@@ -1,0 +1,15 @@
+[package]
+name = "esimorph-admin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Admin and access control module for esimorph token contracts"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+soroban-sdk = "22.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }

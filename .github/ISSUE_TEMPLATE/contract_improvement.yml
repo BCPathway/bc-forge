@@ -1,0 +1,83 @@
+name: 🔧 Contract Improvement
+description: Propose an improvement to the Soroban smart contracts
+title: "[Contract]: "
+labels: ["smart-contract", "improvement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Propose a smart contract-specific improvement. This could be a new function,
+        storage optimization, security hardening, or gas reduction.
+
+  - type: dropdown
+    id: contract_area
+    attributes:
+      label: Contract Area
+      description: Which contract module does this improvement target?
+      options:
+        - Token (contracts/token)
+        - Admin (contracts/admin)
+        - Lifecycle (contracts/lifecycle)
+        - New Module
+        - Cross-Contract
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of Improvement
+      description: Clearly describe what you want to change or add.
+      placeholder: "Add a batch_transfer() function that processes multiple transfers in a single invocation..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this improvement needed? What use case does it serve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security Considerations
+      description: |
+        Does this change affect access control, storage permissions, or token supply?
+        Could it introduce reentrancy or overflow risks?
+    validations:
+      required: true
+
+  - type: textarea
+    id: gas
+    attributes:
+      label: Gas / Storage Impact
+      description: |
+        Will this change increase or decrease gas costs?
+        Does it use Persistent vs Instance vs Temporary storage appropriately?
+    validations:
+      required: false
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing Strategy
+      description: How should this improvement be tested?
+      placeholder: |
+        - Unit test: test_batch_transfer_success
+        - Edge case: batch with 0 recipients
+        - Edge case: batch exceeding balance
+    validations:
+      required: false
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Links to SEPs, Soroban docs, related PRs, or prior art.
+    validations:
+      required: false

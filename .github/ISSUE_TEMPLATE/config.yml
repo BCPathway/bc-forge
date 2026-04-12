@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & Discussions
+    url: https://github.com/p3ris0n/esimorph/discussions
+    about: Ask questions, share ideas, and discuss esimorph with the community.
+  - name: 📖 Soroban Documentation
+    url: https://soroban.stellar.org/docs
+    about: Official Soroban smart contract documentation.
+  - name: 🌐 Stellar Developer Docs
+    url: https://developers.stellar.org/docs
+    about: Stellar network documentation and guides.

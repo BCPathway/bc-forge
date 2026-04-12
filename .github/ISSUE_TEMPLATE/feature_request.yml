@@ -1,0 +1,71 @@
+name: ✨ Feature Request
+description: Suggest a new feature or improvement for esimorph
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make esimorph better? We'd love to hear it!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Description
+      description: What problem does this feature solve? Is it related to a frustration?
+      placeholder: "I'm always frustrated when I have to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature you'd like to see implemented.
+      placeholder: "Add a batch_mint() function that accepts a list of (address, amount) pairs..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you've considered.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the project would this affect?
+      options:
+        - Smart Contract (Rust)
+        - TypeScript SDK
+        - CI / Build
+        - Documentation
+        - New Component
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Suggestion
+      description: How important is this feature for your use case?
+      options:
+        - Nice to have
+        - Important
+        - Critical / Blocker
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any mockups, references, or related issues.
+    validations:
+      required: false

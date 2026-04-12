@@ -1,0 +1,31 @@
+{
+  "name": "@esimorph/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for interacting with esimorph token contracts on Stellar/Soroban",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "echo \"SDK tests require a running Soroban RPC — see README\" && exit 0",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "token",
+    "blockchain",
+    "sdk"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
