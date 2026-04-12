@@ -59,23 +59,45 @@ mod tests {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::Env;
 
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    struct AdminContract;
+
+    #[contractimpl]
+    impl AdminContract {
+        pub fn set(env: Env, admin: Address) {
+            set_admin(&env, &admin);
+        }
+        pub fn get(env: Env) -> Address {
+            get_admin(&env)
+        }
+        pub fn has(env: Env) -> bool {
+            has_admin(&env)
+        }
+    }
+
     #[test]
     fn test_set_and_get_admin() {
         let env = Env::default();
         let admin = Address::generate(&env);
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
 
-        set_admin(&env, &admin);
-        let stored = get_admin(&env);
-        assert_eq!(stored, admin);
+        client.set(&admin);
+        assert_eq!(client.get(), admin);
     }
 
     #[test]
     fn test_has_admin() {
         let env = Env::default();
-        assert!(!has_admin(&env));
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        assert!(!client.has());
 
         let admin = Address::generate(&env);
-        set_admin(&env, &admin);
-        assert!(has_admin(&env));
+        client.set(&admin);
+        assert!(client.has());
     }
 }

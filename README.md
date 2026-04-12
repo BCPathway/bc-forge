@@ -97,7 +97,7 @@ stellar contract build
 ### 4. Run Contract Tests
 
 ```bash
-cargo test --all
+cargo test --tests
 ```
 
 Expected output:

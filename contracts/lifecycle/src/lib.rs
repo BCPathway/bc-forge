@@ -74,23 +74,49 @@ mod tests {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::Env;
 
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    struct LifecycleContract;
+
+    #[contractimpl]
+    impl LifecycleContract {
+        pub fn pause(env: Env, admin: Address) {
+            super::pause(env, admin);
+        }
+        pub fn unpause(env: Env, admin: Address) {
+            super::unpause(env, admin);
+        }
+        pub fn is_paused(env: Env) -> bool {
+            super::is_paused(&env)
+        }
+        pub fn require_not(env: Env) {
+            super::require_not_paused(&env);
+        }
+    }
+
     #[test]
     fn test_initial_state_not_paused() {
         let env = Env::default();
-        assert!(!is_paused(&env));
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        
+        assert!(!client.is_paused());
     }
 
     #[test]
     fn test_pause_and_unpause() {
         let env = Env::default();
         env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
 
-        pause(env.clone(), admin.clone());
-        assert!(is_paused(&env));
+        client.pause(&admin);
+        assert!(client.is_paused());
 
-        unpause(env.clone(), admin.clone());
-        assert!(!is_paused(&env));
+        client.unpause(&admin);
+        assert!(!client.is_paused());
     }
 
     #[test]
@@ -98,10 +124,12 @@ mod tests {
     fn test_double_pause_panics() {
         let env = Env::default();
         env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
 
-        pause(env.clone(), admin.clone());
-        pause(env.clone(), admin.clone());
+        client.pause(&admin);
+        client.pause(&admin);
     }
 
     #[test]
@@ -109,9 +137,11 @@ mod tests {
     fn test_unpause_when_not_paused_panics() {
         let env = Env::default();
         env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
 
-        unpause(env.clone(), admin.clone());
+        client.unpause(&admin);
     }
 
     #[test]
@@ -119,9 +149,11 @@ mod tests {
     fn test_require_not_paused_panics_when_paused() {
         let env = Env::default();
         env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
 
-        pause(env.clone(), admin.clone());
-        require_not_paused(&env);
+        client.pause(&admin);
+        client.require_not();
     }
 }

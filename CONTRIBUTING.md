@@ -42,7 +42,7 @@ rustup target add wasm32-unknown-unknown
 
 # Build & test contracts
 cargo build
-cargo test --all
+cargo test --tests
 
 # Setup SDK
 cd sdk
@@ -132,7 +132,7 @@ Run all tests before submitting:
 
 ```bash
 # Contract tests
-cargo test --all
+cargo test --tests
 
 # SDK build check
 cd sdk && npm run build
@@ -152,7 +152,7 @@ cd sdk && npm run build
 
 - [ ] Branch follows naming convention
 - [ ] Code passes `cargo fmt` and `cargo clippy`
-- [ ] All tests pass (`cargo test --all`)
+- [ ] All tests pass (`cargo test --tests`)
 - [ ] SDK compiles (`npm run build` in `sdk/`)
 - [ ] New functions have doc comments
 - [ ] README updated if applicable
