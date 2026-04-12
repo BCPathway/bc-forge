@@ -1,4 +1,4 @@
-# esimorph 🔨
+# bc-forge 🔨
 
 A modular Soroban smart contract platform for **token minting** on the Stellar blockchain, with a TypeScript SDK for seamless integration.
 
@@ -19,7 +19,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 ## 📁 Project Structure
 
 ```
-esimorph/
+bc-forge/
 ├── contracts/                    # Soroban smart contracts (Rust)
 │   ├── admin/                    # Admin access control module
 │   │   ├── Cargo.toml
@@ -36,7 +36,7 @@ esimorph/
 ├── sdk/                          # TypeScript SDK
 │   ├── src/
 │   │   ├── index.ts              # Entry point
-│   │   ├── client.ts             # esimorphClient class
+│   │   ├── client.ts             # bcForgeClient class
 │   │   └── utils.ts              # Transaction helpers
 │   ├── package.json
 │   └── tsconfig.json
@@ -64,8 +64,8 @@ esimorph/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/p3ris0n/esimorph.git
-cd esimorph
+git clone https://github.com/p3ris0n/bc-forge.git
+cd bc-forge
 ```
 
 ### 2. Install Rust & Soroban Tooling
@@ -133,7 +133,7 @@ stellar keys fund deployer --network testnet
 
 ```bash
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/esimorph_token.wasm \
+  --wasm target/wasm32-unknown-unknown/release/bc_forge_token.wasm \
   --source deployer \
   --network testnet
 ```
@@ -151,7 +151,7 @@ stellar contract invoke \
   initialize \
   --admin <YOUR_PUBLIC_KEY> \
   --decimal 7 \
-  --name "esimorph Token" \
+  --name "bc-forge Token" \
   --symbol "SFG"
 ```
 
@@ -182,10 +182,10 @@ stellar contract invoke \
 ## 📦 SDK Usage
 
 ```typescript
-import { esimorphClient } from '@esimorph/sdk';
+import { bcForgeClient } from '@bc-forge/sdk';
 import { Keypair } from '@stellar/stellar-sdk';
 
-const client = new esimorphClient({
+const client = new bcForgeClient({
   rpcUrl: 'https://soroban-testnet.stellar.org',
   networkPassphrase: 'Test SDF Network ; September 2015',
   contractId: 'CABC...XYZ',
@@ -215,7 +215,7 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                  EsimorphToken                  │
+│                  BcForgeToken                   │
 │  ┌───────────┐  ┌──────────────┐  ┌───────────┐│
 │  │   Admin    │  │  Lifecycle   │  │  SEP-41   ││
 │  │  Module    │  │   Module     │  │ Interface ││
@@ -231,7 +231,7 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 
 ## 🤝 Contributing
 
-We welcome contributions! esimorph is maintained on [drips.network](https://www.drips.network) — contributors can earn rewards by resolving posted issues.
+We welcome contributions! bc-forge is maintained on [drips.network](https://www.drips.network) — contributors can earn rewards by resolving posted issues.
 
 ### Quick Start for Contributors
 

@@ -1,4 +1,4 @@
-//! # esimorph Admin Module
+//! # bc-forge Admin Module
 //!
 //! Reusable access-control primitives for Soroban contracts.
 //! Provides admin storage, authentication guards, and role management.

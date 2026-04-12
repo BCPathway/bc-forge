@@ -1,4 +1,4 @@
-//! # esimorph Token Contract Tests
+//! # bc-forge Token Contract Tests
 //!
 //! Comprehensive unit tests for the token contract covering:
 //! - Initialization and metadata
@@ -14,19 +14,19 @@
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
 
-use crate::{EsimorphToken, EsimorphTokenClient};
+use crate::{BcForgeToken, BcForgeTokenClient};
 
 /// Helper: register the contract and return a client.
-fn setup_contract(env: &Env) -> (EsimorphTokenClient<'_>, Address) {
-    let contract_id = env.register(EsimorphToken, ());
-    let client = EsimorphTokenClient::new(env, &contract_id);
+fn setup_contract(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
+    let contract_id = env.register(BcForgeToken, ());
+    let client = BcForgeTokenClient::new(env, &contract_id);
     (client, contract_id)
 }
 
 /// Helper: initialize a contract with defaults.
-fn init_default(env: &Env, client: &EsimorphTokenClient) -> Address {
+fn init_default(env: &Env, client: &BcForgeTokenClient) -> Address {
     let admin = Address::generate(env);
-    let name = String::from_str(env, "esimorph Token");
+    let name = String::from_str(env, "bc-forge Token");
     let symbol = String::from_str(env, "SFG");
     client.initialize(&admin, &7, &name, &symbol);
     admin
@@ -41,7 +41,7 @@ fn test_initialize() {
     let (client, _) = setup_contract(&env);
     let admin = init_default(&env, &client);
 
-    assert_eq!(client.name(), String::from_str(&env, "esimorph Token"));
+    assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
     assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
     assert_eq!(client.decimals(), 7);
     assert_eq!(client.supply(), 0);

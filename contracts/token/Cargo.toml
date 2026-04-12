@@ -1,17 +1,17 @@
 [package]
-name = "esimorph-token"
+name = "bc-forge-token"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Core SEP-41 token contract for esimorph with admin controls and pausable lifecycle"
+description = "Core SEP-41 token contract for bc-forge with admin controls and pausable lifecycle"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "22.0.0"
-esimorph-admin = { path = "../admin" }
-esimorph-lifecycle = { path = "../lifecycle" }
+bc-forge-admin = { path = "../admin" }
+bc-forge-lifecycle = { path = "../lifecycle" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.0", features = ["testutils"] }

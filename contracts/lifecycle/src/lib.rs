@@ -1,4 +1,4 @@
-//! # esimorph Lifecycle Module
+//! # bc-forge Lifecycle Module
 //!
 //! Emergency pause/unpause functionality for Soroban contracts.
 //! When a contract is paused, guarded functions will panic, preventing

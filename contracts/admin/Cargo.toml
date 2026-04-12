@@ -1,9 +1,9 @@
 [package]
-name = "esimorph-admin"
+name = "bc-forge-admin"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Admin and access control module for esimorph token contracts"
+description = "Admin and access control module for bc-forge token contracts"
 
 [lib]
 crate-type = ["rlib"]

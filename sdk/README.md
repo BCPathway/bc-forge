@@ -1,23 +1,23 @@
-# @esimorph/sdk
+# @bc-forge/sdk
 
-TypeScript SDK for interacting with esimorph token contracts deployed on the Stellar/Soroban network.
+TypeScript SDK for interacting with bc-forge token contracts deployed on the Stellar/Soroban network.
 
 ## Installation
 
 ```bash
-npm install @esimorph/sdk
+npm install @bc-forge/sdk
 # or
-yarn add @esimorph/sdk
+yarn add @bc-forge/sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { esimorphClient } from '@esimorph/sdk';
+import { bcForgeClient } from '@bc-forge/sdk';
 import { Keypair } from '@stellar/stellar-sdk';
 
 // Initialize client
-const client = new esimorphClient({
+const client = new bcForgeClient({
   rpcUrl: 'https://soroban-testnet.stellar.org',
   networkPassphrase: 'Test SDF Network ; September 2015',
   contractId: 'CABC...XYZ', // Your deployed contract ID

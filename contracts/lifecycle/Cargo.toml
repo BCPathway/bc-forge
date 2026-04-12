@@ -1,9 +1,9 @@
 [package]
-name = "esimorph-lifecycle"
+name = "bc-forge-lifecycle"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Pause/unpause lifecycle management for esimorph contracts"
+description = "Pause/unpause lifecycle management for bc-forge contracts"
 
 [lib]
 crate-type = ["rlib"]

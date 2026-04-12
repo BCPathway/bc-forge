@@ -1,7 +1,7 @@
 /**
- * @esimorph/sdk — esimorphClient
+ * @bc-forge/sdk — bcForgeClient
  *
- * High-level TypeScript client for interacting with deployed esimorph
+ * High-level TypeScript client for interacting with deployed bc-forge
  * token contracts on the Stellar/Soroban network.
  */
 
@@ -25,12 +25,12 @@ import {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface esimorphClientConfig {
+export interface bcForgeClientConfig {
   /** Soroban RPC endpoint URL (e.g., https://soroban-testnet.stellar.org) */
   rpcUrl: string;
   /** Stellar network passphrase */
   networkPassphrase: string;
-  /** Deployed esimorph token contract ID */
+  /** Deployed bc-forge token contract ID */
   contractId: string;
 }
 
@@ -45,14 +45,14 @@ export interface TransactionResult {
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
-export class esimorphClient {
+export class bcForgeClient {
   private rpcUrl: string;
   private networkPassphrase: string;
   private contractId: string;
   private server: SorobanRpc.Server;
   private contract: Contract;
 
-  constructor(config: esimorphClientConfig) {
+  constructor(config: bcForgeClientConfig) {
     this.rpcUrl = config.rpcUrl;
     this.networkPassphrase = config.networkPassphrase;
     this.contractId = config.contractId;
@@ -307,14 +307,14 @@ export class esimorphClient {
     if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
       return {
         success: true,
-        hash: response.hash,
+        hash: (response as any).hash,
         returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
       };
     }
 
     return {
       success: false,
-      hash: response.hash,
+      hash: (response as any).hash,
     };
   }
 }

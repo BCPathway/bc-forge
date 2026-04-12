@@ -1,4 +1,4 @@
-//! # esimorph Token Events
+//! # bc-forge Token Events
 //!
 //! Structured event emission for all token contract operations.
 //! Events are emitted to the ledger for indexing by off-chain services.

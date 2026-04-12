@@ -1,10 +1,10 @@
-# Contributing to esimorph
+# Contributing to bc-forge
 
-Thank you for your interest in contributing to esimorph! This guide will help you get started as a contributor, whether you're fixing bugs, adding features, or improving documentation.
+Thank you for your interest in contributing to bc-forge! This guide will help you get started as a contributor, whether you're fixing bugs, adding features, or improving documentation.
 
 ## 🌊 drips.network Collaboration
 
-esimorph is maintained on [drips.network](https://www.drips.network). As a contributor, you can:
+bc-forge is maintained on [drips.network](https://www.drips.network). As a contributor, you can:
 
 1. **Browse posted issues** — The maintainer posts issues with bounties on drips.network
 2. **Claim an issue** — Comment on the GitHub issue to claim it
@@ -15,7 +15,7 @@ esimorph is maintained on [drips.network](https://www.drips.network). As a contr
 
 1. Create a profile at [drips.network](https://www.drips.network)
 2. Link your GitHub account
-3. Browse the esimorph project for available issues
+3. Browse the bc-forge project for available issues
 4. Claim and work on issues that match your skills
 
 ## 🛠️ Development Setup
@@ -31,11 +31,11 @@ esimorph is maintained on [drips.network](https://www.drips.network). As a contr
 
 ```bash
 # Clone your fork
-git clone https://github.com/YOUR_USERNAME/esimorph.git
-cd esimorph
+git clone https://github.com/YOUR_USERNAME/bc-forge.git
+cd bc-forge
 
 # Add upstream remote
-git remote add upstream https://github.com/p3ris0n/esimorph.git
+git remote add upstream https://github.com/p3ris0n/bc-forge.git
 
 # Install Rust dependencies
 rustup target add wasm32-unknown-unknown
@@ -54,7 +54,7 @@ npm run build
 
 ### 1. Find an Issue
 
-- Check the [Issues](https://github.com/p3ris0n/esimorph/issues) tab
+- Check the [Issues](https://github.com/p3ris0n/bc-forge/issues) tab
 - Look for labels:
   - `good-first-issue` — Perfect for newcomers
   - `smart-contract` — Rust/Soroban contract work
@@ -172,16 +172,16 @@ cd sdk && npm run build
 
 ### TypeScript SDK
 
-- **esimorphClient** — The single entry point for all operations
+- **bcForgeClient** — The single entry point for all operations
 - **Read-only methods** — Use simulation (no transaction needed)
 - **Write methods** — Build, simulate, sign, submit, poll
 
 ## ❓ Questions?
 
-- Open a [Discussion](https://github.com/p3ris0n/esimorph/discussions)
+- Open a [Discussion](https://github.com/p3ris0n/bc-forge/discussions)
 - Check [Soroban docs](https://soroban.stellar.org/docs)
-- Review existing [closed issues](https://github.com/p3ris0n/esimorph/issues?q=is%3Aclosed) for solutions
+- Review existing [closed issues](https://github.com/p3ris0n/bc-forge/issues?q=is%3Aclosed) for solutions
 
 ---
 
-Thank you for contributing to esimorph! Every contribution, no matter how small, makes a difference. 🚀
+Thank you for contributing to bc-forge! Every contribution, no matter how small, makes a difference. 🚀

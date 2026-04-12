@@ -1,13 +1,13 @@
 /**
- * @esimorph/sdk — TypeScript SDK for esimorph Token Contracts
+ * @bc-forge/sdk — TypeScript SDK for bc-forge Token Contracts
  *
  * Re-exports the main client and utility types.
  *
  * @example
  * ```typescript
- * import { esimorphClient } from '@esimorph/sdk';
+ * import { bcForgeClient } from '@bc-forge/sdk';
  *
- * const client = new esimorphClient({
+ * const client = new bcForgeClient({
  *   rpcUrl: 'https://soroban-testnet.stellar.org',
  *   networkPassphrase: 'Test SDF Network ; September 2015',
  *   contractId: 'CABC...XYZ',
@@ -18,6 +18,6 @@
  * ```
  */
 
-export { esimorphClient } from './client';
-export type { esimorphClientConfig, TransactionResult } from './client';
+export { bcForgeClient } from './client';
+export type { bcForgeClientConfig, TransactionResult } from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';

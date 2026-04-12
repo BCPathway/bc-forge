@@ -1,5 +1,5 @@
 /**
- * @esimorph/sdk — Utility functions for Soroban transaction building and submission.
+ * @bc-forge/sdk — Utility functions for Soroban transaction building and submission.
  */
 
 import {

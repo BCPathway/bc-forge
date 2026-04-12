@@ -1,7 +1,7 @@
 {
-  "name": "@esimorph/sdk",
+  "name": "@bc-forge/sdk",
   "version": "0.1.0",
-  "description": "TypeScript SDK for interacting with esimorph token contracts on Stellar/Soroban",
+  "description": "TypeScript SDK for interacting with bc-forge token contracts on Stellar/Soroban",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

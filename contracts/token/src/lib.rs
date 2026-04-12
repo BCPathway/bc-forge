@@ -1,4 +1,4 @@
-//! # esimorph Token Contract
+//! # bc-forge Token Contract
 //!
 //! A Soroban-based token contract implementing the standard SEP-41 TokenInterface
 //! with additional administrative controls, pausable lifecycle, and ownership management.
@@ -45,13 +45,13 @@ pub enum DataKey {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[contract]
-pub struct EsimorphToken;
+pub struct BcForgeToken;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-impl EsimorphToken {
+impl BcForgeToken {
     /// Reads the balance for a given address, defaulting to 0.
     fn read_balance(env: &Env, id: &Address) -> i128 {
         env.storage()
@@ -131,7 +131,7 @@ impl EsimorphToken {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[contractimpl]
-impl EsimorphToken {
+impl BcForgeToken {
     /// Initializes the token contract with an admin and metadata.
     ///
     /// # Arguments
@@ -165,7 +165,7 @@ impl EsimorphToken {
     /// # Panics
     /// Panics if caller is not admin, amount is non-positive, or contract is paused.
     pub fn mint(env: Env, to: Address, amount: i128) {
-        esimorph_lifecycle::require_not_paused(&env);
+        bc_forge_lifecycle::require_not_paused(&env);
 
         if amount <= 0 {
             panic!("mint amount must be positive");
@@ -203,14 +203,14 @@ impl EsimorphToken {
     /// Pauses all token operations. Admin-only.
     pub fn pause(env: Env) {
         let admin = Self::read_admin(&env);
-        esimorph_lifecycle::pause(env.clone(), admin.clone());
+        bc_forge_lifecycle::pause(env.clone(), admin.clone());
         events::emit_paused(&env, &admin);
     }
 
     /// Unpauses token operations. Admin-only.
     pub fn unpause(env: Env) {
         let admin = Self::read_admin(&env);
-        esimorph_lifecycle::unpause(env.clone(), admin.clone());
+        bc_forge_lifecycle::unpause(env.clone(), admin.clone());
         events::emit_unpaused(&env, &admin);
     }
 
@@ -225,7 +225,7 @@ impl EsimorphToken {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[contractimpl]
-impl TokenInterface for EsimorphToken {
+impl TokenInterface for BcForgeToken {
     /// Returns the spending allowance granted by `from` to `spender`.
     fn allowance(env: Env, from: Address, spender: Address) -> i128 {
         Self::read_allowance(&env, &from, &spender)
@@ -257,7 +257,7 @@ impl TokenInterface for EsimorphToken {
     /// # Panics
     /// Panics if paused, amount is non-positive, or insufficient balance.
     fn transfer(env: Env, from: Address, to: Address, amount: i128) {
-        esimorph_lifecycle::require_not_paused(&env);
+        bc_forge_lifecycle::require_not_paused(&env);
         from.require_auth();
 
         if amount <= 0 {
@@ -273,7 +273,7 @@ impl TokenInterface for EsimorphToken {
     /// # Panics
     /// Panics if paused, insufficient allowance, or insufficient balance.
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
-        esimorph_lifecycle::require_not_paused(&env);
+        bc_forge_lifecycle::require_not_paused(&env);
         spender.require_auth();
 
         if amount <= 0 {
@@ -295,7 +295,7 @@ impl TokenInterface for EsimorphToken {
     /// # Panics
     /// Panics if paused, amount is non-positive, or insufficient balance.
     fn burn(env: Env, from: Address, amount: i128) {
-        esimorph_lifecycle::require_not_paused(&env);
+        bc_forge_lifecycle::require_not_paused(&env);
         from.require_auth();
 
         if amount <= 0 {
@@ -321,7 +321,7 @@ impl TokenInterface for EsimorphToken {
     /// # Panics
     /// Panics if paused, insufficient allowance, or insufficient balance.
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
-        esimorph_lifecycle::require_not_paused(&env);
+        bc_forge_lifecycle::require_not_paused(&env);
         spender.require_auth();
 
         if amount <= 0 {
@@ -360,7 +360,7 @@ impl TokenInterface for EsimorphToken {
         env.storage()
             .instance()
             .get(&DataKey::Name)
-            .unwrap_or_else(|| String::from_str(&env, "esimorph"))
+            .unwrap_or_else(|| String::from_str(&env, "bc-forge"))
     }
 
     /// Returns the token ticker symbol.
