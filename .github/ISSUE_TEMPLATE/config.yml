@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 💬 Questions & Discussions
-    url: https://github.com/p3ris0n/esimorph/discussions
-    about: Ask questions, share ideas, and discuss esimorph with the community.
+    url: https://github.com/p3ris0n/bc-forge/discussions
+    about: Ask questions, share ideas, and discuss bc-forge with the community.
   - name: 📖 Soroban Documentation
     url: https://soroban.stellar.org/docs
     about: Official Soroban smart contract documentation.

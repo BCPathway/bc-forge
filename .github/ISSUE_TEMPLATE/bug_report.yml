@@ -1,5 +1,5 @@
 name: 🐛 Bug Report
-description: Report a bug or unexpected behavior in esimorph
+description: Report a bug or unexpected behavior in bc-forge
 title: "[Bug]: "
 labels: ["bug", "triage"]
 assignees: []

@@ -1,5 +1,5 @@
 name: ✨ Feature Request
-description: Suggest a new feature or improvement for esimorph
+description: Suggest a new feature or improvement for bc-forge
 title: "[Feature]: "
 labels: ["enhancement"]
 assignees: []
@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Have an idea to make esimorph better? We'd love to hear it!
+        Have an idea to make bc-forge better? We'd love to hear it!
 
   - type: textarea
     id: problem

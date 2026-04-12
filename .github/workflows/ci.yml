@@ -1,4 +1,4 @@
-name: esimorph CI
+name: bc-forge CI
 
 on:
   push:

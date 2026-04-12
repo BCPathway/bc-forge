@@ -100,7 +100,7 @@ mod tests {
         let env = Env::default();
         let contract_id = env.register(LifecycleContract, ());
         let client = LifecycleContractClient::new(&env, &contract_id);
-        
+
         assert!(!client.is_paused());
     }
 
