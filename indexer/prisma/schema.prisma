@@ -1,0 +1,41 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Mint {
+  id        String   @id @default(uuid())
+  to        String
+  amount    String
+  ledger    Int
+  txHash    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model Transfer {
+  id        String   @id @default(uuid())
+  from      String
+  to        String
+  amount    String
+  ledger    Int
+  txHash    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model Burn {
+  id        String   @id @default(uuid())
+  from      String
+  amount    String
+  ledger    Int
+  txHash    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model LastIndexedLedger {
+  id     Int @id @default(1)
+  ledger Int
+}
