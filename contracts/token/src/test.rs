@@ -314,6 +314,98 @@ fn test_transfer_ownership() {
     assert_eq!(client.balance(&user), 500);
 }
 
+#[test]
+fn test_two_step_ownership_transfer_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let new_admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    // Initially no pending owner
+    assert!(client.pending_owner().is_none());
+
+    // Propose new admin
+    client.propose_owner(&new_admin);
+    
+    // Check pending owner
+    let pending = client.pending_owner();
+    assert!(pending.is_some());
+    assert_eq!(pending.unwrap(), new_admin);
+
+    // New admin accepts
+    client.accept_ownership();
+
+    // Pending owner should be cleared
+    assert!(client.pending_owner().is_none());
+
+    // New admin should be able to mint
+    client.mint(&user, &500);
+    assert_eq!(client.balance(&user), 500);
+}
+
+#[test]
+#[should_panic(expected = "no pending ownership transfer")]
+fn test_accept_ownership_without_proposal_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+
+    // Try to accept without proposal
+    client.accept_ownership();
+}
+
+#[test]
+fn test_cancel_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let new_admin = Address::generate(&env);
+
+    // Propose new admin
+    client.propose_owner(&new_admin);
+    assert!(client.pending_owner().is_some());
+
+    // Cancel the transfer
+    client.cancel_transfer();
+
+    // Pending owner should be cleared
+    assert!(client.pending_owner().is_none());
+}
+
+#[test]
+#[should_panic(expected = "no pending ownership transfer")]
+fn test_cancel_transfer_without_proposal_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+
+    // Try to cancel without proposal
+    client.cancel_transfer();
+}
+
+#[test]
+fn test_double_propose_updates_pending_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let first_proposal = Address::generate(&env);
+    let second_proposal = Address::generate(&env);
+
+    // First proposal
+    client.propose_owner(&first_proposal);
+    assert_eq!(client.pending_owner().unwrap(), first_proposal);
+
+    // Second proposal (should override first)
+    client.propose_owner(&second_proposal);
+    assert_eq!(client.pending_owner().unwrap(), second_proposal);
+}
+
 // ─── Pause / Unpause ─────────────────────────────────────────────────────────
 
 #[test]

@@ -26,6 +26,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
 pub enum DataKey {
     /// The contract admin address.
     Admin,
+    /// Pending admin for two-step ownership transfer.
+    PendingAdmin,
     /// Spending allowance: (owner, spender) → amount.
     Allowance(Address, Address),
     /// Allowance expiration: (owner, spender) → ledger sequence.
@@ -142,6 +144,11 @@ impl BcForgeToken {
             .get(&DataKey::Admin)
             .expect("contract not initialized")
     }
+
+    /// Reads the pending admin address (if any).
+    fn read_pending_admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,6 +210,9 @@ impl BcForgeToken {
 
     /// Transfers the admin role to a new address. Current admin-only.
     ///
+    /// ⚠️ DEPRECATED: Use propose_owner() + accept_ownership() for safer two-step transfer.
+    /// This function is kept for backward compatibility but may be removed in future versions.
+    ///
     /// # Arguments
     /// * `new_admin` - The address to receive admin privileges.
     pub fn transfer_ownership(env: Env, new_admin: Address) {
@@ -211,6 +221,61 @@ impl BcForgeToken {
 
         env.storage().instance().set(&DataKey::Admin, &new_admin);
         events::emit_ownership_transferred(&env, &admin, &new_admin);
+    }
+
+    /// Proposes a new admin for two-step ownership transfer. Current admin-only.
+    ///
+    /// # Arguments
+    /// * `new_admin` - The address to propose as the new admin.
+    ///
+    /// # Panics
+    /// Panics if caller is not the current admin.
+    pub fn propose_owner(env: Env, new_admin: Address) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        events::emit_ownership_proposed(&env, &admin, &new_admin);
+    }
+
+    /// Accepts pending ownership transfer. Only the pending admin can call this.
+    ///
+    /// # Panics
+    /// Panics if there is no pending admin or if caller is not the pending admin.
+    pub fn accept_ownership(env: Env) {
+        let pending_admin = Self::read_pending_admin(&env)
+            .expect("no pending ownership transfer");
+        
+        pending_admin.require_auth();
+
+        let old_admin = Self::read_admin(&env);
+        env.storage().instance().set(&DataKey::Admin, &pending_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        events::emit_ownership_accepted(&env, &old_admin, &pending_admin);
+    }
+
+    /// Cancels a pending ownership transfer. Current admin-only.
+    ///
+    /// # Panics
+    /// Panics if caller is not the current admin or if there is no pending transfer.
+    pub fn cancel_transfer(env: Env) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        let pending_admin = Self::read_pending_admin(&env)
+            .expect("no pending ownership transfer");
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        events::emit_ownership_cancelled(&env, &admin, &pending_admin);
+    }
+
+    /// Returns the pending admin address if there is a pending transfer.
+    ///
+    /// # Returns
+    /// Some(Address) if there is a pending admin, None otherwise.
+    pub fn pending_owner(env: Env) -> Option<Address> {
+        Self::read_pending_admin(&env)
     }
 
     /// Returns the total token supply.
