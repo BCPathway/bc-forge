@@ -18,7 +18,7 @@ mod events;
 mod test;
 
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, contracttype, vec, Address, Env, String, Vec};
 
 /// Storage keys for the token contract state.
 #[derive(Clone)]
@@ -42,6 +42,14 @@ pub enum DataKey {
     Decimals,
     /// Total token supply.
     Supply,
+}
+
+/// Represents a mint recipient with address and amount.
+#[derive(Clone)]
+#[contracttype]
+pub struct Recipient {
+    pub address: Address,
+    pub amount: i128,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,6 +214,52 @@ impl BcForgeToken {
         Self::write_supply(&env, supply);
 
         events::emit_mint(&env, &admin, &to, amount, balance, supply);
+    }
+
+    /// Mints tokens to multiple recipients in a single transaction. Admin-only.
+    ///
+    /// # Arguments
+    /// * `recipients` - Vector of (address, amount) pairs.
+    ///
+    /// # Panics
+    /// Panics if caller is not admin, contract is paused, any amount is non-positive,
+    /// or if the recipients list is empty.
+    ///
+    /// # Note
+    /// All mints are atomic - if any recipient has an invalid amount, the entire batch reverts.
+    pub fn batch_mint(env: Env, recipients: Vec<Recipient>) {
+        bc_forge_lifecycle::require_not_paused(&env);
+
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        if recipients.is_empty() {
+            panic!("recipients list cannot be empty");
+        }
+
+        // First pass: validate all amounts are positive
+        for i in 0..recipients.len() {
+            let recipient = recipients.get(i).expect("recipient should exist");
+            if recipient.amount <= 0 {
+                panic!("mint amount must be positive for all recipients");
+            }
+        }
+
+        // Second pass: perform all mints and calculate total
+        let mut total_minted: i128 = 0;
+        for i in 0..recipients.len() {
+            let recipient = recipients.get(i).expect("recipient should exist");
+            let balance = Self::read_balance(&env, &recipient.address) + recipient.amount;
+            Self::write_balance(&env, &recipient.address, balance);
+            total_minted += recipient.amount;
+
+            // Emit individual mint event per recipient
+            events::emit_mint(&env, &admin, &recipient.address, recipient.amount, balance, Self::read_supply(&env) + total_minted);
+        }
+
+        // Update total supply atomically once at the end
+        let new_supply = Self::read_supply(&env) + total_minted;
+        Self::write_supply(&env, new_supply);
     }
 
     /// Transfers the admin role to a new address. Current admin-only.

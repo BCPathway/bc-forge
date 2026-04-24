@@ -200,6 +200,32 @@ export class bcForgeClient {
   }
 
   /**
+   * Batch mint tokens to multiple recipients. Admin-only.
+   *
+   * @param recipients - Array of [address, amount] tuples
+   * @param source     - Admin keypair
+   */
+  async batchMint(
+    recipients: [string, bigint][],
+    source: Keypair
+  ): Promise<TransactionResult> {
+    // Convert recipients to the format expected by the contract
+    const recipientScVals = recipients.map(([address, amount]) => {
+      return nativeToScVal(
+        {
+          address: new Address(address).toScVal(),
+          amount: nativeToScVal(amount, { type: 'i128' }),
+        },
+        { type: 'map' }
+      );
+    });
+
+    const recipientsVec = nativeToScVal(recipientScVals, { type: 'vec' });
+
+    return this.invokeContract('batch_mint', [recipientsVec], source);
+  }
+
+  /**
    * Transfer tokens between addresses.
    *
    * @param from   - Sender address
