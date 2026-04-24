@@ -126,6 +126,36 @@ export class bcForgeClient {
     return scValToNative(result) as string;
   }
 
+  // ─── Batch Queries ───────────────────────────────────────────────────────
+
+  /**
+   * Get token balances for multiple addresses in batches.
+   *
+   * @param addresses - Array of Stellar public keys
+   * @param batchSize - Maximum number of concurrent queries (default: 10)
+   * @returns Array of balances as bigints
+   */
+  async getBalances(addresses: string[], batchSize: number = 10): Promise<bigint[]> {
+    return this.executeBatch(addresses, (addr) => this.getBalance(addr), batchSize);
+  }
+
+  /**
+   * Internal helper to execute a list of async tasks in chunks using Promise.all.
+   */
+  private async executeBatch<T, R>(
+    items: T[],
+    task: (item: T) => Promise<R>,
+    batchSize: number
+  ): Promise<R[]> {
+    const results: R[] = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+      const chunk = items.slice(i, i + batchSize);
+      const batchResults = await Promise.all(chunk.map((item) => task(item)));
+      results.push(...batchResults);
+    }
+    return results;
+  }
+
   // ─── Write Transactions ──────────────────────────────────────────────────
 
   /**
