@@ -6,14 +6,12 @@ import {
   SorobanRpc,
   TransactionBuilder,
   Networks,
-  Operation,
   xdr,
   Address,
   nativeToScVal,
   scValToNative as sdkScValToNative,
   Contract,
   Keypair,
-  Account,
 } from '@stellar/stellar-sdk';
 
 /**
@@ -33,7 +31,7 @@ export async function buildInvokeTransaction(
   contractId: string,
   method: string,
   args: xdr.ScVal[],
-  sourceKeypair: Keypair
+  sourceKeypair: Keypair,
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
   const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
@@ -70,7 +68,7 @@ export async function buildInvokeTransaction(
  */
 export async function submitTransaction(
   rpcUrl: string,
-  txXdr: string
+  txXdr: string,
 ): Promise<SorobanRpc.Api.GetTransactionResponse> {
   const server = new SorobanRpc.Server(rpcUrl);
   const tx = TransactionBuilder.fromXDR(txXdr, Networks.TESTNET);
@@ -90,7 +88,10 @@ export async function submitTransaction(
     await new Promise((resolve) => setTimeout(resolve, 1000));
     getResponse = await server.getTransaction(sendResponse.hash);
     attempts++;
-  } while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND && attempts < maxAttempts);
+  } while (
+    getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+    attempts < maxAttempts
+  );
 
   if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
     throw new Error('Transaction not found after maximum polling attempts');
