@@ -16,6 +16,8 @@ mod events;
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod proptest;
 
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
