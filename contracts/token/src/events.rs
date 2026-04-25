@@ -90,3 +90,28 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("unpause"),), (admin.clone(),));
 }
+
+/// Emitted when tokens are clawed back.
+pub fn emit_clawback(env: &Env, admin: &Address, from: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("clawback"),),
+        (admin.clone(), from.clone(), to.clone(), amount),
+    );
+}
+
+/// Emitted when tokens are locked.
+pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_time: u64) {
+    env.events().publish(
+        (symbol_short!("lock"),),
+        (user.clone(), amount, unlock_time),
+    );
+}
+
+/// Emitted when locked tokens are withdrawn.
+pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("unlock"),),
+        (user.clone(), amount),
+    );
+}
+
