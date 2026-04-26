@@ -98,3 +98,19 @@ pub fn emit_upgrade(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
         (admin.clone(), new_wasm_hash.clone()),
     );
 }
+
+/// Emitted when the token name is updated.
+pub fn emit_update_name(env: &Env, admin: &Address, old_name: &String, new_name: &String) {
+    env.events().publish(
+        (symbol_short!("upd_name"),),
+        (admin.clone(), old_name.clone(), new_name.clone()),
+    );
+}
+
+/// Emitted when the token symbol is updated.
+pub fn emit_update_symbol(env: &Env, admin: &Address, old_symbol: &String, new_symbol: &String) {
+    env.events().publish(
+        (symbol_short!("upd_sym"),),
+        (admin.clone(), old_symbol.clone(), new_symbol.clone()),
+    );
+}

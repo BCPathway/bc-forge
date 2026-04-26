@@ -296,6 +296,30 @@ export class bcForgeClient {
     ], source);
   }
 
+  /**
+   * Update the token name. Admin-only.
+   *
+   * @param newName - The new token name
+   * @param source  - Admin keypair
+   */
+  async updateName(newName: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('update_name', [
+      stringToScVal(newName),
+    ], source);
+  }
+
+  /**
+   * Update the token symbol. Admin-only.
+   *
+   * @param newSymbol - The new token symbol
+   * @param source    - Admin keypair
+   */
+  async updateSymbol(newSymbol: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('update_symbol', [
+      stringToScVal(newSymbol),
+    ], source);
+  }
+
   // ─── Internal Helpers ────────────────────────────────────────────────────
 
   /**
