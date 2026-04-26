@@ -18,7 +18,7 @@ mod events;
 mod test;
 
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String};
 
 /// Storage keys for the token contract state.
 #[derive(Clone)]
@@ -214,9 +214,46 @@ impl BcForgeToken {
         events::emit_unpaused(&env, &admin);
     }
 
+    /// Upgrades the contract to a new WASM hash. Admin-only.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        events::emit_upgrade(&env, &admin, &new_wasm_hash);
+    }
+
     /// Returns the contract version.
     pub fn version(env: Env) -> String {
         String::from_str(&env, "1.0.0")
+    }
+
+    /// Updates the token name. Admin-only.
+    pub fn update_name(env: Env, new_name: String) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        let old_name = env.storage()
+            .instance()
+            .get(&DataKey::Name)
+            .unwrap_or_else(|| String::from_str(&env, "bc-forge"));
+
+        env.storage().instance().set(&DataKey::Name, &new_name);
+        events::emit_update_name(&env, &admin, &old_name, &new_name);
+    }
+
+    /// Updates the token symbol. Admin-only.
+    pub fn update_symbol(env: Env, new_symbol: String) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        let old_symbol = env.storage()
+            .instance()
+            .get(&DataKey::Symbol)
+            .unwrap_or_else(|| String::from_str(&env, "SFG"));
+
+        env.storage().instance().set(&DataKey::Symbol, &new_symbol);
+        events::emit_update_symbol(&env, &admin, &old_symbol, &new_symbol);
     }
 }
 
