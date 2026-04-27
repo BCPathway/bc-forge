@@ -134,3 +134,109 @@ export function u32ToScVal(value: number): xdr.ScVal {
 export function scValToNative(scVal: xdr.ScVal): any {
   return sdkScValToNative(scVal);
 }
+
+/**
+ * Builds an unsigned transaction XDR for offline signing.
+ *
+ * @param rpcUrl           - The Soroban RPC endpoint URL.
+ * @param networkPassphrase - The Stellar network passphrase.
+ * @param contractId       - The deployed contract ID (C... address).
+ * @param method           - The contract function name to invoke.
+ * @param args             - Array of xdr.ScVal arguments.
+ * @param sourcePublicKey  - The public key of the transaction source account.
+ * @returns The unsigned transaction XDR string (requires signing before submission).
+ */
+export async function buildUnsignedTransaction(
+  rpcUrl: string,
+  networkPassphrase: string,
+  contractId: string,
+  method: string,
+  args: xdr.ScVal[],
+  sourcePublicKey: string
+): Promise<string> {
+  const server = new SorobanRpc.Server(rpcUrl);
+  const sourceAccount = await server.getAccount(sourcePublicKey);
+
+  const contract = new Contract(contractId);
+
+  const tx = new TransactionBuilder(sourceAccount, {
+    fee: '100',
+    networkPassphrase,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(30)
+    .build();
+
+  // Simulate to get the assembled transaction
+  const simulated = await server.simulateTransaction(tx);
+
+  if (SorobanRpc.Api.isSimulationError(simulated)) {
+    throw new Error(`Simulation failed: ${simulated.error}`);
+  }
+
+  const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
+
+  // Return unsigned transaction
+  return assembled.toXDR();
+}
+
+/**
+ * Signs a transaction XDR with the provided keypair.
+ *
+ * @param txXdr      - The unsigned transaction in XDR format.
+ * @param networkPassphrase - The Stellar network passphrase.
+ * @param keypair    - The keypair to sign the transaction with.
+ * @returns The signed transaction XDR string.
+ */
+export function signTransaction(
+  txXdr: string,
+  networkPassphrase: string,
+  keypair: Keypair
+): string {
+  const tx = TransactionBuilder.fromXDR(txXdr, networkPassphrase);
+  tx.sign(keypair);
+  return tx.toXDR();
+}
+
+/**
+ * Simulates a contract invocation without building or submitting a transaction.
+ *
+ * @param rpcUrl           - The Soroban RPC endpoint URL.
+ * @param networkPassphrase - The Stellar network passphrase.
+ * @param contractId       - The deployed contract ID (C... address).
+ * @param method           - The contract function name to invoke.
+ * @param args             - Array of xdr.ScVal arguments.
+ * @param sourcePublicKey  - The public key for simulation context.
+ * @returns The simulation result including return value and cost.
+ */
+export async function simulateTransaction(
+  rpcUrl: string,
+  networkPassphrase: string,
+  contractId: string,
+  method: string,
+  args: xdr.ScVal[],
+  sourcePublicKey: string
+): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
+  const server = new SorobanRpc.Server(rpcUrl);
+  
+  // Create a dummy account for simulation
+  const account = new Account(sourcePublicKey, '0');
+  
+  const contract = new Contract(contractId);
+
+  const tx = new TransactionBuilder(account, {
+    fee: '100',
+    networkPassphrase,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(30)
+    .build();
+
+  const simulated = await server.simulateTransaction(tx);
+
+  if (SorobanRpc.Api.isSimulationError(simulated)) {
+    throw new Error(`Simulation failed: ${simulated.error}`);
+  }
+
+  return simulated;
+}

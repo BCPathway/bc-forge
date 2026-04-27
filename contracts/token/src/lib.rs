@@ -26,8 +26,12 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
 pub enum DataKey {
     /// The contract admin address.
     Admin,
+    /// Pending admin for two-step ownership transfer.
+    PendingAdmin,
     /// Spending allowance: (owner, spender) → amount.
     Allowance(Address, Address),
+    /// Allowance expiration: (owner, spender) → ledger sequence.
+    AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),
     /// Token name (human-readable).
@@ -68,7 +72,16 @@ impl BcForgeToken {
     }
 
     /// Reads the spending allowance for (owner → spender), defaulting to 0.
+    /// Returns 0 if the allowance has expired.
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
+        // Check if allowance has expired
+        if let Some(exp_ledger) = env.storage().persistent().get(&DataKey::AllowanceExp(from.clone(), spender.clone())) {
+            let current_ledger = env.ledger().sequence();
+            if current_ledger > exp_ledger {
+                return 0; // Allowance expired
+            }
+        }
+        
         env.storage()
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
@@ -76,10 +89,17 @@ impl BcForgeToken {
     }
 
     /// Writes a spending allowance for (owner → spender).
-    fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
+    fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
         env.storage()
             .persistent()
             .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
+        
+        // Store expiration if non-zero (0 means no expiration)
+        if exp > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
+        }
     }
 
     /// Moves `amount` tokens from `from` to `to`.
@@ -123,6 +143,11 @@ impl BcForgeToken {
             .instance()
             .get(&DataKey::Admin)
             .expect("contract not initialized")
+    }
+
+    /// Reads the pending admin address (if any).
+    fn read_pending_admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 }
 
@@ -185,6 +210,9 @@ impl BcForgeToken {
 
     /// Transfers the admin role to a new address. Current admin-only.
     ///
+    /// ⚠️ DEPRECATED: Use propose_owner() + accept_ownership() for safer two-step transfer.
+    /// This function is kept for backward compatibility but may be removed in future versions.
+    ///
     /// # Arguments
     /// * `new_admin` - The address to receive admin privileges.
     pub fn transfer_ownership(env: Env, new_admin: Address) {
@@ -193,6 +221,61 @@ impl BcForgeToken {
 
         env.storage().instance().set(&DataKey::Admin, &new_admin);
         events::emit_ownership_transferred(&env, &admin, &new_admin);
+    }
+
+    /// Proposes a new admin for two-step ownership transfer. Current admin-only.
+    ///
+    /// # Arguments
+    /// * `new_admin` - The address to propose as the new admin.
+    ///
+    /// # Panics
+    /// Panics if caller is not the current admin.
+    pub fn propose_owner(env: Env, new_admin: Address) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        events::emit_ownership_proposed(&env, &admin, &new_admin);
+    }
+
+    /// Accepts pending ownership transfer. Only the pending admin can call this.
+    ///
+    /// # Panics
+    /// Panics if there is no pending admin or if caller is not the pending admin.
+    pub fn accept_ownership(env: Env) {
+        let pending_admin = Self::read_pending_admin(&env)
+            .expect("no pending ownership transfer");
+        
+        pending_admin.require_auth();
+
+        let old_admin = Self::read_admin(&env);
+        env.storage().instance().set(&DataKey::Admin, &pending_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        events::emit_ownership_accepted(&env, &old_admin, &pending_admin);
+    }
+
+    /// Cancels a pending ownership transfer. Current admin-only.
+    ///
+    /// # Panics
+    /// Panics if caller is not the current admin or if there is no pending transfer.
+    pub fn cancel_transfer(env: Env) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        let pending_admin = Self::read_pending_admin(&env)
+            .expect("no pending ownership transfer");
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        events::emit_ownership_cancelled(&env, &admin, &pending_admin);
+    }
+
+    /// Returns the pending admin address if there is a pending transfer.
+    ///
+    /// # Returns
+    /// Some(Address) if there is a pending admin, None otherwise.
+    pub fn pending_owner(env: Env) -> Option<Address> {
+        Self::read_pending_admin(&env)
     }
 
     /// Returns the total token supply.
@@ -237,13 +320,13 @@ impl TokenInterface for BcForgeToken {
     /// * `from`    - The token owner granting the allowance.
     /// * `spender` - The address being granted spending rights.
     /// * `amount`  - Maximum tokens the spender can use.
-    /// * `_exp`    - Expiration ledger (reserved, currently unused).
-    fn approve(env: Env, from: Address, spender: Address, amount: i128, _exp: u32) {
+    /// * `exp`     - Expiration ledger sequence (0 means no expiration).
+    fn approve(env: Env, from: Address, spender: Address, amount: i128, exp: u32) {
         from.require_auth();
         if amount < 0 {
             panic!("approval amount must be non-negative");
         }
-        Self::write_allowance(&env, &from, &spender, amount);
+        Self::write_allowance(&env, &from, &spender, amount, exp);
         events::emit_approve(&env, &from, &spender, amount);
     }
 
@@ -286,7 +369,7 @@ impl TokenInterface for BcForgeToken {
         }
 
         Self::move_balance(&env, &from, &to, amount);
-        Self::write_allowance(&env, &from, &spender, allowance - amount);
+        Self::write_allowance(&env, &from, &spender, allowance - amount, 0); // Keep original expiration
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
     }
 
@@ -338,7 +421,7 @@ impl TokenInterface for BcForgeToken {
             panic!("insufficient balance");
         }
 
-        Self::write_allowance(&env, &from, &spender, allowance - amount);
+        Self::write_allowance(&env, &from, &spender, allowance - amount, 0); // Keep original expiration
         Self::write_balance(&env, &from, balance - amount);
 
         let supply = Self::read_supply(&env) - amount;
