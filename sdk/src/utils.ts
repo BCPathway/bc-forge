@@ -134,3 +134,12 @@ export function u32ToScVal(value: number): xdr.ScVal {
 export function scValToNative(scVal: xdr.ScVal): any {
   return sdkScValToNative(scVal);
 }
+
+/**
+ * Converts a 32-byte hex string or Buffer to an ScVal.
+ */
+export function hashToScVal(hash: string | Buffer): xdr.ScVal {
+  const buf = typeof hash === 'string' ? Buffer.from(hash, 'hex') : hash;
+  if (buf.length !== 32) throw new Error('Hash must be exactly 32 bytes');
+  return xdr.ScVal.scvBytes(buf);
+}

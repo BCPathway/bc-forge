@@ -18,7 +18,7 @@ mod events;
 mod test;
 
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String};
 
 /// Storage keys for the token contract state.
 #[derive(Clone)]
@@ -212,6 +212,15 @@ impl BcForgeToken {
         let admin = Self::read_admin(&env);
         bc_forge_lifecycle::unpause(env.clone(), admin.clone());
         events::emit_unpaused(&env, &admin);
+    }
+
+    /// Upgrades the contract to a new WASM hash. Admin-only.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        events::emit_upgrade(&env, &admin, &new_wasm_hash);
     }
 
     /// Returns the contract version.

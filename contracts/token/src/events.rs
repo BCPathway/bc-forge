@@ -3,7 +3,7 @@
 //! Structured event emission for all token contract operations.
 //! Events are emitted to the ledger for indexing by off-chain services.
 
-use soroban_sdk::{symbol_short, Address, Env, String};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
 
 /// Emitted when the token contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
@@ -89,4 +89,12 @@ pub fn emit_paused(env: &Env, admin: &Address) {
 pub fn emit_unpaused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("unpause"),), (admin.clone(),));
+}
+
+/// Emitted when the contract is upgraded.
+pub fn emit_upgrade(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+    env.events().publish(
+        (symbol_short!("upgrade"),),
+        (admin.clone(), new_wasm_hash.clone()),
+    );
 }
