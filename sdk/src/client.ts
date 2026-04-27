@@ -15,6 +15,9 @@ import {
   stringToScVal,
   u32ToScVal,
   scValToNative,
+  buildUnsignedTransaction,
+  signTransaction,
+  simulateTransaction,
 } from './utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -270,6 +273,174 @@ export class bcForgeClient {
    */
   async unpause(source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('unpause', [], source);
+  }
+
+  // ─── Offline Transaction Builders ──────────────────────────────────────────
+
+  /**
+   * Build an unsigned mint transaction for offline signing.
+   *
+   * @param to              - Recipient address
+   * @param amount          - Number of tokens to mint
+   * @param sourcePublicKey - Admin's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildMintTx(
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'mint',
+      [addressToScVal(to), i128ToScVal(amount)],
+      sourcePublicKey
+    );
+  }
+
+  /**
+   * Build an unsigned transfer transaction for offline signing.
+   *
+   * @param from            - Sender address
+   * @param to              - Recipient address
+   * @param amount          - Number of tokens
+   * @param sourcePublicKey - Sender's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildTransferTx(
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'transfer',
+      [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      sourcePublicKey
+    );
+  }
+
+  /**
+   * Build an unsigned approve transaction for offline signing.
+   *
+   * @param from            - Token owner
+   * @param spender         - Approved spender
+   * @param amount          - Maximum spendable amount
+   * @param exp             - Expiration ledger (0 for no expiration)
+   * @param sourcePublicKey - Owner's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildApproveTx(
+    from: string,
+    spender: string,
+    amount: bigint,
+    exp: number,
+    sourcePublicKey: string
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'approve',
+      [addressToScVal(from), addressToScVal(spender), i128ToScVal(amount), u32ToScVal(exp)],
+      sourcePublicKey
+    );
+  }
+
+  /**
+   * Build an unsigned burn transaction for offline signing.
+   *
+   * @param from            - Address whose tokens to burn
+   * @param amount          - Number of tokens to burn
+   * @param sourcePublicKey - Burner's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildBurnTx(
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'burn',
+      [addressToScVal(from), i128ToScVal(amount)],
+      sourcePublicKey
+    );
+  }
+
+  /**
+   * Sign an unsigned transaction XDR.
+   *
+   * @param txXdr - Unsigned transaction XDR string
+   * @param keypair - Keypair to sign with
+   * @returns Signed transaction XDR string
+   */
+  signTx(txXdr: string, keypair: Keypair): string {
+    return signTransaction(txXdr, this.networkPassphrase, keypair);
+  }
+
+  /**
+   * Simulate a contract invocation without submitting.
+   *
+   * @param method - Contract method name
+   * @param args - Method arguments as ScVal array
+   * @param sourcePublicKey - Public key for simulation context
+   * @returns Simulation result with return value and cost
+   */
+  async simulate(
+    method: string,
+    args: xdr.ScVal[],
+    sourcePublicKey: string
+  ): Promise<any> {
+    return simulateTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      method,
+      args,
+      sourcePublicKey
+    );
+  }
+
+  /**
+   * Simulate a mint operation.
+   *
+   * @param to - Recipient address
+   * @param amount - Number of tokens to mint
+   * @param sourcePublicKey - Admin's public key
+   * @returns Simulation result
+   */
+  async simulateMint(
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string
+  ): Promise<any> {
+    return this.simulate('mint', [addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
+  }
+
+  /**
+   * Simulate a transfer operation.
+   *
+   * @param from - Sender address
+   * @param to - Recipient address
+   * @param amount - Number of tokens
+   * @param sourcePublicKey - Sender's public key
+   * @returns Simulation result
+   */
+  async simulateTransfer(
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string
+  ): Promise<any> {
+    return this.simulate('transfer', [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
   }
 
   // ─── Internal Helpers ────────────────────────────────────────────────────
