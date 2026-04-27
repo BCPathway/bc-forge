@@ -5,13 +5,7 @@
  * token contracts on the Stellar/Soroban network.
  */
 
-import {
-  SorobanRpc,
-  Contract,
-  TransactionBuilder,
-  Keypair,
-  xdr,
-} from '@stellar/stellar-sdk';
+import { SorobanRpc, Contract, TransactionBuilder, Keypair, xdr } from '@stellar/stellar-sdk';
 
 import {
   buildInvokeTransaction,
@@ -145,7 +139,7 @@ export class bcForgeClient {
   private async executeBatch<T, R>(
     items: T[],
     task: (item: T) => Promise<R>,
-    batchSize: number
+    batchSize: number,
   ): Promise<R[]> {
     const results: R[] = [];
     for (let i = 0; i < items.length; i += batchSize) {
@@ -172,14 +166,13 @@ export class bcForgeClient {
     decimals: number,
     name: string,
     symbol: string,
-    source: Keypair
+    source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract('initialize', [
-      addressToScVal(admin),
-      u32ToScVal(decimals),
-      stringToScVal(name),
-      stringToScVal(symbol),
-    ], source);
+    return this.invokeContract(
+      'initialize',
+      [addressToScVal(admin), u32ToScVal(decimals), stringToScVal(name), stringToScVal(symbol)],
+      source,
+    );
   }
 
   /**
@@ -190,10 +183,7 @@ export class bcForgeClient {
    * @param source - Admin keypair
    */
   async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('mint', [
-      addressToScVal(to),
-      i128ToScVal(amount),
-    ], source);
+    return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
   }
 
   /**
@@ -208,13 +198,13 @@ export class bcForgeClient {
     from: string,
     to: string,
     amount: bigint,
-    source: Keypair
+    source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract('transfer', [
-      addressToScVal(from),
-      addressToScVal(to),
-      i128ToScVal(amount),
-    ], source);
+    return this.invokeContract(
+      'transfer',
+      [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      source,
+    );
   }
 
   /**
@@ -229,14 +219,18 @@ export class bcForgeClient {
     from: string,
     spender: string,
     amount: bigint,
-    source: Keypair
+    source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract('approve', [
-      addressToScVal(from),
-      addressToScVal(spender),
-      i128ToScVal(amount),
-      u32ToScVal(0), // expiration ledger
-    ], source);
+    return this.invokeContract(
+      'approve',
+      [
+        addressToScVal(from),
+        addressToScVal(spender),
+        i128ToScVal(amount),
+        u32ToScVal(0), // expiration ledger
+      ],
+      source,
+    );
   }
 
   /**
@@ -247,10 +241,7 @@ export class bcForgeClient {
    * @param source - Burner's keypair
    */
   async burn(from: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('burn', [
-      addressToScVal(from),
-      i128ToScVal(amount),
-    ], source);
+    return this.invokeContract('burn', [addressToScVal(from), i128ToScVal(amount)], source);
   }
 
   /**
@@ -260,9 +251,7 @@ export class bcForgeClient {
    * @param source   - Current admin's keypair
    */
   async transferOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('transfer_ownership', [
-      addressToScVal(newAdmin),
-    ], source);
+    return this.invokeContract('transfer_ownership', [addressToScVal(newAdmin)], source);
   }
 
   /**
@@ -291,7 +280,7 @@ export class bcForgeClient {
   private async queryContract(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
     const account = new (await import('@stellar/stellar-sdk')).Account(
       'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-      '0'
+      '0',
     );
 
     const tx = new TransactionBuilder(account, {
@@ -321,7 +310,7 @@ export class bcForgeClient {
   private async invokeContract(
     method: string,
     args: xdr.ScVal[],
-    source: Keypair
+    source: Keypair,
   ): Promise<TransactionResult> {
     const txXdr = await buildInvokeTransaction(
       this.rpcUrl,
@@ -329,7 +318,7 @@ export class bcForgeClient {
       this.contractId,
       method,
       args,
-      source
+      source,
     );
 
     const response = await submitTransaction(this.rpcUrl, txXdr);
