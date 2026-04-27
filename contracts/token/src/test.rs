@@ -178,6 +178,76 @@ fn test_transfer_from_insufficient_allowance() {
     client.transfer_from(&spender, &owner, &receiver, &200);
 }
 
+#[test]
+fn test_allowance_with_future_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let receiver = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 1000 (future)
+    let current_ledger = env.ledger().sequence();
+    env.ledger().set(current_ledger + 100);
+    
+    client.approve(&owner, &spender, &500, &1000);
+    
+    // Should be usable
+    assert_eq!(client.allowance(&owner, &spender), 500);
+    
+    client.transfer_from(&spender, &owner, &receiver, &200);
+    assert_eq!(client.balance(&receiver), 200);
+    assert_eq!(client.allowance(&owner, &spender), 300);
+}
+
+#[test]
+fn test_allowance_with_past_expiration_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 100
+    client.approve(&owner, &spender, &500, &100);
+    
+    // Move to ledger 200 (past expiration)
+    env.ledger().set(200);
+    
+    // Allowance should be 0 (expired)
+    assert_eq!(client.allowance(&owner, &spender), 0);
+}
+
+#[test]
+#[should_panic(expected = "insufficient allowance")]
+fn test_transfer_from_with_expired_allowance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let receiver = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 100
+    client.approve(&owner, &spender, &500, &100);
+    
+    // Move to ledger 200 (past expiration)
+    env.ledger().set(200);
+    
+    // Should fail with insufficient allowance (expired)
+    client.transfer_from(&spender, &owner, &receiver, &200);
+}
+
 // ─── Burn ────────────────────────────────────────────────────────────────────
 
 #[test]
