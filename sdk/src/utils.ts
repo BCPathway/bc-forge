@@ -14,6 +14,8 @@ import {
   Keypair,
 } from '@stellar/stellar-sdk';
 
+import { SimulationError, TransactionSubmissionError, TransactionTimeoutError } from './errors';
+
 /**
  * Builds an `invokeHostFunction` transaction for a Soroban contract call.
  *
@@ -50,7 +52,7 @@ export async function buildInvokeTransaction(
   const simulated = await server.simulateTransaction(tx);
 
   if (SorobanRpc.Api.isSimulationError(simulated)) {
-    throw new Error(`Simulation failed: ${simulated.error}`);
+    throw new SimulationError('Contract simulation failed', simulated.error);
   }
 
   const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
@@ -76,7 +78,9 @@ export async function submitTransaction(
   const sendResponse = await server.sendTransaction(tx);
 
   if (sendResponse.status === 'ERROR') {
-    throw new Error(`Transaction submission failed: ${sendResponse.errorResult}`);
+    throw new TransactionSubmissionError(
+      `Transaction submission failed: ${sendResponse.errorResult}`,
+    );
   }
 
   // Poll for completion
@@ -94,7 +98,10 @@ export async function submitTransaction(
   );
 
   if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
-    throw new Error('Transaction not found after maximum polling attempts');
+    throw new TransactionTimeoutError(
+      'Transaction not found after maximum polling attempts',
+      sendResponse.hash,
+    );
   }
 
   return getResponse;
