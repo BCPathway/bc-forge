@@ -33,7 +33,7 @@ export async function buildInvokeTransaction(
   contractId: string,
   method: string,
   args: xdr.ScVal[],
-  sourceKeypair: Keypair
+  sourceKeypair: Keypair,
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
   const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
@@ -70,7 +70,7 @@ export async function buildInvokeTransaction(
  */
 export async function submitTransaction(
   rpcUrl: string,
-  txXdr: string
+  txXdr: string,
 ): Promise<SorobanRpc.Api.GetTransactionResponse> {
   const server = new SorobanRpc.Server(rpcUrl);
   const tx = TransactionBuilder.fromXDR(txXdr, Networks.TESTNET);
@@ -92,7 +92,10 @@ export async function submitTransaction(
     await new Promise((resolve) => setTimeout(resolve, 1000));
     getResponse = await server.getTransaction(sendResponse.hash);
     attempts++;
-  } while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND && attempts < maxAttempts);
+  } while (
+    getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+    attempts < maxAttempts
+  );
 
   if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
     throw new TransactionTimeoutError(
@@ -137,4 +140,13 @@ export function u32ToScVal(value: number): xdr.ScVal {
  */
 export function scValToNative(scVal: xdr.ScVal): any {
   return sdkScValToNative(scVal);
+}
+
+/**
+ * Converts a 32-byte hex string or Buffer to an ScVal.
+ */
+export function hashToScVal(hash: string | Buffer): xdr.ScVal {
+  const buf = typeof hash === 'string' ? Buffer.from(hash, 'hex') : hash;
+  if (buf.length !== 32) throw new Error('Hash must be exactly 32 bytes');
+  return xdr.ScVal.scvBytes(buf);
 }
