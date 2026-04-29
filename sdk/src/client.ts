@@ -27,6 +27,8 @@ import {
   hashToScVal,
 } from './utils';
 
+import { SimulationError, RPCError } from './errors';
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface bcForgeClientConfig {
@@ -431,8 +433,21 @@ export class bcForgeClient {
 
 
   /**
-   * Simulates a read-only contract call (no transaction submission).
+   * Internal helper to execute a task with retries.
    */
+  private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
+    let lastError: any;
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        // Only retry on certain errors (e.g., network/RPC errors)
+        // For now, we retry on any error that isn't a known terminal error
+        if (i < retries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+        }
+      }
   private async queryContract(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
     const account = new (await import('@stellar/stellar-sdk')).Account(
       'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
@@ -456,8 +471,44 @@ export class bcForgeClient {
     if (!SorobanRpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
       throw new Error('Query returned no result');
     }
+    throw lastError;
+  }
 
-    return simulated.result.retval;
+  /**
+   * Simulates a read-only contract call (no transaction submission).
+   */
+  private async queryContract(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
+    return this.withRetry(async () => {
+      try {
+        const account = new (await import('@stellar/stellar-sdk')).Account(
+          'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+          '0'
+        );
+
+        const tx = new TransactionBuilder(account, {
+          fee: '100',
+          networkPassphrase: this.networkPassphrase,
+        })
+          .addOperation(this.contract.call(method, ...args))
+          .setTimeout(30)
+          .build();
+
+        const simulated = await this.server.simulateTransaction(tx);
+
+        if (SorobanRpc.Api.isSimulationError(simulated)) {
+          throw new SimulationError(`Query failed: ${simulated.error}`, simulated.error);
+        }
+
+        if (!SorobanRpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
+          throw new SimulationError('Query returned no result');
+        }
+
+        return simulated.result.retval;
+      } catch (error: any) {
+        if (error instanceof SimulationError) throw error;
+        throw new RPCError('RPC call failed', error);
+      }
+    });
   }
 
   /**
@@ -468,6 +519,37 @@ export class bcForgeClient {
     args: xdr.ScVal[],
     source: Keypair,
   ): Promise<TransactionResult> {
+    return this.withRetry(async () => {
+      try {
+        const txXdr = await buildInvokeTransaction(
+          this.rpcUrl,
+          this.networkPassphrase,
+          this.contractId,
+          method,
+          args,
+          source
+        );
+
+        const response = await submitTransaction(this.rpcUrl, txXdr);
+
+        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+          return {
+            success: true,
+            hash: (response as any).hash,
+            returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+          };
+        }
+
+        return {
+          success: false,
+          hash: (response as any).hash,
+        };
+      } catch (error: any) {
+        // Don't retry on simulation errors (usually logic errors)
+        if (error instanceof SimulationError) throw error;
+        throw error;
+      }
+    });
     const txXdr = await buildInvokeTransaction(
       this.rpcUrl,
       this.networkPassphrase,
