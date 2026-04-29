@@ -13,6 +13,18 @@ use soroban_sdk::{contracttype, Address, Env, Vec, vec, String};
 pub enum AdminKey {
     /// The contract administrator address (singular).
     Admin,
+    /// Role assignments: (Role, Address) -> bool
+    Role(Role, Address),
+}
+
+/// Enumeration of available roles.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum Role {
+    /// Global administrator with full control.
+    Admin = 0,
+    /// Account authorized to mint tokens.
+    Minter = 1,
     /// The pool of administrator addresses for multi-sig.
     AdminPool,
     /// Minimum signatures required for multi-sig actions.
@@ -42,6 +54,8 @@ pub struct Proposal {
 /// Stores the admin address in instance storage.
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&AdminKey::Admin, admin);
+    // Automatically grant the Admin role to the administrator.
+    grant_role(env, Role::Admin, admin);
 }
 
 /// Retrieves the current admin address.
@@ -57,6 +71,28 @@ pub fn has_admin(env: &Env) -> bool {
     env.storage().instance().has(&AdminKey::Admin)
 }
 
+/// Grants a role to an address. Only callable by an Admin.
+pub fn grant_role(env: &Env, role: Role, address: &Address) {
+    // If the contract is already initialized, ensure only an Admin can grant roles.
+    if has_admin(env) {
+        require_admin(env);
+    }
+    env.storage().persistent().set(&AdminKey::Role(role, address.clone()), &true);
+}
+
+/// Revokes a role from an address. Only callable by an Admin.
+pub fn revoke_role(env: &Env, role: Role, address: &Address) {
+    require_admin(env);
+    env.storage().persistent().remove(&AdminKey::Role(role, address.clone()));
+}
+
+/// Returns `true` if the address has the specified role.
+pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+    // Admins implicitly have all roles.
+    if env.storage().persistent().has(&AdminKey::Role(Role::Admin, address.clone())) {
+        return true;
+    }
+    env.storage().persistent().has(&AdminKey::Role(role, address.clone()))
 // ─── Multi-Sig Primitives ───────────────────────────────────────────────────
 
 /// Configures the multi-signature admin pool.
@@ -95,6 +131,12 @@ pub fn require_admin(env: &Env) {
     admin.require_auth();
 }
 
+/// Requires that the specified address has the given role and has authorized the invocation.
+pub fn require_role(env: &Env, role: Role, address: &Address) {
+    if !has_role(env, role, address) {
+        panic!("unauthorized: missing role");
+    }
+    address.require_auth();
 // ─── Proposals ──────────────────────────────────────────────────────────────
 
 /// Creates a new proposal for an administrative action.
@@ -195,6 +237,7 @@ mod tests {
     #[test]
     fn test_set_and_get_admin() {
         let env = Env::default();
+        env.mock_all_auths();
         let admin = Address::generate(&env);
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
@@ -205,6 +248,7 @@ mod tests {
     #[test]
     fn test_multi_sig() {
         let env = Env::default();
+        env.mock_all_auths();
         let admin1 = Address::generate(&env);
         let admin2 = Address::generate(&env);
         let admin3 = Address::generate(&env);

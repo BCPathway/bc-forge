@@ -16,6 +16,8 @@ mod events;
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod proptest;
 
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
@@ -42,11 +44,13 @@ pub enum TokenError {
 }
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Vec};
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String};
+use bc_forge_admin::{self as admin, Role};
 
 /// Storage keys for the token contract state.
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    // Admin is now handled by bc_forge_admin
     /// The contract admin address (legacy/internal).
     Admin,
     /// Spending allowance: (owner, spender) → amount.
@@ -201,6 +205,7 @@ impl BcForgeToken {
 
     /// Reads the admin address via the admin module.
     fn read_admin(env: &Env) -> Address {
+        admin::get_admin(env)
         bc_forge_admin::get_admin(env)
     }
 
@@ -243,6 +248,11 @@ impl BcForgeToken {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(TokenError::AlreadyInitialized);
     pub fn initialize(env: Env, admin: Address, decimal: u32, name: String, symbol: String) {
+        if admin::has_admin(&env) {
+            panic!("already initialized");
+        }
+
+        admin::set_admin(&env, &admin);
         if bc_forge_admin::has_admin(&env) {
             panic!("already initialized");
         }
@@ -269,6 +279,10 @@ impl BcForgeToken {
 
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
+    ///
+    /// # Panics
+    /// Panics if caller is not admin, amount is non-positive, or contract is paused.
+    pub fn mint(env: Env, caller: Address, to: Address, amount: i128) {
     /// Mints `amount` tokens to the `to` address. Single-admin auth.
     pub fn mint(env: Env, to: Address, amount: i128) {
         bc_forge_lifecycle::require_not_paused(&env);
@@ -321,6 +335,7 @@ impl BcForgeToken {
 
         let admin = Self::read_admin(&env)?;
         admin.require_auth();
+        admin::require_role(&env, Role::Minter, &caller);
     /// Sets the specifically designated ClawbackAdmin.
     pub fn set_clawback_admin(env: Env, admin: Address) {
         Self::read_admin(&env).require_auth();
@@ -349,6 +364,22 @@ impl BcForgeToken {
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin = Self::read_admin(&env)?;
+        events::emit_mint(&env, &caller, &to, amount, balance, supply);
+    }
+
+    /// Grants a role to an address. Admin-only.
+    pub fn grant_role(env: Env, role: Role, address: Address) {
+        admin::grant_role(&env, role, &address);
+    }
+
+    /// Revokes a role from an address. Admin-only.
+    pub fn revoke_role(env: Env, role: Role, address: Address) {
+        admin::revoke_role(&env, role, &address);
+    }
+
+    /// Checks if an address has a role.
+    pub fn has_role(env: Env, role: Role, address: Address) -> bool {
+        admin::has_role(&env, role, &address)
         Self::move_balance(&env, &from, &to, amount);
         events::emit_clawback(&env, &claw_admin, &from, &to, amount);
     }
@@ -397,9 +428,10 @@ impl BcForgeToken {
 
     /// Transfers the admin role to a new address.
     pub fn transfer_ownership(env: Env, new_admin: Address) {
-        let admin = Self::read_admin(&env);
+        let admin = admin::get_admin(&env);
         admin.require_auth();
 
+        admin::set_admin(&env, &new_admin);
         bc_forge_admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &admin, &new_admin);
 
