@@ -6,15 +6,15 @@ import {
   SorobanRpc,
   TransactionBuilder,
   Networks,
-  Operation,
   xdr,
   Address,
   nativeToScVal,
   scValToNative as sdkScValToNative,
   Contract,
   Keypair,
-  Account,
 } from '@stellar/stellar-sdk';
+
+import { SimulationError, TransactionSubmissionError, TransactionTimeoutError } from './errors';
 
 /**
  * Builds an `invokeHostFunction` transaction for a Soroban contract call.
@@ -33,7 +33,7 @@ export async function buildInvokeTransaction(
   contractId: string,
   method: string,
   args: xdr.ScVal[],
-  sourceKeypair: Keypair
+  sourceKeypair: Keypair,
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
   const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
@@ -52,7 +52,7 @@ export async function buildInvokeTransaction(
   const simulated = await server.simulateTransaction(tx);
 
   if (SorobanRpc.Api.isSimulationError(simulated)) {
-    throw new Error(`Simulation failed: ${simulated.error}`);
+    throw new SimulationError('Contract simulation failed', simulated.error);
   }
 
   const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
@@ -70,7 +70,7 @@ export async function buildInvokeTransaction(
  */
 export async function submitTransaction(
   rpcUrl: string,
-  txXdr: string
+  txXdr: string,
 ): Promise<SorobanRpc.Api.GetTransactionResponse> {
   const server = new SorobanRpc.Server(rpcUrl);
   const tx = TransactionBuilder.fromXDR(txXdr, Networks.TESTNET);
@@ -78,7 +78,9 @@ export async function submitTransaction(
   const sendResponse = await server.sendTransaction(tx);
 
   if (sendResponse.status === 'ERROR') {
-    throw new Error(`Transaction submission failed: ${sendResponse.errorResult}`);
+    throw new TransactionSubmissionError(
+      `Transaction submission failed: ${sendResponse.errorResult}`,
+    );
   }
 
   // Poll for completion
@@ -90,10 +92,16 @@ export async function submitTransaction(
     await new Promise((resolve) => setTimeout(resolve, 1000));
     getResponse = await server.getTransaction(sendResponse.hash);
     attempts++;
-  } while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND && attempts < maxAttempts);
+  } while (
+    getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+    attempts < maxAttempts
+  );
 
   if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
-    throw new Error('Transaction not found after maximum polling attempts');
+    throw new TransactionTimeoutError(
+      'Transaction not found after maximum polling attempts',
+      sendResponse.hash,
+    );
   }
 
   return getResponse;
@@ -238,4 +246,10 @@ export async function simulateTransaction(
   }
 
   return simulated;
+ * Converts a 32-byte hex string or Buffer to an ScVal.
+ */
+export function hashToScVal(hash: string | Buffer): xdr.ScVal {
+  const buf = typeof hash === 'string' ? Buffer.from(hash, 'hex') : hash;
+  if (buf.length !== 32) throw new Error('Hash must be exactly 32 bytes');
+  return xdr.ScVal.scvBytes(buf);
 }
