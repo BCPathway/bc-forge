@@ -55,6 +55,8 @@ pub enum DataKey {
     Admin,
     /// Spending allowance: (owner, spender) → amount.
     Allowance(Address, Address),
+    /// Allowance expiration: (owner, spender) → ledger sequence.
+    AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),
     /// Token name (human-readable).
@@ -152,7 +154,16 @@ impl BcForgeToken {
     }
 
     /// Reads the spending allowance for (owner → spender), defaulting to 0.
+    /// Returns 0 if the allowance has expired.
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
+        // Check if allowance has expired
+        if let Some(exp_ledger) = env.storage().persistent().get(&DataKey::AllowanceExp(from.clone(), spender.clone())) {
+            let current_ledger = env.ledger().sequence();
+            if current_ledger > exp_ledger {
+                return 0; // Allowance expired
+            }
+        }
+        
         env.storage()
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
@@ -160,10 +171,17 @@ impl BcForgeToken {
     }
 
     /// Writes a spending allowance for (owner → spender).
-    fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
+    fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
         env.storage()
             .persistent()
             .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
+        
+        // Store expiration if non-zero (0 means no expiration)
+        if exp > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
+        }
     }
 
     /// Moves `amount` tokens from `from` to `to`.
@@ -536,13 +554,21 @@ impl TokenInterface for BcForgeToken {
         Self::read_allowance(&env, &from, &spender)
     }
 
+    /// Approves `spender` to spend up to `amount` tokens on behalf of `from`.
+    ///
+    /// # Arguments
+    /// * `from`    - The token owner granting the allowance.
+    /// * `spender` - The address being granted spending rights.
+    /// * `amount`  - Maximum tokens the spender can use.
+    /// * `exp`     - Expiration ledger sequence (0 means no expiration).
+    fn approve(env: Env, from: Address, spender: Address, amount: i128, exp: u32) {
     fn approve(env: Env, from: Address, spender: Address, amount: i128, _exp: u32) {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         from.require_auth();
         if amount < 0 {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
         }
-        Self::write_allowance(&env, &from, &spender, amount);
+        Self::write_allowance(&env, &from, &spender, amount, exp);
         events::emit_approve(&env, &from, &spender, amount);
     }
 
@@ -580,6 +606,8 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
+        Self::move_balance(&env, &from, &to, amount);
+        Self::write_allowance(&env, &from, &spender, allowance - amount, 0); // Keep original expiration
         let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
         Self::write_allowance(&env, &from, &spender, allowance - amount);
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
@@ -629,7 +657,7 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
-        Self::write_allowance(&env, &from, &spender, allowance - amount);
+        Self::write_allowance(&env, &from, &spender, allowance - amount, 0); // Keep original expiration
         Self::write_balance(&env, &from, balance - amount);
 
         let supply = Self::read_supply(&env) - amount;
