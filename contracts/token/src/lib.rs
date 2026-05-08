@@ -20,28 +20,7 @@ mod test;
 mod proptest;
 
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String,
-};
-
-/// Errors returned by the token contract.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum TokenError {
-    /// The contract was initialized more than once.
-    AlreadyInitialized = 1,
-    /// The contract has not been initialized yet.
-    NotInitialized = 2,
-    /// The source account does not have enough tokens.
-    InsufficientBalance = 3,
-    /// The approved allowance is too small for the requested action.
-    InsufficientAllowance = 4,
-    /// The provided amount is invalid for this operation.
-    InvalidAmount = 5,
-    /// The contract is currently paused.
-    ContractPaused = 6,
-}
+use soroban_sdk::{contract, contractimpl, contracttype, vec, Address, Env, String, Vec};
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Vec};
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String};
 use bc_forge_admin::{self as admin, Role};
@@ -92,6 +71,14 @@ pub enum TokenAction {
     Mint(Address, i128),
     Pause,
     Unpause,
+}
+
+/// Represents a mint recipient with address and amount.
+#[derive(Clone)]
+#[contracttype]
+pub struct Recipient {
+    pub address: Address,
+    pub amount: i128,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -409,6 +396,52 @@ impl BcForgeToken {
         events::emit_clawback(&env, &claw_admin, &from, &to, amount);
     }
 
+    /// Mints tokens to multiple recipients in a single transaction. Admin-only.
+    ///
+    /// # Arguments
+    /// * `recipients` - Vector of (address, amount) pairs.
+    ///
+    /// # Panics
+    /// Panics if caller is not admin, contract is paused, any amount is non-positive,
+    /// or if the recipients list is empty.
+    ///
+    /// # Note
+    /// All mints are atomic - if any recipient has an invalid amount, the entire batch reverts.
+    pub fn batch_mint(env: Env, recipients: Vec<Recipient>) {
+        bc_forge_lifecycle::require_not_paused(&env);
+
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        if recipients.is_empty() {
+            panic!("recipients list cannot be empty");
+        }
+
+        // First pass: validate all amounts are positive
+        for i in 0..recipients.len() {
+            let recipient = recipients.get(i).expect("recipient should exist");
+            if recipient.amount <= 0 {
+                panic!("mint amount must be positive for all recipients");
+            }
+        }
+
+        // Second pass: perform all mints and calculate total
+        let mut total_minted: i128 = 0;
+        for i in 0..recipients.len() {
+            let recipient = recipients.get(i).expect("recipient should exist");
+            let balance = Self::read_balance(&env, &recipient.address) + recipient.amount;
+            Self::write_balance(&env, &recipient.address, balance);
+            total_minted += recipient.amount;
+
+            // Emit individual mint event per recipient
+            events::emit_mint(&env, &admin, &recipient.address, recipient.amount, balance, Self::read_supply(&env) + total_minted);
+        }
+
+        // Update total supply atomically once at the end
+        let new_supply = Self::read_supply(&env) + total_minted;
+        Self::write_supply(&env, new_supply);
+    }
+
     /// Transfers the admin role to a new address. Current admin-only.
     ///
     /// ⚠️ DEPRECATED: Use propose_owner() + accept_ownership() for safer two-step transfer.
@@ -468,6 +501,61 @@ impl BcForgeToken {
         events::emit_ownership_transferred(&env, &admin, &new_admin);
 
         Ok(())
+    }
+
+    /// Proposes a new admin for two-step ownership transfer. Current admin-only.
+    ///
+    /// # Arguments
+    /// * `new_admin` - The address to propose as the new admin.
+    ///
+    /// # Panics
+    /// Panics if caller is not the current admin.
+    pub fn propose_owner(env: Env, new_admin: Address) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        events::emit_ownership_proposed(&env, &admin, &new_admin);
+    }
+
+    /// Accepts pending ownership transfer. Only the pending admin can call this.
+    ///
+    /// # Panics
+    /// Panics if there is no pending admin or if caller is not the pending admin.
+    pub fn accept_ownership(env: Env) {
+        let pending_admin = Self::read_pending_admin(&env)
+            .expect("no pending ownership transfer");
+        
+        pending_admin.require_auth();
+
+        let old_admin = Self::read_admin(&env);
+        env.storage().instance().set(&DataKey::Admin, &pending_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        events::emit_ownership_accepted(&env, &old_admin, &pending_admin);
+    }
+
+    /// Cancels a pending ownership transfer. Current admin-only.
+    ///
+    /// # Panics
+    /// Panics if caller is not the current admin or if there is no pending transfer.
+    pub fn cancel_transfer(env: Env) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
+
+        let pending_admin = Self::read_pending_admin(&env)
+            .expect("no pending ownership transfer");
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        events::emit_ownership_cancelled(&env, &admin, &pending_admin);
+    }
+
+    /// Returns the pending admin address if there is a pending transfer.
+    ///
+    /// # Returns
+    /// Some(Address) if there is a pending admin, None otherwise.
+    pub fn pending_owner(env: Env) -> Option<Address> {
+        Self::read_pending_admin(&env)
     }
 
     /// Proposes a new admin for two-step ownership transfer. Current admin-only.
@@ -677,8 +765,6 @@ impl TokenInterface for BcForgeToken {
 
         Self::move_balance(&env, &from, &to, amount);
         Self::write_allowance(&env, &from, &spender, allowance - amount, 0); // Keep original expiration
-        let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        Self::write_allowance(&env, &from, &spender, allowance - amount);
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
     }
 
