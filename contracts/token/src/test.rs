@@ -14,6 +14,7 @@
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
 
+use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
 use crate::{BcForgeToken, BcForgeTokenClient};
 use bc_forge_admin::Role;
 
@@ -29,7 +30,7 @@ fn init_default(env: &Env, client: &BcForgeTokenClient) -> Address {
     let admin = Address::generate(env);
     let name = String::from_str(env, "bc-forge Token");
     let symbol = String::from_str(env, "SFG");
-    client.initialize(&admin, &7, &name, &symbol);
+    let _ = client.initialize(&admin, &7, &name, &symbol);
     admin
 }
 
@@ -50,14 +51,19 @@ fn test_initialize() {
 }
 
 #[test]
-#[should_panic(expected = "already initialized")]
-fn test_double_initialize_panics() {
+fn test_double_initialize_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
     init_default(&env, &client);
-    // Second init should panic
-    init_default(&env, &client);
+    let admin = Address::generate(&env);
+    let name = String::from_str(&env, "bc-forge Token");
+    let symbol = String::from_str(&env, "SFG");
+
+    assert_eq!(
+        client.try_initialize(&admin, &7, &name, &symbol),
+        Err(Ok(TokenError::AlreadyInitialized))
+    );
 }
 
 // ─── Minting ─────────────────────────────────────────────────────────────────
@@ -70,6 +76,7 @@ fn test_mint() {
     let admin = init_default(&env, &client);
     let user = Address::generate(&env);
 
+    let _ = client.mint(&user, &1000);
     client.mint(&admin, &user, &1000);
 
     assert_eq!(client.balance(&user), 1000);
@@ -85,6 +92,8 @@ fn test_mint_multiple_users() {
     let user_a = Address::generate(&env);
     let user_b = Address::generate(&env);
 
+    let _ = client.mint(&user_a, &500);
+    let _ = client.mint(&user_b, &300);
     client.mint(&admin, &user_a, &500);
     client.mint(&admin, &user_b, &300);
 
@@ -94,14 +103,17 @@ fn test_mint_multiple_users() {
 }
 
 #[test]
-#[should_panic(expected = "mint amount must be positive")]
-fn test_mint_zero_panics() {
+fn test_mint_zero_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
     let admin = init_default(&env, &client);
     let user = Address::generate(&env);
 
+    assert_eq!(
+        client.try_mint(&user, &0),
+        Err(Ok(TokenError::InvalidAmount))
+    );
     client.mint(&admin, &user, &0);
 }
 
@@ -116,6 +128,7 @@ fn test_transfer() {
     let sender = Address::generate(&env);
     let receiver = Address::generate(&env);
 
+    let _ = client.mint(&sender, &1000);
     client.mint(&admin, &sender, &1000);
     client.transfer(&sender, &receiver, &400);
 
@@ -126,8 +139,7 @@ fn test_transfer() {
 }
 
 #[test]
-#[should_panic(expected = "insufficient balance")]
-fn test_transfer_insufficient_balance() {
+fn test_transfer_insufficient_balance_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
@@ -135,6 +147,11 @@ fn test_transfer_insufficient_balance() {
     let sender = Address::generate(&env);
     let receiver = Address::generate(&env);
 
+    let _ = client.mint(&sender, &100);
+    assert_eq!(
+        client.try_transfer(&sender, &receiver, &200),
+        Err(Ok(TokenError::InsufficientBalance))
+    );
     client.mint(&admin, &sender, &100);
     client.transfer(&sender, &receiver, &200);
 }
@@ -151,6 +168,7 @@ fn test_approve_and_transfer_from() {
     let spender = Address::generate(&env);
     let receiver = Address::generate(&env);
 
+    let _ = client.mint(&owner, &1000);
     client.mint(&admin, &owner, &1000);
     client.approve(&owner, &spender, &500, &0);
 
@@ -164,8 +182,7 @@ fn test_approve_and_transfer_from() {
 }
 
 #[test]
-#[should_panic(expected = "insufficient allowance")]
-fn test_transfer_from_insufficient_allowance() {
+fn test_transfer_from_insufficient_allowance_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
@@ -174,9 +191,13 @@ fn test_transfer_from_insufficient_allowance() {
     let spender = Address::generate(&env);
     let receiver = Address::generate(&env);
 
+    let _ = client.mint(&owner, &1000);
     client.mint(&admin, &owner, &1000);
     client.approve(&owner, &spender, &100, &0);
-    client.transfer_from(&spender, &owner, &receiver, &200);
+    assert_eq!(
+        client.try_transfer_from(&spender, &owner, &receiver, &200),
+        Err(Ok(TokenError::InsufficientAllowance))
+    );
 }
 
 #[test]
@@ -259,6 +280,7 @@ fn test_burn() {
     let admin = init_default(&env, &client);
     let user = Address::generate(&env);
 
+    let _ = client.mint(&user, &1000);
     client.mint(&admin, &user, &1000);
     client.burn(&user, &300);
 
@@ -267,14 +289,18 @@ fn test_burn() {
 }
 
 #[test]
-#[should_panic(expected = "insufficient balance")]
-fn test_burn_insufficient_balance() {
+fn test_burn_insufficient_balance_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
     let admin = init_default(&env, &client);
     let user = Address::generate(&env);
 
+    let _ = client.mint(&user, &100);
+    assert_eq!(
+        client.try_burn(&user, &200),
+        Err(Ok(TokenError::InsufficientBalance))
+    );
     client.mint(&admin, &user, &100);
     client.burn(&user, &200);
 }
@@ -288,6 +314,7 @@ fn test_burn_from() {
     let owner = Address::generate(&env);
     let spender = Address::generate(&env);
 
+    let _ = client.mint(&owner, &1000);
     client.mint(&admin, &owner, &1000);
     client.approve(&owner, &spender, &500, &0);
     client.burn_from(&spender, &owner, &200);
@@ -308,9 +335,10 @@ fn test_transfer_ownership() {
     let new_admin = Address::generate(&env);
     let user = Address::generate(&env);
 
-    client.transfer_ownership(&new_admin);
+    let _ = client.transfer_ownership(&new_admin);
 
     // New admin should be able to mint
+    let _ = client.mint(&user, &500);
     client.mint(&new_admin, &user, &500);
     assert_eq!(client.balance(&user), 500);
 }
@@ -356,14 +384,18 @@ fn test_mint_unauthorized_role() {
 // ─── Pause / Unpause ─────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "contract is paused")]
-fn test_mint_while_paused() {
+fn test_mint_while_paused_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
     let admin = init_default(&env, &client);
     let user = Address::generate(&env);
 
+    let _ = client.pause();
+    assert_eq!(
+        client.try_mint(&user, &100),
+        Err(Ok(TokenError::ContractPaused))
+    );
     client.pause();
     client.mint(&admin, &user, &100);
 }
@@ -376,17 +408,17 @@ fn test_unpause_restores_operations() {
     let admin = init_default(&env, &client);
     let user = Address::generate(&env);
 
-    client.pause();
-    client.unpause();
+    let _ = client.pause();
+    let _ = client.unpause();
 
     // Should work again
+    let _ = client.mint(&user, &100);
     client.mint(&admin, &user, &100);
     assert_eq!(client.balance(&user), 100);
 }
 
 #[test]
-#[should_panic(expected = "contract is paused")]
-fn test_transfer_while_paused() {
+fn test_transfer_while_paused_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
@@ -394,6 +426,12 @@ fn test_transfer_while_paused() {
     let sender = Address::generate(&env);
     let receiver = Address::generate(&env);
 
+    let _ = client.mint(&sender, &1000);
+    let _ = client.pause();
+    assert_eq!(
+        client.try_transfer(&sender, &receiver, &100),
+        Err(Ok(TokenError::ContractPaused))
+    );
     client.mint(&admin, &sender, &1000);
     client.pause();
     client.transfer(&sender, &receiver, &100);
