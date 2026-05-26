@@ -60,6 +60,20 @@ await client.transfer(
 );
 ```
 
+## Burning Tokens
+
+```typescript
+const ownerKeypair = Keypair.fromSecret('SXXX...SECRET');
+
+// Burn 50 tokens from owner's balance
+const burnResult = await client.burn(
+  ownerKeypair.publicKey(),
+  BigInt(50_0000000),
+  ownerKeypair
+);
+console.log('Burn TX:', burnResult.hash, 'Success:', burnResult.success);
+```
+
 ## Approving & Delegated Transfers
 
 ```typescript
@@ -76,6 +90,24 @@ const allowance = await client.getAllowance(
   ownerKeypair.publicKey(),
   'GSPENDER...ADDR'
 );
+console.log('Allowance:', allowance);
+```
+
+## Querying Allowance
+
+```typescript
+const allowance = await client.getAllowance(
+  'GOWNER...ADDR',
+  'GSPENDER...ADDR'
+);
+console.log('Allowance:', allowance);
+```
+
+## Querying Contract Version
+
+```typescript
+const version = await client.getVersion();
+console.log('Contract version:', version);
 ```
 
 ## Admin Operations
