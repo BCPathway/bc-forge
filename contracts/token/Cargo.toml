@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Core SEP-41 token contract for bc-forge with admin controls and pausable lifecycle"
+license = "MIT"
+repository = "https://github.com/BCPathway/bc-forge"
+homepage = "https://github.com/BCPathway/bc-forge"
+readme = "../../README.md"
+keywords = ["stellar", "soroban", "token", "sep-41"]
+categories = ["cryptography::cryptocurrencies", "wasm"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
