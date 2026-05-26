@@ -51,6 +51,19 @@ jobs:
       - name: Run tests
         run: cargo test --all
 
+      - name: Install Tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Run coverage (Tarpaulin)
+        run: cargo tarpaulin --workspace --out Html --out Xml --out Stdout
+        continue-on-error: true
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ./tarpaulin-report.html
+
       - name: Build WASM
         run: cargo build --target wasm32-unknown-unknown --release
 
