@@ -78,12 +78,27 @@ const allowance = await client.getAllowance(
 );
 ```
 
+## Ownership Management
+
+```typescript
+// Step 1: propose a new owner
+await client.proposeOwnership('GNEWADMIN...ADDR', adminKeypair);
+
+// Step 2: the proposed owner accepts
+await client.acceptOwnership(newOwnerKeypair);
+
+// Optional: cancel before acceptance
+await client.cancelOwnershipTransfer(adminKeypair);
+```
+
+```typescript
+// Backwards-compatible alias for the propose step
+await client.transferOwnership('GNEWADMIN...ADDR', adminKeypair);
+```
+
 ## Admin Operations
 
 ```typescript
-// Transfer ownership
-await client.transferOwnership('GNEWADMIN...ADDR', adminKeypair);
-
 // Emergency pause / unpause
 await client.pause(adminKeypair);
 await client.unpause(adminKeypair);
@@ -112,7 +127,10 @@ await client.unpause(adminKeypair);
 | `transfer(from, to, amount, source)` | Transfer tokens |
 | `approve(from, spender, amount, source)` | Set spending allowance |
 | `burn(from, amount, source)` | Burn tokens |
-| `transferOwnership(newAdmin, source)` | Transfer admin role |
+| `proposeOwnership(newAdmin, source)` | Propose a new admin |
+| `acceptOwnership(source)` | Accept a pending admin transfer |
+| `cancelOwnershipTransfer(source)` | Cancel a pending admin transfer |
+| `transferOwnership(newAdmin, source)` | Backwards-compatible alias for `proposeOwnership` |
 | `pause(source)` | Pause contract (admin-only) |
 | `unpause(source)` | Unpause contract (admin-only) |
 

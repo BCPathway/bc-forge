@@ -8,8 +8,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "echo \"SDK tests require a running Soroban RPC — see README\" && exit 0",
-    "lint": "eslint 'src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
     "clean": "rm -rf dist"
   },
   "keywords": [
