@@ -286,13 +286,42 @@ export class bcForgeClient {
   }
 
   /**
-   * Transfer admin/ownership to a new address. Current admin only.
+   * Propose a new owner/admin address. Current admin only.
    *
+   * @param newAdmin - Proposed new admin address
+   * @param source   - Current admin's keypair
+   */
+  async proposeOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('propose_ownership', [addressToScVal(newAdmin)], source);
+  }
+
+  /**
+   * Accept a pending ownership transfer. Must be called by the proposed owner.
+   *
+   * @param source - Proposed owner's keypair
+   */
+  async acceptOwnership(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('accept_ownership', [], source);
+  }
+
+  /**
+   * Cancel a pending ownership transfer. Current admin only.
+   *
+   * @param source - Current admin's keypair
+   */
+  async cancelOwnershipTransfer(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('cancel_ownership_transfer', [], source);
+  }
+
+  /**
+   * Transfer admin/ownership to a new address.
+   *
+   * @deprecated Use `proposeOwnership` / `acceptOwnership` instead.
    * @param newAdmin - New admin address
    * @param source   - Current admin's keypair
    */
   async transferOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('transfer_ownership', [addressToScVal(newAdmin)], source);
+    return this.proposeOwnership(newAdmin, source);
   }
 
   /**
@@ -499,9 +528,7 @@ export class bcForgeClient {
    * @param source      - Admin keypair
    */
   async upgrade(newWasmHash: string | Buffer, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('upgrade', [
-      hashToScVal(newWasmHash),
-    ], source);
+    return this.invokeContract('upgrade', [hashToScVal(newWasmHash)], source);
   }
 
   /**
@@ -562,9 +589,7 @@ export class bcForgeClient {
    * @param source  - Admin keypair
    */
   async updateName(newName: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('update_name', [
-      stringToScVal(newName),
-    ], source);
+    return this.invokeContract('update_name', [stringToScVal(newName)], source);
   }
 
   /**
@@ -619,9 +644,7 @@ export class bcForgeClient {
    * @param source    - Admin keypair
    */
   async updateSymbol(newSymbol: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('update_symbol', [
-      stringToScVal(newSymbol),
-    ], source);
+    return this.invokeContract('update_symbol', [stringToScVal(newSymbol)], source);
   }
 
   // ─── Internal Helpers ────────────────────────────────────────────────────
