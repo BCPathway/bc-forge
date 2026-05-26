@@ -729,6 +729,84 @@ fn test_transfer_while_paused_returns_error() {
     client.transfer(&sender, &receiver, &100);
 }
 
+// ─── Pause/Unpause Edge Case Tests ─────────────────────────────────────────
+
+#[test]
+fn test_transfer_ownership_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let new_admin = Address::generate(&env);
+    let _ = client.pause();
+    // Ownership transfer should still work while paused
+    client.transfer_ownership(&new_admin);
+    // New admin can mint
+    client.mint(&new_admin, &admin, &1);
+}
+
+#[test]
+fn test_balance_query_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let user = Address::generate(&env);
+    client.mint(&admin, &user, &123);
+    client.pause();
+    // Balance query should still work while paused
+    let bal = client.balance(&user);
+    assert_eq!(bal, 123);
+}
+
+// ─── Negative Admin Function Tests ─────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "unauthorized: missing role")]
+fn test_pause_unauthorized_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let not_admin = Address::generate(&env);
+    client.pause_with_auth(&not_admin);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: missing role")]
+fn test_unpause_unauthorized_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let not_admin = Address::generate(&env);
+    client.unpause_with_auth(&not_admin);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: missing role")]
+fn test_transfer_ownership_unauthorized_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let not_admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.transfer_ownership_with_auth(&new_admin, &not_admin);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: missing role")]
+fn test_mint_unauthorized_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let not_admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    client.mint(&not_admin, &user, &100);
+}
+
 // ─── Version ─────────────────────────────────────────────────────────────────
 
 #[test]
