@@ -27,3 +27,6 @@ sdk/*.tgz
 # OS
 .DS_Store
 Thumbs.db
+
+# PR text
+issue_pr.txt
