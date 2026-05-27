@@ -10,6 +10,14 @@ interface AccountState {
   allowances: Record<string, bigint>;
 }
 
+/**
+ * `MockBcForgeClient` — lightweight in-memory stand-in for `bcForgeClient`.
+ *
+ * Use this class in unit tests and UI development where a live Soroban RPC
+ * and on-chain contract are not available. The mock implements the same
+ * high-level public methods as `bcForgeClient` but operates entirely in
+ * memory and returns deterministic `TransactionResult` objects.
+ */
 export class MockBcForgeClient {
   private accounts: Record<string, AccountState> = {};
   private totalSupply: bigint = 0n;

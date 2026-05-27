@@ -32,6 +32,13 @@ import { SimulationError, RPCError } from './errors';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/**
+ * Configuration used to construct a `bcForgeClient` instance.
+ *
+ * @property rpcUrl - Soroban RPC endpoint URL (e.g., `https://soroban-testnet.stellar.org`).
+ * @property networkPassphrase - Stellar network passphrase (e.g., `Test SDF Network ; September 2015`).
+ * @property contractId - Deployed bc-forge contract ID (C... address).
+ */
 export interface bcForgeClientConfig {
   /** Soroban RPC endpoint URL (e.g., https://soroban-testnet.stellar.org) */
   rpcUrl: string;
@@ -41,6 +48,13 @@ export interface bcForgeClientConfig {
   contractId: string;
 }
 
+/**
+ * Result shape returned for write operations that produce a transaction.
+ *
+ * @property success - True when the transaction executed successfully.
+ * @property hash - Ledger transaction hash identifying the submitted transaction.
+ * @property returnValue - Optional decoded return value from the contract invocation.
+ */
 export interface TransactionResult {
   /** Whether the transaction was successful */
   success: boolean;
@@ -50,6 +64,9 @@ export interface TransactionResult {
   returnValue?: any;
 }
 
+/**
+ * Describes a single recipient for the `batchMint` operation.
+ */
 export interface BatchMintRecipient {
   /** Recipient Stellar public key (G... address) */
   to: string;
@@ -59,6 +76,19 @@ export interface BatchMintRecipient {
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
+/**
+ * High-level client for interacting with the deployed bc-forge token contract.
+ *
+ * This class provides convenience methods for querying contract state,
+ * building transactions for offline signing, and submitting signed transactions
+ * to a Soroban RPC endpoint.
+ *
+ * Example:
+ * ```ts
+ * const client = new bcForgeClient({ rpcUrl, networkPassphrase, contractId });
+ * await client.mint('GABC...', 100n, keypair);
+ * ```
+ */
 export class bcForgeClient {
   private rpcUrl: string;
   private networkPassphrase: string;
