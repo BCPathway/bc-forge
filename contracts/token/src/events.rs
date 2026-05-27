@@ -90,7 +90,7 @@ pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &A
 /// Emitted when pending admin accepts ownership.
 pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_accept"),),
+        (symbol_short!("own_acc"),),
         (old_admin.clone(), new_admin.clone()),
     );
 }
@@ -98,7 +98,7 @@ pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Addre
 /// Emitted when ownership transfer is cancelled.
 pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_cancel"),),
+        (symbol_short!("own_can"),),
         (admin.clone(), cancelled_admin.clone()),
     );
 }
