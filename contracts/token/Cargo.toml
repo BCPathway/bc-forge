@@ -1,7 +1,5 @@
 [package]
 name = "bc-forge-token"
-version = "0.1.0"
-edition = "2021"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -20,7 +18,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = "22.0.0"
 soroban-sdk = { workspace = true }
 bc-forge-admin = { path = "../admin" }
 bc-forge-lifecycle = { path = "../lifecycle" }

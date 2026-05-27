@@ -1,7 +1,5 @@
 [package]
 name = "bc-forge-admin"
-version = "0.1.0"
-edition = "2021"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,13 +14,8 @@ description = "Admin access control module for bc-forge Soroban token contracts"
 readme = "../../README.md"
 publish = false
 
-
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = "22.0.0"
 soroban-sdk = { workspace = true }
-
-[dev-dependencies]
-soroban-sdk = { version = "22.0.0", features = ["testutils"] }
