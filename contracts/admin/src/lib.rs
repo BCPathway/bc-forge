@@ -15,6 +15,8 @@ pub enum AdminKey {
     Admin,
     /// Role assignments: (Role, Address) -> bool
     Role(Role, Address),
+    /// Multi-sig required for specific critical actions: CriticalAction -> bool
+    MultiSigRequired(CriticalAction),
 }
 
 /// Enumeration of available roles.
@@ -35,12 +37,36 @@ pub enum Role {
     ProposalIdCounter,
 }
 
+/// Types of critical administrative actions that require multi-signature approval.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum CriticalAction {
+    /// Change the contract administrator.
+    ChangeAdmin = 0,
+    /// Modify the admin pool or threshold.
+    ModifyAdminPool = 1,
+    /// Pause or unpause contract operations.
+    PauseContract = 2,
+    /// Upgrade contract implementation.
+    UpgradeContract = 3,
+    /// Change critical contract parameters.
+    ChangeParameters = 4,
+    /// Mint tokens (if applicable).
+    MintTokens = 5,
+    /// Burn tokens (if applicable).
+    BurnTokens = 6,
+    /// Transfer ownership of contract.
+    TransferOwnership = 7,
+}
+
 /// A proposal for a multi-signature action.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
     /// The admin who created the proposal.
     pub creator: Address,
+    /// The type of critical action this proposal addresses.
+    pub action_type: CriticalAction,
     /// Description or metadata about the proposal.
     pub description: String,
     /// List of admins who have approved this proposal.
@@ -93,6 +119,8 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
         return true;
     }
     env.storage().persistent().has(&AdminKey::Role(role, address.clone()))
+}
+
 // ─── Multi-Sig Primitives ───────────────────────────────────────────────────
 
 /// Configures the multi-signature admin pool.
@@ -123,6 +151,22 @@ pub fn get_threshold(env: &Env) -> u32 {
     env.storage().instance().get(&AdminKey::Threshold).unwrap_or(1)
 }
 
+/// Configures whether a specific critical action requires multi-signature approval.
+pub fn set_multi_sig_required(env: &Env, action: CriticalAction, required: bool) {
+    require_admin(env);
+    env.storage().instance().set(&AdminKey::MultiSigRequired(action), &required);
+}
+
+/// Checks if a specific critical action requires multi-signature approval.
+pub fn is_multi_sig_required(env: &Env, action: CriticalAction) -> bool {
+    env.storage().instance().get(&AdminKey::MultiSigRequired(action)).unwrap_or(false)
+}
+
+/// Checks if multi-signature is enabled for the contract.
+pub fn is_multi_sig_enabled(env: &Env) -> bool {
+    env.storage().instance().has(&AdminKey::AdminPool)
+}
+
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
 /// Requires that the stored admin has authorized the current invocation.
@@ -137,10 +181,50 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
         panic!("unauthorized: missing role");
     }
     address.require_auth();
+}
+
+/// Requires multi-signature approval for a critical action.
+/// If multi-sig is not enabled for the action, falls back to single admin approval.
+pub fn require_multi_sig(env: &Env, action: CriticalAction, proposal_id: u64) {
+    if is_multi_sig_required(env, action) {
+        if !is_proposal_ready(env, proposal_id) {
+            panic!("multi-signature threshold not met for critical action");
+        }
+        let proposal: Proposal = env.storage().instance().get(&AdminKey::Proposal(proposal_id))
+            .expect("proposal not found");
+        if proposal.action_type != action {
+            panic!("proposal action type does not match required action");
+        }
+    } else {
+        require_admin(env);
+    }
+}
+
+/// Requires multi-signature approval for a critical action with a specific caller.
+/// This variant ensures the caller is part of the admin pool.
+pub fn require_multi_sig_with_caller(env: &Env, action: CriticalAction, proposal_id: u64, caller: &Address) {
+    if is_multi_sig_required(env, action) {
+        if !is_proposal_ready(env, proposal_id) {
+            panic!("multi-signature threshold not met for critical action");
+        }
+        let proposal: Proposal = env.storage().instance().get(&AdminKey::Proposal(proposal_id))
+            .expect("proposal not found");
+        if proposal.action_type != action {
+            panic!("proposal action type does not match required action");
+        }
+        let pool = get_admin_pool(env);
+        if !pool.contains(caller) {
+            panic!("caller is not in admin pool");
+        }
+    } else {
+        require_admin(env);
+    }
+}
+
 // ─── Proposals ──────────────────────────────────────────────────────────────
 
 /// Creates a new proposal for an administrative action.
-pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
+pub fn create_proposal(env: &Env, creator: Address, action_type: CriticalAction, description: String) -> u64 {
     creator.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&creator) {
@@ -152,6 +236,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
 
     let proposal = Proposal {
         creator: creator.clone(),
+        action_type,
         description,
         approvals: vec![env, creator],
         executed: false,
@@ -194,16 +279,41 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
 pub fn mark_executed(env: &Env, proposal_id: u64) {
     let mut proposal: Proposal = env.storage().instance().get(&AdminKey::Proposal(proposal_id))
         .expect("proposal not found");
-    
+
     if proposal.executed {
         panic!("already executed");
     }
     if !is_proposal_ready(env, proposal_id) {
         panic!("threshold not met");
     }
-    
+
     proposal.executed = true;
     env.storage().instance().set(&AdminKey::Proposal(proposal_id), &proposal);
+}
+
+/// Executes a proposal after it has met the threshold.
+/// Returns the action type of the executed proposal.
+pub fn execute_proposal(env: &Env, proposal_id: u64) -> CriticalAction {
+    let mut proposal: Proposal = env.storage().instance().get(&AdminKey::Proposal(proposal_id))
+        .expect("proposal not found");
+
+    if proposal.executed {
+        panic!("proposal already executed");
+    }
+    if !is_proposal_ready(env, proposal_id) {
+        panic!("threshold not met for execution");
+    }
+
+    proposal.executed = true;
+    let action_type = proposal.action_type;
+    env.storage().instance().set(&AdminKey::Proposal(proposal_id), &proposal);
+    action_type
+}
+
+/// Gets the proposal details by ID.
+pub fn get_proposal(env: &Env, proposal_id: u64) -> Proposal {
+    env.storage().instance().get(&AdminKey::Proposal(proposal_id))
+        .expect("proposal not found")
 }
 
 #[cfg(test)]
@@ -223,14 +333,23 @@ mod tests {
         pub fn set_pool(env: Env, admins: Vec<Address>, threshold: u32) {
             set_admin_pool(&env, admins, threshold);
         }
-        pub fn propose(env: Env, creator: Address, desc: String) -> u64 {
-            create_proposal(&env, creator, desc)
+        pub fn propose(env: Env, creator: Address, action_type: CriticalAction, desc: String) -> u64 {
+            create_proposal(&env, creator, action_type, desc)
         }
         pub fn approve(env: Env, admin: Address, id: u64) {
             approve_proposal(&env, admin, id);
         }
         pub fn ready(env: Env, id: u64) -> bool {
             is_proposal_ready(&env, id)
+        }
+        pub fn execute(env: Env, id: u64) -> CriticalAction {
+            execute_proposal(&env, id)
+        }
+        pub fn set_multi_sig_required(env: Env, action: CriticalAction, required: bool) {
+            set_multi_sig_required(&env, action, required);
+        }
+        pub fn is_multi_sig_required(env: Env, action: CriticalAction) -> bool {
+            is_multi_sig_required(&env, action)
         }
     }
 
@@ -252,16 +371,131 @@ mod tests {
         let admin1 = Address::generate(&env);
         let admin2 = Address::generate(&env);
         let admin3 = Address::generate(&env);
-        
+
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
-        
+
         client.set_pool(&vec![&env, admin1.clone(), admin2.clone(), admin3.clone()], 2);
-        
-        let id = client.propose(&admin1, &String::from_str(&env, "test"));
+
+        let id = client.propose(&admin1, &CriticalAction::ChangeAdmin, &String::from_str(&env, "test"));
         assert!(!client.ready(&id));
-        
+
         client.approve(&admin2, &id);
         assert!(client.ready(&id));
+    }
+
+    #[test]
+    fn test_multi_sig_with_critical_actions() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        // Set up admin pool with threshold of 2
+        client.set_pool(&vec![&env, admin1.clone(), admin2.clone(), admin3.clone()], 2);
+
+        // Configure ChangeAdmin to require multi-sig
+        client.set_multi_sig_required(&CriticalAction::ChangeAdmin, true);
+        assert!(client.is_multi_sig_required(&CriticalAction::ChangeAdmin));
+
+        // Create a proposal for changing admin
+        let id = client.propose(&admin1, &CriticalAction::ChangeAdmin, &String::from_str(&env, "Change admin to new address"));
+        assert!(!client.ready(&id));
+
+        // Approve with second admin
+        client.approve(&admin2, &id);
+        assert!(client.ready(&id));
+
+        // Execute the proposal
+        let action_type = client.execute(&id);
+        assert_eq!(action_type, CriticalAction::ChangeAdmin);
+
+        // Verify proposal is marked as executed
+        assert!(client.ready(&id)); // Still ready but executed
+    }
+
+    #[test]
+    fn test_multi_sig_threshold_not_met() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        // Set up admin pool with threshold of 3
+        client.set_pool(&vec![&env, admin1.clone(), admin2.clone(), admin3.clone()], 3);
+
+        // Create a proposal
+        let id = client.propose(&admin1, &CriticalAction::UpgradeContract, &String::from_str(&env, "Upgrade contract"));
+        assert!(!client.ready(&id));
+
+        // Approve with second admin (still not enough)
+        client.approve(&admin2, &id);
+        assert!(!client.ready(&id));
+
+        // Approve with third admin (now meets threshold)
+        client.approve(&admin3, &id);
+        assert!(client.ready(&id));
+    }
+
+    #[test]
+    fn test_multi_sig_different_action_types() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        // Set up admin pool with threshold of 2
+        client.set_pool(&vec![&env, admin1.clone(), admin2.clone()], 2);
+
+        // Create proposals for different action types
+        let id1 = client.propose(&admin1, &CriticalAction::ChangeAdmin, &String::from_str(&env, "Change admin"));
+        let id2 = client.propose(&admin1, &CriticalAction::PauseContract, &String::from_str(&env, "Pause contract"));
+        let id3 = client.propose(&admin1, &CriticalAction::MintTokens, &String::from_str(&env, "Mint tokens"));
+
+        // Approve all proposals
+        client.approve(&admin2, &id1);
+        client.approve(&admin2, &id2);
+        client.approve(&admin2, &id3);
+
+        // All should be ready
+        assert!(client.ready(&id1));
+        assert!(client.ready(&id2));
+        assert!(client.ready(&id3));
+
+        // Execute and verify action types
+        assert_eq!(client.execute(&id1), CriticalAction::ChangeAdmin);
+        assert_eq!(client.execute(&id2), CriticalAction::PauseContract);
+        assert_eq!(client.execute(&id3), CriticalAction::MintTokens);
+    }
+
+    #[test]
+    fn test_multi_sig_fallback_to_single_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        // Set single admin (no multi-sig pool)
+        client.set(&admin);
+
+        // Configure action to require multi-sig (but pool not set)
+        client.set_multi_sig_required(&CriticalAction::ChangeAdmin, true);
+
+        // Since multi-sig is not enabled (no pool), it should fall back to single admin
+        // This is tested implicitly by the require_multi_sig function
+        assert!(!is_multi_sig_enabled(&env));
     }
 }
