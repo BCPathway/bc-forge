@@ -65,16 +65,18 @@ export async function buildInvokeTransaction(
 /**
  * Submits a signed transaction XDR to the Soroban RPC and waits for confirmation.
  *
- * @param rpcUrl  - The Soroban RPC endpoint URL.
- * @param txXdr   - The signed transaction in XDR format.
+ * @param rpcUrl           - The Soroban RPC endpoint URL.
+ * @param txXdr            - The signed transaction in XDR format.
+ * @param networkPassphrase - The Stellar network passphrase.
  * @returns The transaction result from the ledger.
  */
 export async function submitTransaction(
   rpcUrl: string,
   txXdr: string,
+  networkPassphrase: string,
 ): Promise<SorobanRpc.Api.GetTransactionResponse> {
   const server = new SorobanRpc.Server(rpcUrl);
-  const tx = TransactionBuilder.fromXDR(txXdr, Networks.TESTNET);
+  const tx = TransactionBuilder.fromXDR(txXdr, networkPassphrase);
 
   const sendResponse = await server.sendTransaction(tx);
 
