@@ -323,7 +323,7 @@ export class bcForgeClient {
    * @param source   - Current admin's keypair
    */
   async transferOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
-    return this.proposeOwnership(newAdmin, source);
+    return this.invokeContract('propose_ownership', [addressToScVal(newAdmin)], source);
   }
 
   /**
