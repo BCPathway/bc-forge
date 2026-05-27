@@ -10,14 +10,12 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let client = BcForgeTokenClient::new(env, &contract_id);
     let admin = Address::generate(env);
 
-    client
-        .initialize(
-            &admin,
-            &7,
-            &String::from_str(env, "bc-forge Token"),
-            &String::from_str(env, "SFG"),
-        )
-        .unwrap();
+    client.initialize(
+        &admin,
+        &7,
+        &String::from_str(env, "bc-forge Token"),
+        &String::from_str(env, "SFG"),
+    );
 
     (client, admin)
 }
@@ -30,7 +28,7 @@ fn test_transfer() {
     let from = Address::generate(&env);
     let to = Address::generate(&env);
 
-    client.mint(&from, &1000).unwrap();
+    client.mint(&from, &1000);
     client.transfer(&from, &to, &300);
 
     assert_eq!(client.balance(&from), 700);
@@ -48,7 +46,7 @@ fn test_batch_transfer_multiple_recipients() {
     let recipient_b = Address::generate(&env);
     let recipient_c = Address::generate(&env);
 
-    client.mint(&from, &1000).unwrap();
+    client.mint(&from, &1000);
 
     let recipients = vec![
         &env,
@@ -73,12 +71,14 @@ fn test_batch_transfer_rejects_invalid_amount() {
     let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
-    client.mint(&from, &1000).unwrap();
+    client.mint(&from, &1000);
 
     let recipients = vec![&env, (recipient.clone(), 0_i128)];
     assert_eq!(
         client.try_batch_transfer(&from, &recipients),
-        Err(Ok(TokenError::InvalidAmount))
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InvalidAmount as u32
+        )))
     );
     assert_eq!(client.balance(&from), 1000);
     assert_eq!(client.balance(&recipient), 0);
@@ -93,7 +93,7 @@ fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
     let recipient_a = Address::generate(&env);
     let recipient_b = Address::generate(&env);
 
-    client.mint(&from, &100).unwrap();
+    client.mint(&from, &100);
 
     let recipients = vec![
         &env,
@@ -102,7 +102,9 @@ fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
     ];
     assert_eq!(
         client.try_batch_transfer(&from, &recipients),
-        Err(Ok(TokenError::InsufficientBalance))
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientBalance as u32
+        )))
     );
     assert_eq!(client.balance(&from), 100);
     assert_eq!(client.balance(&recipient_a), 0);
@@ -117,12 +119,14 @@ fn test_batch_transfer_while_paused_returns_error() {
     let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
-    client.mint(&from, &100).unwrap();
-    client.pause().unwrap();
+    client.mint(&from, &100);
+    client.pause();
 
     let recipients: Vec<(Address, i128)> = vec![&env, (recipient, 10_i128)];
     assert_eq!(
         client.try_batch_transfer(&from, &recipients),
-        Err(Ok(TokenError::ContractPaused))
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::ContractPaused as u32
+        )))
     );
 }
