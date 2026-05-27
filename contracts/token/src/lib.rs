@@ -246,6 +246,7 @@ impl BcForgeToken {
             Self::internal_mint(&env, &current_admin, &recipient.address, recipient.amount)?;
         }
 
+        events::emit_batch_mint(&env, &current_admin, &recipients);
         Ok(())
     }
 
@@ -298,11 +299,13 @@ impl BcForgeToken {
         env.storage()
             .instance()
             .set(&DataKey::ProposalAction(id), &action);
+        events::emit_proposal_created(&env, &signer, id, &action);
         id
     }
 
     pub fn approve_proposal(env: Env, signer: Address, proposal_id: u64) {
         admin::approve_proposal(&env, signer, proposal_id);
+        events::emit_proposal_approved(&env, &signer, proposal_id);
     }
 
     pub fn execute_proposal(env: Env, proposal_id: u64) {
@@ -330,6 +333,7 @@ impl BcForgeToken {
                 events::emit_unpaused(&env, &current_admin);
             }
         }
+        events::emit_proposal_executed(&env, proposal_id);
         env.storage()
             .instance()
             .remove(&DataKey::ProposalAction(proposal_id));
@@ -362,11 +366,17 @@ impl BcForgeToken {
     }
 
     pub fn grant_role(env: Env, role: Role, address: Address) {
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
         admin::grant_role(&env, role, &address);
+        events::emit_role_granted(&env, &current_admin, role, &address);
     }
 
     pub fn revoke_role(env: Env, role: Role, address: Address) {
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
         admin::revoke_role(&env, role, &address);
+        events::emit_role_revoked(&env, &current_admin, role, &address);
     }
 
     pub fn has_role(env: Env, role: Role, address: Address) -> bool {
@@ -508,6 +518,13 @@ impl BcForgeToken {
             .unwrap_or_else(|| String::from_str(&env, "bc-forge"));
         env.storage().instance().set(&DataKey::Name, &new_name);
         events::emit_update_name(&env, &current_admin, &old_name, &new_name);
+        events::emit_metadata_updated(
+            &env,
+            &current_admin,
+            &String::from_str(&env, "name"),
+            &old_name,
+            &new_name,
+        );
         Ok(())
     }
 
@@ -521,6 +538,13 @@ impl BcForgeToken {
             .unwrap_or_else(|| String::from_str(&env, "SFG"));
         env.storage().instance().set(&DataKey::Symbol, &new_symbol);
         events::emit_update_symbol(&env, &current_admin, &old_symbol, &new_symbol);
+        events::emit_metadata_updated(
+            &env,
+            &current_admin,
+            &String::from_str(&env, "symbol"),
+            &old_symbol,
+            &new_symbol,
+        );
         Ok(())
     }
 }

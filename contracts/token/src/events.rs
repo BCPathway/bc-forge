@@ -3,7 +3,9 @@
 //! Structured event emission for all token contract operations.
 //! Events are emitted to the ledger for indexing by off-chain services.
 
-use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
+use bc_forge_admin::Role;
+use crate::{Recipient, TokenAction};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String, Vec};
 
 /// Emitted when the token contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
@@ -26,6 +28,64 @@ pub fn emit_mint(
         (symbol_short!("mint"),),
         (admin.clone(), to.clone(), amount, new_balance, new_supply),
     );
+}
+
+/// Emitted when a batch mint operation completes.
+pub fn emit_batch_mint(env: &Env, admin: &Address, recipients: &Vec<Recipient>) {
+    env.events().publish((symbol_short!("batch_mint"),), (admin.clone(), recipients.clone()));
+}
+
+/// Emitted when contract metadata is updated.
+pub fn emit_metadata_updated(
+    env: &Env,
+    admin: &Address,
+    field: &String,
+    old_value: &String,
+    new_value: &String,
+) {
+    env.events().publish(
+        (symbol_short!("meta_upd"),),
+        (
+            admin.clone(),
+            field.clone(),
+            old_value.clone(),
+            new_value.clone(),
+        ),
+    );
+}
+
+/// Emitted when an RBAC role is granted.
+pub fn emit_role_granted(env: &Env, admin: &Address, role: Role, subject: &Address) {
+    env.events().publish(
+        (symbol_short!("role_grt"),),
+        (admin.clone(), role, subject.clone()),
+    );
+}
+
+/// Emitted when an RBAC role is revoked.
+pub fn emit_role_revoked(env: &Env, admin: &Address, role: Role, subject: &Address) {
+    env.events().publish(
+        (symbol_short!("role_rev"),),
+        (admin.clone(), role, subject.clone()),
+    );
+}
+
+/// Emitted when a governance proposal is created.
+pub fn emit_proposal_created(env: &Env, creator: &Address, proposal_id: u64, action: &TokenAction) {
+    env.events().publish(
+        (symbol_short!("prop_crt"),),
+        (creator.clone(), proposal_id, action.clone()),
+    );
+}
+
+/// Emitted when a governance proposal is approved.
+pub fn emit_proposal_approved(env: &Env, approver: &Address, proposal_id: u64) {
+    env.events().publish((symbol_short!("prop_apr"),), (approver.clone(), proposal_id));
+}
+
+/// Emitted when a governance proposal is executed.
+pub fn emit_proposal_executed(env: &Env, proposal_id: u64) {
+    env.events().publish((symbol_short!("prop_exe"),), (proposal_id,));
 }
 
 /// Emitted when tokens are burned.
