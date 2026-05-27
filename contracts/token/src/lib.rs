@@ -1,4 +1,8 @@
-//! bc-forge Token Contract.
+//! # bc-forge Token Contract
+//!
+//! A Soroban-based token contract implementing the standard SEP-41 TokenInterface
+//! with additional administrative controls, pausable lifecycle, ownership management,
+//! role-based access control, clawback regulatory features, lockup/vesting, and multi-sig support.
 
 #![no_std]
 
@@ -16,6 +20,7 @@ use soroban_sdk::{
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    /// The contract admin address (singular).
     Admin,
     PendingAdmin,
     Allowance(Address, Address),
