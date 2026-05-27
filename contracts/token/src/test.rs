@@ -56,7 +56,7 @@ fn test_batch_transfer_multiple_recipients() {
         (recipient_b.clone(), 250_i128),
         (recipient_c.clone(), 50_i128),
     ];
-    client.batch_transfer(&from, &recipients).unwrap();
+    client.batch_transfer(&from, &recipients);
 
     assert_eq!(client.balance(&from), 600);
     assert_eq!(client.balance(&recipient_a), 100);
@@ -95,7 +95,11 @@ fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
 
     client.mint(&from, &100).unwrap();
 
-    let recipients = vec![&env, (recipient_a.clone(), 80_i128), (recipient_b.clone(), 40_i128)];
+    let recipients = vec![
+        &env,
+        (recipient_a.clone(), 80_i128),
+        (recipient_b.clone(), 40_i128),
+    ];
     assert_eq!(
         client.try_batch_transfer(&from, &recipients),
         Err(Ok(TokenError::InsufficientBalance))

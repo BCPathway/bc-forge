@@ -95,7 +95,9 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
         panic!("invalid threshold for admin pool");
     }
     env.storage().instance().set(&AdminKey::AdminPool, &pool);
-    env.storage().instance().set(&AdminKey::Threshold, &threshold);
+    env.storage()
+        .instance()
+        .set(&AdminKey::Threshold, &threshold);
 }
 
 pub fn get_admin_pool(env: &Env) -> Vec<Address> {
@@ -141,7 +143,9 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         executed: false,
     };
 
-    env.storage().instance().set(&AdminKey::Proposal(id), &proposal);
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(id), &proposal);
     id
 }
 

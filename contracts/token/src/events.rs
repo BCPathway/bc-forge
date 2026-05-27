@@ -133,10 +133,8 @@ pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_time: u64) {
 
 /// Emitted when locked tokens are withdrawn.
 pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("unlock"),),
-        (user.clone(), amount),
-    );
+    env.events()
+        .publish((symbol_short!("unlock"),), (user.clone(), amount));
 }
 
 /// Emitted when the contract is upgraded.

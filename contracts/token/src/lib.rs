@@ -249,35 +249,32 @@ impl BcForgeToken {
         Ok(())
     }
 
-    pub fn batch_transfer(
-        env: Env,
-        from: Address,
-        recipients: Vec<(Address, i128)>,
-    ) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        Self::ensure_not_paused(&env)?;
+    pub fn batch_transfer(env: Env, from: Address, recipients: Vec<(Address, i128)>) {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();
 
         let mut total: i128 = 0;
         for i in 0..recipients.len() {
             let (_, amount) = recipients.get(i).expect("recipient should exist");
             if amount <= 0 {
-                return Err(TokenError::InvalidAmount);
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
             }
-            total = total.checked_add(amount).ok_or(TokenError::InvalidAmount)?;
+            total = match total.checked_add(amount) {
+                Some(total) => total,
+                None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
+            };
         }
 
         if Self::read_balance(&env, &from) < total {
-            return Err(TokenError::InsufficientBalance);
+            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
         for i in 0..recipients.len() {
             let (to, amount) = recipients.get(i).expect("recipient should exist");
-            let _ = Self::move_balance(&env, &from, &to, amount)?;
+            let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
             events::emit_transfer(&env, &from, &to, amount);
         }
-
-        Ok(())
     }
 
     pub fn supply(env: Env) -> i128 {
@@ -291,9 +288,16 @@ impl BcForgeToken {
         admin::set_admin_pool(&env, pool, threshold);
     }
 
-    pub fn propose_action(env: Env, signer: Address, action: TokenAction, description: String) -> u64 {
+    pub fn propose_action(
+        env: Env,
+        signer: Address,
+        action: TokenAction,
+        description: String,
+    ) -> u64 {
         let id = admin::create_proposal(&env, signer, description);
-        env.storage().instance().set(&DataKey::ProposalAction(id), &action);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalAction(id), &action);
         id
     }
 
@@ -438,7 +442,9 @@ impl BcForgeToken {
     pub fn propose_owner(env: Env, new_admin: Address) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
         events::emit_ownership_proposed(&env, &current_admin, &new_admin);
         Ok(())
     }
