@@ -251,6 +251,34 @@ export class bcForgeClient {
   }
 
   /**
+   * Transfer tokens from one address to another using an approved allowance.
+   *
+   * @param spender - Address authorized to spend tokens
+   * @param from    - Token owner address
+   * @param to      - Recipient address
+   * @param amount  - Number of tokens to transfer
+   * @param source  - Spender's keypair
+   */
+  async transferFrom(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'transfer_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        addressToScVal(to),
+        i128ToScVal(amount),
+      ],
+      source,
+    );
+  }
+
+  /**
    * Approve a spender to use tokens on your behalf.
    *
    * @param from    - Token owner
@@ -285,6 +313,31 @@ export class bcForgeClient {
    */
   async burn(from: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('burn', [addressToScVal(from), i128ToScVal(amount)], source);
+  }
+
+  /**
+   * Burn tokens from an address using an approved allowance.
+   *
+   * @param spender - Address authorized to burn tokens
+   * @param from    - Token owner address
+   * @param amount  - Number of tokens to burn
+   * @param source  - Spender's keypair
+   */
+  async burnFrom(
+    spender: string,
+    from: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
+      source,
+    );
   }
 
   /**
@@ -362,6 +415,38 @@ export class bcForgeClient {
   }
 
   /**
+   * Build an unsigned transferFrom transaction for offline signing.
+   *
+   * @param spender           - Address authorized to spend tokens
+   * @param from              - Token owner address
+   * @param to                - Recipient address
+   * @param amount            - Number of tokens to transfer
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildTransferFromTx(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'transfer_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        addressToScVal(to),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
    * Build an unsigned approve transaction for offline signing.
    *
    * @param from            - Token owner
@@ -403,6 +488,35 @@ export class bcForgeClient {
       this.contractId,
       'burn',
       [addressToScVal(from), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned burnFrom transaction for offline signing.
+   *
+   * @param spender           - Address authorized to burn tokens
+   * @param from              - Token owner address
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildBurnFromTx(
+    spender: string,
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
       sourcePublicKey,
     );
   }
@@ -467,6 +581,81 @@ export class bcForgeClient {
     return this.simulate(
       'transfer',
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Simulate a transferFrom operation.
+   *
+   * @param spender           - Address authorized to spend tokens
+   * @param from              - Token owner address
+   * @param to                - Recipient address
+   * @param amount            - Number of tokens to transfer
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Simulation result
+   */
+  async simulateTransferFrom(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'transfer_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        addressToScVal(to),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Simulate a burn operation.
+   *
+   * @param from              - Address whose tokens to burn
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Burner's public key
+   * @returns Simulation result
+   */
+  async simulateBurn(
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'burn',
+      [addressToScVal(from), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Simulate a burnFrom operation.
+   *
+   * @param spender           - Address authorized to burn tokens
+   * @param from              - Token owner address
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Simulation result
+   */
+  async simulateBurnFrom(
+    spender: string,
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
       sourcePublicKey,
     );
   }
