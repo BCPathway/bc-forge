@@ -11,6 +11,7 @@
 //! - Structured event emissions for off-chain indexing
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 mod events;
 

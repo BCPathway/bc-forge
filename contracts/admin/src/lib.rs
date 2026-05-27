@@ -4,6 +4,7 @@
 //! Provides admin storage, authentication guards, and role management.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 use soroban_sdk::{contracttype, Address, Env};
 
