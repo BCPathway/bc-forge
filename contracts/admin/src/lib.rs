@@ -31,7 +31,6 @@ pub enum AdminKey {
 pub enum Role {
     /// Global administrator with full control.
     Admin = 0,
-    /// Account authorized to mint tokens.
     Minter = 1,
 }
 
