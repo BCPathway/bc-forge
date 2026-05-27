@@ -83,6 +83,18 @@ pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Ad
 pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
         (symbol_short!("own_prop"),),
+/// Emitted when a new admin is proposed (two-step transfer).
+pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &Address) {
+    env.events().publish(
+        (symbol_short!("own_prop"),),
+        (old_admin.clone(), pending_admin.clone()),
+    );
+}
+
+/// Emitted when pending admin accepts ownership.
+pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Address) {
+    env.events().publish(
+        (symbol_short!("own_acc"),),
         (old_admin.clone(), new_admin.clone()),
     );
 }
@@ -92,6 +104,11 @@ pub fn emit_ownership_transfer_cancelled(env: &Env, admin: &Address, pending_adm
     env.events().publish(
         (symbol_short!("own_cncl"),),
         (admin.clone(), pending_admin.clone()),
+/// Emitted when ownership transfer is cancelled.
+pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
+    env.events().publish(
+        (symbol_short!("own_can"),),
+        (admin.clone(), cancelled_admin.clone()),
     );
 }
 
@@ -105,6 +122,28 @@ pub fn emit_paused(env: &Env, admin: &Address) {
 pub fn emit_unpaused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("unpause"),), (admin.clone(),));
+}
+
+/// Emitted when tokens are clawed back.
+pub fn emit_clawback(env: &Env, admin: &Address, from: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("clawback"),),
+        (admin.clone(), from.clone(), to.clone(), amount),
+    );
+}
+
+/// Emitted when tokens are locked.
+pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_time: u64) {
+    env.events().publish(
+        (symbol_short!("lock"),),
+        (user.clone(), amount, unlock_time),
+    );
+}
+
+/// Emitted when locked tokens are withdrawn.
+pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
+    env.events()
+        .publish((symbol_short!("unlock"),), (user.clone(), amount));
 }
 
 /// Emitted when the contract is upgraded.
