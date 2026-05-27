@@ -825,6 +825,23 @@ export class bcForgeClient {
   }
 
   /**
+   * Poll for recent contract events using cursor-based pagination.
+   *
+   * @param cursor - Optional cursor for pagination (from previous response)
+   * @returns Events response containing events and next cursor
+   */
+  async pollEvents(cursor?: string): Promise<{ events: any[]; cursor: string }> {
+    const response = await this.server.getEvents({
+      cursor,
+      filters: [{ contractIds: [this.contractId], type: 'contract' }],
+    });
+    return {
+      events: response.events,
+      cursor: response.cursor,
+    };
+  }
+
+  /**
    * Update the token symbol. Admin-only.
    *
    * @param newSymbol - The new token symbol
