@@ -125,14 +125,13 @@ impl BcForgeToken {
     }
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
-        if let Some(exp_ledger) = env
+        if env
             .storage()
             .persistent()
             .get::<_, u32>(&DataKey::AllowanceExp(from.clone(), spender.clone()))
+            .is_some_and(|exp_ledger| exp_ledger > 0 && env.ledger().sequence() > exp_ledger)
         {
-            if exp_ledger > 0 && env.ledger().sequence() > exp_ledger {
-                return 0;
-            }
+            return 0;
         }
 
         env.storage()
