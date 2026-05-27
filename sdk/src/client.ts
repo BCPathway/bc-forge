@@ -660,6 +660,30 @@ export class bcForgeClient {
     );
   }
 
+  /**
+   * Dry-run a transaction to estimate fees and resources without submitting.
+   *
+   * @param txXdr - Transaction XDR string to simulate
+   * @returns Simulation result with estimated resources, fees, and potential return value
+   */
+  async simulateTx(txXdr: string): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
+    return this.withRetry(async () => {
+      try {
+        const tx = TransactionBuilder.fromXDR(txXdr, this.networkPassphrase);
+        const simulated = await this.server.simulateTransaction(tx);
+
+        if (SorobanRpc.Api.isSimulationError(simulated)) {
+          throw new SimulationError(`Simulation failed: ${simulated.error}`, simulated.error);
+        }
+
+        return simulated;
+      } catch (error: any) {
+        if (error instanceof SimulationError) throw error;
+        throw new RPCError('RPC simulation failed', error);
+      }
+    });
+  }
+
   // ─── Multi-Sig / Admin Pool ──────────────────────────────────────────────
 
   /**
