@@ -203,11 +203,6 @@ impl BcForgeToken {
     fn read_pending_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
-
-    /// Clears any pending ownership transfer.
-    fn clear_pending_admin(env: &Env) {
-        env.storage().instance().remove(&DataKey::PendingAdmin);
-    }
 }
 
 #[contractimpl]
@@ -285,7 +280,7 @@ impl BcForgeToken {
 
         for i in 0..recipients.len() {
             let (to, amount) = recipients.get(i).expect("recipient should exist");
-            let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+            Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
             events::emit_transfer(&env, &from, &to, amount);
         }
     }
@@ -368,7 +363,7 @@ impl BcForgeToken {
             return Err(TokenError::InvalidAmount);
         }
 
-        let _ = Self::move_balance(&env, &from, &to, amount)?;
+        Self::move_balance(&env, &from, &to, amount)?;
         events::emit_clawback(&env, &clawback_admin, &from, &to, amount);
         Ok(())
     }
@@ -568,7 +563,7 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
         }
 
-        let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+        Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
         events::emit_transfer(&env, &from, &to, amount);
     }
 
@@ -586,7 +581,7 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
-        let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+        Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
         Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
     }
