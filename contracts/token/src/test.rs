@@ -70,7 +70,7 @@ fn test_propose_accept_ownership() {
     let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    client.propose_ownership(&new_admin);
+    client.propose_ownership(&new_admin).unwrap();
 
     assert_eq!(admin, BcForgeToken::read_admin(&env).unwrap());
     assert_eq!(client.pending_owner(), Some(new_admin.clone()));
@@ -88,8 +88,8 @@ fn test_cancel_ownership_transfer() {
     let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    client.propose_ownership(&new_admin);
-    client.cancel_ownership_transfer();
+    client.propose_ownership(&new_admin).unwrap();
+    client.cancel_ownership_transfer().unwrap();
 
     assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
     assert_eq!(client.pending_owner(), None);
@@ -112,7 +112,7 @@ fn test_transfer_ownership_alias_proposes() {
     let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    client.propose_ownership(&new_admin);
+    client.propose_ownership(&new_admin).unwrap();
 
     assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
     assert_eq!(client.pending_owner(), Some(new_admin));
