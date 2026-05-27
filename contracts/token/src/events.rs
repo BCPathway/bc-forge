@@ -90,7 +90,7 @@ pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &A
 /// Emitted when pending admin accepts ownership.
 pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_accept"),),
+        (symbol_short!("own_acpt"),),
         (old_admin.clone(), new_admin.clone()),
     );
 }
@@ -98,7 +98,7 @@ pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Addre
 /// Emitted when ownership transfer is cancelled.
 pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_cancel"),),
+        (symbol_short!("own_cncl"),),
         (admin.clone(), cancelled_admin.clone()),
     );
 }
@@ -160,5 +160,21 @@ pub fn emit_update_symbol(env: &Env, admin: &Address, old_symbol: &String, new_s
     env.events().publish(
         (symbol_short!("upd_sym"),),
         (admin.clone(), old_symbol.clone(), new_symbol.clone()),
+    );
+}
+
+/// Emitted when the Minter role is granted to an address.
+pub fn emit_minter_granted(env: &Env, admin: &Address, minter: &Address) {
+    env.events().publish(
+        (symbol_short!("mtr_grnt"),),
+        (admin.clone(), minter.clone()),
+    );
+}
+
+/// Emitted when the Minter role is revoked from an address.
+pub fn emit_minter_revoked(env: &Env, admin: &Address, minter: &Address) {
+    env.events().publish(
+        (symbol_short!("mtr_rvk"),),
+        (admin.clone(), minter.clone()),
     );
 }
