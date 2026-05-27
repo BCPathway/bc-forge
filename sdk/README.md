@@ -41,10 +41,24 @@ const adminKeypair = Keypair.fromSecret('SXXX...SECRET');
 const result = await client.mint(
   'GABCDEF...RECIPIENT',
   BigInt(1000_0000000), // 1000 tokens with 7 decimals
-  adminKeypair
+  adminKeypair,
 );
 
 console.log('Mint TX:', result.hash, 'Success:', result.success);
+```
+
+## Batch Minting Tokens (Admin Only)
+
+```typescript
+const adminKeypair = Keypair.fromSecret('SXXX...SECRET');
+
+await client.batchMint(
+  [
+    { to: 'GABCDEF...RECIPIENT1', amount: BigInt(1000_0000000) },
+    { to: 'GHIJKL...RECIPIENT2', amount: BigInt(250_0000000) },
+  ],
+  adminKeypair,
+);
 ```
 
 ## Transferring Tokens
@@ -56,7 +70,7 @@ await client.transfer(
   senderKeypair.publicKey(),
   'GABCDEF...RECIPIENT',
   BigInt(100_0000000),
-  senderKeypair
+  senderKeypair,
 );
 ```
 
@@ -66,11 +80,7 @@ await client.transfer(
 const ownerKeypair = Keypair.fromSecret('SXXX...SECRET');
 
 // Burn 50 tokens from owner's balance
-const burnResult = await client.burn(
-  ownerKeypair.publicKey(),
-  BigInt(50_0000000),
-  ownerKeypair
-);
+const burnResult = await client.burn(ownerKeypair.publicKey(), BigInt(50_0000000), ownerKeypair);
 console.log('Burn TX:', burnResult.hash, 'Success:', burnResult.success);
 ```
 
@@ -82,24 +92,18 @@ await client.approve(
   ownerKeypair.publicKey(),
   'GSPENDER...ADDR',
   BigInt(500_0000000),
-  ownerKeypair
+  ownerKeypair,
 );
 
 // Check allowance
-const allowance = await client.getAllowance(
-  ownerKeypair.publicKey(),
-  'GSPENDER...ADDR'
-);
+const allowance = await client.getAllowance(ownerKeypair.publicKey(), 'GSPENDER...ADDR');
 console.log('Allowance:', allowance);
 ```
 
 ## Querying Allowance
 
 ```typescript
-const allowance = await client.getAllowance(
-  'GOWNER...ADDR',
-  'GSPENDER...ADDR'
-);
+const allowance = await client.getAllowance('GOWNER...ADDR', 'GSPENDER...ADDR');
 console.log('Allowance:', allowance);
 ```
 
