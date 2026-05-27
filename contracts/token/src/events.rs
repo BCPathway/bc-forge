@@ -79,10 +79,6 @@ pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Ad
     );
 }
 
-/// Emitted when ownership transfer is proposed.
-pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, new_admin: &Address) {
-    env.events().publish(
-        (symbol_short!("own_prop"),),
 /// Emitted when a new admin is proposed (two-step transfer).
 pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &Address) {
     env.events().publish(
@@ -99,11 +95,6 @@ pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Addre
     );
 }
 
-/// Emitted when a pending ownership transfer is cancelled.
-pub fn emit_ownership_transfer_cancelled(env: &Env, admin: &Address, pending_admin: &Address) {
-    env.events().publish(
-        (symbol_short!("own_cncl"),),
-        (admin.clone(), pending_admin.clone()),
 /// Emitted when ownership transfer is cancelled.
 pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
     env.events().publish(

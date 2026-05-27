@@ -25,7 +25,6 @@ pub enum DataKey {
     /// Pending admin address for a two-step ownership transfer.
     PendingAdmin,
     /// Spending allowance: (owner, spender) → amount.
-    PendingAdmin,
     Allowance(Address, Address),
     AllowanceExp(Address, Address),
     Balance(Address),
@@ -211,11 +210,6 @@ impl BcForgeToken {
     }
 }
 
-    fn read_pending_admin(env: &Env) -> Option<Address> {
-        env.storage().instance().get(&DataKey::PendingAdmin)
-    }
-}
-
 #[contractimpl]
 impl BcForgeToken {
     pub fn initialize(
@@ -285,50 +279,6 @@ impl BcForgeToken {
             };
         }
 
-    /// Proposes a new admin address. Current admin-only.
-    ///
-    /// # Arguments
-    /// * `new_admin` - The address to receive admin privileges.
-    pub fn propose_ownership(env: Env, new_admin: Address) {
-        let admin = Self::read_admin(&env);
-        admin.require_auth();
-
-        env.storage()
-            .instance()
-            .set(&DataKey::PendingAdmin, &new_admin);
-        events::emit_ownership_proposed(&env, &admin, &new_admin);
-    }
-
-    /// Accepts a pending ownership transfer. Proposed admin only.
-    pub fn accept_ownership(env: Env) {
-        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
-        pending_admin.require_auth();
-
-        let old_admin = Self::read_admin(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::Admin, &pending_admin);
-        Self::clear_pending_admin(&env);
-
-        events::emit_ownership_transferred(&env, &old_admin, &pending_admin);
-    }
-
-    /// Cancels a pending ownership transfer. Current admin only.
-    pub fn cancel_ownership_transfer(env: Env) {
-        let admin = Self::read_admin(&env);
-        admin.require_auth();
-
-        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
-        Self::clear_pending_admin(&env);
-
-        events::emit_ownership_transfer_cancelled(&env, &admin, &pending_admin);
-    }
-
-    /// Transfers the admin role to a new address.
-    ///
-    /// This is a backwards-compatible alias for `propose_ownership`.
-    pub fn transfer_ownership(env: Env, new_admin: Address) {
-        Self::propose_ownership(env, new_admin);
         if Self::read_balance(&env, &from) < total {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
@@ -533,6 +483,14 @@ impl BcForgeToken {
         Ok(())
     }
 
+    pub fn propose_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
+        Self::propose_owner(env, new_admin)
+    }
+
+    pub fn cancel_ownership_transfer(env: Env) -> Result<(), TokenError> {
+        Self::cancel_transfer(env)
+    }
+
     pub fn pending_owner(env: Env) -> Option<Address> {
         Self::read_pending_admin(&env)
     }
@@ -576,11 +534,6 @@ impl BcForgeToken {
         events::emit_update_name(&env, &current_admin, &old_name, &new_name);
         Ok(())
     }
-
-    /// Updates the token symbol. Admin-only.
-    pub fn update_symbol(env: Env, new_symbol: String) {
-        let admin = Self::read_admin(&env);
-        admin.require_auth();
 
     pub fn update_symbol(env: Env, new_symbol: String) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;

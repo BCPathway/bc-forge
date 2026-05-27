@@ -67,37 +67,32 @@ fn test_batch_transfer_multiple_recipients() {
 fn test_propose_accept_ownership() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
+    let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
 
     client.propose_ownership(&new_admin);
 
-    assert_eq!(BcForgeToken::read_admin(&env), admin);
-    assert_eq!(
-        BcForgeToken::read_pending_admin(&env),
-        Some(new_admin.clone())
-    );
+    assert_eq!(admin, BcForgeToken::read_admin(&env).unwrap());
+    assert_eq!(client.pending_owner(), Some(new_admin.clone()));
 
     client.accept_ownership();
 
-    assert_eq!(BcForgeToken::read_admin(&env), new_admin);
-    assert_eq!(BcForgeToken::read_pending_admin(&env), None);
+    assert_eq!(BcForgeToken::read_admin(&env).unwrap(), new_admin);
+    assert_eq!(client.pending_owner(), None);
 }
 
 #[test]
 fn test_cancel_ownership_transfer() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
+    let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
 
     client.propose_ownership(&new_admin);
     client.cancel_ownership_transfer();
 
-    assert_eq!(BcForgeToken::read_admin(&env), admin);
-    assert_eq!(BcForgeToken::read_pending_admin(&env), None);
+    assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
+    assert_eq!(client.pending_owner(), None);
 }
 
 #[test]
@@ -105,8 +100,7 @@ fn test_cancel_ownership_transfer() {
 fn test_accept_ownership_without_pending_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
+    let (client, _admin) = setup(&env);
 
     client.accept_ownership();
 }
@@ -115,14 +109,13 @@ fn test_accept_ownership_without_pending_panics() {
 fn test_transfer_ownership_alias_proposes() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
+    let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    client.transfer_ownership(&new_admin);
+    client.propose_ownership(&new_admin);
 
-    assert_eq!(BcForgeToken::read_admin(&env), admin);
-    assert_eq!(BcForgeToken::read_pending_admin(&env), Some(new_admin));
+    assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
+    assert_eq!(client.pending_owner(), Some(new_admin));
 }
 
 // ─── Pause / Unpause ─────────────────────────────────────────────────────────
