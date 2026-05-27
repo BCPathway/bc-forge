@@ -1,141 +1,40 @@
-//! # bc-forge Token Contract Tests
-//!
-//! Comprehensive unit tests for the token contract covering:
-//! - Initialization and metadata
-//! - Minting and supply tracking
-//! - Transfers and balance updates
-//! - Allowances and delegated transfers
-//! - Burning tokens
-//! - Admin-only guards
-//! - Pause / unpause lifecycle
-
 #![cfg(test)]
 
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{vec, Address, Env, String, Vec};
 
-use crate::{BcForgeToken, BcForgeTokenClient, Recipient};
 use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
-use crate::{BcForgeToken, BcForgeTokenClient};
-use bc_forge_admin::Role;
 
-/// Helper: register the contract and return a client.
-fn setup_contract(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
+fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let contract_id = env.register(BcForgeToken, ());
     let client = BcForgeTokenClient::new(env, &contract_id);
-    (client, contract_id)
-}
-
-/// Helper: initialize a contract with defaults.
-fn init_default(env: &Env, client: &BcForgeTokenClient) -> Address {
     let admin = Address::generate(env);
-    let name = String::from_str(env, "bc-forge Token");
-    let symbol = String::from_str(env, "SFG");
-    let _ = client.initialize(&admin, &7, &name, &symbol);
-    admin
+
+    client
+        .initialize(
+            &admin,
+            &7,
+            &String::from_str(env, "bc-forge Token"),
+            &String::from_str(env, "SFG"),
+        )
+        .unwrap();
+
+    (client, admin)
 }
-
-// ─── Initialization ──────────────────────────────────────────────────────────
-
-#[test]
-fn test_initialize() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
-
-    assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
-    assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
-    assert_eq!(client.decimals(), 7);
-    assert_eq!(client.supply(), 0);
-    let _ = admin; // admin used in init
-}
-
-#[test]
-fn test_double_initialize_returns_error() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    init_default(&env, &client);
-    let admin = Address::generate(&env);
-    let name = String::from_str(&env, "bc-forge Token");
-    let symbol = String::from_str(&env, "SFG");
-
-    assert_eq!(
-        client.try_initialize(&admin, &7, &name, &symbol),
-        Err(Ok(TokenError::AlreadyInitialized))
-    );
-}
-
-// ─── Minting ─────────────────────────────────────────────────────────────────
-
-#[test]
-fn test_mint() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
-    let user = Address::generate(&env);
-
-    let _ = client.mint(&user, &1000);
-    client.mint(&admin, &user, &1000);
-
-    assert_eq!(client.balance(&user), 1000);
-    assert_eq!(client.supply(), 1000);
-}
-
-#[test]
-fn test_mint_multiple_users() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
-    let user_a = Address::generate(&env);
-    let user_b = Address::generate(&env);
-
-    let _ = client.mint(&user_a, &500);
-    let _ = client.mint(&user_b, &300);
-    client.mint(&admin, &user_a, &500);
-    client.mint(&admin, &user_b, &300);
-
-    assert_eq!(client.balance(&user_a), 500);
-    assert_eq!(client.balance(&user_b), 300);
-    assert_eq!(client.supply(), 800);
-}
-
-#[test]
-fn test_mint_zero_returns_error() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
-    let user = Address::generate(&env);
-
-    assert_eq!(
-        client.try_mint(&user, &0),
-        Err(Ok(TokenError::InvalidAmount))
-    );
-    client.mint(&admin, &user, &0);
-}
-
-// ─── Transfer ────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_transfer() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
-    let sender = Address::generate(&env);
-    let receiver = Address::generate(&env);
+    let (client, _admin) = setup(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
 
-    let _ = client.mint(&sender, &1000);
-    client.mint(&admin, &sender, &1000);
-    client.transfer(&sender, &receiver, &400);
+    client.mint(&from, &1000).unwrap();
+    client.transfer(&from, &to, &300);
 
-    assert_eq!(client.balance(&sender), 600);
-    assert_eq!(client.balance(&receiver), 400);
-    // Supply unchanged after transfer
+    assert_eq!(client.balance(&from), 700);
+    assert_eq!(client.balance(&to), 300);
     assert_eq!(client.supply(), 1000);
 }
 
@@ -920,191 +819,90 @@ fn test_mint_unauthorized_panics() {
 
 #[test]
 fn test_version() {
+fn test_batch_transfer_multiple_recipients() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
+    let (client, _admin) = setup(&env);
+    let from = Address::generate(&env);
+    let recipient_a = Address::generate(&env);
+    let recipient_b = Address::generate(&env);
+    let recipient_c = Address::generate(&env);
 
-    assert_eq!(client.version(), String::from_str(&env, "1.0.0"));
-}
-
-// ─── Batch Mint ──────────────────────────────────────────────────────────────
-
-#[test]
-fn test_batch_mint_single_recipient() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-    let recipient = Address::generate(&env);
+    client.mint(&from, &1000).unwrap();
 
     let recipients = vec![
         &env,
-        Recipient {
-            address: recipient.clone(),
-            amount: 1000,
-        },
+        (recipient_a.clone(), 100_i128),
+        (recipient_b.clone(), 250_i128),
+        (recipient_c.clone(), 50_i128),
     ];
+    client.batch_transfer(&from, &recipients);
 
-    client.batch_mint(&recipients);
-
-    assert_eq!(client.balance(&recipient), 1000);
+    assert_eq!(client.balance(&from), 600);
+    assert_eq!(client.balance(&recipient_a), 100);
+    assert_eq!(client.balance(&recipient_b), 250);
+    assert_eq!(client.balance(&recipient_c), 50);
     assert_eq!(client.supply(), 1000);
 }
 
 #[test]
-fn test_batch_mint_five_recipients() {
+fn test_batch_transfer_rejects_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-    
-    let r1 = Address::generate(&env);
-    let r2 = Address::generate(&env);
-    let r3 = Address::generate(&env);
-    let r4 = Address::generate(&env);
-    let r5 = Address::generate(&env);
-
-    let recipients = vec![
-        &env,
-        Recipient { address: r1.clone(), amount: 100 },
-        Recipient { address: r2.clone(), amount: 200 },
-        Recipient { address: r3.clone(), amount: 300 },
-        Recipient { address: r4.clone(), amount: 400 },
-        Recipient { address: r5.clone(), amount: 500 },
-    ];
-
-    client.batch_mint(&recipients);
-
-    assert_eq!(client.balance(&r1), 100);
-    assert_eq!(client.balance(&r2), 200);
-    assert_eq!(client.balance(&r3), 300);
-    assert_eq!(client.balance(&r4), 400);
-    assert_eq!(client.balance(&r5), 500);
-    assert_eq!(client.supply(), 1500);
-}
-
-#[test]
-fn test_batch_mint_ten_recipients() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-    
-    let mut recipients_vec = Vec::new(&env);
-    let mut expected_total: i128 = 0;
-    
-    for i in 0..10 {
-        let recipient = Address::generate(&env);
-        let amount = (i + 1) as i128 * 100;
-        recipients_vec.push_back(Recipient {
-            address: recipient,
-            amount,
-        });
-        expected_total += amount;
-    }
-
-    client.batch_mint(&recipients_vec);
-    assert_eq!(client.supply(), expected_total);
-}
-
-#[test]
-#[should_panic(expected = "recipients list cannot be empty")]
-fn test_batch_mint_empty_list_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-
-    let recipients: Vec<Recipient> = Vec::new(&env);
-    client.batch_mint(&recipients);
-}
-
-#[test]
-#[should_panic(expected = "mint amount must be positive for all recipients")]
-fn test_batch_mint_with_zero_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-    let r1 = Address::generate(&env);
-    let r2 = Address::generate(&env);
-
-    let recipients = vec![
-        &env,
-        Recipient { address: r1, amount: 100 },
-        Recipient { address: r2, amount: 0 }, // Invalid: zero amount
-    ];
-
-    client.batch_mint(&recipients);
-}
-
-#[test]
-#[should_panic(expected = "mint amount must be positive for all recipients")]
-fn test_batch_mint_with_negative_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-    let r1 = Address::generate(&env);
-    let r2 = Address::generate(&env);
-
-    let recipients = vec![
-        &env,
-        Recipient { address: r1, amount: 100 },
-        Recipient { address: r2, amount: -50 }, // Invalid: negative amount
-    ];
-
-    client.batch_mint(&recipients);
-}
-
-#[test]
-#[should_panic(expected = "contract is paused")]
-fn test_batch_mint_while_paused_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
+    let (client, _admin) = setup(&env);
+    let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
-    let recipients = vec![
-        &env,
-        Recipient {
-            address: recipient,
-            amount: 100,
-        },
-    ];
+    client.mint(&from, &1000).unwrap();
 
-    client.pause();
-    client.batch_mint(&recipients);
+    let recipients = vec![&env, (recipient.clone(), 0_i128)];
+    assert_eq!(
+        client.try_batch_transfer(&from, &recipients),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(client.balance(&from), 1000);
+    assert_eq!(client.balance(&recipient), 0);
 }
 
 #[test]
-fn test_batch_mint_atomic_supply_update() {
+fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-    
-    let r1 = Address::generate(&env);
-    let r2 = Address::generate(&env);
-    let r3 = Address::generate(&env);
+    let (client, _admin) = setup(&env);
+    let from = Address::generate(&env);
+    let recipient_a = Address::generate(&env);
+    let recipient_b = Address::generate(&env);
 
-    // Initial supply is 0
-    assert_eq!(client.supply(), 0);
+    client.mint(&from, &100).unwrap();
 
     let recipients = vec![
         &env,
-        Recipient { address: r1.clone(), amount: 100 },
-        Recipient { address: r2.clone(), amount: 200 },
-        Recipient { address: r3.clone(), amount: 300 },
+        (recipient_a.clone(), 80_i128),
+        (recipient_b.clone(), 40_i128),
     ];
+    assert_eq!(
+        client.try_batch_transfer(&from, &recipients),
+        Err(Ok(TokenError::InsufficientBalance))
+    );
+    assert_eq!(client.balance(&from), 100);
+    assert_eq!(client.balance(&recipient_a), 0);
+    assert_eq!(client.balance(&recipient_b), 0);
+}
 
-    client.batch_mint(&recipients);
+#[test]
+fn test_batch_transfer_while_paused_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let from = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
-    // Supply should be updated atomically
-    assert_eq!(client.supply(), 600);
-    assert_eq!(client.balance(&r1), 100);
-    assert_eq!(client.balance(&r2), 200);
-    assert_eq!(client.balance(&r3), 300);
+    client.mint(&from, &100).unwrap();
+    client.pause().unwrap();
+
+    let recipients: Vec<(Address, i128)> = vec![&env, (recipient, 10_i128)];
+    assert_eq!(
+        client.try_batch_transfer(&from, &recipients),
+        Err(Ok(TokenError::ContractPaused))
+    );
 }

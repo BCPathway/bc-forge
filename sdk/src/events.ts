@@ -55,10 +55,10 @@ export function decodeEvent(event: SorobanRpc.Api.EventResponse): bcForgeEvent |
     return {
       type,
       ledger: event.ledger,
-      contractId: event.contractId,
+      contractId: event.contractId?.toString() ?? '',
       data: scValToNative(event.value),
     };
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -86,7 +86,7 @@ export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEve
       contractId: event.contractId()?.toString('hex') || '',
       data: scValToNative(body.data()),
     };
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -104,10 +104,10 @@ export async function subscribeEvents(
   rpcUrl: string,
   contractId: string,
   callback: (event: bcForgeEvent) => void,
-  options: SubscriptionOptions = {}
+  options: SubscriptionOptions = {},
 ): Promise<() => void> {
   const server = new SorobanRpc.Server(rpcUrl);
-  
+
   // Default to starting from the latest ledger if not specified
   let lastLedger = options.startLedger;
   if (!lastLedger) {
@@ -140,7 +140,7 @@ export async function subscribeEvents(
           lastLedger = event.ledger + 1;
         }
       }
-    } catch (err) {
+    } catch {
       // Retry in the next poll cycle on failure
     }
 
