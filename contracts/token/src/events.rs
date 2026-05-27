@@ -3,7 +3,7 @@
 //! Structured event emission for all token contract operations.
 //! Events are emitted to the ledger for indexing by off-chain services.
 
-use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String, Symbol};
 
 /// Emitted when the token contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
@@ -90,7 +90,7 @@ pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &A
 /// Emitted when pending admin accepts ownership.
 pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_accept"),),
+        (Symbol::new(env, "own_accept"),),
         (old_admin.clone(), new_admin.clone()),
     );
 }
@@ -98,7 +98,7 @@ pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Addre
 /// Emitted when ownership transfer is cancelled.
 pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_cancel"),),
+        (Symbol::new(env, "own_cancel"),),
         (admin.clone(), cancelled_admin.clone()),
     );
 }

@@ -15,6 +15,14 @@ pub enum AdminKey {
     Admin,
     /// Role assignments: (Role, Address) -> bool
     Role(Role, Address),
+    /// The pool of administrator addresses for multi-sig.
+    AdminPool,
+    /// Minimum signatures required for multi-sig actions.
+    Threshold,
+    /// Active proposals: proposal_id -> Proposal.
+    Proposal(u64),
+    /// Counter for generating unique proposal IDs.
+    ProposalIdCounter,
 }
 
 /// Enumeration of available roles.
@@ -25,14 +33,6 @@ pub enum Role {
     Admin = 0,
     /// Account authorized to mint tokens.
     Minter = 1,
-    /// The pool of administrator addresses for multi-sig.
-    AdminPool,
-    /// Minimum signatures required for multi-sig actions.
-    Threshold,
-    /// Active proposals: proposal_id -> Proposal.
-    Proposal(u64),
-    /// Counter for generating unique proposal IDs.
-    ProposalIdCounter,
 }
 
 /// A proposal for a multi-signature action.
@@ -93,6 +93,7 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
         return true;
     }
     env.storage().persistent().has(&AdminKey::Role(role, address.clone()))
+}
 // ─── Multi-Sig Primitives ───────────────────────────────────────────────────
 
 /// Configures the multi-signature admin pool.
@@ -137,6 +138,7 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
         panic!("unauthorized: missing role");
     }
     address.require_auth();
+}
 // ─── Proposals ──────────────────────────────────────────────────────────────
 
 /// Creates a new proposal for an administrative action.

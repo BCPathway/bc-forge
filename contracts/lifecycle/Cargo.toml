@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Pause/unpause lifecycle management for bc-forge contracts"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+keywords = ["soroban", "stellar", "smart-contract", "lifecycle", "pausable"]
+categories = ["cryptography::cryptocurrencies"]
 
 [lib]
 crate-type = ["rlib"]

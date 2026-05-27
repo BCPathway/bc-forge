@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Core SEP-41 token contract for bc-forge with admin controls and pausable lifecycle"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+keywords = ["soroban", "stellar", "smart-contract", "token", "sep-41"]
+categories = ["cryptography::cryptocurrencies"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
