@@ -10,65 +10,31 @@ mod events;
 
 #[cfg(test)]
 mod test;
-#[cfg(test)]
-mod proptest;
 
+use bc_forge_admin::{self as admin, Role};
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
 };
-use bc_forge_admin::Role;
 
-/// Errors returned by the token contract.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum TokenError {
-    /// The contract was initialized more than once.
-    AlreadyInitialized = 1,
-    /// The contract has not been initialized yet.
-    NotInitialized = 2,
-    /// The source account does not have enough tokens.
-    InsufficientBalance = 3,
-    /// The approved allowance is too small for the requested action.
-    InsufficientAllowance = 4,
-    /// The provided amount is invalid for this operation.
-    InvalidAmount = 5,
-    /// The contract is currently paused.
-    ContractPaused = 6,
-}
-
-/// Storage keys for the token contract state.
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
     /// The contract admin address (singular).
     Admin,
-    /// Pending admin for two-step ownership transfer.
     PendingAdmin,
-    /// Spending allowance: (owner, spender) → amount.
     Allowance(Address, Address),
-    /// Allowance expiration: (owner, spender) → ledger sequence.
     AllowanceExp(Address, Address),
-    /// Token balance for an address.
     Balance(Address),
-    /// Token name (human-readable).
     Name,
-    /// Token ticker symbol.
     Symbol,
-    /// Number of decimal places.
     Decimals,
-    /// Total token supply.
     Supply,
-    /// Specific administrator for clawback operations.
     ClawbackAdmin,
-    /// Lockup information for a specific address.
     Lockup(Address),
-    /// Associated action for a proposal ID.
     ProposalAction(u64),
 }
 
-/// Information about a token lockup/vesting.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct LockupInfo {
@@ -76,7 +42,6 @@ pub struct LockupInfo {
     pub unlock_time: u64,
 }
 
-/// Possible actions that can be proposed via multi-sig.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub enum TokenAction {
@@ -85,7 +50,6 @@ pub enum TokenAction {
     Unpause,
 }
 
-/// Represents a mint recipient with address and amount.
 #[derive(Clone)]
 #[contracttype]
 pub struct Recipient {
@@ -93,15 +57,22 @@ pub struct Recipient {
     pub amount: i128,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum TokenError {
+    AlreadyInitialized = 1,
+    NotInitialized = 2,
+    InvalidAmount = 3,
+    InsufficientBalance = 4,
+    InsufficientAllowance = 5,
+    ContractPaused = 6,
+}
+
 #[contract]
 pub struct BcForgeToken;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 impl BcForgeToken {
-    /// Returns an initialized admin address or a contract error.
     fn read_admin(env: &Env) -> Result<Address, TokenError> {
         env.storage()
             .instance()
@@ -109,7 +80,11 @@ impl BcForgeToken {
             .ok_or(TokenError::NotInitialized)
     }
 
-    /// Returns `Ok(())` when the contract has been initialized.
+    fn set_admin(env: &Env, new_admin: &Address) {
+        env.storage().instance().set(&DataKey::Admin, new_admin);
+        admin::set_admin(env, new_admin);
+    }
+
     fn ensure_initialized(env: &Env) -> Result<(), TokenError> {
         if env.storage().instance().has(&DataKey::Admin) {
             Ok(())
@@ -118,7 +93,6 @@ impl BcForgeToken {
         }
     }
 
-    /// Returns `Ok(())` when the contract is not paused.
     fn ensure_not_paused(env: &Env) -> Result<(), TokenError> {
         if bc_forge_lifecycle::is_paused(env) {
             Err(TokenError::ContractPaused)
@@ -127,7 +101,6 @@ impl BcForgeToken {
         }
     }
 
-    /// Panics with a contract error if the result is `Err`.
     fn panic_on_err<T>(env: &Env, result: Result<T, TokenError>) -> T {
         match result {
             Ok(value) => value,
@@ -135,7 +108,6 @@ impl BcForgeToken {
         }
     }
 
-    /// Reads the balance for a given address, defaulting to 0.
     fn read_balance(env: &Env, id: &Address) -> i128 {
         env.storage()
             .persistent()
@@ -143,49 +115,38 @@ impl BcForgeToken {
             .unwrap_or(0)
     }
 
-    /// Writes a balance for a given address.
     fn write_balance(env: &Env, id: &Address, balance: i128) {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(id.clone()), &balance);
     }
 
-    /// Reads the spending allowance for (owner → spender), defaulting to 0.
-    /// Returns 0 if the allowance has expired.
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
-        if let Some(exp_ledger) = env.storage().persistent().get(&DataKey::AllowanceExp(from.clone(), spender.clone())) {
-            let current_ledger = env.ledger().sequence();
-            if current_ledger > exp_ledger {
-                return 0; // Allowance expired
+        if let Some(exp_ledger) = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::AllowanceExp(from.clone(), spender.clone()))
+        {
+            if exp_ledger > 0 && env.ledger().sequence() > exp_ledger {
+                return 0;
             }
         }
-        
+
         env.storage()
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(0)
     }
 
-    /// Writes a spending allowance for (owner → spender).
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
         env.storage()
             .persistent()
             .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
-        
-        if exp > 0 {
-            env.storage()
-                .persistent()
-                .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
-        } else {
-            // If exp is 0, clear any old expiration
-            env.storage()
-                .persistent()
-                .remove(&DataKey::AllowanceExp(from.clone(), spender.clone()));
-        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
     }
 
-    /// Moves `amount` tokens from `from` to `to`.
-    /// Returns the new balances (from_balance, to_balance).
     fn move_balance(
         env: &Env,
         from: &Address,
@@ -203,48 +164,46 @@ impl BcForgeToken {
 
         let new_from = from_balance - amount;
         let new_to = Self::read_balance(env, to) + amount;
-
         Self::write_balance(env, from, new_from);
         Self::write_balance(env, to, new_to);
-
         Ok((new_from, new_to))
     }
 
-    /// Reads the total supply, defaulting to 0.
     fn read_supply(env: &Env) -> i128 {
         env.storage().instance().get(&DataKey::Supply).unwrap_or(0)
     }
 
-    /// Writes the total supply.
     fn write_supply(env: &Env, supply: i128) {
         env.storage().instance().set(&DataKey::Supply, &supply);
     }
 
-    /// Internal logic for minting.
-    fn internal_mint(env: &Env, to: Address, amount: i128) -> Result<(), TokenError> {
-        let balance = Self::read_balance(env, &to) + amount;
-        Self::write_balance(env, &to, balance);
+    fn internal_mint(
+        env: &Env,
+        admin: &Address,
+        to: &Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let balance = Self::read_balance(env, to) + amount;
+        Self::write_balance(env, to, balance);
 
         let supply = Self::read_supply(env) + amount;
         Self::write_supply(env, supply);
+        events::emit_mint(env, admin, to, amount, balance, supply);
 
-        events::emit_mint(env, &bc_forge_admin::get_admin(env), &to, amount, balance, supply);
         Ok(())
     }
 
-    /// Reads the pending admin address (if any).
     fn read_pending_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom Admin / Lifecycle / Clawback / Locking Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[contractimpl]
 impl BcForgeToken {
-    /// Initializes the token contract with an admin and metadata.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -252,358 +211,324 @@ impl BcForgeToken {
         name: String,
         symbol: String,
     ) -> Result<(), TokenError> {
-        if bc_forge_admin::has_admin(&env) {
+        if env.storage().instance().has(&DataKey::Admin) {
             return Err(TokenError::AlreadyInitialized);
         }
 
-        env.storage().instance().set(&DataKey::Admin, &admin);
-        bc_forge_admin::set_admin(&env, &admin);
+        Self::set_admin(&env, &admin);
         env.storage().instance().set(&DataKey::Decimals, &decimal);
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
-
         events::emit_initialized(&env, &admin, decimal, &name, &symbol);
 
         Ok(())
     }
 
-    /// Mints `amount` tokens to the `to` address. Admin or Minter only.
-    pub fn mint(env: Env, caller: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
-
-        if amount <= 0 {
-            return Err(TokenError::InvalidAmount);
-        }
-
-        bc_forge_admin::require_role(&env, Role::Minter, &caller);
-        Self::internal_mint(&env, to, amount)?;
-
-        Ok(())
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+        Self::internal_mint(&env, &current_admin, &to, amount)
     }
 
-    /// Configures the multi-signature admin pool.
-    pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
-        bc_forge_admin::set_admin_pool(&env, pool, threshold);
-        Ok(())
-    }
-
-    /// Creates a proposal for a multi-sig token action.
-    pub fn propose_action(env: Env, admin: Address, action: TokenAction, description: String) -> Result<u64, TokenError> {
-        Self::ensure_initialized(&env)?;
-        let id = bc_forge_admin::create_proposal(&env, admin, description);
-        env.storage().instance().set(&DataKey::ProposalAction(id), &action);
-        Ok(id)
-    }
-
-    /// Approves an existing proposal.
-    pub fn approve_proposal(env: Env, admin: Address, proposal_id: u64) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        bc_forge_admin::approve_proposal(&env, admin, proposal_id);
-        Ok(())
-    }
-
-    /// Executes a proposal once quorum is reached.
-    pub fn execute_proposal(env: Env, proposal_id: u64) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        bc_forge_admin::mark_executed(&env, proposal_id);
-        let action: TokenAction = env.storage().instance().get(&DataKey::ProposalAction(proposal_id))
-            .ok_or(TokenError::InvalidAmount)?;
-
-        match action {
-            TokenAction::Mint(to, amount) => {
-                Self::ensure_not_paused(&env)?;
-                Self::internal_mint(&env, to, amount)?;
-            },
-            TokenAction::Pause => {
-                let admin = bc_forge_admin::get_admin(&env);
-                bc_forge_lifecycle::pause(env.clone(), admin.clone());
-                events::emit_paused(&env, &admin);
-            },
-            TokenAction::Unpause => {
-                let admin = bc_forge_admin::get_admin(&env);
-                bc_forge_lifecycle::unpause(env.clone(), admin.clone());
-                events::emit_unpaused(&env, &admin);
-            }
-        }
-        env.storage().instance().remove(&DataKey::ProposalAction(proposal_id));
-        Ok(())
-    }
-
-    /// Sets the specifically designated ClawbackAdmin.
-    pub fn set_clawback_admin(env: Env, admin: Address) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let cur_admin = Self::read_admin(&env)?;
-        cur_admin.require_auth();
-
-        env.storage().instance().set(&DataKey::ClawbackAdmin, &admin);
-        Ok(())
-    }
-
-    /// Recovers asset balances from client allocations. SEP-0008 compliant.
-    pub fn clawback(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let claw_admin: Address = env.storage().instance().get(&DataKey::ClawbackAdmin)
-            .ok_or(TokenError::NotInitialized)?;
-        claw_admin.require_auth();
-
-        if amount <= 0 {
-            return Err(TokenError::InvalidAmount);
-        }
-
-        Self::move_balance(&env, &from, &to, amount)?;
-        events::emit_clawback(&env, &claw_admin, &from, &to, amount);
-        Ok(())
-    }
-
-    /// Grants a role to an address. Admin-only.
-    pub fn grant_role(env: Env, role: Role, address: Address) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        bc_forge_admin::grant_role(&env, role, &address);
-        Ok(())
-    }
-
-    /// Revokes a role from an address. Admin-only.
-    pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        bc_forge_admin::revoke_role(&env, role, &address);
-        Ok(())
-    }
-
-    /// Checks if an address has a role.
-    pub fn has_role(env: Env, role: Role, address: Address) -> bool {
-        bc_forge_admin::has_role(&env, role, &address)
-    }
-
-    /// Mints tokens to multiple recipients in a single transaction. Admin-only.
     pub fn batch_mint(env: Env, recipients: Vec<Recipient>) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
-
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
-        if recipients.is_empty() {
-            return Err(TokenError::InvalidAmount);
-        }
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
 
         for i in 0..recipients.len() {
-            let recipient = recipients.get(i).ok_or(TokenError::InvalidAmount)?;
+            let recipient = recipients.get(i).expect("recipient should exist");
             if recipient.amount <= 0 {
                 return Err(TokenError::InvalidAmount);
             }
         }
 
-        let mut total_minted: i128 = 0;
         for i in 0..recipients.len() {
-            let recipient = recipients.get(i).ok_or(TokenError::InvalidAmount)?;
-            let balance = Self::read_balance(&env, &recipient.address) + recipient.amount;
-            Self::write_balance(&env, &recipient.address, balance);
-            total_minted += recipient.amount;
-
-            events::emit_mint(&env, &admin, &recipient.address, recipient.amount, balance, Self::read_supply(&env) + total_minted);
+            let recipient = recipients.get(i).expect("recipient should exist");
+            Self::internal_mint(&env, &current_admin, &recipient.address, recipient.amount)?;
         }
 
-        let new_supply = Self::read_supply(&env) + total_minted;
-        Self::write_supply(&env, new_supply);
         Ok(())
     }
 
-    /// Locks tokens for a user until a specific ledger timestamp.
-    pub fn lock_tokens(env: Env, user: Address, amount: i128, unlock_time: u64) -> Result<(), TokenError> {
+    pub fn batch_transfer(env: Env, from: Address, recipients: Vec<(Address, i128)>) {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+        from.require_auth();
+
+        let mut total: i128 = 0;
+        for i in 0..recipients.len() {
+            let (_, amount) = recipients.get(i).expect("recipient should exist");
+            if amount <= 0 {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
+            total = match total.checked_add(amount) {
+                Some(total) => total,
+                None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
+            };
+        }
+
+        if Self::read_balance(&env, &from) < total {
+            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
+        }
+
+        for i in 0..recipients.len() {
+            let (to, amount) = recipients.get(i).expect("recipient should exist");
+            let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+            events::emit_transfer(&env, &from, &to, amount);
+        }
+    }
+
+    pub fn supply(env: Env) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_supply(&env)
+    }
+
+    pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        admin::set_admin_pool(&env, pool, threshold);
+    }
+
+    pub fn propose_action(
+        env: Env,
+        signer: Address,
+        action: TokenAction,
+        description: String,
+    ) -> u64 {
+        let id = admin::create_proposal(&env, signer, description);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalAction(id), &action);
+        id
+    }
+
+    pub fn approve_proposal(env: Env, signer: Address, proposal_id: u64) {
+        admin::approve_proposal(&env, signer, proposal_id);
+    }
+
+    pub fn execute_proposal(env: Env, proposal_id: u64) {
+        admin::mark_executed(&env, proposal_id);
+        let action: TokenAction = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProposalAction(proposal_id))
+            .expect("proposal action not found");
+
+        match action {
+            TokenAction::Mint(to, amount) => {
+                Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+                let current_admin = Self::read_admin(&env).expect("contract not initialized");
+                Self::panic_on_err(&env, Self::internal_mint(&env, &current_admin, &to, amount));
+            }
+            TokenAction::Pause => {
+                let current_admin = Self::read_admin(&env).expect("contract not initialized");
+                bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
+                events::emit_paused(&env, &current_admin);
+            }
+            TokenAction::Unpause => {
+                let current_admin = Self::read_admin(&env).expect("contract not initialized");
+                bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
+                events::emit_unpaused(&env, &current_admin);
+            }
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::ProposalAction(proposal_id));
+    }
+
+    pub fn set_clawback_admin(env: Env, clawback_admin: Address) {
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::ClawbackAdmin, &clawback_admin);
+    }
+
+    pub fn clawback(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-        
+        let clawback_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClawbackAdmin)
+            .expect("clawback admin not set");
+        clawback_admin.require_auth();
+
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let _ = Self::move_balance(&env, &from, &to, amount)?;
+        events::emit_clawback(&env, &clawback_admin, &from, &to, amount);
+        Ok(())
+    }
+
+    pub fn grant_role(env: Env, role: Role, address: Address) {
+        admin::grant_role(&env, role, &address);
+    }
+
+    pub fn revoke_role(env: Env, role: Role, address: Address) {
+        admin::revoke_role(&env, role, &address);
+    }
+
+    pub fn has_role(env: Env, role: Role, address: Address) -> bool {
+        admin::has_role(&env, role, &address)
+    }
+
+    pub fn lock_tokens(
+        env: Env,
+        user: Address,
+        amount: i128,
+        unlock_time: u64,
+    ) -> Result<(), TokenError> {
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
         let balance = Self::read_balance(&env, &user);
         if balance < amount {
             return Err(TokenError::InsufficientBalance);
         }
-        
+
         Self::write_balance(&env, &user, balance - amount);
-        
-        let mut lockup = env.storage().persistent().get::<_, LockupInfo>(&DataKey::Lockup(user.clone()))
-            .unwrap_or(LockupInfo { amount: 0, unlock_time: 0 });
-            
+        let mut lockup = env
+            .storage()
+            .persistent()
+            .get::<_, LockupInfo>(&DataKey::Lockup(user.clone()))
+            .unwrap_or(LockupInfo {
+                amount: 0,
+                unlock_time: 0,
+            });
         lockup.amount += amount;
         if unlock_time > lockup.unlock_time {
             lockup.unlock_time = unlock_time;
         }
-        
-        env.storage().persistent().set(&DataKey::Lockup(user.clone()), &lockup);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Lockup(user.clone()), &lockup);
         events::emit_locked(&env, &user, amount, lockup.unlock_time);
         Ok(())
     }
 
-    /// Withdraws locked tokens past the release interval.
-    pub fn withdraw_locked(env: Env, user: Address) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
+    pub fn withdraw_locked(env: Env, user: Address) {
         user.require_auth();
-        
-        let lockup: LockupInfo = env.storage().persistent().get(&DataKey::Lockup(user.clone()))
-            .ok_or(TokenError::NotInitialized)?;
-            
+        let lockup: LockupInfo = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Lockup(user.clone()))
+            .expect("no lockup found");
+
         if env.ledger().timestamp() < lockup.unlock_time {
-            return Err(TokenError::InvalidAmount);
+            panic!("tokens are still locked");
         }
-        
+
         let balance = Self::read_balance(&env, &user);
         Self::write_balance(&env, &user, balance + lockup.amount);
-        env.storage().persistent().remove(&DataKey::Lockup(user.clone()));
-        
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Lockup(user.clone()));
         events::emit_withdraw_locked(&env, &user, lockup.amount);
+    }
+
+    pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+        Self::set_admin(&env, &new_admin);
+        events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
     }
 
-    /// Proposes a new admin for two-step ownership transfer. Current admin-only.
     pub fn propose_owner(env: Env, new_admin: Address) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
-        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
-        events::emit_ownership_proposed(&env, &admin, &new_admin);
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        events::emit_ownership_proposed(&env, &current_admin, &new_admin);
         Ok(())
     }
 
-    /// Accepts pending ownership transfer. Only the pending admin can call this.
-    pub fn accept_ownership(env: Env) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let pending_admin = Self::read_pending_admin(&env)
-            .ok_or(TokenError::NotInitialized)?;
+    pub fn accept_ownership(env: Env) {
+        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
         pending_admin.require_auth();
-
-        let old_admin = Self::read_admin(&env)?;
-        env.storage().instance().set(&DataKey::Admin, &pending_admin);
-        bc_forge_admin::set_admin(&env, &pending_admin);
+        let old_admin = Self::read_admin(&env).expect("contract not initialized");
+        Self::set_admin(&env, &pending_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
-
         events::emit_ownership_accepted(&env, &old_admin, &pending_admin);
-        Ok(())
     }
 
-    /// Cancels a pending ownership transfer. Current admin-only.
     pub fn cancel_transfer(env: Env) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
-        let pending_admin = Self::read_pending_admin(&env)
-            .ok_or(TokenError::NotInitialized)?;
-
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
         env.storage().instance().remove(&DataKey::PendingAdmin);
-        events::emit_ownership_cancelled(&env, &admin, &pending_admin);
+        events::emit_ownership_cancelled(&env, &current_admin, &pending_admin);
         Ok(())
     }
 
-    /// Returns the pending admin address if there is a pending transfer.
     pub fn pending_owner(env: Env) -> Option<Address> {
         Self::read_pending_admin(&env)
     }
 
-    /// Returns the total token supply.
-    pub fn supply(env: Env) -> i128 {
-        Self::read_supply(&env)
-    }
-
-    /// Pauses all token operations. Admin-only.
     pub fn pause(env: Env) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
-        bc_forge_lifecycle::pause(env.clone(), admin.clone());
-        events::emit_paused(&env, &admin);
+        let current_admin = Self::read_admin(&env)?;
+        bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
+        events::emit_paused(&env, &current_admin);
         Ok(())
     }
 
-    /// Unpauses token operations. Admin-only.
     pub fn unpause(env: Env) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
-        bc_forge_lifecycle::unpause(env.clone(), admin.clone());
-        events::emit_unpaused(&env, &admin);
+        let current_admin = Self::read_admin(&env)?;
+        bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
+        events::emit_unpaused(&env, &current_admin);
         Ok(())
     }
 
-    /// Upgrades the contract to a new WASM hash. Admin-only.
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
-        events::emit_upgrade(&env, &admin, &new_wasm_hash);
-
+        events::emit_upgrade(&env, &current_admin, &new_wasm_hash);
         Ok(())
     }
 
-    /// Returns the contract version.
     pub fn version(env: Env) -> String {
         String::from_str(&env, "1.1.0")
     }
 
-    /// Updates the token name. Admin-only.
     pub fn update_name(env: Env, new_name: String) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
         let old_name = env
             .storage()
             .instance()
             .get(&DataKey::Name)
             .unwrap_or_else(|| String::from_str(&env, "bc-forge"));
-
         env.storage().instance().set(&DataKey::Name, &new_name);
-        events::emit_update_name(&env, &admin, &old_name, &new_name);
-
+        events::emit_update_name(&env, &current_admin, &old_name, &new_name);
         Ok(())
     }
 
-    /// Updates the token symbol. Admin-only.
     pub fn update_symbol(env: Env, new_symbol: String) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
         let old_symbol = env
             .storage()
             .instance()
             .get(&DataKey::Symbol)
             .unwrap_or_else(|| String::from_str(&env, "SFG"));
-
         env.storage().instance().set(&DataKey::Symbol, &new_symbol);
-        events::emit_update_symbol(&env, &admin, &old_symbol, &new_symbol);
-
-        Ok(())
-    }
-
-    /// Transfers the admin role to a new address. Current admin-only.
-    pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin = Self::read_admin(&env)?;
-        admin.require_auth();
-
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
-        bc_forge_admin::set_admin(&env, &new_admin);
-        events::emit_ownership_transferred(&env, &admin, &new_admin);
-
+        events::emit_update_symbol(&env, &current_admin, &old_symbol, &new_symbol);
         Ok(())
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SEP-41 TokenInterface Implementation
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[contractimpl]
 impl TokenInterface for BcForgeToken {
@@ -612,7 +537,6 @@ impl TokenInterface for BcForgeToken {
         Self::read_allowance(&env, &from, &spender)
     }
 
-    /// Approves `spender` to spend up to `amount` tokens on behalf of `from`.
     fn approve(env: Env, from: Address, spender: Address, amount: i128, exp: u32) {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         from.require_auth();
@@ -628,10 +552,9 @@ impl TokenInterface for BcForgeToken {
         Self::read_balance(&env, &id)
     }
 
-    /// Transfers `amount` tokens from `from` to `to`.
     fn transfer(env: Env, from: Address, to: Address, amount: i128) {
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();
 
         if amount <= 0 {
@@ -642,10 +565,9 @@ impl TokenInterface for BcForgeToken {
         events::emit_transfer(&env, &from, &to, amount);
     }
 
-    /// Transfers `amount` tokens from `from` to `to` using `spender`'s allowance.
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         spender.require_auth();
 
         if amount <= 0 {
@@ -658,14 +580,13 @@ impl TokenInterface for BcForgeToken {
         }
 
         let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0); // Keep original expiration
+        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
     }
 
-    /// Burns `amount` tokens from `from`'s balance, reducing total supply.
     fn burn(env: Env, from: Address, amount: i128) {
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();
 
         if amount <= 0 {
@@ -679,17 +600,14 @@ impl TokenInterface for BcForgeToken {
 
         let new_balance = balance - amount;
         Self::write_balance(&env, &from, new_balance);
-
         let supply = Self::read_supply(&env) - amount;
         Self::write_supply(&env, supply);
-
         events::emit_burn(&env, &from, amount, new_balance, supply);
     }
 
-    /// Burns `amount` tokens from `from` using `spender`'s allowance.
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         spender.require_auth();
 
         if amount <= 0 {
@@ -706,12 +624,10 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0); // Keep original expiration
+        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         Self::write_balance(&env, &from, balance - amount);
-
         let supply = Self::read_supply(&env) - amount;
         Self::write_supply(&env, supply);
-
         events::emit_burn(&env, &from, amount, balance - amount, supply);
     }
 

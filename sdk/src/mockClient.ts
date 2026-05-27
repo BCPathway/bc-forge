@@ -3,7 +3,7 @@
  *
  * Allows frontend devs to test logic without a live Soroban RPC.
  */
-import { bcForgeClientConfig, TransactionResult } from './client';
+import type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
 
 interface AccountState {
   balance: bigint;
@@ -17,7 +17,7 @@ export class MockBcForgeClient {
   private symbol: string = 'MOCK';
   private decimals: number = 7;
 
-  constructor(config: bcForgeClientConfig) {}
+  constructor(_config: bcForgeClientConfig) {}
 
   async getBalance(address: string): Promise<bigint> {
     return this.accounts[address]?.balance ?? 0n;
@@ -50,6 +50,22 @@ export class MockBcForgeClient {
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
+  async batchMint(recipients: BatchMintRecipient[]): Promise<TransactionResult> {
+    if (recipients.length === 0) {
+      return { success: false, hash: 'mock-hash', returnValue: 'Recipients list cannot be empty' };
+    }
+    if (recipients.some(({ amount }) => amount <= 0n)) {
+      return { success: false, hash: 'mock-hash', returnValue: 'Mint amount must be positive' };
+    }
+
+    for (const { to, amount } of recipients) {
+      if (!this.accounts[to]) this.accounts[to] = { balance: 0n, allowances: {} };
+      this.accounts[to].balance += amount;
+      this.totalSupply += amount;
+    }
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
   async transfer(from: string, to: string, amount: bigint): Promise<TransactionResult> {
     if ((this.accounts[from]?.balance ?? 0n) < amount) {
       return { success: false, hash: 'mock-hash', returnValue: 'Insufficient balance' };
@@ -66,7 +82,12 @@ export class MockBcForgeClient {
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
-  async transferFrom(owner: string, spender: string, to: string, amount: bigint): Promise<TransactionResult> {
+  async transferFrom(
+    owner: string,
+    spender: string,
+    to: string,
+    amount: bigint,
+  ): Promise<TransactionResult> {
     const allowance = this.accounts[owner]?.allowances[spender] ?? 0n;
     if (allowance < amount) {
       return { success: false, hash: 'mock-hash', returnValue: 'Insufficient allowance' };
