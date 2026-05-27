@@ -82,6 +82,36 @@ export class MockBcForgeClient {
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
+  async batchTransfer(from: string, recipients: BatchMintRecipient[]): Promise<TransactionResult> {
+    if ((this.accounts[from]?.balance ?? 0n) < recipients.reduce((sum, r) => sum + r.amount, 0n)) {
+      return { success: false, hash: 'mock-hash', returnValue: 'Insufficient balance' };
+    }
+    for (const { to, amount } of recipients) {
+      if (!this.accounts[to]) this.accounts[to] = { balance: 0n, allowances: {} };
+      this.accounts[from].balance -= amount;
+      this.accounts[to].balance += amount;
+    }
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async updateName(newName: string): Promise<TransactionResult> {
+    this.name = newName;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async updateSymbol(newSymbol: string): Promise<TransactionResult> {
+    this.symbol = newSymbol;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async grantMinter(_address: string): Promise<TransactionResult> {
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async revokeMinter(_address: string): Promise<TransactionResult> {
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
   async transferFrom(
     owner: string,
     spender: string,

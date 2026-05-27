@@ -57,6 +57,12 @@ export interface BatchMintRecipient {
   amount: bigint;
 }
 
+/** Role for role-based access control */
+export enum Role {
+  Admin = 'Admin',
+  Minter = 'Minter',
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class bcForgeClient {
@@ -227,6 +233,26 @@ export class bcForgeClient {
     );
     const recipientsVec = xdr.ScVal.scvVec(recipientScVals);
     return this.invokeContract('batch_mint', [recipientsVec], source);
+  }
+
+  /**
+   * Batch transfer tokens to multiple recipients. Sender's keypair must authorize the transaction.
+   *
+   * @param from     - Sender address
+   * @param recipients - Array of recipient objects with address and amount
+   * @param source   - Sender's keypair
+   */
+  async batchTransfer(
+    from: string,
+    recipients: BatchMintRecipient[],
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    const recipientsVec = xdr.ScVal.scvVec(
+      recipients.map(({ to, amount }) =>
+        xdr.ScVal.scvVec([addressToScVal(to), i128ToScVal(amount)]),
+      ),
+    );
+    return this.invokeContract('batch_transfer', [addressToScVal(from), recipientsVec], source);
   }
 
   /**
@@ -558,6 +584,36 @@ export class bcForgeClient {
     return this.invokeContract(
       'execute_proposal',
       [nativeToScVal(proposalId, { type: 'u64' })],
+      source,
+    );
+  }
+
+  // ─── RBAC / Role Management ────────────────────────────────────────────────
+
+  /**
+   * Grant the Minter role to an address. Admin-only.
+   *
+   * @param address - Address to grant the Minter role to
+   * @param source  - Admin keypair
+   */
+  async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'grant_role',
+      [nativeToScVal(Role.Minter), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Revoke the Minter role from an address. Admin-only.
+   *
+   * @param address - Address to revoke the Minter role from
+   * @param source  - Admin keypair
+   */
+  async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'revoke_role',
+      [nativeToScVal(Role.Minter), addressToScVal(address)],
       source,
     );
   }
