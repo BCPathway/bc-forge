@@ -364,10 +364,6 @@ impl BcForgeToken {
             .get(&DataKey::ClawbackAdmin)
             .expect("clawback admin not set");
         clawback_admin.require_auth();
-
-        env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
-        events::emit_upgrade(&env, &admin, &new_wasm_hash);
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
