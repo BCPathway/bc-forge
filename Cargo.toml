@@ -1,9 +1,21 @@
 [workspace]
+members = ["contracts/*"]
 resolver = "2"
 
-members = [
-    "contracts/*",
-]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Peolite001/bc-forge"
+homepage = "https://github.com/Peolite001/bc-forge"
+documentation = "https://github.com/Peolite001/bc-forge#readme"
+authors = ["bc-forge Contributors"]
+categories = ["wasm", "cryptography::cryptocurrencies"]
+keywords = ["soroban", "stellar", "smart-contracts", "token", "sep-41"]
+rust-version = "1.74"
+
+[workspace.dependencies]
+soroban-sdk = "22.0.0"
 
 [profile.release]
 opt-level = "z"

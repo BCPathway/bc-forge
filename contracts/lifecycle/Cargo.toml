@@ -2,14 +2,27 @@
 name = "bc-forge-lifecycle"
 version = "0.1.0"
 edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
 publish = false
 description = "Pause/unpause lifecycle management for bc-forge contracts"
 
 [lib]
-crate-type = ["rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "22.0.0"
+soroban-sdk = { workspace = true }
+bc-forge-admin = { path = "../admin" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.0", features = ["testutils"] }
