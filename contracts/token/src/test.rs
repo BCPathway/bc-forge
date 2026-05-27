@@ -535,6 +535,115 @@ fn test_burn_from() {
     assert_eq!(client.supply(), 800);
 }
 
+#[test]
+#[should_panic(expected = "insufficient allowance")]
+fn test_burn_from_with_expired_allowance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 100
+    client.approve(&owner, &spender, &500, &100);
+    
+    // Move to ledger 200 (past expiration)
+    env.ledger().set(200);
+    
+    // Should fail with insufficient allowance (expired)
+    client.burn_from(&spender, &owner, &200);
+}
+
+#[test]
+fn test_burn_from_preserves_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 1000 (future)
+    client.approve(&owner, &spender, &500, &1000);
+    
+    // Burn some tokens
+    client.burn_from(&spender, &owner, &200);
+    
+    // Allowance should be reduced but expiration preserved
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    assert_eq!(client.balance(&owner), 800);
+    assert_eq!(client.supply(), 800);
+    
+    // Move to ledger 500 (still before expiration)
+    env.ledger().set(500);
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    
+    // Move to ledger 1001 (past expiration)
+    env.ledger().set(1001);
+    assert_eq!(client.allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_transfer_from_preserves_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let receiver = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 1000 (future)
+    client.approve(&owner, &spender, &500, &1000);
+    
+    // Transfer some tokens
+    client.transfer_from(&spender, &owner, &receiver, &200);
+    
+    // Allowance should be reduced but expiration preserved
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    assert_eq!(client.balance(&receiver), 200);
+    
+    // Move to ledger 500 (still before expiration)
+    env.ledger().set(500);
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    
+    // Move to ledger 1001 (past expiration)
+    env.ledger().set(1001);
+    assert_eq!(client.allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_approve_with_zero_expiration_clears_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 1000
+    client.approve(&owner, &spender, &500, &1000);
+    
+    // Verify allowance is set with expiration
+    assert_eq!(client.allowance(&owner, &spender), 500);
+    
+    // Re-approve with exp=0 (clear expiration)
+    client.approve(&owner, &spender, &300, &0);
+    
+    // Allowance should still work even after moving far in the future
+    env.ledger().set(10000);
+    assert_eq!(client.allowance(&owner, &spender), 300);
+}
+
 // ─── Ownership ───────────────────────────────────────────────────────────────
 
 #[test]
