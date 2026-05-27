@@ -1,6 +1,7 @@
 //! Reusable access-control primitives for Soroban contracts.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
 

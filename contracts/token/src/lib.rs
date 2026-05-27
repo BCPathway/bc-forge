@@ -5,6 +5,7 @@
 //! role-based access control, clawback regulatory features, lockup/vesting, and multi-sig support.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 mod events;
 
