@@ -36,30 +36,16 @@ export async function buildInvokeTransaction(
   args: xdr.ScVal[],
   sourceKeypair: Keypair,
 ): Promise<string> {
-  const server = new SorobanRpc.Server(rpcUrl);
-  const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
-
-  const contract = new Contract(contractId);
-
-  const tx = new TransactionBuilder(sourceAccount, {
-    fee: '100',
+  const unsignedTx = await buildUnsignedTransaction(
+    rpcUrl,
     networkPassphrase,
-  })
-    .addOperation(contract.call(method, ...args))
-    .setTimeout(30)
-    .build();
+    contractId,
+    method,
+    args,
+    sourceKeypair.publicKey(),
+  );
 
-  // Simulate to get the assembled transaction
-  const simulated = await server.simulateTransaction(tx);
-
-  if (SorobanRpc.Api.isSimulationError(simulated)) {
-    throw new SimulationError('Contract simulation failed', simulated.error);
-  }
-
-  const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
-  assembled.sign(sourceKeypair);
-
-  return assembled.toXDR();
+  return signTransaction(unsignedTx, networkPassphrase, sourceKeypair);
 }
 
 /**
@@ -179,7 +165,7 @@ export async function buildUnsignedTransaction(
   const simulated = await server.simulateTransaction(tx);
 
   if (SorobanRpc.Api.isSimulationError(simulated)) {
-    throw new Error(`Simulation failed: ${simulated.error}`);
+    throw new SimulationError(`Simulation failed: ${simulated.error}`, simulated.error);
   }
 
   const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
@@ -243,7 +229,7 @@ export async function simulateTransaction(
   const simulated = await server.simulateTransaction(tx);
 
   if (SorobanRpc.Api.isSimulationError(simulated)) {
-    throw new Error(`Simulation failed: ${simulated.error}`);
+    throw new SimulationError(`Simulation failed: ${simulated.error}`, simulated.error);
   }
 
   return simulated;
