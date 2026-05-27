@@ -90,7 +90,7 @@ pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &A
 /// Emitted when pending admin accepts ownership.
 pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_accept"),),
+        (symbol_short!("own_acc"),),
         (old_admin.clone(), new_admin.clone()),
     );
 }
@@ -98,7 +98,7 @@ pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Addre
 /// Emitted when ownership transfer is cancelled.
 pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
     env.events().publish(
-        (symbol_short!("own_cancel"),),
+        (symbol_short!("own_can"),),
         (admin.clone(), cancelled_admin.clone()),
     );
 }
@@ -133,10 +133,8 @@ pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_time: u64) {
 
 /// Emitted when locked tokens are withdrawn.
 pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("unlock"),),
-        (user.clone(), amount),
-    );
+    env.events()
+        .publish((symbol_short!("unlock"),), (user.clone(), amount));
 }
 
 /// Emitted when the contract is upgraded.
