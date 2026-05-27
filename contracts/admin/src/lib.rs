@@ -9,16 +9,23 @@ use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
 pub enum AdminKey {
     Admin,
     Role(Role, Address),
+    /// The pool of administrator addresses for multi-sig.
     AdminPool,
+    /// Minimum signatures required for multi-sig actions.
     Threshold,
+    /// Active proposals: proposal_id -> Proposal.
     Proposal(u64),
+    /// Counter for generating unique proposal IDs.
     ProposalIdCounter,
 }
 
+/// Enumeration of available roles.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
+    /// Global administrator with full control.
     Admin,
+    /// Account authorized to mint tokens.
     Minter,
 }
 
@@ -73,22 +80,28 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     {
         return true;
     }
-
     env.storage()
         .persistent()
         .has(&AdminKey::Role(role, address.clone()))
 }
 
+// ─── Guards ──────────────────────────────────────────────────────────────────
+
+/// Requires that the stored admin has authorized the current invocation.
 pub fn require_admin(env: &Env) {
-    get_admin(env).require_auth();
+    let admin = get_admin(env);
+    admin.require_auth();
 }
 
+/// Requires that the specified address has the given role and has authorized the invocation.
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
         panic!("unauthorized: missing role");
     }
     address.require_auth();
 }
+
+// ─── Multi-Sig Primitives ───────────────────────────────────────────────────
 
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     if threshold == 0 || threshold > pool.len() {
@@ -120,6 +133,9 @@ pub fn get_threshold(env: &Env) -> u32 {
         .unwrap_or(1)
 }
 
+// ─── Proposals ──────────────────────────────────────────────────────────────
+
+/// Creates a new proposal for an administrative action.
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
     creator.require_auth();
     let pool = get_admin_pool(env);
