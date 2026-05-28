@@ -33,6 +33,7 @@ pub enum DataKey {
     ClawbackAdmin,
     Lockup(Address),
     ProposalAction(u64),
+    BridgeLock(Address),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,6 +146,25 @@ impl BcForgeToken {
         env.storage()
             .persistent()
             .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
+    }
+
+    fn read_bridge_locked(env: &Env, user: &Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BridgeLock(user.clone()))
+            .unwrap_or(0)
+    }
+
+    fn write_bridge_locked(env: &Env, user: &Address, amount: i128) {
+        if amount == 0 {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::BridgeLock(user.clone()));
+        } else {
+            env.storage()
+                .persistent()
+                .set(&DataKey::BridgeLock(user.clone()), &amount);
+        }
     }
 
     fn move_balance(
@@ -434,6 +454,65 @@ impl BcForgeToken {
             .persistent()
             .remove(&DataKey::Lockup(user.clone()));
         events::emit_withdraw_locked(&env, &user, lockup.amount);
+    }
+
+    /// Locks tokens for cross-chain bridges using an approved relayer.
+    pub fn bridge_lock(
+        env: Env,
+        relayer: Address,
+        user: Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_role(&env, Role::BridgeRelayer, &relayer);
+
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let allowance = Self::read_allowance(&env, &user, &relayer);
+        if allowance < amount {
+            return Err(TokenError::InsufficientAllowance);
+        }
+
+        let balance = Self::read_balance(&env, &user);
+        if balance < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+
+        Self::write_balance(&env, &user, balance - amount);
+        Self::write_allowance(&env, &user, &relayer, allowance - amount, 0);
+
+        let locked = Self::read_bridge_locked(&env, &user);
+        Self::write_bridge_locked(&env, &user, locked + amount);
+        events::emit_locked(&env, &user, amount, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Releases bridge-locked tokens back to the user. Relayer-only.
+    pub fn bridge_unlock(
+        env: Env,
+        relayer: Address,
+        user: Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_role(&env, Role::BridgeRelayer, &relayer);
+
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let locked = Self::read_bridge_locked(&env, &user);
+        if locked < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+
+        Self::write_bridge_locked(&env, &user, locked - amount);
+        let balance = Self::read_balance(&env, &user);
+        Self::write_balance(&env, &user, balance + amount);
+        events::emit_withdraw_locked(&env, &user, amount);
+        Ok(())
     }
 
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
