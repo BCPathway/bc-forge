@@ -24,23 +24,10 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-deps-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-deps-
-
-      - name: Cache Cargo target
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-target-${{ hashFiles('Cargo.lock') }}-stable
-          restore-keys: |
-            ${{ runner.os }}-cargo-target-
+          shared-key: bc-forge-contracts
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -65,6 +52,8 @@ jobs:
           path: ./tarpaulin-report.html
 
       - name: Build WASM
+        env:
+          CARGO_INCREMENTAL: 0
         run: cargo build --target wasm32-unknown-unknown --release
 
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────
