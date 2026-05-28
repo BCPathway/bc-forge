@@ -1,5 +1,4 @@
-#![cfg(test)]
-
+use bc_forge_admin::Role;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{vec, Address, Env, String, Vec};
 
@@ -129,4 +128,65 @@ fn test_batch_transfer_while_paused_returns_error() {
             TokenError::ContractPaused as u32
         )))
     );
+}
+
+#[test]
+fn test_bridge_lock_and_unlock() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let user = Address::generate(&env);
+    let relayer = Address::generate(&env);
+
+    client.mint(&user, &1000);
+    client.grant_role(&Role::BridgeRelayer, &relayer);
+    client.approve(&user, &relayer, &600, &0);
+
+    client.bridge_lock(&relayer, &user, &400);
+    assert_eq!(client.balance(&user), 600);
+
+    client.bridge_unlock(&relayer, &user, &250);
+    assert_eq!(client.balance(&user), 850);
+
+    client.bridge_unlock(&relayer, &user, &150);
+    assert_eq!(client.balance(&user), 1000);
+}
+
+#[test]
+fn test_bridge_lock_rejects_insufficient_allowance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let user = Address::generate(&env);
+    let relayer = Address::generate(&env);
+
+    client.mint(&user, &1000);
+    client.grant_role(&Role::BridgeRelayer, &relayer);
+    client.approve(&user, &relayer, &100, &0);
+
+    assert_eq!(
+        client.try_bridge_lock(&relayer, &user, &200),
+        Err(Ok(TokenError::InsufficientAllowance))
+    );
+    assert_eq!(client.balance(&user), 1000);
+}
+
+#[test]
+fn test_bridge_unlock_rejects_insufficient_locked_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let user = Address::generate(&env);
+    let relayer = Address::generate(&env);
+
+    client.mint(&user, &1000);
+    client.grant_role(&Role::BridgeRelayer, &relayer);
+    client.approve(&user, &relayer, &500, &0);
+    client.bridge_lock(&relayer, &user, &100);
+
+    assert_eq!(
+        client.try_bridge_unlock(&relayer, &user, &200),
+        Err(Ok(TokenError::InsufficientBalance))
+    );
+    assert_eq!(client.balance(&user), 900);
 }

@@ -27,6 +27,8 @@ pub enum Role {
     Admin,
     /// Account authorized to mint tokens.
     Minter,
+    /// Account authorized to lock/unlock tokens for cross-chain bridges.
+    BridgeRelayer,
 }
 
 #[derive(Clone, Debug, PartialEq)]
