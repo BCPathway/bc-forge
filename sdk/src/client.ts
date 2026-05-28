@@ -1,17 +1,22 @@
 /**
  * @bc-forge/sdk — bcForgeClient
- *
- * High-level TypeScript client for interacting with deployed bc-forge
- * token contracts on the Stellar/Soroban network.
- */
-
-import {
-  SorobanRpc,
-  Contract,
-  TransactionBuilder,
-  Keypair,
-  xdr,
-  nativeToScVal,
+  /**
+   * Transfer tokens between addresses.
+  /**
+   * Approve a spender to use tokens on your behalf.
+  /**
+   * Burn tokens from an address.
+  /**
+   * Transfer admin/ownership to a new address (current admin only).
+  /**
+   * Pause all token operations (admin-only).
+   *
+   * @param source - Admin `Keypair` signing the pause transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
+   */
+  async pause(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('pause', [], source);
+  }
 } from '@stellar/stellar-sdk';
 
 import {
@@ -32,15 +37,30 @@ import { SimulationError, RPCError } from './errors';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface bcForgeClientConfig {
-  /** Soroban RPC endpoint URL (e.g., https://soroban-testnet.stellar.org) */
-  rpcUrl: string;
+/**
+ * Configuration used to construct a `bcForgeClient` instance.
+  /**
+   * Unpause token operations (admin-only).
+   *
+   * @param source - Admin `Keypair` signing the unpause transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
+   */
+  async unpause(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('unpause', [], source);
+  }
   /** Stellar network passphrase */
   networkPassphrase: string;
   /** Deployed bc-forge token contract ID */
   contractId: string;
 }
 
+/**
+ * Result shape returned for write operations that produce a transaction.
+ *
+ * @property success - True when the transaction executed successfully.
+ * @property hash - Ledger transaction hash identifying the submitted transaction.
+ * @property returnValue - Optional decoded return value from the contract invocation.
+ */
 export interface TransactionResult {
   /** Whether the transaction was successful */
   success: boolean;
@@ -50,6 +70,9 @@ export interface TransactionResult {
   returnValue?: any;
 }
 
+/**
+ * Describes a single recipient for the `batchMint` operation.
+ */
 export interface BatchMintRecipient {
   /** Recipient Stellar public key (G... address) */
   to: string;
@@ -59,28 +82,44 @@ export interface BatchMintRecipient {
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
-export class bcForgeClient {
-  private rpcUrl: string;
-  private networkPassphrase: string;
-  private contractId: string;
-  private server: SorobanRpc.Server;
-  private contract: Contract;
-
-  constructor(config: bcForgeClientConfig) {
-    this.rpcUrl = config.rpcUrl;
-    this.networkPassphrase = config.networkPassphrase;
-    this.contractId = config.contractId;
+/**
+ * High-level client for interacting with the deployed bc-forge token contract.
+ *
+ * This class provides convenience methods for querying contract state,
+ * building transactions for offline signing, and submitting signed transactions
+ * to a Soroban RPC endpoint.
+ *
+ * Example:
+  /**
+   * Initialize the token contract. Can only be called once.
+   *
+   * @param admin - Admin address (G... public key) that will be set as contract admin.
+   * @param decimals - Number of decimal places for the token.
+   * @param name - Human-readable token name.
+   * @param symbol - Token ticker symbol.
+   * @param source - Keypair used to sign the initialization transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
+   */
+  async initialize(
+    admin: string,
+    decimals: number,
+    name: string,
+    symbol: string,
+    source: Keypair,
+  ): Promise<TransactionResult> {
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
 
+  
+
   /**
    * Get the token balance for an address.
    *
-   * @param address - Stellar public key (G... address)
-   * @returns Token balance as bigint
+   * @param address - Stellar public key (G... address) to query.
+   * @returns Promise resolving to the account balance as a bigint.
    */
   async getBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('balance', [addressToScVal(address)]);
@@ -90,7 +129,7 @@ export class bcForgeClient {
   /**
    * Get the total token supply.
    *
-   * @returns Total supply as bigint
+   * @returns Promise resolving to the total supply as a bigint.
    */
   async getTotalSupply(): Promise<bigint> {
     const result = await this.queryContract('supply', []);
@@ -99,6 +138,8 @@ export class bcForgeClient {
 
   /**
    * Get the human-readable token name.
+   *
+   * @returns Promise resolving to the token name string.
    */
   async getName(): Promise<string> {
     const result = await this.queryContract('name', []);
@@ -107,6 +148,8 @@ export class bcForgeClient {
 
   /**
    * Get the token ticker symbol.
+   *
+   * @returns Promise resolving to the token symbol string.
    */
   async getSymbol(): Promise<string> {
     const result = await this.queryContract('symbol', []);
@@ -115,6 +158,8 @@ export class bcForgeClient {
 
   /**
    * Get the number of decimal places.
+   *
+   * @returns Promise resolving to the number of decimals as a number.
    */
   async getDecimals(): Promise<number> {
     const result = await this.queryContract('decimals', []);
@@ -123,6 +168,10 @@ export class bcForgeClient {
 
   /**
    * Get the spending allowance from `owner` to `spender`.
+   *
+   * @param owner - Owner Stellar public key (G... address).
+   * @param spender - Spender Stellar public key (G... address).
+   * @returns Promise resolving to the allowance as a bigint.
    */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
     const result = await this.queryContract('allowance', [
@@ -134,6 +183,8 @@ export class bcForgeClient {
 
   /**
    * Get the contract version string.
+   *
+   * @returns Promise resolving to the contract version string.
    */
   async getVersion(): Promise<string> {
     const result = await this.queryContract('version', []);
@@ -145,9 +196,9 @@ export class bcForgeClient {
   /**
    * Get token balances for multiple addresses in batches.
    *
-   * @param addresses - Array of Stellar public keys
-   * @param batchSize - Maximum number of concurrent queries (default: 10)
-   * @returns Array of balances as bigints
+   * @param addresses - Array of Stellar public keys to query.
+   * @param batchSize - Maximum number of concurrent queries (default: 10).
+   * @returns Promise resolving to an array of balances (bigint) in the same order.
    */
   async getBalances(addresses: string[], batchSize: number = 10): Promise<bigint[]> {
     return this.executeBatch(addresses, (addr) => this.getBalance(addr), batchSize);
@@ -175,11 +226,12 @@ export class bcForgeClient {
   /**
    * Initialize the token contract. Can only be called once.
    *
-   * @param admin    - Admin address
-   * @param decimals - Number of decimal places
-   * @param name     - Token name
-   * @param symbol   - Token symbol
-   * @param source   - Keypair of the transaction signer
+   * @param admin - Admin address (G... public key) that will be set as contract admin.
+   * @param decimals - Number of decimal places for the token.
+   * @param name - Human-readable token name.
+   * @param symbol - Token ticker symbol.
+   * @param source - Keypair used to sign the initialization transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async initialize(
     admin: string,
@@ -194,23 +246,26 @@ export class bcForgeClient {
       source,
     );
   }
-
   /**
-   * Mint tokens to an address. Admin-only.
+   * Mint tokens to an address (admin-only).
    *
-   * @param to     - Recipient address
-   * @param amount - Number of tokens to mint
-   * @param source - Admin keypair
+   * @param to - Recipient Stellar public key (G... address).
+   * @param amount - Amount to mint as bigint.
+   * @param source - Admin `Keypair` signing the transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
   }
+    return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
+  }
 
   /**
-   * Batch mint tokens to multiple recipients. Admin-only.
+   * Batch mint tokens to multiple recipients (admin-only).
    *
-   * @param recipients - Array of recipient objects
-   * @param source     - Admin keypair
+   * @param recipients - Array of recipients with `to` and `amount` fields.
+   * @param source - Admin `Keypair` signing the transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async batchMint(recipients: BatchMintRecipient[], source: Keypair): Promise<TransactionResult> {
     const recipientScVals = recipients.map(({ to, amount }) =>
@@ -232,10 +287,11 @@ export class bcForgeClient {
   /**
    * Transfer tokens between addresses.
    *
-   * @param from   - Sender address
-   * @param to     - Recipient address
-   * @param amount - Number of tokens
-   * @param source - Sender's keypair
+   * @param from - Sender Stellar public key (G... address).
+   * @param to - Recipient Stellar public key (G... address).
+   * @param amount - Amount to transfer as bigint.
+   * @param source - Sender's `Keypair` used to sign the transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async transfer(
     from: string,
@@ -246,17 +302,19 @@ export class bcForgeClient {
     return this.invokeContract(
       'transfer',
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
-      source,
-    );
-  }
-
-  /**
-   * Approve a spender to use tokens on your behalf.
-   *
-   * @param from    - Token owner
-   * @param spender - Approved spender
-   * @param amount  - Maximum spendable amount
-   * @param source  - Owner's keypair
+      /**
+       * Batch mint tokens to multiple recipients (admin-only).
+       *
+       * @param recipients - Array of recipients with `to` and `amount` fields.
+       * @param source - Admin `Keypair` signing the transaction.
+       * @returns Promise resolving to a `TransactionResult` describing submission outcome.
+       */
+      async batchMint(recipients: BatchMintRecipient[], source: Keypair): Promise<TransactionResult> {
+   * @param from - Token owner Stellar public key (G... address).
+   * @param spender - Spender Stellar public key (G... address).
+   * @param amount - Allowance amount as bigint.
+   * @param source - Owner's `Keypair` signing the approval transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async approve(
     from: string,
@@ -279,37 +337,41 @@ export class bcForgeClient {
   /**
    * Burn tokens from an address.
    *
-   * @param from   - Address whose tokens to burn
-   * @param amount - Number of tokens to burn
-   * @param source - Burner's keypair
+   * @param from - Address whose tokens to burn (G... public key).
+   * @param amount - Amount to burn as bigint.
+   * @param source - Keypair used to sign the burn transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async burn(from: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('burn', [addressToScVal(from), i128ToScVal(amount)], source);
   }
 
   /**
-   * Transfer admin/ownership to a new address. Current admin only.
+   * Transfer admin/ownership to a new address (current admin only).
    *
-   * @param newAdmin - New admin address
-   * @param source   - Current admin's keypair
+   * @param newAdmin - New admin Stellar public key (G... address).
+   * @param source - Current admin's `Keypair` signing the transfer.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async transferOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('transfer_ownership', [addressToScVal(newAdmin)], source);
   }
 
   /**
-   * Pause all token operations. Admin-only.
+   * Pause all token operations (admin-only).
    *
-   * @param source - Admin keypair
+   * @param source - Admin `Keypair` signing the pause transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async pause(source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('pause', [], source);
   }
 
   /**
-   * Unpause token operations. Admin-only.
+   * Unpause token operations (admin-only).
    *
-   * @param source - Admin keypair
+   * @param source - Admin `Keypair` signing the unpause transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async unpause(source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('unpause', [], source);
@@ -318,12 +380,12 @@ export class bcForgeClient {
   // ─── Offline Transaction Builders ──────────────────────────────────────────
 
   /**
-   * Build an unsigned mint transaction for offline signing.
+   * Build an unsigned mint transaction XDR for offline signing.
    *
-   * @param to              - Recipient address
-   * @param amount          - Number of tokens to mint
-   * @param sourcePublicKey - Admin's public key
-   * @returns Unsigned transaction XDR string
+   * @param to - Recipient Stellar public key (G... address).
+   * @param amount - Number of tokens to mint as bigint.
+   * @param sourcePublicKey - Admin's public key to use as tx source.
+   * @returns Promise resolving to an unsigned transaction XDR string.
    */
   async buildMintTx(to: string, amount: bigint, sourcePublicKey: string): Promise<string> {
     return buildUnsignedTransaction(
@@ -337,13 +399,13 @@ export class bcForgeClient {
   }
 
   /**
-   * Build an unsigned transfer transaction for offline signing.
+   * Build an unsigned transfer transaction XDR for offline signing.
    *
-   * @param from            - Sender address
-   * @param to              - Recipient address
-   * @param amount          - Number of tokens
-   * @param sourcePublicKey - Sender's public key
-   * @returns Unsigned transaction XDR string
+   * @param from - Sender Stellar public key (G... address).
+   * @param to - Recipient Stellar public key (G... address).
+   * @param amount - Number of tokens as bigint.
+   * @param sourcePublicKey - Sender's public key to use as tx source.
+   * @returns Promise resolving to an unsigned transaction XDR string.
    */
   async buildTransferTx(
     from: string,
@@ -362,14 +424,14 @@ export class bcForgeClient {
   }
 
   /**
-   * Build an unsigned approve transaction for offline signing.
+   * Build an unsigned approve transaction XDR for offline signing.
    *
-   * @param from            - Token owner
-   * @param spender         - Approved spender
-   * @param amount          - Maximum spendable amount
-   * @param exp             - Expiration ledger (0 for no expiration)
-   * @param sourcePublicKey - Owner's public key
-   * @returns Unsigned transaction XDR string
+   * @param from - Token owner Stellar public key (G... address).
+   * @param spender - Approved spender Stellar public key (G... address).
+   * @param amount - Allowance amount as bigint.
+   * @param exp - Expiration ledger (0 for no expiration).
+   * @param sourcePublicKey - Owner's public key to use as tx source.
+   * @returns Promise resolving to an unsigned transaction XDR string.
    */
   async buildApproveTx(
     from: string,
@@ -389,12 +451,12 @@ export class bcForgeClient {
   }
 
   /**
-   * Build an unsigned burn transaction for offline signing.
+   * Build an unsigned burn transaction XDR for offline signing.
    *
-   * @param from            - Address whose tokens to burn
-   * @param amount          - Number of tokens to burn
-   * @param sourcePublicKey - Burner's public key
-   * @returns Unsigned transaction XDR string
+   * @param from - Address whose tokens to burn (G... public key).
+   * @param amount - Amount to burn as bigint.
+   * @param sourcePublicKey - Burner's public key to use as tx source.
+   * @returns Promise resolving to an unsigned transaction XDR string.
    */
   async buildBurnTx(from: string, amount: bigint, sourcePublicKey: string): Promise<string> {
     return buildUnsignedTransaction(
@@ -476,9 +538,10 @@ export class bcForgeClient {
   /**
    * Configure the multi-signature admin pool.
    *
-   * @param pool      - Array of admin addresses
-   * @param threshold - Quorum threshold
-   * @param source    - Current admin keypair
+   * @param pool - Array of admin Stellar public keys (G... addresses).
+   * @param threshold - Quorum threshold (number of approvals required).
+   * @param source - Current admin `Keypair` signing the configuration transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async setAdminPool(
     pool: string[],
@@ -499,10 +562,11 @@ export class bcForgeClient {
   }
 
   /**
-   * Upgrades the contract to a new WASM hash. Admin-only.
+   * Upgrade the contract to a new WASM hash (admin-only).
    *
-   * @param newWasmHash - 32-byte hex string or Buffer of the new WASM hash
-   * @param source      - Admin keypair
+   * @param newWasmHash - 32-byte hex string or Buffer of the new WASM hash.
+   * @param source - Admin `Keypair` signing the upgrade transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async upgrade(newWasmHash: string | Buffer, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('upgrade', [hashToScVal(newWasmHash)], source);
@@ -511,10 +575,11 @@ export class bcForgeClient {
   /**
    * Propose a sensitive action for multi-sig approval.
    *
-   * @param admin       - Proposing admin address
-   * @param action      - The action to propose (Mint, Pause, or Unpause)
-   * @param description - Human-readable description
-   * @param source      - Proposing admin keypair
+   * @param admin - Proposing admin Stellar public key (G... address).
+   * @param action - The action to propose. Supported shapes: `{ Mint: [to, amount] }`, `{ Pause: [] }`, `{ Unpause: [] }`.
+   * @param description - Human-readable description of the proposal.
+   * @param source - Proposing admin `Keypair` signing the proposal transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async proposeAction(
     admin: string,
@@ -537,7 +602,12 @@ export class bcForgeClient {
   }
 
   /**
-   * Approve a pending proposal.
+   * Approve a pending multi-sig proposal.
+   *
+   * @param admin - Admin Stellar public key approving the proposal.
+   * @param proposalId - Proposal identifier as bigint.
+   * @param source - Admin `Keypair` signing the approval.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async approveProposal(
     admin: string,
@@ -552,7 +622,11 @@ export class bcForgeClient {
   }
 
   /**
-   * Execute a proposal once quorum is reached.
+   * Execute an approved proposal once quorum is reached.
+   *
+   * @param proposalId - Proposal identifier as bigint.
+   * @param source - Admin `Keypair` executing the proposal.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async executeProposal(proposalId: bigint, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
@@ -565,17 +639,22 @@ export class bcForgeClient {
   // ─── Clawback / Regulatory ───────────────────────────────────────────────
 
   /**
-   * Set the designated clawback administrator.
+   * Set the designated clawback administrator (admin-only).
+   *
+   * @param admin - Clawback administrator Stellar public key (G... address).
+   * @param source - Admin `Keypair` signing the transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async setClawbackAdmin(admin: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('set_clawback_admin', [addressToScVal(admin)], source);
   }
 
   /**
-   * Update the token name. Admin-only.
+   * Update the token name (admin-only).
    *
-   * @param newName - The new token name
-   * @param source  - Admin keypair
+   * @param newName - The new token name string.
+   * @param source - Admin `Keypair` signing the update.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async updateName(newName: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('update_name', [stringToScVal(newName)], source);
@@ -583,6 +662,12 @@ export class bcForgeClient {
 
   /**
    * Execute a clawback operation.
+   *
+   * @param from - Address to claw back from (G... public key).
+   * @param to - Recipient address to receive clawed funds (G... public key).
+   * @param amount - Amount to claw back as bigint.
+   * @param source - Admin `Keypair` signing the clawback transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async clawback(
     from: string,
@@ -601,6 +686,12 @@ export class bcForgeClient {
 
   /**
    * Lock tokens for a user until a specific timestamp.
+   *
+   * @param user - User Stellar public key (G... address) whose tokens will be locked.
+   * @param amount - Amount to lock as bigint.
+   * @param unlockTime - Timestamp (u64) when tokens become withdrawable.
+   * @param source - Admin or controller `Keypair` signing the lock transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async lockTokens(
     user: string,
@@ -616,7 +707,11 @@ export class bcForgeClient {
   }
 
   /**
-   * Withdraw matured locked tokens.
+   * Withdraw matured locked tokens for a user.
+   *
+   * @param user - User Stellar public key (G... address) to withdraw for.
+   * @param source - `Keypair` signing the withdrawal transaction.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async withdrawLocked(user: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('withdraw_locked', [addressToScVal(user)], source);
@@ -625,7 +720,10 @@ export class bcForgeClient {
   // ─── Events ──────────────────────────────────────────────────────────────
 
   /**
-   * Get recent events for the contract.
+   * Get recent events for the contract via Soroban RPC.
+   *
+   * @param startLedger - Optional ledger sequence to start from. If omitted, defaults to latest ledger - 1000.
+   * @returns Promise resolving to an array of raw event objects returned by the RPC.
    */
   async getEvents(startLedger?: number): Promise<any[]> {
     const response = await this.server.getEvents({
@@ -636,10 +734,11 @@ export class bcForgeClient {
   }
 
   /**
-   * Update the token symbol. Admin-only.
+   * Update the token symbol (admin-only).
    *
-   * @param newSymbol - The new token symbol
-   * @param source    - Admin keypair
+   * @param newSymbol - The new token symbol string.
+   * @param source - Admin `Keypair` signing the update.
+   * @returns Promise resolving to a `TransactionResult` describing submission outcome.
    */
   async updateSymbol(newSymbol: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('update_symbol', [stringToScVal(newSymbol)], source);
@@ -723,7 +822,7 @@ export class bcForgeClient {
           source,
         );
 
-        const response = await submitTransaction(this.rpcUrl, txXdr);
+        const response = await submitTransaction(this.rpcUrl, txXdr, this.networkPassphrase);
 
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {
