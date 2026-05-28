@@ -41,7 +41,10 @@ export interface SubscriptionOptions {
 }
 
 /**
- * Decodes a standard Soroban RPC event into a native bcForgeEvent.
+ * Decodes a standard Soroban RPC event into a native `bcForgeEvent`.
+ *
+ * @param event - Raw event object returned by the Soroban RPC.
+ * @returns A decoded `bcForgeEvent` or `null` if decoding fails or the event is not a bc-forge contract event.
  */
 export function decodeEvent(event: SorobanRpc.Api.EventResponse): bcForgeEvent | null {
   if (!event.topic || event.topic.length === 0) return null;
@@ -64,7 +67,10 @@ export function decodeEvent(event: SorobanRpc.Api.EventResponse): bcForgeEvent |
 }
 
 /**
- * Decodes raw diagnostic events (often found in transaction results) into bcForgeEvents.
+ * Decodes raw diagnostic events (often found in transaction results) into `bcForgeEvent`.
+ *
+ * @param rawEvent - Raw `xdr.DiagnosticEvent` to decode.
+ * @returns A decoded `bcForgeEvent` or `null` if decoding fails or event is not a contract event.
  */
 export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEvent | null {
   const event = rawEvent.event();
@@ -94,11 +100,14 @@ export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEve
 /**
  * Subscribes to real-time events for a given bc-forge contract.
  *
- * @param rpcUrl      - Soroban RPC endpoint
- * @param contractId  - Target contract ID
- * @param callback    - Function called for every new decoded event
- * @param options     - Polking and ledger range options
- * @returns An unsubscribe function to stop polling.
+ * This function polls the Soroban RPC for contract events and invokes `callback`
+ * for each decoded `bcForgeEvent`.
+ *
+ * @param rpcUrl - Soroban RPC endpoint URL.
+ * @param contractId - Target contract ID to filter events for.
+ * @param callback - Function called for every new decoded `bcForgeEvent`.
+ * @param options - Optional subscription options (pollingIntervalMs, startLedger).
+ * @returns A Promise resolving to an unsubscribe function which stops polling when called.
  */
 export async function subscribeEvents(
   rpcUrl: string,

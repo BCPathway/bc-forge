@@ -111,35 +111,50 @@ export async function submitTransaction(
 }
 
 /**
- * Converts a Stellar address string to an ScVal for contract invocation.
+ * Converts a Stellar address string to an `xdr.ScVal` for contract invocation.
+ *
+ * @param address - Stellar public key (G... address) to convert.
+ * @returns `xdr.ScVal` representing the provided address.
  */
 export function addressToScVal(address: string): xdr.ScVal {
   return new Address(address).toScVal();
 }
 
 /**
- * Converts a native i128 bigint to an ScVal.
+ * Converts a native i128 `bigint` to an `xdr.ScVal`.
+ *
+ * @param value - `bigint` value to convert to `i128` ScVal.
+ * @returns `xdr.ScVal` representing the i128 value.
  */
 export function i128ToScVal(value: bigint): xdr.ScVal {
   return nativeToScVal(value, { type: 'i128' });
 }
 
 /**
- * Converts a native string to an ScVal.
+ * Converts a native string to an `xdr.ScVal`.
+ *
+ * @param value - String to convert to ScVal.
+ * @returns `xdr.ScVal` representing the provided string.
  */
 export function stringToScVal(value: string): xdr.ScVal {
   return nativeToScVal(value, { type: 'string' });
 }
 
 /**
- * Converts a native u32 to an ScVal.
+ * Converts a native `number` to a `u32` `xdr.ScVal`.
+ *
+ * @param value - Number to convert to `u32` ScVal.
+ * @returns `xdr.ScVal` representing the provided number as `u32`.
  */
 export function u32ToScVal(value: number): xdr.ScVal {
   return nativeToScVal(value, { type: 'u32' });
 }
 
 /**
- * Converts an ScVal to a native JS type.
+ * Converts an `xdr.ScVal` to a native JavaScript type using the SDK helper.
+ *
+ * @param scVal - The `xdr.ScVal` to convert.
+ * @returns The native JavaScript representation of the ScVal.
  */
 export function scValToNative(scVal: xdr.ScVal): any {
   return sdkScValToNative(scVal);
@@ -252,7 +267,11 @@ export async function simulateTransaction(
 }
 
 /**
- * Converts a 32-byte hex string or Buffer to an ScVal.
+ * Converts a 32-byte hex string or Buffer to an `xdr.ScVal` bytes value.
+ *
+ * @param hash - 32-byte hex string or `Buffer`.
+ * @returns `xdr.ScVal` containing the bytes.
+ * @throws If the provided buffer is not exactly 32 bytes.
  */
 export function hashToScVal(hash: string | Buffer): xdr.ScVal {
   const buf = typeof hash === 'string' ? Buffer.from(hash, 'hex') : hash;
