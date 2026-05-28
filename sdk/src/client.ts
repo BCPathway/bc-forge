@@ -122,6 +122,14 @@ export class bcForgeClient {
   }
 
   /**
+   * Check whether the contract is currently paused.
+   */
+  async isPaused(): Promise<boolean> {
+    const result = await this.queryContract('is_paused', []);
+    return scValToNative(result) as boolean;
+  }
+
+  /**
    * Get the spending allowance from `owner` to `spender`.
    */
   async getAllowance(owner: string, spender: string): Promise<bigint> {

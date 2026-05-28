@@ -476,6 +476,10 @@ impl BcForgeToken {
         Self::read_pending_admin(&env)
     }
 
+    pub fn is_paused(env: Env) -> bool {
+        bc_forge_lifecycle::is_paused(&env)
+    }
+
     pub fn pause(env: Env) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         bc_forge_lifecycle::pause(env.clone(), current_admin.clone());

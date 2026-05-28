@@ -130,3 +130,18 @@ fn test_batch_transfer_while_paused_returns_error() {
         )))
     );
 }
+
+#[test]
+fn test_is_paused_query() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+
+    assert!(!client.is_paused());
+
+    client.pause();
+    assert!(client.is_paused());
+
+    client.unpause();
+    assert!(!client.is_paused());
+}
