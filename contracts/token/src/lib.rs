@@ -384,21 +384,26 @@ impl BcForgeToken {
             .set(&DataKey::ClawbackAdmin, &clawback_admin);
     }
 
-    pub fn clawback(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+    pub fn clawback(env: Env, caller: Address, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        let clawback_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::ClawbackAdmin)
-            .expect("clawback admin not set");
-        clawback_admin.require_auth();
+        caller.require_auth();
+
+        let current_admin = Self::read_admin(&env)?;
+        let clawback_admin: Option<Address> = env.storage().instance().get(&DataKey::ClawbackAdmin);
+
+        let is_authorized = caller == current_admin
+            || clawback_admin.map_or(false, |ca| ca == caller);
+
+        if !is_authorized {
+            panic!("unauthorized");
+        }
 
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
 
         let _ = Self::move_balance(&env, &from, &to, amount)?;
-        events::emit_clawback(&env, &clawback_admin, &from, &to, amount);
+        events::emit_clawback(&env, &caller, &from, &to, amount);
         Ok(())
     }
 
