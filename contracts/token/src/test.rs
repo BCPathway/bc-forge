@@ -910,3 +910,84 @@ fn test_batch_transfer_while_paused_returns_error() {
         )))
     );
 }
+
+#[test]
+fn test_clawback_by_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &500);
+    client.clawback(&admin, &victim, &treasury, &200);
+
+    assert_eq!(client.balance(&victim), 300);
+    assert_eq!(client.balance(&treasury), 200);
+}
+
+#[test]
+fn test_clawback_by_clawback_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let clawback_admin = Address::generate(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.set_clawback_admin(&clawback_admin);
+    client.mint(&victim, &500);
+    client.clawback(&clawback_admin, &victim, &treasury, &300);
+
+    assert_eq!(client.balance(&victim), 200);
+    assert_eq!(client.balance(&treasury), 300);
+    let _ = admin;
+}
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn test_clawback_unauthorized_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let rando = Address::generate(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &100);
+    client.clawback(&rando, &victim, &treasury, &50);
+}
+
+#[test]
+fn test_clawback_invalid_amount_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &100);
+    assert_eq!(
+        client.try_clawback(&admin, &victim, &treasury, &0),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InvalidAmount as u32
+        )))
+    );
+}
+
+#[test]
+fn test_clawback_insufficient_balance_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &50);
+    assert_eq!(
+        client.try_clawback(&admin, &victim, &treasury, &100),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientBalance as u32
+        )))
+    );
+}
