@@ -25,9 +25,8 @@ pub enum DataKey {
     PendingAdmin,
     /// Spending allowance: (owner, spender) → amount and expiration.
     Allowance(Address, Address),
-    /// Token balance for an address.
-    Allowance(Address, Address),
     AllowanceExp(Address, Address),
+    /// Token balance for an address.
     Balance(Address),
     Name,
     Symbol,
@@ -177,10 +176,6 @@ impl BcForgeToken {
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
     }
 
     fn move_balance(
