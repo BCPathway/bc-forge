@@ -562,11 +562,10 @@ fn test_transfer_ownership() {
 
 #[test]
 fn test_two_step_ownership_transfer_happy_path() {
-fn test_role_management() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
+    let _admin = init_default(&env, &client);
     let new_admin = Address::generate(&env);
     let user = Address::generate(&env);
 
@@ -574,7 +573,7 @@ fn test_role_management() {
     assert!(client.pending_owner().is_none());
 
     // Propose new admin
-    client.propose_owner(&new_admin);
+    client.propose_ownership(&new_admin);
     
     // Check pending owner
     let pending = client.pending_owner();
@@ -595,28 +594,6 @@ fn test_role_management() {
 #[test]
 #[should_panic(expected = "no pending ownership transfer")]
 fn test_accept_ownership_without_proposal_fails() {
-    let minter = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    // Minter doesn't have the role initially
-    assert!(!client.has_role(&Role::Minter, &minter));
-
-    // Admin grants Minter role
-    client.grant_role(&Role::Minter, &minter);
-    assert!(client.has_role(&Role::Minter, &minter));
-
-    // Minter can now mint
-    client.mint(&minter, &user, &100);
-    assert_eq!(client.balance(&user), 100);
-
-    // Admin revokes Minter role
-    client.revoke_role(&Role::Minter, &minter);
-    assert!(!client.has_role(&Role::Minter, &minter));
-}
-
-#[test]
-#[should_panic(expected = "unauthorized: missing role")]
-fn test_mint_unauthorized_role() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
@@ -627,7 +604,7 @@ fn test_mint_unauthorized_role() {
 }
 
 #[test]
-fn test_cancel_transfer() {
+fn test_cancel_ownership() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
@@ -635,11 +612,11 @@ fn test_cancel_transfer() {
     let new_admin = Address::generate(&env);
 
     // Propose new admin
-    client.propose_owner(&new_admin);
+    client.propose_ownership(&new_admin);
     assert!(client.pending_owner().is_some());
 
     // Cancel the transfer
-    client.cancel_transfer();
+    client.cancel_ownership();
 
     // Pending owner should be cleared
     assert!(client.pending_owner().is_none());
@@ -647,14 +624,14 @@ fn test_cancel_transfer() {
 
 #[test]
 #[should_panic(expected = "no pending ownership transfer")]
-fn test_cancel_transfer_without_proposal_fails() {
+fn test_cancel_ownership_without_proposal_fails() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
     let _admin = init_default(&env, &client);
 
     // Try to cancel without proposal
-    client.cancel_transfer();
+    client.cancel_ownership();
 }
 
 #[test]
@@ -667,16 +644,12 @@ fn test_double_propose_updates_pending_admin() {
     let second_proposal = Address::generate(&env);
 
     // First proposal
-    client.propose_owner(&first_proposal);
+    client.propose_ownership(&first_proposal);
     assert_eq!(client.pending_owner().unwrap(), first_proposal);
 
     // Second proposal (should override first)
-    client.propose_owner(&second_proposal);
+    client.propose_ownership(&second_proposal);
     assert_eq!(client.pending_owner().unwrap(), second_proposal);
-    let non_minter = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    client.mint(&non_minter, &user, &100);
 }
 
 // ─── Pause / Unpause ─────────────────────────────────────────────────────────

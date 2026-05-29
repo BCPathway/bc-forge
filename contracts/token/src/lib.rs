@@ -480,6 +480,10 @@ impl BcForgeToken {
         Ok(())
     }
 
+    pub fn propose_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
+        Self::propose_owner(env, new_admin)
+    }
+
     pub fn propose_owner(env: Env, new_admin: Address) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
@@ -506,6 +510,10 @@ impl BcForgeToken {
         env.storage().instance().remove(&DataKey::PendingAdmin);
         events::emit_ownership_cancelled(&env, &current_admin, &pending_admin);
         Ok(())
+    }
+
+    pub fn cancel_ownership(env: Env) -> Result<(), TokenError> {
+        Self::cancel_transfer(env)
     }
 
     pub fn pending_owner(env: Env) -> Option<Address> {
