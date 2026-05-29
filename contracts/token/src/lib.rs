@@ -526,6 +526,10 @@ impl BcForgeToken {
         Ok(())
     }
 
+    pub fn is_paused(env: Env) -> bool {
+        bc_forge_lifecycle::is_paused(&env)
+    }
+
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
