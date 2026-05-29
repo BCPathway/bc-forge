@@ -154,6 +154,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
 
     let proposal = Proposal {
         creator: creator.clone(),
+        action_type,
         description,
         approvals: vec![env, creator],
         executed: false,
