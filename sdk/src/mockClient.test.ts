@@ -10,6 +10,19 @@ describe('MockBcForgeClient', () => {
     expect(await client.getBalance('B')).toBe(400n);
   });
 
+  it('should batch mint tokens in-memory', async () => {
+    const client = new MockBcForgeClient({} as any);
+    const result = await client.batchMint([
+      { to: 'A', amount: 100n },
+      { to: 'B', amount: 250n },
+    ]);
+
+    expect(result.success).toBe(true);
+    expect(await client.getBalance('A')).toBe(100n);
+    expect(await client.getBalance('B')).toBe(250n);
+    expect(await client.getTotalSupply()).toBe(350n);
+  });
+
   it('should handle allowances and transferFrom', async () => {
     const client = new MockBcForgeClient({} as any);
     await client.mint('A', 1000n);

@@ -67,17 +67,6 @@ fn test_double_initialize_returns_error() {
         client.try_initialize(&admin, &7, &name, &symbol),
         Err(Ok(TokenError::AlreadyInitialized))
     );
-}
-
-// ─── Minting ─────────────────────────────────────────────────────────────────
-
-#[test]
-fn test_mint() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
-    let user = Address::generate(&env);
 
     client.mint(&admin, &user, &1000);
 
@@ -116,23 +105,19 @@ fn test_mint_zero_returns_error() {
     );
 }
 
-// ─── Transfer ────────────────────────────────────────────────────────────────
-
 #[test]
 fn test_transfer() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
-    let sender = Address::generate(&env);
-    let receiver = Address::generate(&env);
+    let (client, _admin) = setup(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
 
     client.mint(&admin, &sender, &1000);
     client.transfer(&sender, &receiver, &400);
 
-    assert_eq!(client.balance(&sender), 600);
-    assert_eq!(client.balance(&receiver), 400);
-    // Supply unchanged after transfer
+    assert_eq!(client.balance(&from), 700);
+    assert_eq!(client.balance(&to), 300);
     assert_eq!(client.supply(), 1000);
 }
 
@@ -309,6 +294,115 @@ fn test_burn_from() {
     assert_eq!(client.balance(&owner), 800);
     assert_eq!(client.allowance(&owner, &spender), 300);
     assert_eq!(client.supply(), 800);
+}
+
+#[test]
+#[should_panic(expected = "insufficient allowance")]
+fn test_burn_from_with_expired_allowance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 100
+    client.approve(&owner, &spender, &500, &100);
+    
+    // Move to ledger 200 (past expiration)
+    env.ledger().set(200);
+    
+    // Should fail with insufficient allowance (expired)
+    client.burn_from(&spender, &owner, &200);
+}
+
+#[test]
+fn test_burn_from_preserves_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 1000 (future)
+    client.approve(&owner, &spender, &500, &1000);
+    
+    // Burn some tokens
+    client.burn_from(&spender, &owner, &200);
+    
+    // Allowance should be reduced but expiration preserved
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    assert_eq!(client.balance(&owner), 800);
+    assert_eq!(client.supply(), 800);
+    
+    // Move to ledger 500 (still before expiration)
+    env.ledger().set(500);
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    
+    // Move to ledger 1001 (past expiration)
+    env.ledger().set(1001);
+    assert_eq!(client.allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_transfer_from_preserves_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let receiver = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 1000 (future)
+    client.approve(&owner, &spender, &500, &1000);
+    
+    // Transfer some tokens
+    client.transfer_from(&spender, &owner, &receiver, &200);
+    
+    // Allowance should be reduced but expiration preserved
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    assert_eq!(client.balance(&receiver), 200);
+    
+    // Move to ledger 500 (still before expiration)
+    env.ledger().set(500);
+    assert_eq!(client.allowance(&owner, &spender), 300);
+    
+    // Move to ledger 1001 (past expiration)
+    env.ledger().set(1001);
+    assert_eq!(client.allowance(&owner, &spender), 0);
+}
+
+#[test]
+fn test_approve_with_zero_expiration_clears_expiration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &1000);
+    
+    // Set expiration to ledger 1000
+    client.approve(&owner, &spender, &500, &1000);
+    
+    // Verify allowance is set with expiration
+    assert_eq!(client.allowance(&owner, &spender), 500);
+    
+    // Re-approve with exp=0 (clear expiration)
+    client.approve(&owner, &spender, &300, &0);
+    
+    // Allowance should still work even after moving far in the future
+    env.ledger().set(10000);
+    assert_eq!(client.allowance(&owner, &spender), 300);
 }
 
 // ─── Ownership ───────────────────────────────────────────────────────────────
@@ -588,6 +682,7 @@ fn test_mint_unauthorized_panics() {
 
 #[test]
 fn test_version() {
+fn test_batch_transfer_multiple_recipients() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
@@ -613,6 +708,7 @@ fn test_batch_mint_single_recipient() {
             amount: 500,
         },
     ];
+    client.batch_transfer(&from, &recipients);
 
     client.batch_mint(&recipients);
 
@@ -674,21 +770,21 @@ fn test_batch_mint_ten_recipients() {
     assert_eq!(client.supply(), total);
 }
 
-#[test]
-#[should_panic(expected = "recipients list cannot be empty")]
-fn test_batch_mint_empty_list_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
+    client.mint(&from, &1000);
 
-    let recipients: Vec<Recipient> = Vec::new(&env);
-    client.batch_mint(&recipients);
+    let recipients = vec![&env, (recipient.clone(), 0_i128)];
+    assert_eq!(
+        client.try_batch_transfer(&from, &recipients),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InvalidAmount as u32
+        )))
+    );
+    assert_eq!(client.balance(&from), 1000);
+    assert_eq!(client.balance(&recipient), 0);
 }
 
 #[test]
-#[should_panic(expected = "mint amount must be positive for all recipients")]
-fn test_batch_mint_with_zero_amount_fails() {
+fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _) = setup_contract(&env);
@@ -708,18 +804,7 @@ fn test_batch_mint_with_zero_amount_fails() {
         }, // Invalid: zero amount
     ];
 
-    client.batch_mint(&recipients);
-}
-
-#[test]
-#[should_panic(expected = "mint amount must be positive for all recipients")]
-fn test_batch_mint_with_negative_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
-    let r1 = Address::generate(&env);
-    let r2 = Address::generate(&env);
+    client.mint(&from, &100);
 
     let recipients = vec![
         &env,
@@ -732,27 +817,26 @@ fn test_batch_mint_with_negative_amount_fails() {
             amount: -50,
         }, // Invalid: negative amount
     ];
-
-    client.batch_mint(&recipients);
+    assert_eq!(
+        client.try_batch_transfer(&from, &recipients),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientBalance as u32
+        )))
+    );
+    assert_eq!(client.balance(&from), 100);
+    assert_eq!(client.balance(&recipient_a), 0);
+    assert_eq!(client.balance(&recipient_b), 0);
 }
 
 #[test]
-#[should_panic(expected = "contract is paused")]
-fn test_batch_mint_while_paused_fails() {
+fn test_batch_transfer_while_paused_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let _admin = init_default(&env, &client);
+    let (client, _admin) = setup(&env);
+    let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
-    let recipients = vec![
-        &env,
-        Recipient {
-            address: recipient,
-            amount: 100,
-        },
-    ];
-
+    client.mint(&from, &100);
     client.pause();
     client.batch_mint(&recipients);
 }
