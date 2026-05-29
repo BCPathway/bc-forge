@@ -1,11 +1,7 @@
-//! # bc-forge Token Events
-//!
-//! Structured event emission for all token contract operations.
-//! Events are emitted to the ledger for indexing by off-chain services.
+﻿//! # bc-forge Token Events
 
 use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
 
-/// Emitted when the token contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
     env.events().publish(
         (symbol_short!("init"),),
@@ -13,22 +9,20 @@ pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String
     );
 }
 
-/// Emitted when tokens are minted.
-pub fn emit_mint(
-    env: &Env,
-    admin: &Address,
-    to: &Address,
-    amount: i128,
-    new_balance: i128,
-    new_supply: i128,
-) {
+pub fn emit_max_supply_set(env: &Env, admin: &Address, max_supply: i128) {
+    env.events().publish(
+        (symbol_short!("max_sup"),),
+        (admin.clone(), max_supply),
+    );
+}
+
+pub fn emit_mint(env: &Env, admin: &Address, to: &Address, amount: i128, new_balance: i128, new_supply: i128) {
     env.events().publish(
         (symbol_short!("mint"),),
         (admin.clone(), to.clone(), amount, new_balance, new_supply),
     );
 }
 
-/// Emitted when tokens are burned.
 pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new_supply: i128) {
     env.events().publish(
         (symbol_short!("burn"),),
@@ -36,34 +30,17 @@ pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new
     );
 }
 
-/// Emitted on a standard transfer.
 pub fn emit_transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
-    env.events()
-        .publish((symbol_short!("xfer"),), (from.clone(), to.clone(), amount));
+    env.events().publish((symbol_short!("xfer"),), (from.clone(), to.clone(), amount));
 }
 
-/// Emitted on a delegated transfer (transfer_from).
-pub fn emit_transfer_from(
-    env: &Env,
-    spender: &Address,
-    from: &Address,
-    to: &Address,
-    amount: i128,
-    remaining_allowance: i128,
-) {
+pub fn emit_transfer_from(env: &Env, spender: &Address, from: &Address, to: &Address, amount: i128, remaining_allowance: i128) {
     env.events().publish(
         (symbol_short!("xfer_frm"),),
-        (
-            spender.clone(),
-            from.clone(),
-            to.clone(),
-            amount,
-            remaining_allowance,
-        ),
+        (spender.clone(), from.clone(), to.clone(), amount, remaining_allowance),
     );
 }
 
-/// Emitted when an allowance is approved.
 pub fn emit_approve(env: &Env, from: &Address, spender: &Address, amount: i128) {
     env.events().publish(
         (symbol_short!("approve"),),
@@ -71,7 +48,6 @@ pub fn emit_approve(env: &Env, from: &Address, spender: &Address, amount: i128) 
     );
 }
 
-/// Emitted when contract ownership is transferred.
 pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
         (symbol_short!("own_xfer"),),
@@ -79,7 +55,6 @@ pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Ad
     );
 }
 
-/// Emitted when a new admin is proposed (two-step transfer).
 pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &Address) {
     env.events().publish(
         (symbol_short!("own_prop"),),
@@ -87,7 +62,6 @@ pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &A
     );
 }
 
-/// Emitted when pending admin accepts ownership.
 pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
         (symbol_short!("own_acc"),),
@@ -95,7 +69,6 @@ pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Addre
     );
 }
 
-/// Emitted when ownership transfer is cancelled.
 pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
     env.events().publish(
         (symbol_short!("own_can"),),
@@ -103,19 +76,14 @@ pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Ad
     );
 }
 
-/// Emitted when the contract is paused.
 pub fn emit_paused(env: &Env, admin: &Address) {
-    env.events()
-        .publish((symbol_short!("paused"),), (admin.clone(),));
+    env.events().publish((symbol_short!("paused"),), (admin.clone(),));
 }
 
-/// Emitted when the contract is unpaused.
 pub fn emit_unpaused(env: &Env, admin: &Address) {
-    env.events()
-        .publish((symbol_short!("unpause"),), (admin.clone(),));
+    env.events().publish((symbol_short!("unpause"),), (admin.clone(),));
 }
 
-/// Emitted when tokens are clawed back.
 pub fn emit_clawback(env: &Env, admin: &Address, from: &Address, to: &Address, amount: i128) {
     env.events().publish(
         (symbol_short!("clawback"),),
@@ -123,7 +91,6 @@ pub fn emit_clawback(env: &Env, admin: &Address, from: &Address, to: &Address, a
     );
 }
 
-/// Emitted when tokens are locked.
 pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_time: u64) {
     env.events().publish(
         (symbol_short!("lock"),),
@@ -131,13 +98,10 @@ pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_time: u64) {
     );
 }
 
-/// Emitted when locked tokens are withdrawn.
 pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
-    env.events()
-        .publish((symbol_short!("unlock"),), (user.clone(), amount));
+    env.events().publish((symbol_short!("unlock"),), (user.clone(), amount));
 }
 
-/// Emitted when the contract is upgraded.
 pub fn emit_upgrade(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
     env.events().publish(
         (symbol_short!("upgrade"),),
@@ -145,7 +109,6 @@ pub fn emit_upgrade(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
     );
 }
 
-/// Emitted when the token name is updated.
 pub fn emit_update_name(env: &Env, admin: &Address, old_name: &String, new_name: &String) {
     env.events().publish(
         (symbol_short!("upd_name"),),
@@ -153,7 +116,6 @@ pub fn emit_update_name(env: &Env, admin: &Address, old_name: &String, new_name:
     );
 }
 
-/// Emitted when the token symbol is updated.
 pub fn emit_update_symbol(env: &Env, admin: &Address, old_symbol: &String, new_symbol: &String) {
     env.events().publish(
         (symbol_short!("upd_sym"),),
