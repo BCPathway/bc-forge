@@ -1,4 +1,4 @@
-﻿//! # bc-forge Token Contract
+//! # bc-forge Token Contract
 //!
 //! A Soroban-based token contract implementing the standard SEP-41 TokenInterface
 //! with additional administrative controls, pausable lifecycle, ownership management,
@@ -306,9 +306,16 @@ impl BcForgeToken {
         admin::set_admin_pool(&env, pool, threshold);
     }
 
-    pub fn propose_action(env: Env, signer: Address, action: TokenAction, description: String) -> u64 {
+    pub fn propose_action(
+        env: Env,
+        signer: Address,
+        action: TokenAction,
+        description: String,
+    ) -> u64 {
         let id = admin::create_proposal(&env, signer, description);
-        env.storage().instance().set(&DataKey::ProposalAction(id), &action);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalAction(id), &action);
         id
     }
 
@@ -340,13 +347,17 @@ impl BcForgeToken {
                 events::emit_unpaused(&env, &current_admin);
             }
         }
-        env.storage().instance().remove(&DataKey::ProposalAction(proposal_id));
+        env.storage()
+            .instance()
+            .remove(&DataKey::ProposalAction(proposal_id));
     }
 
     pub fn set_clawback_admin(env: Env, clawback_admin: Address) {
         let current_admin = Self::read_admin(&env).expect("contract not initialized");
         current_admin.require_auth();
-        env.storage().instance().set(&DataKey::ClawbackAdmin, &clawback_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::ClawbackAdmin, &clawback_admin);
     }
 
     pub fn clawback(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
@@ -377,7 +388,12 @@ impl BcForgeToken {
         admin::has_role(&env, role, &address)
     }
 
-    pub fn lock_tokens(env: Env, user: Address, amount: i128, unlock_time: u64) -> Result<(), TokenError> {
+    pub fn lock_tokens(
+        env: Env,
+        user: Address,
+        amount: i128,
+        unlock_time: u64,
+    ) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
         if amount <= 0 {
@@ -392,12 +408,17 @@ impl BcForgeToken {
             .storage()
             .persistent()
             .get::<_, LockupInfo>(&DataKey::Lockup(user.clone()))
-            .unwrap_or(LockupInfo { amount: 0, unlock_time: 0 });
+            .unwrap_or(LockupInfo {
+                amount: 0,
+                unlock_time: 0,
+            });
         lockup.amount += amount;
         if unlock_time > lockup.unlock_time {
             lockup.unlock_time = unlock_time;
         }
-        env.storage().persistent().set(&DataKey::Lockup(user.clone()), &lockup);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Lockup(user.clone()), &lockup);
         events::emit_locked(&env, &user, amount, lockup.unlock_time);
         Ok(())
     }
@@ -414,7 +435,9 @@ impl BcForgeToken {
         }
         let balance = Self::read_balance(&env, &user);
         Self::write_balance(&env, &user, balance + lockup.amount);
-        env.storage().persistent().remove(&DataKey::Lockup(user.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Lockup(user.clone()));
         events::emit_withdraw_locked(&env, &user, lockup.amount);
     }
 
@@ -429,7 +452,9 @@ impl BcForgeToken {
     pub fn propose_owner(env: Env, new_admin: Address) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
         events::emit_ownership_proposed(&env, &current_admin, &new_admin);
         Ok(())
     }
@@ -473,7 +498,8 @@ impl BcForgeToken {
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
         events::emit_upgrade(&env, &current_admin, &new_wasm_hash);
         Ok(())
     }
@@ -485,7 +511,10 @@ impl BcForgeToken {
     pub fn update_name(env: Env, new_name: String) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        let old_name = env.storage().instance().get(&DataKey::Name)
+        let old_name = env
+            .storage()
+            .instance()
+            .get(&DataKey::Name)
             .unwrap_or_else(|| String::from_str(&env, "bc-forge"));
         env.storage().instance().set(&DataKey::Name, &new_name);
         events::emit_update_name(&env, &current_admin, &old_name, &new_name);
@@ -495,7 +524,10 @@ impl BcForgeToken {
     pub fn update_symbol(env: Env, new_symbol: String) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        let old_symbol = env.storage().instance().get(&DataKey::Symbol)
+        let old_symbol = env
+            .storage()
+            .instance()
+            .get(&DataKey::Symbol)
             .unwrap_or_else(|| String::from_str(&env, "SFG"));
         env.storage().instance().set(&DataKey::Symbol, &new_symbol);
         events::emit_update_symbol(&env, &current_admin, &old_symbol, &new_symbol);
@@ -594,18 +626,25 @@ impl TokenInterface for BcForgeToken {
 
     fn decimals(env: Env) -> u32 {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        env.storage().instance().get(&DataKey::Decimals).unwrap_or(7)
+        env.storage()
+            .instance()
+            .get(&DataKey::Decimals)
+            .unwrap_or(7)
     }
 
     fn name(env: Env) -> String {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        env.storage().instance().get(&DataKey::Name)
+        env.storage()
+            .instance()
+            .get(&DataKey::Name)
             .unwrap_or_else(|| String::from_str(&env, "bc-forge"))
     }
 
     fn symbol(env: Env) -> String {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        env.storage().instance().get(&DataKey::Symbol)
+        env.storage()
+            .instance()
+            .get(&DataKey::Symbol)
             .unwrap_or_else(|| String::from_str(&env, "SFG"))
     }
 }

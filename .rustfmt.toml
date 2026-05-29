@@ -1,0 +1,28 @@
+﻿# bc-forge Rust Formatting Configuration
+# https://rust-lang.github.io/rustfmt/
+#
+# Note: some advanced options (imports_granularity, group_imports, brace_style, etc.)
+# require the nightly toolchain. This config uses stable-only options.
+# To enable nightly options, run: rustup override set nightly
+
+edition = "2021"
+
+# Indentation
+tab_spaces = 4
+hard_tabs = false
+
+# Line length
+max_width = 100
+
+# Imports
+reorder_imports = true
+reorder_modules = true
+
+# Functions
+fn_params_layout = "Tall"
+
+# Misc
+newline_style = "Unix"
+remove_nested_parens = true
+use_field_init_shorthand = true
+use_try_shorthand = true

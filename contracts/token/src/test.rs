@@ -1,4 +1,4 @@
-﻿#![cfg(test)]
+#![cfg(test)]
 
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{vec, Address, Env, String, Vec};
@@ -211,8 +211,14 @@ fn test_batch_mint_respects_max_supply() {
     use crate::Recipient;
     let recipients = vec![
         &env,
-        Recipient { address: user_a.clone(), amount: 300 },
-        Recipient { address: user_b.clone(), amount: 300 },
+        Recipient {
+            address: user_a.clone(),
+            amount: 300,
+        },
+        Recipient {
+            address: user_b.clone(),
+            amount: 300,
+        },
     ];
     assert_eq!(
         client.try_batch_mint(&recipients),
