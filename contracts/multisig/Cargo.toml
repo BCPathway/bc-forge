@@ -1,0 +1,19 @@
+[package]
+name = "bc-forge-multisig"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Multi-signature governance module for bc-forge contracts"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+keywords = ["soroban", "stellar", "smart-contract", "multisig", "governance"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "22.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }

@@ -266,6 +266,47 @@ await client.transfer(
 
 See [sdk/README.md](sdk/README.md) for the full API reference.
 
+## Multi-Signature Governance
+
+bc-forge now supports M-of-N governance for critical admin operations while keeping the original single-admin flow as the default fallback. A token starts with the normal admin model after `initialize`. The current admin can opt into governance with `enable_multisig_governance`, which stores the signer set, threshold, proposal expiry window, and replaces the token admin with the configured governance admin address.
+
+Governed actions:
+
+- `Mint(Address, amount)`
+- `Pause`
+- `Unpause`
+- `TransferOwnership(Address)`
+- `UpdateThreshold(threshold)`
+
+Governance flow:
+
+```mermaid
+flowchart LR
+    A["Signer proposes action"] --> B["Proposal stored with expiry ledger"]
+    B --> C["Other signers approve"]
+    C --> D{"Approvals >= threshold?"}
+    D -- "No" --> C
+    D -- "Yes" --> E["Execute proposal"]
+    E --> F["Token applies governed action"]
+    B --> G["Reject proposal"]
+    B --> H["Proposal expires after N ledgers"]
+```
+
+Proposal lifecycle:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending
+    Pending --> Executed: execute after threshold
+    Pending --> Rejected: signer rejects
+    Pending --> Expired: current ledger exceeds expiry
+    Executed --> [*]
+    Rejected --> [*]
+    Expired --> [*]
+```
+
+The `contracts/multisig` crate emits structured events for initialization, proposal creation, approval, execution, rejection, and threshold updates so off-chain indexers can reconstruct governance activity.
+
 ## 🏗️ Smart Contract Architecture
 
 ```
