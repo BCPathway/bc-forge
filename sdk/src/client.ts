@@ -29,6 +29,7 @@ import {
 } from './utils';
 
 import { SimulationError, RPCError } from './errors';
+import { CacheManager, CacheConfig, CacheMetrics, CacheWarmEntry } from './cache';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,12 @@ export interface bcForgeClientConfig {
   networkPassphrase: string;
   /** Deployed bc-forge token contract ID */
   contractId: string;
+  /**
+   * Enable in-memory caching for read-only queries.
+   * Pass `{}` to use defaults (30 s TTL, 100-entry LRU).
+   * Omit entirely to disable caching.
+   */
+  cacheConfig?: Partial<CacheConfig>;
 }
 
 export interface TransactionResult {
@@ -57,6 +64,18 @@ export interface BatchMintRecipient {
   amount: bigint;
 }
 
+// ─── Cache key constants ──────────────────────────────────────────────────────
+
+const CK = {
+  balance: (addr: string) => `balance:${addr}`,
+  supply: 'supply',
+  name: 'name',
+  symbol: 'symbol',
+  decimals: 'decimals',
+  allowance: (owner: string, spender: string) => `allowance:${owner}:${spender}`,
+  version: 'version',
+} as const;
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class bcForgeClient {
@@ -65,6 +84,7 @@ export class bcForgeClient {
   private contractId: string;
   private server: SorobanRpc.Server;
   private contract: Contract;
+  private cache: CacheManager | undefined;
 
   constructor(config: bcForgeClientConfig) {
     this.rpcUrl = config.rpcUrl;
@@ -72,90 +92,71 @@ export class bcForgeClient {
     this.contractId = config.contractId;
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
+    if (config.cacheConfig !== undefined) {
+      this.cache = new CacheManager(config.cacheConfig);
+    }
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
 
-  /**
-   * Get the token balance for an address.
-   *
-   * @param address - Stellar public key (G... address)
-   * @returns Token balance as bigint
-   */
   async getBalance(address: string): Promise<bigint> {
-    const result = await this.queryContract('balance', [addressToScVal(address)]);
-    return BigInt(scValToNative(result));
+    return this.cached(CK.balance(address), async () => {
+      const result = await this.queryContract('balance', [addressToScVal(address)]);
+      return BigInt(scValToNative(result));
+    });
   }
 
-  /**
-   * Get the total token supply.
-   *
-   * @returns Total supply as bigint
-   */
   async getTotalSupply(): Promise<bigint> {
-    const result = await this.queryContract('supply', []);
-    return BigInt(scValToNative(result));
+    return this.cached(CK.supply, async () => {
+      const result = await this.queryContract('supply', []);
+      return BigInt(scValToNative(result));
+    });
   }
 
-  /**
-   * Get the human-readable token name.
-   */
   async getName(): Promise<string> {
-    const result = await this.queryContract('name', []);
-    return scValToNative(result) as string;
+    return this.cached(CK.name, async () => {
+      const result = await this.queryContract('name', []);
+      return scValToNative(result) as string;
+    });
   }
 
-  /**
-   * Get the token ticker symbol.
-   */
   async getSymbol(): Promise<string> {
-    const result = await this.queryContract('symbol', []);
-    return scValToNative(result) as string;
+    return this.cached(CK.symbol, async () => {
+      const result = await this.queryContract('symbol', []);
+      return scValToNative(result) as string;
+    });
   }
 
-  /**
-   * Get the number of decimal places.
-   */
   async getDecimals(): Promise<number> {
-    const result = await this.queryContract('decimals', []);
-    return scValToNative(result) as number;
+    return this.cached(CK.decimals, async () => {
+      const result = await this.queryContract('decimals', []);
+      return scValToNative(result) as number;
+    });
   }
 
-  /**
-   * Get the spending allowance from `owner` to `spender`.
-   */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
-    const result = await this.queryContract('allowance', [
-      addressToScVal(owner),
-      addressToScVal(spender),
-    ]);
-    return BigInt(scValToNative(result));
+    return this.cached(CK.allowance(owner, spender), async () => {
+      const result = await this.queryContract('allowance', [
+        addressToScVal(owner),
+        addressToScVal(spender),
+      ]);
+      return BigInt(scValToNative(result));
+    });
   }
 
-  /**
-   * Get the contract version string.
-   */
   async getVersion(): Promise<string> {
-    const result = await this.queryContract('version', []);
-    return scValToNative(result) as string;
+    return this.cached(CK.version, async () => {
+      const result = await this.queryContract('version', []);
+      return scValToNative(result) as string;
+    });
   }
 
   // ─── Batch Queries ───────────────────────────────────────────────────────
 
-  /**
-   * Get token balances for multiple addresses in batches.
-   *
-   * @param addresses - Array of Stellar public keys
-   * @param batchSize - Maximum number of concurrent queries (default: 10)
-   * @returns Array of balances as bigints
-   */
   async getBalances(addresses: string[], batchSize: number = 10): Promise<bigint[]> {
     return this.executeBatch(addresses, (addr) => this.getBalance(addr), batchSize);
   }
 
-  /**
-   * Internal helper to execute a list of async tasks in chunks using Promise.all.
-   */
   private async executeBatch<T, R>(
     items: T[],
     task: (item: T) => Promise<R>,
@@ -172,15 +173,6 @@ export class bcForgeClient {
 
   // ─── Write Transactions ──────────────────────────────────────────────────
 
-  /**
-   * Initialize the token contract. Can only be called once.
-   *
-   * @param admin    - Admin address
-   * @param decimals - Number of decimal places
-   * @param name     - Token name
-   * @param symbol   - Token symbol
-   * @param source   - Keypair of the transaction signer
-   */
   async initialize(
     admin: string,
     decimals: number,
@@ -188,30 +180,28 @@ export class bcForgeClient {
     symbol: string,
     source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract(
+    const result = await this.invokeContract(
       'initialize',
       [addressToScVal(admin), u32ToScVal(decimals), stringToScVal(name), stringToScVal(symbol)],
       source,
     );
+    if (result.success) this.cache?.invalidateAll();
+    return result;
   }
 
-  /**
-   * Mint tokens to an address. Admin-only.
-   *
-   * @param to     - Recipient address
-   * @param amount - Number of tokens to mint
-   * @param source - Admin keypair
-   */
   async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
+    const result = await this.invokeContract(
+      'mint',
+      [addressToScVal(to), i128ToScVal(amount)],
+      source,
+    );
+    if (result.success) {
+      this.cache?.invalidate(CK.balance(to));
+      this.cache?.invalidate(CK.supply);
+    }
+    return result;
   }
 
-  /**
-   * Batch mint tokens to multiple recipients. Admin-only.
-   *
-   * @param recipients - Array of recipient objects
-   * @param source     - Admin keypair
-   */
   async batchMint(recipients: BatchMintRecipient[], source: Keypair): Promise<TransactionResult> {
     const recipientScVals = recipients.map(({ to, amount }) =>
       xdr.ScVal.scvMap([
@@ -226,45 +216,41 @@ export class bcForgeClient {
       ]),
     );
     const recipientsVec = xdr.ScVal.scvVec(recipientScVals);
-    return this.invokeContract('batch_mint', [recipientsVec], source);
+    const result = await this.invokeContract('batch_mint', [recipientsVec], source);
+    if (result.success) {
+      this.cache?.invalidate(CK.supply);
+      for (const { to } of recipients) {
+        this.cache?.invalidate(CK.balance(to));
+      }
+    }
+    return result;
   }
 
-  /**
-   * Transfer tokens between addresses.
-   *
-   * @param from   - Sender address
-   * @param to     - Recipient address
-   * @param amount - Number of tokens
-   * @param source - Sender's keypair
-   */
   async transfer(
     from: string,
     to: string,
     amount: bigint,
     source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract(
+    const result = await this.invokeContract(
       'transfer',
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       source,
     );
+    if (result.success) {
+      this.cache?.invalidate(CK.balance(from));
+      this.cache?.invalidate(CK.balance(to));
+    }
+    return result;
   }
 
-  /**
-   * Approve a spender to use tokens on your behalf.
-   *
-   * @param from    - Token owner
-   * @param spender - Approved spender
-   * @param amount  - Maximum spendable amount
-   * @param source  - Owner's keypair
-   */
   async approve(
     from: string,
     spender: string,
     amount: bigint,
     source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract(
+    const result = await this.invokeContract(
       'approve',
       [
         addressToScVal(from),
@@ -274,57 +260,39 @@ export class bcForgeClient {
       ],
       source,
     );
+    if (result.success) {
+      this.cache?.invalidate(CK.allowance(from, spender));
+    }
+    return result;
   }
 
-  /**
-   * Burn tokens from an address.
-   *
-   * @param from   - Address whose tokens to burn
-   * @param amount - Number of tokens to burn
-   * @param source - Burner's keypair
-   */
   async burn(from: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('burn', [addressToScVal(from), i128ToScVal(amount)], source);
+    const result = await this.invokeContract(
+      'burn',
+      [addressToScVal(from), i128ToScVal(amount)],
+      source,
+    );
+    if (result.success) {
+      this.cache?.invalidate(CK.balance(from));
+      this.cache?.invalidate(CK.supply);
+    }
+    return result;
   }
 
-  /**
-   * Transfer admin/ownership to a new address. Current admin only.
-   *
-   * @param newAdmin - New admin address
-   * @param source   - Current admin's keypair
-   */
   async transferOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('transfer_ownership', [addressToScVal(newAdmin)], source);
   }
 
-  /**
-   * Pause all token operations. Admin-only.
-   *
-   * @param source - Admin keypair
-   */
   async pause(source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('pause', [], source);
   }
 
-  /**
-   * Unpause token operations. Admin-only.
-   *
-   * @param source - Admin keypair
-   */
   async unpause(source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('unpause', [], source);
   }
 
   // ─── Offline Transaction Builders ──────────────────────────────────────────
 
-  /**
-   * Build an unsigned mint transaction for offline signing.
-   *
-   * @param to              - Recipient address
-   * @param amount          - Number of tokens to mint
-   * @param sourcePublicKey - Admin's public key
-   * @returns Unsigned transaction XDR string
-   */
   async buildMintTx(to: string, amount: bigint, sourcePublicKey: string): Promise<string> {
     return buildUnsignedTransaction(
       this.rpcUrl,
@@ -336,15 +304,6 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Build an unsigned transfer transaction for offline signing.
-   *
-   * @param from            - Sender address
-   * @param to              - Recipient address
-   * @param amount          - Number of tokens
-   * @param sourcePublicKey - Sender's public key
-   * @returns Unsigned transaction XDR string
-   */
   async buildTransferTx(
     from: string,
     to: string,
@@ -361,16 +320,6 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Build an unsigned approve transaction for offline signing.
-   *
-   * @param from            - Token owner
-   * @param spender         - Approved spender
-   * @param amount          - Maximum spendable amount
-   * @param exp             - Expiration ledger (0 for no expiration)
-   * @param sourcePublicKey - Owner's public key
-   * @returns Unsigned transaction XDR string
-   */
   async buildApproveTx(
     from: string,
     spender: string,
@@ -388,14 +337,6 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Build an unsigned burn transaction for offline signing.
-   *
-   * @param from            - Address whose tokens to burn
-   * @param amount          - Number of tokens to burn
-   * @param sourcePublicKey - Burner's public key
-   * @returns Unsigned transaction XDR string
-   */
   async buildBurnTx(from: string, amount: bigint, sourcePublicKey: string): Promise<string> {
     return buildUnsignedTransaction(
       this.rpcUrl,
@@ -407,25 +348,10 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Sign an unsigned transaction XDR.
-   *
-   * @param txXdr - Unsigned transaction XDR string
-   * @param keypair - Keypair to sign with
-   * @returns Signed transaction XDR string
-   */
   signTx(txXdr: string, keypair: Keypair): string {
     return signTransaction(txXdr, this.networkPassphrase, keypair);
   }
 
-  /**
-   * Simulate a contract invocation without submitting.
-   *
-   * @param method - Contract method name
-   * @param args - Method arguments as ScVal array
-   * @param sourcePublicKey - Public key for simulation context
-   * @returns Simulation result with return value and cost
-   */
   async simulate(method: string, args: xdr.ScVal[], sourcePublicKey: string): Promise<any> {
     return simulateTransaction(
       this.rpcUrl,
@@ -437,27 +363,10 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Simulate a mint operation.
-   *
-   * @param to - Recipient address
-   * @param amount - Number of tokens to mint
-   * @param sourcePublicKey - Admin's public key
-   * @returns Simulation result
-   */
   async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise<any> {
     return this.simulate('mint', [addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
   }
 
-  /**
-   * Simulate a transfer operation.
-   *
-   * @param from - Sender address
-   * @param to - Recipient address
-   * @param amount - Number of tokens
-   * @param sourcePublicKey - Sender's public key
-   * @returns Simulation result
-   */
   async simulateTransfer(
     from: string,
     to: string,
@@ -473,13 +382,6 @@ export class bcForgeClient {
 
   // ─── Multi-Sig / Admin Pool ──────────────────────────────────────────────
 
-  /**
-   * Configure the multi-signature admin pool.
-   *
-   * @param pool      - Array of admin addresses
-   * @param threshold - Quorum threshold
-   * @param source    - Current admin keypair
-   */
   async setAdminPool(
     pool: string[],
     threshold: number,
@@ -498,24 +400,13 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Upgrades the contract to a new WASM hash. Admin-only.
-   *
-   * @param newWasmHash - 32-byte hex string or Buffer of the new WASM hash
-   * @param source      - Admin keypair
-   */
   async upgrade(newWasmHash: string | Buffer, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('upgrade', [hashToScVal(newWasmHash)], source);
+    const result = await this.invokeContract('upgrade', [hashToScVal(newWasmHash)], source);
+    // Contract logic may change after upgrade; full invalidation is safest.
+    if (result.success) this.cache?.invalidateAll();
+    return result;
   }
 
-  /**
-   * Propose a sensitive action for multi-sig approval.
-   *
-   * @param admin       - Proposing admin address
-   * @param action      - The action to propose (Mint, Pause, or Unpause)
-   * @param description - Human-readable description
-   * @param source      - Proposing admin keypair
-   */
   async proposeAction(
     admin: string,
     action: { Mint: [string, bigint] } | { Pause: [] } | { Unpause: [] },
@@ -536,9 +427,6 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Approve a pending proposal.
-   */
   async approveProposal(
     admin: string,
     proposalId: bigint,
@@ -551,9 +439,6 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Execute a proposal once quorum is reached.
-   */
   async executeProposal(proposalId: bigint, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'execute_proposal',
@@ -564,69 +449,59 @@ export class bcForgeClient {
 
   // ─── Clawback / Regulatory ───────────────────────────────────────────────
 
-  /**
-   * Set the designated clawback administrator.
-   */
   async setClawbackAdmin(admin: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('set_clawback_admin', [addressToScVal(admin)], source);
   }
 
-  /**
-   * Update the token name. Admin-only.
-   *
-   * @param newName - The new token name
-   * @param source  - Admin keypair
-   */
   async updateName(newName: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('update_name', [stringToScVal(newName)], source);
+    const result = await this.invokeContract('update_name', [stringToScVal(newName)], source);
+    if (result.success) this.cache?.invalidate(CK.name);
+    return result;
   }
 
-  /**
-   * Execute a clawback operation.
-   */
   async clawback(
     from: string,
     to: string,
     amount: bigint,
     source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract(
+    const result = await this.invokeContract(
       'clawback',
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       source,
     );
+    if (result.success) {
+      this.cache?.invalidate(CK.balance(from));
+      this.cache?.invalidate(CK.balance(to));
+    }
+    return result;
   }
 
   // ─── Locking / Vesting ───────────────────────────────────────────────────
 
-  /**
-   * Lock tokens for a user until a specific timestamp.
-   */
   async lockTokens(
     user: string,
     amount: bigint,
     unlockTime: bigint,
     source: Keypair,
   ): Promise<TransactionResult> {
-    return this.invokeContract(
+    const result = await this.invokeContract(
       'lock_tokens',
       [addressToScVal(user), i128ToScVal(amount), nativeToScVal(unlockTime, { type: 'u64' })],
       source,
     );
+    if (result.success) this.cache?.invalidate(CK.balance(user));
+    return result;
   }
 
-  /**
-   * Withdraw matured locked tokens.
-   */
   async withdrawLocked(user: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('withdraw_locked', [addressToScVal(user)], source);
+    const result = await this.invokeContract('withdraw_locked', [addressToScVal(user)], source);
+    if (result.success) this.cache?.invalidate(CK.balance(user));
+    return result;
   }
 
   // ─── Events ──────────────────────────────────────────────────────────────
 
-  /**
-   * Get recent events for the contract.
-   */
   async getEvents(startLedger?: number): Promise<any[]> {
     const response = await this.server.getEvents({
       startLedger: startLedger || (await this.server.getLatestLedger()).sequence - 1000,
@@ -635,21 +510,63 @@ export class bcForgeClient {
     return response.events;
   }
 
-  /**
-   * Update the token symbol. Admin-only.
-   *
-   * @param newSymbol - The new token symbol
-   * @param source    - Admin keypair
-   */
   async updateSymbol(newSymbol: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('update_symbol', [stringToScVal(newSymbol)], source);
+    const result = await this.invokeContract('update_symbol', [stringToScVal(newSymbol)], source);
+    if (result.success) this.cache?.invalidate(CK.symbol);
+    return result;
+  }
+
+  // ─── Cache Management ─────────────────────────────────────────────────────
+
+  /**
+   * Return a snapshot of cache performance metrics.
+   * Returns `undefined` when caching is not configured.
+   */
+  getCacheMetrics(): CacheMetrics | undefined {
+    return this.cache?.getMetrics();
+  }
+
+  /**
+   * Evict all cached entries. No-op when caching is not configured.
+   */
+  clearCache(): void {
+    this.cache?.invalidateAll();
+  }
+
+  /**
+   * Pre-populate the cache with known values (e.g. from SSR or a trusted source).
+   * No-op when caching is not configured.
+   */
+  warmUpCache<T>(entries: CacheWarmEntry<T>[]): void {
+    this.cache?.warmUp(entries);
+  }
+
+  /**
+   * Fetch balances for multiple addresses and cache the results.
+   * Useful for warming the cache before rendering a list of balances.
+   *
+   * @returns Map of address → balance
+   */
+  async prefetchBalances(addresses: string[]): Promise<Map<string, bigint>> {
+    const balances = await this.getBalances(addresses);
+    return new Map(addresses.map((addr, i) => [addr, balances[i]]));
   }
 
   // ─── Internal Helpers ────────────────────────────────────────────────────
 
   /**
-   * Internal helper to execute a task with retries.
+   * Return a cached value for `key`, or execute `fn`, cache the result, and return it.
+   * When caching is disabled the result of `fn` is returned directly.
    */
+  private async cached<T>(key: string, fn: () => Promise<T>, ttlMs?: number): Promise<T> {
+    if (!this.cache) return fn();
+    const hit = this.cache.get<T>(key);
+    if (hit !== undefined) return hit;
+    const value = await fn();
+    this.cache.set(key, value, ttlMs);
+    return value;
+  }
+
   private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
     let lastError: any;
     for (let i = 0; i < retries; i++) {
@@ -657,8 +574,6 @@ export class bcForgeClient {
         return await fn();
       } catch (error) {
         lastError = error;
-        // Only retry on certain errors (e.g., network/RPC errors)
-        // For now, we retry on any error that isn't a known terminal error
         if (i < retries - 1) {
           await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
         }
@@ -667,9 +582,6 @@ export class bcForgeClient {
     throw lastError;
   }
 
-  /**
-   * Simulates a read-only contract call (no transaction submission).
-   */
   private async queryContract(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
     return this.withRetry(async () => {
       try {
@@ -704,9 +616,6 @@ export class bcForgeClient {
     });
   }
 
-  /**
-   * Builds, signs, submits, and polls a contract invocation transaction.
-   */
   private async invokeContract(
     method: string,
     args: xdr.ScVal[],
@@ -738,7 +647,6 @@ export class bcForgeClient {
           hash: (response as any).hash,
         };
       } catch (error: any) {
-        // Don't retry on simulation errors (usually logic errors)
         if (error instanceof SimulationError) throw error;
         throw error;
       }
