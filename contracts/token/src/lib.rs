@@ -23,11 +23,8 @@ pub enum DataKey {
     /// The contract admin address (singular).
     Admin,
     PendingAdmin,
-    /// Spending allowance: (owner, spender) → amount and expiration.
+    /// Spending allowance: (owner, spender) → AllowanceInfo.
     Allowance(Address, Address),
-    /// Token balance for an address.
-    Allowance(Address, Address),
-    AllowanceExp(Address, Address),
     Balance(Address),
     Name,
     Symbol,
@@ -133,54 +130,26 @@ impl BcForgeToken {
             .set(&DataKey::Balance(id.clone()), &balance);
     }
 
-    fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
-        let allowance_info: AllowanceInfo = env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 });
-        
-        // Check if allowance has expired
-        if allowance_info.exp_ledger > 0 {
-            let current_ledger = env.ledger().sequence();
-            if current_ledger > allowance_info.exp_ledger as u64 {
-                return 0; // Allowance expired
-            }
-        }
-        
-        allowance_info.amount
-        if let Some(exp_ledger) = env
-            .storage()
-            .persistent()
-            .get::<_, u32>(&DataKey::AllowanceExp(from.clone(), spender.clone()))
-        {
-            if exp_ledger > 0 && env.ledger().sequence() > exp_ledger {
-                return 0;
-            }
-        }
-
-        env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(0)
-    }
-
-    fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
-        let allowance_info = AllowanceInfo { amount, exp_ledger: exp };
-        env.storage()
-            .persistent()
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &allowance_info);
-    }
-
-    /// Reads the full allowance info for (owner → spender), defaulting to zero allowance with no expiration.
     fn read_allowance_info(env: &Env, from: &Address, spender: &Address) -> AllowanceInfo {
         env.storage()
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
+    }
+
+    fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
+        let info = Self::read_allowance_info(env, from, spender);
+        if info.exp_ledger > 0 && env.ledger().sequence() > info.exp_ledger {
+            return 0;
+        }
+        info.amount
+    }
+
+    fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
+        env.storage().persistent().set(
+            &DataKey::Allowance(from.clone(), spender.clone()),
+            &AllowanceInfo { amount, exp_ledger: exp },
+        );
     }
 
     fn move_balance(
@@ -615,12 +584,9 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
-        Self::move_balance(&env, &from, &to, amount);
-        // Preserve the original expiration
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
-        Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
         let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
+        Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
     }
 
@@ -664,10 +630,8 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
-        // Preserve the original expiration
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
         Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         Self::write_balance(&env, &from, balance - amount);
         let supply = Self::read_supply(&env) - amount;
         Self::write_supply(&env, supply);

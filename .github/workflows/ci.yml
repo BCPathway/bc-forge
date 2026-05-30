@@ -93,3 +93,51 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # ─── Codegen CI ─────────────────────────────────────────────────────────
+  codegen:
+    name: Contract Bindings Codegen
+    runs-on: ubuntu-latest
+    needs: [contracts, sdk]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('Cargo.lock') }}-stable
+
+      - name: Build WASM
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Build codegen tool
+        working-directory: sdk
+        run: npm run codegen:build
+
+      - name: Run codegen
+        working-directory: sdk
+        run: |
+          node codegen/dist/index.js \
+            ../target/wasm32-unknown-unknown/release/bc_forge_token.wasm \
+            src/generated-client.ts \
+            --name BcForgeToken
+
+      - name: Upload generated bindings
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-client
+          path: sdk/src/generated-client.ts

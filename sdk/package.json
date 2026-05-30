@@ -10,7 +10,9 @@
     "test": "jest --passWithNoTests",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --write 'src/**/*.ts'",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "codegen:build": "cd codegen && npm ci && npm run build",
+    "codegen": "node codegen/dist/index.js"
   },
   "keywords": [
     "stellar",

@@ -1,0 +1,24 @@
+{
+  "name": "@bc-forge/codegen",
+  "version": "0.1.0",
+  "description": "Code generation tool for bc-forge Soroban contract TypeScript bindings",
+  "main": "dist/index.js",
+  "bin": {
+    "bc-forge-codegen": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "codegen": "node dist/index.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
