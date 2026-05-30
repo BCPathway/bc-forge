@@ -29,6 +29,7 @@ import {
 } from './utils';
 
 import { SimulationError, RPCError } from './errors';
+import { EventParser, EventFilter, bcForgeEvent } from './events';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -633,6 +634,32 @@ export class bcForgeClient {
       filters: [{ contractIds: [this.contractId], type: 'contract' }],
     });
     return response.events;
+  }
+
+  /**
+   * Get event history with filtering.
+   */
+  async getEventHistory(filter: EventFilter = {}): Promise<bcForgeEvent[]> {
+    const parser = new EventParser();
+    const response = await this.server.getEvents({
+      startLedger: filter.startLedger,
+      filters: [
+        {
+          contractIds: filter.contractIds || [this.contractId],
+          type: 'contract',
+        },
+      ],
+    });
+    let events = parser.parseEvents(response.events);
+    // Apply event type filter
+    if (filter.eventTypes && filter.eventTypes.length > 0) {
+      events = events.filter((e) => filter.eventTypes!.includes(e.type));
+    }
+    // Apply end ledger filter
+    if (filter.endLedger !== undefined) {
+      events = events.filter((e) => e.ledger <= filter.endLedger!);
+    }
+    return events;
   }
 
   /**
