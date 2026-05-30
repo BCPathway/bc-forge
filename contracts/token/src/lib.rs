@@ -45,6 +45,15 @@ pub struct LockupInfo {
     pub unlock_time: u64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct PendingAdminInfo {
+    pub address: Address,
+    pub expires_at: u64,
+}
+
+const PENDING_OWNER_TIMEOUT_SECS: u64 = 86400; // 24 hours
+
 /// Information about an allowance, including amount and expiration.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
@@ -233,8 +242,21 @@ impl BcForgeToken {
         Ok(())
     }
 
-    fn read_pending_admin(env: &Env) -> Option<Address> {
+    fn read_pending_admin(env: &Env) -> Option<PendingAdminInfo> {
+        // If there's a pending admin, return it; caller should check expiry.
         env.storage().instance().get(&DataKey::PendingAdmin)
+    }
+
+    fn read_active_pending_admin(env: &Env) -> Option<PendingAdminInfo> {
+        if let Some(pending): Option<PendingAdminInfo> = env.storage().instance().get(&DataKey::PendingAdmin) {
+            let now = env.ledger().timestamp();
+            if pending.expires_at == 0 || now <= pending.expires_at {
+                return Some(pending);
+            }
+            // expired: clean up
+            env.storage().instance().remove(&DataKey::PendingAdmin);
+        }
+        None
     }
 }
 
@@ -473,43 +495,50 @@ impl BcForgeToken {
     }
 
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
-        let current_admin = Self::read_admin(&env)?;
-        current_admin.require_auth();
-        Self::set_admin(&env, &new_admin);
-        events::emit_ownership_transferred(&env, &current_admin, &new_admin);
-        Ok(())
+        // For safety, `transfer_ownership` now initiates a two-step transfer (propose).
+        // Keep signature for compatibility but set a pending admin with expiration.
+        Self::propose_owner(env, new_admin)
     }
 
     pub fn propose_owner(env: Env, new_admin: Address) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        env.storage()
-            .instance()
-            .set(&DataKey::PendingAdmin, &new_admin);
+        let now = env.ledger().timestamp();
+        let pending = PendingAdminInfo {
+            address: new_admin.clone(),
+            expires_at: now + PENDING_OWNER_TIMEOUT_SECS,
+        };
+        env.storage().instance().set(&DataKey::PendingAdmin, &pending);
         events::emit_ownership_proposed(&env, &current_admin, &new_admin);
         Ok(())
     }
 
     pub fn accept_ownership(env: Env) {
-        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
-        pending_admin.require_auth();
+        let pending = Self::read_active_pending_admin(&env).expect("no pending ownership transfer");
+        // ensure the pending admin authorized the call
+        pending.address.require_auth();
         let old_admin = Self::read_admin(&env).expect("contract not initialized");
-        Self::set_admin(&env, &pending_admin);
+        Self::set_admin(&env, &pending.address);
         env.storage().instance().remove(&DataKey::PendingAdmin);
-        events::emit_ownership_accepted(&env, &old_admin, &pending_admin);
+        events::emit_ownership_accepted(&env, &old_admin, &pending.address);
     }
 
     pub fn cancel_transfer(env: Env) -> Result<(), TokenError> {
+        // keep old name for compatibility
+        Self::cancel_ownership_transfer(env)
+    }
+
+    pub fn cancel_ownership_transfer(env: Env) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
+        let pending = Self::read_pending_admin(&env).expect("no pending ownership transfer");
         env.storage().instance().remove(&DataKey::PendingAdmin);
-        events::emit_ownership_cancelled(&env, &current_admin, &pending_admin);
+        events::emit_ownership_cancelled(&env, &current_admin, &pending.address);
         Ok(())
     }
 
     pub fn pending_owner(env: Env) -> Option<Address> {
-        Self::read_pending_admin(&env)
+        Self::read_active_pending_admin(&env).map(|p| p.address)
     }
 
     pub fn pause(env: Env) -> Result<(), TokenError> {
