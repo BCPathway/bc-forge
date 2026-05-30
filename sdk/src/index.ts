@@ -24,3 +24,7 @@ export { buildInvokeTransaction, submitTransaction, scValToNative } from './util
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
 export * from './mockClient';
+
+// Caching
+export { CacheManager, DEFAULT_CACHE_CONFIG } from './cache';
+export type { CacheConfig, CacheEntry, CacheMetrics, CacheWarmEntry } from './cache';
