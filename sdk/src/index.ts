@@ -24,3 +24,26 @@ export { buildInvokeTransaction, submitTransaction, scValToNative } from './util
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
 export * from './mockClient';
+
+// ─── RPC Pool & Connection Management ────────────────────────────────────────
+export { RpcPool } from './rpc-pool';
+export type { RpcPoolConfig } from './rpc-pool';
+
+export { HealthChecker } from './health-check';
+export type { HealthCheckConfig, HealthCheckResult, EndpointHealth } from './health-check';
+
+export { CircuitBreaker, CircuitBreakerManager } from './circuit-breaker';
+export type { CircuitBreakerState, CircuitBreakerConfig } from './circuit-breaker';
+
+export { ConnectionMetrics } from './connection-metrics';
+export type { EndpointMetrics, PoolMetrics } from './connection-metrics';
+
+export { ConnectionEventEmitter } from './connection-events';
+export type {
+  ConnectionEvent,
+  ConnectionEventListener,
+  HealthCheckEvent,
+  FailoverEvent,
+  CircuitBreakerEvent,
+  PoolEvent,
+} from './connection-events';

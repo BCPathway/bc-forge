@@ -3,6 +3,9 @@
  *
  * High-level TypeScript client for interacting with deployed bc-forge
  * token contracts on the Stellar/Soroban network.
+ *
+ * Supports single and multi-endpoint configurations with automatic failover,
+ * health monitoring, and circuit breaker pattern.
  */
 
 import {
@@ -29,16 +32,20 @@ import {
 } from './utils';
 
 import { SimulationError, RPCError } from './errors';
+import { RpcPool, RpcPoolConfig } from './rpc-pool';
+import { ConnectionEventEmitter } from './connection-events';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface bcForgeClientConfig {
-  /** Soroban RPC endpoint URL (e.g., https://soroban-testnet.stellar.org) */
-  rpcUrl: string;
+  /** Soroban RPC endpoint URL(s): string for single endpoint or string[] for multiple endpoints */
+  rpcUrl: string | string[];
   /** Stellar network passphrase */
   networkPassphrase: string;
   /** Deployed bc-forge token contract ID */
   contractId: string;
+  /** Optional RPC pool configuration (only used when rpcUrl is array) */
+  poolConfig?: Partial<RpcPoolConfig>;
 }
 
 export interface TransactionResult {
@@ -65,13 +72,99 @@ export class bcForgeClient {
   private contractId: string;
   private server: SorobanRpc.Server;
   private contract: Contract;
+  private rpcPool: RpcPool | null = null;
+  private isMultiEndpoint: boolean = false;
 
   constructor(config: bcForgeClientConfig) {
-    this.rpcUrl = config.rpcUrl;
+    this.rpcUrl = Array.isArray(config.rpcUrl) ? config.rpcUrl[0] : config.rpcUrl;
     this.networkPassphrase = config.networkPassphrase;
     this.contractId = config.contractId;
-    this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
+
+    // Initialize RPC pool for multi-endpoint configuration
+    if (Array.isArray(config.rpcUrl) && config.rpcUrl.length > 1) {
+      this.isMultiEndpoint = true;
+      this.rpcPool = new RpcPool({
+        endpoints: config.rpcUrl,
+        strategy: 'round-robin',
+        enableFailover: true,
+        enableRetry: true,
+        maxRetries: 2,
+        emitEvents: true,
+        ...config.poolConfig,
+      });
+      this.server = new SorobanRpc.Server(this.rpcUrl);
+    } else {
+      // Single endpoint: create regular server without pool
+      this.server = new SorobanRpc.Server(this.rpcUrl);
+    }
+  }
+
+  // ─── RPC Pool Management ──────────────────────────────────────────────────
+
+  /**
+   * Get the RPC pool instance (if using multi-endpoint configuration).
+   *
+   * @returns RpcPool instance or null if using single endpoint
+   */
+  getRpcPool(): RpcPool | null {
+    return this.rpcPool;
+  }
+
+  /**
+   * Check if the client is using multi-endpoint configuration.
+   */
+  isUsingMultiEndpoint(): boolean {
+    return this.isMultiEndpoint;
+  }
+
+  /**
+   * Get connection pool metrics (if using multi-endpoint configuration).
+   */
+  getPoolMetrics() {
+    if (!this.rpcPool) {
+      throw new Error('Not using multi-endpoint configuration');
+    }
+    return this.rpcPool.getMetrics();
+  }
+
+  /**
+   * Get connection pool health status (if using multi-endpoint configuration).
+   */
+  getPoolHealthStatus() {
+    if (!this.rpcPool) {
+      throw new Error('Not using multi-endpoint configuration');
+    }
+    return this.rpcPool.getHealthStatus();
+  }
+
+  /**
+   * Get circuit breaker statistics (if using multi-endpoint configuration).
+   */
+  getCircuitBreakerStats() {
+    if (!this.rpcPool) {
+      throw new Error('Not using multi-endpoint configuration');
+    }
+    return this.rpcPool.getCircuitBreakerStats();
+  }
+
+  /**
+   * Get the event emitter for connection events (if using multi-endpoint configuration).
+   */
+  getConnectionEventEmitter(): ConnectionEventEmitter | null {
+    if (!this.rpcPool) {
+      return null;
+    }
+    return this.rpcPool.getEventEmitter();
+  }
+
+  /**
+   * Drain the RPC pool and cleanup resources.
+   */
+  drainPool(): void {
+    if (this.rpcPool) {
+      this.rpcPool.drain();
+    }
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
@@ -671,7 +764,7 @@ export class bcForgeClient {
    * Simulates a read-only contract call (no transaction submission).
    */
   private async queryContract(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
-    return this.withRetry(async () => {
+    const executeQuery = async () => {
       try {
         const account = new (await import('@stellar/stellar-sdk')).Account(
           'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
@@ -701,7 +794,39 @@ export class bcForgeClient {
         if (error instanceof SimulationError) throw error;
         throw new RPCError('RPC call failed', error);
       }
-    });
+    };
+
+    // Use pool failover if available, otherwise direct retry
+    if (this.rpcPool) {
+      return this.rpcPool.executeWithFailover(async (server) => {
+        const account = new (await import('@stellar/stellar-sdk')).Account(
+          'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+          '0',
+        );
+
+        const tx = new TransactionBuilder(account, {
+          fee: '100',
+          networkPassphrase: this.networkPassphrase,
+        })
+          .addOperation(this.contract.call(method, ...args))
+          .setTimeout(30)
+          .build();
+
+        const simulated = await server.simulateTransaction(tx);
+
+        if (SorobanRpc.Api.isSimulationError(simulated)) {
+          throw new SimulationError(`Query failed: ${simulated.error}`, simulated.error);
+        }
+
+        if (!SorobanRpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
+          throw new SimulationError('Query returned no result');
+        }
+
+        return simulated.result.retval;
+      }, `Query(${method})`);
+    } else {
+      return this.withRetry(executeQuery);
+    }
   }
 
   /**
@@ -712,7 +837,7 @@ export class bcForgeClient {
     args: xdr.ScVal[],
     source: Keypair,
   ): Promise<TransactionResult> {
-    return this.withRetry(async () => {
+    const executeInvoke = async () => {
       try {
         const txXdr = await buildInvokeTransaction(
           this.rpcUrl,
@@ -742,6 +867,15 @@ export class bcForgeClient {
         if (error instanceof SimulationError) throw error;
         throw error;
       }
-    });
+    };
+
+    // Use pool failover if available, otherwise direct retry
+    if (this.rpcPool) {
+      // Note: For transaction building and submission, we use the primary RPC
+      // to ensure transaction consistency, but with failover for temporary failures
+      return this.rpcPool.executeWithFailover(async () => executeInvoke(), `Invoke(${method})`);
+    } else {
+      return this.withRetry(executeInvoke);
+    }
   }
 }
