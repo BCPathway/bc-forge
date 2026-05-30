@@ -24,3 +24,8 @@ export { buildInvokeTransaction, submitTransaction, scValToNative } from './util
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
 export * from './mockClient';
+
+export type { WalletAdapter } from './walletAdapter';
+export { FreighterAdapter } from './adapters/freighterAdapter';
+export { AlbedoAdapter } from './adapters/albedoAdapter';
+export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
