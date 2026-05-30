@@ -8,6 +8,7 @@ use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
 #[contracttype]
 pub enum AdminKey {
     Admin,
+    PendingAdmin,
     Role(Role, Address),
     /// The pool of administrator addresses for multi-sig.
     AdminPool,
@@ -17,6 +18,13 @@ pub enum AdminKey {
     Proposal(u64),
     /// Counter for generating unique proposal IDs.
     ProposalIdCounter,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct PendingAdminInfo {
+    pub address: Address,
+    pub expires_at: u64,
 }
 
 /// Enumeration of available roles.
@@ -43,6 +51,22 @@ pub fn set_admin(env: &Env, admin: &Address) {
     env.storage()
         .persistent()
         .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
+}
+
+pub fn set_pending_admin(env: &Env, pending: &Address, expires_at: u64) {
+    let info = PendingAdminInfo {
+        address: pending.clone(),
+        expires_at,
+    };
+    env.storage().instance().set(&AdminKey::PendingAdmin, &info);
+}
+
+pub fn read_pending_admin(env: &Env) -> Option<PendingAdminInfo> {
+    env.storage().instance().get(&AdminKey::PendingAdmin)
+}
+
+pub fn remove_pending_admin(env: &Env) {
+    env.storage().instance().remove(&AdminKey::PendingAdmin);
 }
 
 pub fn get_admin(env: &Env) -> Address {
