@@ -25,9 +25,8 @@ pub enum DataKey {
     PendingAdmin,
     /// Spending allowance: (owner, spender) → amount and expiration.
     Allowance(Address, Address),
-    /// Token balance for an address.
-    Allowance(Address, Address),
     AllowanceExp(Address, Address),
+    /// Token balance for an address.
     Balance(Address),
     Name,
     Symbol,
@@ -134,34 +133,17 @@ impl BcForgeToken {
     }
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
-        let allowance_info: AllowanceInfo = env.storage()
+        let allowance_info: AllowanceInfo = env
+            .storage()
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 });
-        
-        // Check if allowance has expired
-        if allowance_info.exp_ledger > 0 {
-            let current_ledger = env.ledger().sequence();
-            if current_ledger > allowance_info.exp_ledger as u64 {
-                return 0; // Allowance expired
-            }
-        }
-        
-        allowance_info.amount
-        if let Some(exp_ledger) = env
-            .storage()
-            .persistent()
-            .get::<_, u32>(&DataKey::AllowanceExp(from.clone(), spender.clone()))
-        {
-            if exp_ledger > 0 && env.ledger().sequence() > exp_ledger {
-                return 0;
-            }
-        }
 
-        env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(0)
+        if allowance_info.exp_ledger > 0 && env.ledger().sequence() > allowance_info.exp_ledger {
+            0
+        } else {
+            allowance_info.amount
+        }
     }
 
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
@@ -177,10 +159,6 @@ impl BcForgeToken {
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
     }
 
     fn move_balance(
@@ -189,6 +167,11 @@ impl BcForgeToken {
         to: &Address,
         amount: i128,
     ) -> Result<(i128, i128), TokenError> {
+        // Invariant: amount must be positive
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
         let from_balance = Self::read_balance(env, from);
         if from_balance < amount {
             return Err(TokenError::InsufficientBalance);
@@ -198,8 +181,20 @@ impl BcForgeToken {
             return Ok((from_balance, from_balance));
         }
 
-        let new_from = from_balance - amount;
-        let new_to = Self::read_balance(env, to) + amount;
+        // Use checked subtraction to prevent underflow
+        let new_from = from_balance
+            .checked_sub(amount)
+            .ok_or(TokenError::InsufficientBalance)?;
+
+        let to_balance = Self::read_balance(env, to);
+        // Use checked addition to prevent overflow
+        let new_to = to_balance
+            .checked_add(amount)
+            .ok_or(TokenError::InvalidAmount)?;
+
+        // Invariant: sum of balances should not change
+        debug_assert_eq!(from_balance + to_balance, new_from + new_to);
+
         Self::write_balance(env, from, new_from);
         Self::write_balance(env, to, new_to);
         Ok((new_from, new_to))
@@ -219,16 +214,30 @@ impl BcForgeToken {
         to: &Address,
         amount: i128,
     ) -> Result<(), TokenError> {
+        // Invariant: mint amount must be positive
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
 
-        let balance = Self::read_balance(env, to) + amount;
-        Self::write_balance(env, to, balance);
+        let current_balance = Self::read_balance(env, to);
+        // Use checked addition to prevent overflow
+        let new_balance = current_balance
+            .checked_add(amount)
+            .ok_or(TokenError::InvalidAmount)?;
+        Self::write_balance(env, to, new_balance);
 
-        let supply = Self::read_supply(env) + amount;
-        Self::write_supply(env, supply);
-        events::emit_mint(env, admin, to, amount, balance, supply);
+        let current_supply = Self::read_supply(env);
+        // Use checked addition to prevent overflow on total supply
+        let new_supply = current_supply
+            .checked_add(amount)
+            .ok_or(TokenError::InvalidAmount)?;
+        Self::write_supply(env, new_supply);
+
+        // Invariant: supply should always equal sum of all balances (conceptually)
+        // and supply should increase by exactly the amount minted
+        debug_assert_eq!(new_supply, current_supply + amount);
+
+        events::emit_mint(env, admin, to, amount, new_balance, new_supply);
 
         Ok(())
     }
@@ -295,27 +304,41 @@ impl BcForgeToken {
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();
 
+        // First pass: validate all amounts and compute total with overflow check
         let mut total: i128 = 0;
         for i in 0..recipients.len() {
             let (_, amount) = recipients.get(i).expect("recipient should exist");
             if amount <= 0 {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
             }
+            // Use checked_add to prevent overflow during accumulation
             total = match total.checked_add(amount) {
-                Some(total) => total,
+                Some(sum) => sum,
                 None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
             };
         }
 
-        if Self::read_balance(&env, &from) < total {
+        // Invariant: total must be less than or equal to sender's balance
+        let from_balance = Self::read_balance(&env, &from);
+        if from_balance < total {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
+        // Second pass: execute transfers
+        let mut accumulated_transfer: i128 = 0;
         for i in 0..recipients.len() {
             let (to, amount) = recipients.get(i).expect("recipient should exist");
             let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+            // Track total transferred for invariant check
+            accumulated_transfer = match accumulated_transfer.checked_add(amount) {
+                Some(sum) => sum,
+                None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
+            };
             events::emit_transfer(&env, &from, &to, amount);
         }
+
+        // Invariant: total transferred should match the sum of all amounts
+        debug_assert_eq!(accumulated_transfer, total);
     }
 
     pub fn supply(env: Env) -> i128 {
@@ -432,7 +455,12 @@ impl BcForgeToken {
             return Err(TokenError::InsufficientBalance);
         }
 
-        Self::write_balance(&env, &user, balance - amount);
+        // Use checked subtraction when removing from balance
+        let new_balance = balance
+            .checked_sub(amount)
+            .ok_or(TokenError::InsufficientBalance)?;
+        Self::write_balance(&env, &user, new_balance);
+
         let mut lockup = env
             .storage()
             .persistent()
@@ -441,7 +469,18 @@ impl BcForgeToken {
                 amount: 0,
                 unlock_time: 0,
             });
-        lockup.amount += amount;
+
+        // Use checked addition for accumulating locked amount
+        lockup.amount = lockup
+            .amount
+            .checked_add(amount)
+            .ok_or(TokenError::InvalidAmount)?;
+
+        // Invariant: locked amount must be non-negative
+        debug_assert!(lockup.amount >= 0);
+        // Invariant: locked amount should at least equal current lock
+        debug_assert!(lockup.amount >= amount);
+
         if unlock_time > lockup.unlock_time {
             lockup.unlock_time = unlock_time;
         }
@@ -465,7 +504,17 @@ impl BcForgeToken {
         }
 
         let balance = Self::read_balance(&env, &user);
-        Self::write_balance(&env, &user, balance + lockup.amount);
+        // Use checked addition to prevent overflow when restoring locked tokens
+        let new_balance = balance
+            .checked_add(lockup.amount)
+            .expect("balance overflow when withdrawing locked tokens");
+
+        // Invariant: new balance must be greater than original balance
+        debug_assert!(new_balance > balance);
+        // Invariant: new balance should increase by exactly the locked amount
+        debug_assert_eq!(new_balance - balance, lockup.amount);
+
+        Self::write_balance(&env, &user, new_balance);
         env.storage()
             .persistent()
             .remove(&DataKey::Lockup(user.clone()));
@@ -615,13 +664,24 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
-        Self::move_balance(&env, &from, &to, amount);
+        // Move balance (this will validate sufficient balance)
+        let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+
+        // Use checked subtraction to prevent underflow when updating allowance
+        let remaining_allowance = match allowance.checked_sub(amount) {
+            Some(remaining) => remaining,
+            None => soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance),
+        };
+
+        // Invariant: remaining allowance must be non-negative
+        debug_assert!(remaining_allowance >= 0);
+        // Invariant: remaining allowance must be less than original
+        debug_assert!(remaining_allowance < allowance);
+
         // Preserve the original expiration
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
-        Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
-        let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
-        events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
+        Self::write_allowance(&env, &from, &spender, remaining_allowance, allowance_info.exp_ledger);
+        events::emit_transfer_from(&env, &spender, &from, &to, amount, remaining_allowance);
     }
 
     fn burn(env: Env, from: Address, amount: i128) {
@@ -638,11 +698,29 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
-        let new_balance = balance - amount;
+        // Use checked subtraction to prevent underflow
+        let new_balance = match balance.checked_sub(amount) {
+            Some(new_bal) => new_bal,
+            None => soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance),
+        };
+
+        let current_supply = Self::read_supply(&env);
+        // Use checked subtraction to prevent underflow on supply
+        let new_supply = match current_supply.checked_sub(amount) {
+            Some(new_sup) => new_sup,
+            None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
+        };
+
+        // Invariant: new_balance must be non-negative
+        debug_assert!(new_balance >= 0);
+        // Invariant: new_supply must be non-negative
+        debug_assert!(new_supply >= 0);
+        // Invariant: supply decreases by exactly the amount burned
+        debug_assert_eq!(current_supply - new_supply, amount);
+
         Self::write_balance(&env, &from, new_balance);
-        let supply = Self::read_supply(&env) - amount;
-        Self::write_supply(&env, supply);
-        events::emit_burn(&env, &from, amount, new_balance, supply);
+        Self::write_supply(&env, new_supply);
+        events::emit_burn(&env, &from, amount, new_balance, new_supply);
     }
 
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -664,14 +742,39 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
+        // Use checked subtraction for allowance
+        let remaining_allowance = match allowance.checked_sub(amount) {
+            Some(remaining) => remaining,
+            None => soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance),
+        };
+
         // Preserve the original expiration
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
-        Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
-        Self::write_balance(&env, &from, balance - amount);
-        let supply = Self::read_supply(&env) - amount;
-        Self::write_supply(&env, supply);
-        events::emit_burn(&env, &from, amount, balance - amount, supply);
+        Self::write_allowance(&env, &from, &spender, remaining_allowance, allowance_info.exp_ledger);
+
+        // Use checked subtraction for balance
+        let new_balance = match balance.checked_sub(amount) {
+            Some(new_bal) => new_bal,
+            None => soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance),
+        };
+
+        let current_supply = Self::read_supply(&env);
+        // Use checked subtraction for supply
+        let new_supply = match current_supply.checked_sub(amount) {
+            Some(new_sup) => new_sup,
+            None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
+        };
+
+        // Invariant checks
+        debug_assert!(remaining_allowance >= 0);
+        debug_assert!(new_balance >= 0);
+        debug_assert!(new_supply >= 0);
+        debug_assert_eq!(current_supply - new_supply, amount);
+        debug_assert!(remaining_allowance < allowance);
+
+        Self::write_balance(&env, &from, new_balance);
+        Self::write_supply(&env, new_supply);
+        events::emit_burn(&env, &from, amount, new_balance, new_supply);
     }
 
     fn decimals(env: Env) -> u32 {
