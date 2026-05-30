@@ -251,6 +251,45 @@ export class bcForgeClient {
   }
 
   /**
+   * Freeze a specific address. Admin-only.
+   *
+   * @param address - Address to freeze
+   * @param source  - Admin keypair
+   */
+  async freezeAddress(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'freeze_address',
+      [addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Unfreeze a specific address. Admin-only.
+   *
+   * @param address - Address to unfreeze
+   * @param source  - Admin keypair
+   */
+  async unfreezeAddress(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'unfreeze_address',
+      [addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Check whether a specific address is frozen.
+   *
+   * @param address - Address to query
+   * @returns True if the address is frozen or if transfers are globally frozen
+   */
+  async isFrozen(address: string): Promise<boolean> {
+    const result = await this.queryContract('is_frozen', [addressToScVal(address)]);
+    return scValToNative(result) as boolean;
+  }
+
+  /**
    * Approve a spender to use tokens on your behalf.
    *
    * @param from    - Token owner

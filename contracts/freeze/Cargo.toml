@@ -1,0 +1,22 @@
+[package]
+name = "bc-forge-freeze"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Freeze blacklist primitives for bc-forge token contracts"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+keywords = ["soroban", "freeze", "token", "control"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+soroban-sdk = "22.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+
+[features]
+testutils = ["soroban-sdk/testutils"]
