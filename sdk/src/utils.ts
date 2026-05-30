@@ -16,6 +16,7 @@ import {
 } from '@stellar/stellar-sdk';
 
 import { SimulationError, TransactionSubmissionError, TransactionTimeoutError } from './errors';
+import { errorFromSendResponse, IdempotencyTracker } from './retry';
 
 /**
  * Builds an `invokeHostFunction` transaction for a Soroban contract call.
@@ -35,6 +36,8 @@ export async function buildInvokeTransaction(
   method: string,
   args: xdr.ScVal[],
   sourceKeypair: Keypair,
+  /** Inclusion fee in stroops. Defaults to '100'. Bump this on tx_insufficient_fee. */
+  inclusionFee: string = '100',
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
   const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
@@ -42,7 +45,7 @@ export async function buildInvokeTransaction(
   const contract = new Contract(contractId);
 
   const tx = new TransactionBuilder(sourceAccount, {
-    fee: '100',
+    fee: inclusionFee,
     networkPassphrase,
   })
     .addOperation(contract.call(method, ...args))
@@ -65,24 +68,31 @@ export async function buildInvokeTransaction(
 /**
  * Submits a signed transaction XDR to the Soroban RPC and waits for confirmation.
  *
- * @param rpcUrl  - The Soroban RPC endpoint URL.
- * @param txXdr   - The signed transaction in XDR format.
+ * Throws typed errors (TxTooLateError, InsufficientFeeError, BadSequenceError)
+ * so that `executeWithRetry` can classify and handle each failure mode.
+ *
+ * @param rpcUrl   - The Soroban RPC endpoint URL.
+ * @param txXdr    - The signed transaction in XDR format.
+ * @param tracker  - Optional idempotency tracker for the current retry session.
+ * @param networkPassphrase - Network passphrase for XDR parsing (defaults to TESTNET).
  * @returns The transaction result from the ledger.
  */
 export async function submitTransaction(
   rpcUrl: string,
   txXdr: string,
+  tracker?: IdempotencyTracker,
+  networkPassphrase: string = Networks.TESTNET,
 ): Promise<SorobanRpc.Api.GetTransactionResponse> {
   const server = new SorobanRpc.Server(rpcUrl);
-  const tx = TransactionBuilder.fromXDR(txXdr, Networks.TESTNET);
+  const tx = TransactionBuilder.fromXDR(txXdr, networkPassphrase);
 
   const sendResponse = await server.sendTransaction(tx);
 
   if (sendResponse.status === 'ERROR') {
-    throw new TransactionSubmissionError(
-      `Transaction submission failed: ${sendResponse.errorResult}`,
-    );
+    throw errorFromSendResponse(sendResponse);
   }
+
+  tracker?.record(sendResponse.hash);
 
   // Poll for completion
   let getResponse: SorobanRpc.Api.GetTransactionResponse;

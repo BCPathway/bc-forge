@@ -29,6 +29,13 @@ import {
 } from './utils';
 
 import { SimulationError, RPCError } from './errors';
+import {
+  RetryPolicy,
+  DEFAULT_RETRY_POLICY,
+  executeWithRetry,
+  estimateBaseFee,
+  IdempotencyTracker,
+} from './retry';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +46,12 @@ export interface bcForgeClientConfig {
   networkPassphrase: string;
   /** Deployed bc-forge token contract ID */
   contractId: string;
+  /**
+   * Retry policy for write transactions.
+   * Partial overrides are merged with DEFAULT_RETRY_POLICY.
+   * Set `maxAttempts: 1` to disable retries entirely.
+   */
+  retryPolicy?: Partial<RetryPolicy>;
 }
 
 export interface TransactionResult {
@@ -65,6 +78,7 @@ export class bcForgeClient {
   private contractId: string;
   private server: SorobanRpc.Server;
   private contract: Contract;
+  private retryPolicy: RetryPolicy;
 
   constructor(config: bcForgeClientConfig) {
     this.rpcUrl = config.rpcUrl;
@@ -72,6 +86,7 @@ export class bcForgeClient {
     this.contractId = config.contractId;
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
+    this.retryPolicy = { ...DEFAULT_RETRY_POLICY, ...(config.retryPolicy ?? {}) };
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
@@ -648,30 +663,12 @@ export class bcForgeClient {
   // ─── Internal Helpers ────────────────────────────────────────────────────
 
   /**
-   * Internal helper to execute a task with retries.
-   */
-  private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
-    let lastError: any;
-    for (let i = 0; i < retries; i++) {
-      try {
-        return await fn();
-      } catch (error) {
-        lastError = error;
-        // Only retry on certain errors (e.g., network/RPC errors)
-        // For now, we retry on any error that isn't a known terminal error
-        if (i < retries - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
-        }
-      }
-    }
-    throw lastError;
-  }
-
-  /**
    * Simulates a read-only contract call (no transaction submission).
+   * Uses a simple 3-attempt retry for transient RPC failures.
    */
   private async queryContract(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
-    return this.withRetry(async () => {
+    let lastError: any;
+    for (let i = 0; i < 3; i++) {
       try {
         const account = new (await import('@stellar/stellar-sdk')).Account(
           'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
@@ -699,49 +696,52 @@ export class bcForgeClient {
         return simulated.result.retval;
       } catch (error: any) {
         if (error instanceof SimulationError) throw error;
-        throw new RPCError('RPC call failed', error);
+        lastError = new RPCError('RPC call failed', error);
+        if (i < 2) await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
       }
-    });
+    }
+    throw lastError;
   }
 
   /**
-   * Builds, signs, submits, and polls a contract invocation transaction.
+   * Builds, signs, submits, and polls a contract invocation transaction with
+   * automatic retry, fee bumping, and nonce management via `executeWithRetry`.
    */
   private async invokeContract(
     method: string,
     args: xdr.ScVal[],
     source: Keypair,
   ): Promise<TransactionResult> {
-    return this.withRetry(async () => {
-      try {
-        const txXdr = await buildInvokeTransaction(
+    const initialFee = await estimateBaseFee(this.server);
+
+    const response = await executeWithRetry({
+      policy: this.retryPolicy,
+      initialFee,
+      buildTx: (fee) =>
+        buildInvokeTransaction(
           this.rpcUrl,
           this.networkPassphrase,
           this.contractId,
           method,
           args,
           source,
-        );
-
-        const response = await submitTransaction(this.rpcUrl, txXdr);
-
-        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-          return {
-            success: true,
-            hash: (response as any).hash,
-            returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
-          };
-        }
-
-        return {
-          success: false,
-          hash: (response as any).hash,
-        };
-      } catch (error: any) {
-        // Don't retry on simulation errors (usually logic errors)
-        if (error instanceof SimulationError) throw error;
-        throw error;
-      }
+          fee,
+        ),
+      submitTx: (txXdr, tracker: IdempotencyTracker) =>
+        submitTransaction(this.rpcUrl, txXdr, tracker, this.networkPassphrase),
     });
+
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: (response as any).hash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+
+    return {
+      success: false,
+      hash: (response as any).hash,
+    };
   }
 }
