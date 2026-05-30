@@ -24,3 +24,30 @@ export { buildInvokeTransaction, submitTransaction, scValToNative } from './util
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
 export * from './mockClient';
+
+// Retry / fee-bumping
+export {
+  DEFAULT_RETRY_POLICY,
+  executeWithRetry,
+  estimateBaseFee,
+  bumpFee,
+  classifyTxError,
+  isTransientError,
+  calculateBackoffDelay,
+  IdempotencyTracker,
+} from './retry';
+export type { RetryPolicy, SorobanTxErrorCode, RetryExecutorOptions } from './retry';
+
+// Extended error taxonomy
+export {
+  bcForgeError,
+  SimulationError,
+  TransactionSubmissionError,
+  TransactionTimeoutError,
+  RPCError,
+  TxTooLateError,
+  InsufficientFeeError,
+  BadSequenceError,
+  MaxRetriesExceededError,
+  FeeLimitExceededError,
+} from './errors';

@@ -51,3 +51,66 @@ export class RPCError extends bcForgeError {
     this.name = 'RPCError';
   }
 }
+
+// ─── Soroban Transaction Error Taxonomy ──────────────────────────────────────
+
+/**
+ * Thrown when a transaction is rejected because it arrived after its
+ * validity window closed (tx_too_late / txTOO_LATE).
+ */
+export class TxTooLateError extends bcForgeError {
+  readonly code = 'tx_too_late';
+  constructor(message: string, public readonly hash?: string) {
+    super(message);
+    this.name = 'TxTooLateError';
+  }
+}
+
+/**
+ * Thrown when the transaction fee is below the current network minimum
+ * (tx_insufficient_fee / txINSUFFICIENT_FEE).
+ */
+export class InsufficientFeeError extends bcForgeError {
+  readonly code = 'tx_insufficient_fee';
+  constructor(message: string, public readonly hash?: string) {
+    super(message);
+    this.name = 'InsufficientFeeError';
+  }
+}
+
+/**
+ * Thrown when the transaction sequence number does not match the account's
+ * current sequence (tx_bad_seq / txBAD_SEQ).
+ */
+export class BadSequenceError extends bcForgeError {
+  readonly code = 'tx_bad_seq';
+  constructor(message: string) {
+    super(message);
+    this.name = 'BadSequenceError';
+  }
+}
+
+/**
+ * Thrown when all retry attempts are exhausted without a successful result.
+ */
+export class MaxRetriesExceededError extends bcForgeError {
+  constructor(
+    message: string,
+    public readonly attempts: number,
+    public readonly lastError?: Error,
+  ) {
+    super(message);
+    this.name = 'MaxRetriesExceededError';
+  }
+}
+
+/**
+ * Thrown when a fee bump is blocked because the fee has already reached
+ * the configured maxFeeStroops cap.
+ */
+export class FeeLimitExceededError extends bcForgeError {
+  constructor(message: string, public readonly currentFee: string) {
+    super(message);
+    this.name = 'FeeLimitExceededError';
+  }
+}
