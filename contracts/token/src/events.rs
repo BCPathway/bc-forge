@@ -137,7 +137,11 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
         .publish((symbol_short!("unlock"),), (user.clone(), amount));
 }
 
-/// Emitted when the contract is upgraded.
+/// Emitted when a snapshot is created.
+pub fn emit_snapshot_created(env: &Env, snapshot_id: u64) {
+    env.events().publish((symbol_short!("snapshot_created"),), (snapshot_id,));
+}
+
 pub fn emit_upgrade(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
     env.events().publish(
         (symbol_short!("upgrade"),),

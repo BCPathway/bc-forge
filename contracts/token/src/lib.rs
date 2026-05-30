@@ -36,6 +36,12 @@ pub enum DataKey {
     ClawbackAdmin,
     Lockup(Address),
     ProposalAction(u64),
+    // Snapshot support
+    SnapshotCounter,
+    SnapshotBalances(u64, Address),
+    ActiveSnapshots,
+    BalanceHolders,
+
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -131,6 +137,82 @@ impl BcForgeToken {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(id.clone()), &balance);
+        // Track address as a balance holder for snapshots
+        Self::add_balance_holder(env, id);
+    }
+
+    // ---------- Snapshot Helpers ----------
+    fn read_snapshot_counter(env: &Env) -> u64 {
+        env.storage().persistent().get(&DataKey::SnapshotCounter).unwrap_or(0)
+    }
+
+    fn write_snapshot_counter(env: &Env, counter: u64) {
+        env.storage().persistent().set(&DataKey::SnapshotCounter, &counter);
+    }
+
+    fn read_active_snapshots(env: &Env) -> Vec<u64> {
+        env.storage().persistent().get(&DataKey::ActiveSnapshots).unwrap_or(Vec::new(&env))
+    }
+
+    fn write_active_snapshots(env: &Env, snapshots: Vec<u64>) {
+        env.storage().persistent().set(&DataKey::ActiveSnapshots, &snapshots);
+    }
+
+    fn read_balance_holders(env: &Env) -> Vec<Address> {
+        env.storage().persistent().get(&DataKey::BalanceHolders).unwrap_or(Vec::new(&env))
+    }
+
+    fn write_balance_holders(env: &Env, holders: Vec<Address>) {
+        env.storage().persistent().set(&DataKey::BalanceHolders, &holders);
+    }
+
+    fn add_balance_holder(env: &Env, address: &Address) {
+        let mut holders = Self::read_balance_holders(env);
+        // Simple linear check
+        let mut exists = false;
+        for h in holders.iter() {
+            if h == address {
+                exists = true;
+                break;
+            }
+        }
+        if !exists {
+            holders.push_back(address.clone());
+            Self::write_balance_holders(env, holders);
+        }
+    }
+
+    const MAX_SNAPSHOTS: u32 = 10;
+
+    pub fn create_snapshot(env: Env) -> u64 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        let mut counter = Self::read_snapshot_counter(&env) + 1;
+        // Record balances for all holders
+        let holders = Self::read_balance_holders(env);
+        for addr in holders.iter() {
+            let bal = Self::read_balance(&env, addr);
+            env.storage().persistent().set(&DataKey::SnapshotBalances(counter, addr.clone()), &bal);
+        }
+        // Update active snapshots list
+        let mut active = Self::read_active_snapshots(&env);
+        active.push_back(counter);
+        // Prune old snapshots if exceed limit
+        while active.len() > Self::MAX_SNAPSHOTS as usize {
+            if let Some(old_id) = active.front() {
+                for addr in holders.iter() {
+                    env.storage().persistent().remove(&DataKey::SnapshotBalances(*old_id, addr.clone()));
+                }
+                active.pop_front();
+            }
+        }
+        Self::write_active_snapshots(&env, active);
+        Self::write_snapshot_counter(&env, counter);
+        events::emit_snapshot_created(&env, counter);
+        counter
+    }
+
+    pub fn balance_at_snapshot(env: Env, address: Address, snapshot_id: u64) -> i128 {
+        env.storage().persistent().get(&DataKey::SnapshotBalances(snapshot_id, address)).unwrap_or(0)
     }
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
