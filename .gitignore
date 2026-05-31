@@ -1,7 +1,7 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is tracked to ensure reproducible WASM builds
 
 # Soroban compiled output
 *.wasm
