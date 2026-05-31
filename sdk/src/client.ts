@@ -723,7 +723,7 @@ export class bcForgeClient {
           source,
         );
 
-        const response = await submitTransaction(this.rpcUrl, txXdr);
+        const response = await submitTransaction(this.rpcUrl, txXdr, this.networkPassphrase);
 
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {
