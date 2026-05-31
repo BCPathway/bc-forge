@@ -15,6 +15,10 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **Total Supply Tracking** — Accurate supply updated on every mint/burn
 - **TypeScript SDK** — High-level client for all contract interactions
 - **Modular Architecture** — Separate crates for admin, lifecycle, and token logic
+- **Reentrancy Protection** — Comprehensive reentrancy guards for all state-modifying functions
+- **Rate Limiting** — Configurable global and per-address rate limits for mint and transfer operations
+- **Property-Based Fuzz Testing** — Enhanced proptest framework for invariant verification
+- **End-to-End Integration Tests** — Complete lifecycle testing on Stellar testnet
 
 ## 📁 Project Structure
 
@@ -27,12 +31,22 @@ bc-forge/
 │   ├── lifecycle/                # Pause/unpause lifecycle module
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
+│   ├── rate-limit/             # Rate limiting module
+│   │   ├── Cargo.toml
+│   │   └── src/lib.rs
 │   └── token/                    # Core SEP-41 token contract
 │       ├── Cargo.toml
 │       └── src/
 │           ├── lib.rs            # Token contract implementation
 │           ├── events.rs         # Structured event emissions
+│           ├── proptest.rs       # Property-based fuzz testing
+│           ├── reentrancy_guard.rs # Reentrancy protection
+│           ├── rate_limit.rs     # Rate limit integration
 │           └── test.rs           # Unit tests
+├── e2e/                          # End-to-end integration tests
+│   ├── Cargo.toml              # E2E test dependencies
+│   ├── integration_test.rs     # Integration test suite
+│   └── README.md               # E2E test documentation
 ├── sdk/                          # TypeScript SDK
 │   ├── src/
 │   │   ├── index.ts              # Entry point
