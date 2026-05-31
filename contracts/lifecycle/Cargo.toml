@@ -15,6 +15,10 @@ rust-version.workspace = true
 readme = "../../README.md"
 publish = false
 description = "Pause/unpause lifecycle management for bc-forge contracts"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+keywords = ["soroban", "stellar", "smart-contract", "lifecycle", "pausable"]
+categories = ["cryptography::cryptocurrencies"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

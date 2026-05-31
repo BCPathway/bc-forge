@@ -3,12 +3,12 @@
  */
 
 import { bcForgeClient } from './client';
-import { Keypair, Networks } from '@stellar/stellar-sdk';
+import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
 
 // Mock data for testing
 const MOCK_RPC_URL = 'https://soroban-testnet.stellar.org';
 const MOCK_NETWORK = Networks.TESTNET;
-const MOCK_CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABK4I';
+const MOCK_CONTRACT_ID = 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526';
 
 describe('bcForgeClient Offline Transaction Builders', () => {
   let client: bcForgeClient;
@@ -27,8 +27,6 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     it('should build an unsigned mint transaction XDR', async () => {
       // This test would require mocking the RPC server
       // For now, we're testing the method signature and structure
-      const toAddress = Keypair.random().publicKey();
-      const amount = BigInt(1000);
 
       // The actual call would fail without a real RPC server
       // In production, you would mock the server.getResponse
@@ -37,12 +35,49 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     });
   });
 
+  describe('batchMint', () => {
+    it('should invoke batch_mint with object recipients', async () => {
+      const recipientA = Keypair.random().publicKey();
+      const recipientB = Keypair.random().publicKey();
+      const invokeContract = jest.fn().mockResolvedValue({
+        success: true,
+        hash: 'mock-hash',
+        returnValue: null,
+      });
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
+
+      await client.batchMint(
+        [
+          { to: recipientA, amount: 100n },
+          { to: recipientB, amount: 250n },
+        ],
+        adminKeypair,
+      );
+
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, args, source] = invokeContract.mock.calls[0];
+      expect(method).toBe('batch_mint');
+      expect(args).toHaveLength(1);
+      expect(source).toBe(adminKeypair);
+
+      const recipientsVec = args[0] as xdr.ScVal;
+      const recipients = recipientsVec.vec();
+      if (recipients === null) {
+        throw new Error('Expected batch_mint argument to be an ScVal vec');
+      }
+      expect(recipients).toHaveLength(2);
+      const firstRecipient = recipients[0].map();
+      if (firstRecipient === null) {
+        throw new Error('Expected batch_mint recipients to be ScVal maps');
+      }
+      expect(firstRecipient[0].key().sym().toString()).toBe('address');
+      expect(firstRecipient[1].key().sym().toString()).toBe('amount');
+    });
+  });
+
   describe('buildTransferTx', () => {
     it('should build an unsigned transfer transaction XDR', async () => {
-      const fromAddress = Keypair.random().publicKey();
-      const toAddress = Keypair.random().publicKey();
-      const amount = BigInt(500);
-
       expect(typeof client.buildTransferTx).toBe('function');
       expect(client.buildTransferTx.length).toBe(4); // 4 parameters
     });
@@ -50,11 +85,6 @@ describe('bcForgeClient Offline Transaction Builders', () => {
 
   describe('buildApproveTx', () => {
     it('should build an unsigned approve transaction XDR', async () => {
-      const fromAddress = Keypair.random().publicKey();
-      const spenderAddress = Keypair.random().publicKey();
-      const amount = BigInt(1000);
-      const exp = 1000000;
-
       expect(typeof client.buildApproveTx).toBe('function');
       expect(client.buildApproveTx.length).toBe(5); // 5 parameters
     });
@@ -62,9 +92,6 @@ describe('bcForgeClient Offline Transaction Builders', () => {
 
   describe('buildBurnTx', () => {
     it('should build an unsigned burn transaction XDR', async () => {
-      const fromAddress = Keypair.random().publicKey();
-      const amount = BigInt(200);
-
       expect(typeof client.buildBurnTx).toBe('function');
       expect(client.buildBurnTx.length).toBe(3); // 3 parameters
     });
@@ -74,8 +101,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     it('should sign a transaction XDR', () => {
       // Create a mock unsigned transaction XDR (simplified for testing)
       // In production, this would be a real XDR from buildMintTx, etc.
-      const mockXdr = 'AAAAAgAAAAB7NXRFP5sGdM0P6T0qMvqN0k3jTmGmZ3K7hE6m8Y1V5gAAAGQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
-      
+
       expect(typeof client.signTx).toBe('function');
       expect(client.signTx.length).toBe(2); // 2 parameters
     });
