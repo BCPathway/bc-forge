@@ -3,7 +3,7 @@
 //! Structured event emission for all token contract operations.
 //! Events are emitted to the ledger for indexing by off-chain services.
 
-use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, Symbol, String};
 
 /// Emitted when the token contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
@@ -137,11 +137,41 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
         .publish((symbol_short!("unlock"),), (user.clone(), amount));
 }
 
-/// Emitted when the contract is upgraded.
-pub fn emit_upgrade(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
+/// Emitted when an upgrade is scheduled (with a deadline ledger).
+pub fn emit_upgrade_scheduled(
+    env: &Env,
+    admin: &Address,
+    new_wasm_hash: &BytesN<32>,
+    deadline_ledger: u32,
+) {
     env.events().publish(
-        (symbol_short!("upgrade"),),
-        (admin.clone(), new_wasm_hash.clone()),
+        (symbol_short!("up_sched"),),
+        (
+            admin.clone(),
+            new_wasm_hash.clone(),
+            deadline_ledger,
+        ),
+    );
+}
+
+/// Emitted when a pending upgrade is executed.
+pub fn emit_upgrade_executed(env: &Env, new_wasm_hash: &BytesN<32>) {
+    env.events().publish(
+        (symbol_short!("up_exec"),),
+        (new_wasm_hash.clone(),),
+    );
+}
+
+/// Emitted after a successful storage migration.
+pub fn emit_migrated(
+    env: &Env,
+    admin: &Address,
+    old_version: u32,
+    new_version: u32,
+) {
+    env.events().publish(
+        (Symbol::new(env, "migrated"),),
+        (admin.clone(), old_version, new_version),
     );
 }
 

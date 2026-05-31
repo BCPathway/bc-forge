@@ -6,7 +6,6 @@
   "auth": [
     [],
     [],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -14,17 +13,10 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "grant_role",
+              "function_name": "upgrade",
               "args": [
                 {
-                  "vec": [
-                    {
-                      "symbol": "Minter"
-                    }
-                  ]
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "bytes": "abababababababababababababababababababababababababababababababab"
                 }
               ]
             }
@@ -49,34 +41,8 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500
                   }
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "revoke_role",
-              "args": [
-                {
-                  "vec": [
-                    {
-                      "symbol": "Minter"
-                    }
-                  ]
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 }
               ]
             }
@@ -89,7 +55,7 @@
   ],
   "ledger": {
     "protocol_version": 22,
-    "sequence_number": 0,
+    "sequence_number": 5001,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
@@ -135,14 +101,14 @@
                 "val": {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 500
                   }
                 }
               }
             },
             "ext": "v0"
           },
-          99999
+          105000
         ]
       ],
       [
@@ -267,6 +233,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "PendingUpgradeHash"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bytes": "abababababababababababababababababababababababababababababababab"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Supply"
                             }
                           ]
@@ -274,7 +252,7 @@
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 100
+                            "lo": 500
                           }
                         }
                       },
@@ -288,6 +266,18 @@
                         },
                         "val": {
                           "string": "SFG"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "UpgradeDeadline"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 5000
                         }
                       }
                     ]
@@ -339,39 +329,6 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "ledger_key_nonce": {
-                "nonce": 1033654523790656264
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 1033654523790656264
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          100000
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-            "key": {
-              "ledger_key_nonce": {
                 "nonce": 5541220902715666415
               }
             },
@@ -396,7 +353,7 @@
             },
             "ext": "v0"
           },
-          100000
+          105001
         ]
       ],
       [

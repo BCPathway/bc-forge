@@ -273,15 +273,51 @@ await client.setAdminPool(adminPool, threshold, adminKeypair);
 console.log('Admin pool configured');
 ```
 
-## Upgrading the Contract
+## Upgrading the Contract (Two-Phase)
+
+The contract uses a two-phase upgrade mechanism with a time-lock delay for governance safety:
+
+1. **Schedule** — Admin calls `upgrade(newWasmHash)` to schedule the upgrade with a time-lock delay.
+2. **Execute** — After the delay (~5000 ledgers, ~7 hours), anyone can call `executeUpgrade()` to replace the contract WASM.
+3. **Migrate** — Admin calls `migrate(version)` to update the on-chain version number (must strictly increase).
 
 ```typescript
 const adminKeypair = Keypair.fromSecret('SXXX...SECRET');
 
-// Upgrade to new WASM hash
+// Phase 1: Schedule the upgrade (admin-only)
 const newWasmHash = 'a1b2c3d4e5f6...'; // 32-byte hex string
 await client.upgrade(newWasmHash, adminKeypair);
-console.log('Contract upgraded');
+console.log('Upgrade scheduled');
+
+// Wait for the time-lock delay to elapse (~5000 ledgers)
+
+// Phase 2: Execute the upgrade (anyone can call after delay)
+await client.executeUpgrade(adminKeypair);
+console.log('Upgrade executed');
+
+// Phase 3: Migrate the contract version (admin-only)
+await client.migrate(2, adminKeypair);
+console.log('Migrated to version 2');
+```
+
+### Upgrade via Multi-Sig
+
+```typescript
+// Propose an upgrade action (supports multi-sig approval)
+const newWasmHash = 'a1b2c3d4e5f6...';
+await client.proposeAction(
+  adminKeypair.publicKey(),
+  { Upgrade: [newWasmHash] },
+  'Upgrade contract to v2',
+  adminKeypair,
+);
+```
+
+### Checking Contract Version
+
+```typescript
+const versionString = await client.getVersion();         // e.g. "2.0.0"
+const versionNumber = await client.getContractVersion(); // e.g. 2
 ```
 
 ## Multi-Sig Proposals
@@ -392,7 +428,8 @@ await client.unpause(adminKeypair);
 | `getSymbol()` | `string` | Token symbol |
 | `getDecimals()` | `number` | Decimal places |
 | `getAllowance(owner, spender)` | `bigint` | Spending allowance |
-| `getVersion()` | `string` | Contract version |
+| `getVersion()` | `string` | Contract version string |
+| `getContractVersion()` | `number` | Contract version number |
 | `getBalances(addresses[], batchSize)` | `bigint[]` | Batch query multiple balances |
 | `getEvents(startLedger?)` | `any[]` | Get contract events |
 
@@ -410,7 +447,9 @@ await client.unpause(adminKeypair);
 | `pause(source)` | Pause contract (admin-only) |
 | `unpause(source)` | Unpause contract (admin-only) |
 | `setAdminPool(pool[], threshold, source)` | Configure multi-sig admin pool |
-| `upgrade(newWasmHash, source)` | Upgrade contract WASM (admin-only) |
+| `upgrade(newWasmHash, source)` | Schedule contract WASM upgrade with time-lock (admin-only) |
+| `executeUpgrade(source)` | Execute pending upgrade after time-lock delay (anyone) |
+| `migrate(version, source)` | Update contract version number after upgrade (admin-only) |
 | `proposeAction(admin, action, description, source)` | Propose multi-sig action |
 | `approveProposal(admin, proposalId, source)` | Approve a proposal |
 | `executeProposal(proposalId, source)` | Execute approved proposal |

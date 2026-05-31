@@ -20,6 +20,9 @@ export enum bcForgeEventType {
   CLAWBACK = 'clawback',
   LOCKED = 'lock',
   WITHDRAW_LOCKED = 'unlock',
+  UPGRADE_SCHEDULED = 'upgrade_sched',
+  UPGRADE_EXECUTED = 'upgrade_exec',
+  MIGRATED = 'migrated',
 }
 
 /**

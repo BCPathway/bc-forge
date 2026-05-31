@@ -17,15 +17,13 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
 };
 
+const UPGRADE_DELAY_LEDGERS: u32 = 5000;
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// The contract admin address (singular).
     Admin,
     PendingAdmin,
-    /// Spending allowance: (owner, spender) → amount and expiration.
-    Allowance(Address, Address),
-    /// Token balance for an address.
     Allowance(Address, Address),
     AllowanceExp(Address, Address),
     Balance(Address),
@@ -36,6 +34,9 @@ pub enum DataKey {
     ClawbackAdmin,
     Lockup(Address),
     ProposalAction(u64),
+    ContractVersion,
+    PendingUpgradeHash,
+    UpgradeDeadline,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +61,7 @@ pub enum TokenAction {
     Mint(Address, i128),
     Pause,
     Unpause,
+    Upgrade(BytesN<32>),
 }
 
 #[derive(Clone)]
@@ -138,30 +140,15 @@ impl BcForgeToken {
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 });
-        
-        // Check if allowance has expired
+
         if allowance_info.exp_ledger > 0 {
-            let current_ledger = env.ledger().sequence();
-            if current_ledger > allowance_info.exp_ledger as u64 {
-                return 0; // Allowance expired
-            }
-        }
-        
-        allowance_info.amount
-        if let Some(exp_ledger) = env
-            .storage()
-            .persistent()
-            .get::<_, u32>(&DataKey::AllowanceExp(from.clone(), spender.clone()))
-        {
-            if exp_ledger > 0 && env.ledger().sequence() > exp_ledger {
+            let current_ledger: u32 = env.ledger().sequence();
+            if current_ledger > allowance_info.exp_ledger {
                 return 0;
             }
         }
 
-        env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(0)
+        allowance_info.amount
     }
 
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
@@ -171,16 +158,11 @@ impl BcForgeToken {
             .set(&DataKey::Allowance(from.clone(), spender.clone()), &allowance_info);
     }
 
-    /// Reads the full allowance info for (owner → spender), defaulting to zero allowance with no expiration.
     fn read_allowance_info(env: &Env, from: &Address, spender: &Address) -> AllowanceInfo {
         env.storage()
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
     }
 
     fn move_balance(
@@ -370,6 +352,9 @@ impl BcForgeToken {
                 bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
                 events::emit_unpaused(&env, &current_admin);
             }
+            TokenAction::Upgrade(new_wasm_hash) => {
+                let _ = Self::upgrade(env.clone(), new_wasm_hash);
+            }
         }
         env.storage()
             .instance()
@@ -529,14 +514,73 @@ impl BcForgeToken {
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
-        env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
-        events::emit_upgrade(&env, &current_admin, &new_wasm_hash);
+        let deadline = (env.ledger().sequence() as u32) + UPGRADE_DELAY_LEDGERS;
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingUpgradeHash, &new_wasm_hash);
+        env.storage()
+            .instance()
+            .set(&DataKey::UpgradeDeadline, &deadline);
+        events::emit_upgrade_scheduled(&env, &current_admin, &new_wasm_hash, deadline);
         Ok(())
     }
 
+    pub fn execute_upgrade(env: Env) -> Result<(), TokenError> {
+        let pending_hash: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingUpgradeHash)
+            .ok_or(TokenError::NotInitialized)?;
+        let deadline: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UpgradeDeadline)
+            .ok_or(TokenError::NotInitialized)?;
+        if (env.ledger().sequence() as u32) < deadline {
+            panic!("upgrade deadline not yet reached");
+        }
+        env.deployer()
+            .update_current_contract_wasm(pending_hash.clone());
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingUpgradeHash);
+        env.storage()
+            .instance()
+            .remove(&DataKey::UpgradeDeadline);
+        events::emit_upgrade_executed(&env, &pending_hash);
+        Ok(())
+    }
+
+    pub fn migrate(env: Env, version: u32) -> Result<(), TokenError> {
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+        if env.storage().instance().has(&DataKey::PendingUpgradeHash) {
+            panic!("execute pending upgrade before migration");
+        }
+        let current_version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractVersion)
+            .unwrap_or(0);
+        if version <= current_version {
+            panic!("version must be greater than current version");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractVersion, &version);
+        events::emit_migrated(&env, &current_admin, current_version, version);
+        Ok(())
+    }
+
+    pub fn contract_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractVersion)
+            .unwrap_or(0)
+    }
+
     pub fn version(env: Env) -> String {
-        String::from_str(&env, "1.1.0")
+        String::from_str(&env, "2.0.0")
     }
 
     pub fn update_name(env: Env, new_name: String) -> Result<(), TokenError> {
@@ -615,12 +659,9 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
-        Self::move_balance(&env, &from, &to, amount);
-        // Preserve the original expiration
+        let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
         Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
-        let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
     }
 
@@ -664,10 +705,8 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
-        // Preserve the original expiration
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
         Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         Self::write_balance(&env, &from, balance - amount);
         let supply = Self::read_supply(&env) - amount;
         Self::write_supply(&env, supply);

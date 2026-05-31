@@ -5,34 +5,7 @@
   },
   "auth": [
     [],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "initialize",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "u32": 7
-                },
-                {
-                  "string": "bc-forge Token"
-                },
-                {
-                  "string": "SFG"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -42,9 +15,6 @@
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "function_name": "mint",
               "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
@@ -79,7 +49,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 400
+                    "lo": 300
                   }
                 }
               ]
@@ -99,9 +69,9 @@
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
-    "min_persistent_entry_ttl": 4096,
+    "min_persistent_entry_ttl": 100000,
     "min_temp_entry_ttl": 16,
-    "max_entry_ttl": 6312000,
+    "max_entry_ttl": 100001,
     "ledger_entries": [
       [
         {
@@ -141,14 +111,14 @@
                 "val": {
                   "i128": {
                     "hi": 0,
-                    "lo": 600
+                    "lo": 700
                   }
                 }
               }
             },
             "ext": "v0"
           },
-          4095
+          99999
         ]
       ],
       [
@@ -189,14 +159,14 @@
                 "val": {
                   "i128": {
                     "hi": 0,
-                    "lo": 400
+                    "lo": 300
                   }
                 }
               }
             },
             "ext": "v0"
           },
-          4095
+          99999
         ]
       ],
       [
@@ -209,7 +179,11 @@
                   "symbol": "Role"
                 },
                 {
-                  "u32": 0
+                  "vec": [
+                    {
+                      "symbol": "Admin"
+                    }
+                  ]
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -232,7 +206,11 @@
                       "symbol": "Role"
                     },
                     {
-                      "u32": 0
+                      "vec": [
+                        {
+                          "symbol": "Admin"
+                        }
+                      ]
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -247,7 +225,7 @@
             },
             "ext": "v0"
           },
-          4095
+          99999
         ]
       ],
       [
@@ -343,7 +321,7 @@
             },
             "ext": "v0"
           },
-          4095
+          99999
         ]
       ],
       [
@@ -376,13 +354,13 @@
             },
             "ext": "v0"
           },
-          6311999
+          100000
         ]
       ],
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
             "key": {
               "ledger_key_nonce": {
                 "nonce": 5541220902715666415
@@ -397,7 +375,7 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 5541220902715666415
@@ -409,40 +387,7 @@
             },
             "ext": "v0"
           },
-          6311999
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": 1033654523790656264
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 1033654523790656264
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
+          100000
         ]
       ],
       [
@@ -463,7 +408,7 @@
             },
             "ext": "v0"
           },
-          4095
+          99999
         ]
       ]
     ]
