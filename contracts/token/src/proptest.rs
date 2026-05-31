@@ -20,7 +20,7 @@ fn setup_test_env() -> (Env, BcForgeTokenClient<'static>, Address) {
     let admin = Address::generate(&env);
     let name = String::from_str(&env, "PropTest Token");
     let symbol = String::from_str(&env, "PTT");
-    client.initialize(&admin, &7, &name, &symbol);
+    client.initialize(&admin, &7, &name, &symbol, &0);
     
     (env, client, admin)
 }

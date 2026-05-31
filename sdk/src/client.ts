@@ -140,6 +140,28 @@ export class bcForgeClient {
     return scValToNative(result) as string;
   }
 
+  /**
+   * Get the configured maximum supply cap.
+   *
+   * @returns Max supply as bigint, or null when no cap is configured.
+   */
+  async getMaxSupply(): Promise<bigint | null> {
+    const result = await this.queryContract('get_max_supply', []);
+    const native = scValToNative(result);
+    return native == null ? null : BigInt(native);
+  }
+
+  /**
+   * Get the remaining mintable amount under the current supply cap.
+   *
+   * @returns Remaining mintable amount as bigint, or null when no cap is configured.
+   */
+  async getRemainingMintable(): Promise<bigint | null> {
+    const result = await this.queryContract('remaining_mintable', []);
+    const native = scValToNative(result);
+    return native == null ? null : BigInt(native);
+  }
+
   // ─── Batch Queries ───────────────────────────────────────────────────────
 
   /**
@@ -187,10 +209,17 @@ export class bcForgeClient {
     name: string,
     symbol: string,
     source: Keypair,
+    maxSupply?: bigint,
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'initialize',
-      [addressToScVal(admin), u32ToScVal(decimals), stringToScVal(name), stringToScVal(symbol)],
+      [
+        addressToScVal(admin),
+        u32ToScVal(decimals),
+        stringToScVal(name),
+        stringToScVal(symbol),
+        i128ToScVal(maxSupply ?? 0n),
+      ],
       source,
     );
   }
@@ -204,6 +233,16 @@ export class bcForgeClient {
    */
   async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
+  }
+
+  /**
+   * Set the maximum mintable supply.
+   *
+   * @param newCap - New supply ceiling, or 0 to remove the cap.
+   * @param source - Admin keypair
+   */
+  async setMaxSupply(newCap: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('set_max_supply', [i128ToScVal(newCap)], source);
   }
 
   /**

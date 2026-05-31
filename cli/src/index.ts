@@ -55,6 +55,7 @@ program
   .requiredOption('--decimals <number>', 'Decimal places', '7')
   .requiredOption('--name <string>', 'Token name')
   .requiredOption('--symbol <string>', 'Token symbol')
+  .option('--max-supply <number>', 'Optional maximum supply cap')
   .action(async (options) => {
     try {
       const secret = getSecretKey();
@@ -62,6 +63,7 @@ program
       
       const source = Keypair.fromSecret(secret);
       const client = new bcForgeClient(getClientConfig());
+      const maxSupply = options.maxSupply ? BigInt(options.maxSupply) : undefined;
       
       console.log(chalk.yellow('Initializing contract...'));
       const result = await client.initialize(
@@ -69,7 +71,8 @@ program
         parseInt(options.decimals),
         options.name,
         options.symbol,
-        source
+        source,
+        maxSupply,
       );
       
       if (result.success) {

@@ -15,6 +15,7 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
         &7,
         &String::from_str(env, "bc-forge Token"),
         &String::from_str(env, "SFG"),
+        &0,
     );
 
     (client, admin)
@@ -34,6 +35,25 @@ fn test_transfer() {
     assert_eq!(client.balance(&from), 700);
     assert_eq!(client.balance(&to), 300);
     assert_eq!(client.supply(), 1000);
+}
+
+#[test]
+fn test_max_supply_cap_prevents_over_mint() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    client.set_max_supply(&1000);
+    assert_eq!(client.get_max_supply(), 1000);
+    assert_eq!(client.remaining_mintable(), Some(1000));
+
+    client.mint(&admin, &recipient, &800);
+    assert_eq!(client.remaining_mintable(), Some(200));
+    assert_eq!(client.supply(), 800);
+
+    assert_eq!(client.try_mint(&admin, &recipient, &300), Err(Ok(TokenError::MaxSupplyExceeded)));
+    assert_eq!(client.remaining_mintable(), Some(200));
 }
 
 #[test]
