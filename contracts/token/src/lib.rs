@@ -220,7 +220,8 @@ impl BcForgeToken {
         let admin = Self::read_admin(&env);
         admin.require_auth();
 
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
         events::emit_upgrade(&env, &admin, &new_wasm_hash);
     }
 
@@ -234,7 +235,8 @@ impl BcForgeToken {
         let admin = Self::read_admin(&env);
         admin.require_auth();
 
-        let old_name = env.storage()
+        let old_name = env
+            .storage()
             .instance()
             .get(&DataKey::Name)
             .unwrap_or_else(|| String::from_str(&env, "bc-forge"));
@@ -248,7 +250,8 @@ impl BcForgeToken {
         let admin = Self::read_admin(&env);
         admin.require_auth();
 
-        let old_symbol = env.storage()
+        let old_symbol = env
+            .storage()
             .instance()
             .get(&DataKey::Symbol)
             .unwrap_or_else(|| String::from_str(&env, "SFG"));
