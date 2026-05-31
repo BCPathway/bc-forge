@@ -36,6 +36,12 @@ pub enum DataKey {
     ClawbackAdmin,
     Lockup(Address),
     ProposalAction(u64),
+    /// Treasury address for collected fees
+    Treasury,
+    /// Fee configuration
+    FeeConfig,
+    /// Fee exemptions
+    FeeExemption(Address),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +68,30 @@ pub enum TokenAction {
     Unpause,
 }
 
+/// Fee configuration structure
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct FeeConfig {
+    /// Base fee amount (in native XLM)
+    pub base_fee: i128,
+    /// Fee multiplier for complex operations
+    pub complexity_multiplier: u32,
+    /// Maximum fee allowed
+    pub max_fee: i128,
+    /// Whether fees are enabled
+    pub enabled: bool,
+}
+
+/// Fee exemption structure
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct FeeExemption {
+    /// Address exempt from fees
+    pub address: Address,
+    /// Exemption type (0 = all operations, 1 = transfers only, 2 = mint only, etc.)
+    pub exemption_type: u8,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct Recipient {
@@ -79,6 +109,9 @@ pub enum TokenError {
     InsufficientBalance = 4,
     InsufficientAllowance = 5,
     ContractPaused = 6,
+    FeeNotConfigured = 7,
+    InsufficientFeeBalance = 8,
+    FeeExemptionNotFound = 9,
 }
 
 #[contract]
@@ -236,6 +269,103 @@ impl BcForgeToken {
     fn read_pending_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
+
+    fn read_treasury(env: &Env) -> Result<Address, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    fn read_fee_config(env: &Env) -> Result<FeeConfig, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeConfig)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    fn read_fee_exemption(env: &Env, address: &Address) -> Option<FeeExemption> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::FeeExemption(address.clone()))
+    }
+
+    fn is_fee_exempt(env: &Env, address: &Address, operation_type: u8) -> bool {
+        if let Some(exemption) = Self::read_fee_exemption(env, address) {
+            // 0 = all operations, 1 = transfers only, 2 = mint only, etc.
+            exemption.exemption_type == 0 || exemption.exemption_type == operation_type
+        } else {
+            false
+        }
+    }
+
+    fn calculate_fee(env: &Env, operation_type: u8, complexity: u32) -> i128 {
+        let fee_config = match Self::read_fee_config(env) {
+            Ok(config) => config,
+            Err(_) => return 0,
+        };
+
+        if !fee_config.enabled {
+            return 0;
+        }
+
+        // Base fee + (complexity * multiplier)
+        let base_fee = fee_config.base_fee;
+        let multiplier = fee_config.complexity_multiplier as i128;
+        let complexity_fee = (complexity as i128) * multiplier;
+        
+        let total_fee = base_fee + complexity_fee;
+        
+        // Cap at max_fee
+        if total_fee > fee_config.max_fee {
+            fee_config.max_fee
+        } else {
+            total_fee
+        }
+    }
+
+    fn charge_fee(env: &Env, payer: &Address, operation_type: u8, complexity: u32) -> Result<(), TokenError> {
+        // Check if payer is exempt
+        if Self::is_fee_exempt(env, payer, operation_type) {
+            return Ok(());
+        }
+
+        let fee_amount = Self::calculate_fee(env, operation_type, complexity);
+        if fee_amount == 0 {
+            return Ok(());
+        }
+
+        // Get treasury address
+        let treasury = Self::read_treasury(env)?;
+
+        // Check if payer has sufficient balance for fee
+        let payer_balance = Self::read_balance(env, payer);
+        if payer_balance < fee_amount {
+            return Err(TokenError::InsufficientFeeBalance);
+        }
+
+        // Transfer fee to treasury
+        let _ = Self::move_balance(env, payer, &treasury, fee_amount)?;
+        
+        // Emit fee charged event
+        events::emit_fee_charged(env, payer, &treasury, fee_amount);
+        
+        Ok(())
+    }
+
+    fn set_fee_config(env: &Env, config: &FeeConfig) {
+        env.storage().instance().set(&DataKey::FeeConfig, config);
+    }
+
+    fn set_treasury(env: &Env, treasury: &Address) {
+        env.storage().instance().set(&DataKey::Treasury, treasury);
+    }
+
+    fn set_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::FeeExemption(address.clone()), exemption);
+    }
 }
 
 #[contractimpl]
@@ -266,6 +396,10 @@ impl BcForgeToken {
         Self::ensure_not_paused(&env)?;
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
+        
+        // Charge fee for mint operation (complexity: 2)
+        Self::charge_fee(&env, &current_admin, 2, 2)?;
+        
         Self::internal_mint(&env, &current_admin, &to, amount)
     }
 
@@ -512,6 +646,27 @@ impl BcForgeToken {
         Self::read_pending_admin(&env)
     }
 
+    pub fn set_fee_config(env: Env, config: FeeConfig) {
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        Self::set_fee_config(&env, &config);
+        events::emit_fee_config_set(&env, &current_admin, &config);
+    }
+
+    pub fn set_treasury(env: Env, treasury: Address) {
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        Self::set_treasury(&env, &treasury);
+        events::emit_treasury_set(&env, &current_admin, &treasury);
+    }
+
+    pub fn set_fee_exemption(env: Env, address: Address, exemption: FeeExemption) {
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        Self::set_fee_exemption(&env, &address, &exemption);
+        events::emit_fee_exemption_set(&env, &current_admin, &address, &exemption);
+    }
+
     pub fn pause(env: Env) -> Result<(), TokenError> {
         let current_admin = Self::read_admin(&env)?;
         bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
@@ -596,6 +751,9 @@ impl TokenInterface for BcForgeToken {
         if amount <= 0 {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
         }
+
+        // Charge fee for transfer operation (complexity: 1)
+        Self::panic_on_err(&env, Self::charge_fee(&env, &from, 1, 1));
 
         let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
         events::emit_transfer(&env, &from, &to, amount);

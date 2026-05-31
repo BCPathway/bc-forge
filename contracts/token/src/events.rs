@@ -4,6 +4,7 @@
 //! Events are emitted to the ledger for indexing by off-chain services.
 
 use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
+use crate::{FeeConfig, FeeExemption};
 
 /// Emitted when the token contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
@@ -158,5 +159,37 @@ pub fn emit_update_symbol(env: &Env, admin: &Address, old_symbol: &String, new_s
     env.events().publish(
         (symbol_short!("upd_sym"),),
         (admin.clone(), old_symbol.clone(), new_symbol.clone()),
+    );
+}
+
+/// Emitted when fee configuration is set.
+pub fn emit_fee_config_set(env: &Env, admin: &Address, config: &FeeConfig) {
+    env.events().publish(
+        (symbol_short!("fee_cfg"),),
+        (admin.clone(), config.clone()),
+    );
+}
+
+/// Emitted when treasury address is set.
+pub fn emit_treasury_set(env: &Env, admin: &Address, treasury: &Address) {
+    env.events().publish(
+        (symbol_short!("fee_tre"),),
+        (admin.clone(), treasury.clone()),
+    );
+}
+
+/// Emitted when fee exemption is set.
+pub fn emit_fee_exemption_set(env: &Env, admin: &Address, address: &Address, exemption: &FeeExemption) {
+    env.events().publish(
+        (symbol_short!("fee_exc"),),
+        (admin.clone(), address.clone(), exemption.clone()),
+    );
+}
+
+/// Emitted when fee is charged.
+pub fn emit_fee_charged(env: &Env, payer: &Address, treasury: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("fee_chg"),),
+        (payer.clone(), treasury.clone(), amount),
     );
 }
