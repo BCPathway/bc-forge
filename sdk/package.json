@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "echo \"SDK tests require a running Soroban RPC — see README\" && exit 0",
+    "test": "jest --passWithNoTests",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --write 'src/**/*.ts'",
     "clean": "rm -rf dist"
@@ -25,13 +25,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^8.59.0",
     "@typescript-eslint/parser": "^8.59.0",
     "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
+    "jest": "^30.4.2",
     "prettier": "^3.8.3",
+    "ts-jest": "^29.4.11",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.59.0"
   },

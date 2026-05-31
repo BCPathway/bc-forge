@@ -24,14 +24,23 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry
+      - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-deps-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-deps-
+
+      - name: Cache Cargo target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('Cargo.lock') }}-stable
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -41,6 +50,19 @@ jobs:
 
       - name: Run tests
         run: cargo test --all
+
+      - name: Install Tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Run coverage (Tarpaulin)
+        run: cargo tarpaulin --workspace --out Html --out Xml --out Stdout
+        continue-on-error: true
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ./tarpaulin-report.html
 
       - name: Build WASM
         run: cargo build --target wasm32-unknown-unknown --release

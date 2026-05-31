@@ -179,6 +179,61 @@ stellar contract invoke \
   --id <ADDRESS>
 ```
 
+## 🧪 Local Development with Quickstart
+
+If you want to build and test against a local Soroban network, run the Stellar Quickstart container instead of using public testnet services.
+
+### Start Quickstart
+
+```bash
+docker run -d \
+  -p "8000:8000" \
+  --name stellar \
+  stellar/quickstart \
+  --local
+```
+
+This starts a local Stellar network with RPC, Horizon, and Friendbot on your machine.
+
+### Configure the CLI for the Local Network
+
+Register the local network once, then switch the CLI to it:
+
+```bash
+stellar network add local \
+  --rpc-url http://localhost:8000/rpc \
+  --network-passphrase "Test SDF Network ; September 2015"
+
+stellar network use local
+```
+
+### Generate and Fund Accounts
+
+Create a local identity and fund it from the local Friendbot instance:
+
+```bash
+stellar keys generate deployer
+stellar keys fund deployer
+```
+
+You can use `stellar keys public-key deployer` to print the address, then use that keypair as the source account for contract deploy and invoke commands on the local network.
+
+### Point the TypeScript SDK at Quickstart
+
+When using `bcForgeClient`, point `rpcUrl` at the local Quickstart instance:
+
+```typescript
+import { bcForgeClient } from '@bc-forge/sdk';
+
+const client = new bcForgeClient({
+  rpcUrl: 'http://localhost:8000',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+  contractId: 'CABC...XYZ',
+});
+```
+
+If your local Quickstart setup exposes RPC on a different path, keep the same host and update the URL to match your container configuration.
+
 ## 📦 SDK Usage
 
 ```typescript
