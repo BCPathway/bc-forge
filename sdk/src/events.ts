@@ -19,7 +19,7 @@ export enum bcForgeEventType {
   UNPAUSED = 'unpause',
   CLAWBACK = 'clawback',
   LOCKED = 'lock',
-  WITHDRAW_LOCKED = 'unlock',
+  SNAPSHOT_CREATED = 'snapshot_created',
 }
 
 /**
