@@ -499,7 +499,10 @@ export class bcForgeClient {
   }
 
   /**
-   * Upgrades the contract to a new WASM hash. Admin-only.
+   * Schedules an upgrade to a new WASM hash with a time-lock delay. Admin-only.
+   *
+   * After calling upgrade(), wait for the delay to elapse, then call
+   * executeUpgrade() to perform the actual WASM replacement.
    *
    * @param newWasmHash - 32-byte hex string or Buffer of the new WASM hash
    * @param source      - Admin keypair
@@ -509,25 +512,61 @@ export class bcForgeClient {
   }
 
   /**
+   * Executes a previously scheduled upgrade after the time-lock delay has elapsed.
+   * Anyone can call this function once the deadline passes.
+   *
+   * @param source - Any keypair (signer pays fees)
+   */
+  async executeUpgrade(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('execute_upgrade', [], source);
+  }
+
+  /**
+   * Migrates the contract to a new version number after an upgrade has been executed.
+   * Admin-only. The version must strictly increase.
+   *
+   * @param version - New version number (must be > current version)
+   * @param source  - Admin keypair
+   */
+  async migrate(version: number, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('migrate', [u32ToScVal(version)], source);
+  }
+
+  /**
+   * Get the current contract version number.
+   *
+   * @returns Contract version as a number
+   */
+  async getContractVersion(): Promise<number> {
+    const result = await this.queryContract('contract_version', []);
+    return scValToNative(result) as number;
+  }
+
+  /**
    * Propose a sensitive action for multi-sig approval.
    *
    * @param admin       - Proposing admin address
-   * @param action      - The action to propose (Mint, Pause, or Unpause)
+   * @param action      - The action to propose (Mint, Pause, Unpause, or Upgrade)
    * @param description - Human-readable description
    * @param source      - Proposing admin keypair
    */
   async proposeAction(
     admin: string,
-    action: { Mint: [string, bigint] } | { Pause: [] } | { Unpause: [] },
+    action:
+      | { Mint: [string, bigint] }
+      | { Pause: [] }
+      | { Unpause: [] }
+      | { Upgrade: [string | Buffer] },
     description: string,
     source: Keypair,
   ): Promise<TransactionResult> {
-    const actionScVal =
+    const actionScVal = nativeToScVal(
       'Mint' in action
-        ? nativeToScVal({
-            Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
-          })
-        : nativeToScVal(action);
+        ? { Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])] }
+        : 'Upgrade' in action
+          ? { Upgrade: [hashToScVal(action.Upgrade[0])] }
+          : action,
+    );
 
     return this.invokeContract(
       'propose_action',
