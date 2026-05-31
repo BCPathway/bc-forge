@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "22.0.0"
-bc-forge-admin = { path = "../admin" }
+bc-forge-access = { path = "../access" }
 bc-forge-lifecycle = { path = "../lifecycle" }
 
 [dev-dependencies]

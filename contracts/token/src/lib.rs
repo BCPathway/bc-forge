@@ -11,7 +11,7 @@ mod events;
 #[cfg(test)]
 mod test;
 
-use bc_forge_admin::{self as admin, Role};
+use bc_forge_access::Role;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
@@ -24,8 +24,6 @@ pub enum DataKey {
     Admin,
     PendingAdmin,
     /// Spending allowance: (owner, spender) → amount and expiration.
-    Allowance(Address, Address),
-    /// Token balance for an address.
     Allowance(Address, Address),
     AllowanceExp(Address, Address),
     Balance(Address),
@@ -94,7 +92,6 @@ impl BcForgeToken {
 
     fn set_admin(env: &Env, new_admin: &Address) {
         env.storage().instance().set(&DataKey::Admin, new_admin);
-        admin::set_admin(env, new_admin);
     }
 
     fn ensure_initialized(env: &Env) -> Result<(), TokenError> {
@@ -134,34 +131,16 @@ impl BcForgeToken {
     }
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
-        let allowance_info: AllowanceInfo = env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 });
+        let allowance_info = Self::read_allowance_info(env, from, spender);
         
-        // Check if allowance has expired
         if allowance_info.exp_ledger > 0 {
             let current_ledger = env.ledger().sequence();
-            if current_ledger > allowance_info.exp_ledger as u64 {
-                return 0; // Allowance expired
+            if current_ledger > allowance_info.exp_ledger {
+                return 0;
             }
         }
         
         allowance_info.amount
-        if let Some(exp_ledger) = env
-            .storage()
-            .persistent()
-            .get::<_, u32>(&DataKey::AllowanceExp(from.clone(), spender.clone()))
-        {
-            if exp_ledger > 0 && env.ledger().sequence() > exp_ledger {
-                return 0;
-            }
-        }
-
-        env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(0)
     }
 
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
@@ -177,10 +156,6 @@ impl BcForgeToken {
             .persistent()
             .get(&DataKey::Allowance(from.clone(), spender.clone()))
             .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
     }
 
     fn move_balance(
@@ -301,7 +276,7 @@ impl BcForgeToken {
             if amount <= 0 {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
             }
-            total = match total.checked_add(amount) {
+total = match total.checked_add(amount) {
                 Some(total) => total,
                 None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
             };
@@ -326,7 +301,8 @@ impl BcForgeToken {
     pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
         let current_admin = Self::read_admin(&env).expect("contract not initialized");
         current_admin.require_auth();
-        admin::set_admin_pool(&env, pool, threshold);
+        // Assuming multi-sig management helper functions are exposed via bc_forge_access
+        bc_forge_access::set_admin_pool(&env, pool, threshold);
     }
 
     pub fn propose_action(
@@ -335,7 +311,8 @@ impl BcForgeToken {
         action: TokenAction,
         description: String,
     ) -> u64 {
-        let id = admin::create_proposal(&env, signer, description);
+        signer.require_auth();
+        let id = bc_forge_access::create_proposal(&env, signer, description);
         env.storage()
             .instance()
             .set(&DataKey::ProposalAction(id), &action);
@@ -343,11 +320,12 @@ impl BcForgeToken {
     }
 
     pub fn approve_proposal(env: Env, signer: Address, proposal_id: u64) {
-        admin::approve_proposal(&env, signer, proposal_id);
+        signer.require_auth();
+        bc_forge_access::approve_proposal(&env, signer, proposal_id);
     }
 
     pub fn execute_proposal(env: Env, proposal_id: u64) {
-        admin::mark_executed(&env, proposal_id);
+        bc_forge_access::mark_executed(&env, proposal_id);
         let action: TokenAction = env
             .storage()
             .instance()
@@ -403,15 +381,19 @@ impl BcForgeToken {
     }
 
     pub fn grant_role(env: Env, role: Role, address: Address) {
-        admin::grant_role(&env, role, &address);
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        bc_forge_access::grant_role(&env, role, &address);
     }
 
     pub fn revoke_role(env: Env, role: Role, address: Address) {
-        admin::revoke_role(&env, role, &address);
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        bc_forge_access::revoke_role(&env, role, &address);
     }
 
     pub fn has_role(env: Env, role: Role, address: Address) -> bool {
-        admin::has_role(&env, role, &address)
+        bc_forge_access::has_role(&env, role, &address)
     }
 
     pub fn lock_tokens(
@@ -615,12 +597,9 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
-        Self::move_balance(&env, &from, &to, amount);
-        // Preserve the original expiration
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
         Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
         let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
     }
 
@@ -664,10 +643,8 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
-        // Preserve the original expiration
         let allowance_info = Self::read_allowance_info(&env, &from, &spender);
         Self::write_allowance(&env, &from, &spender, allowance - amount, allowance_info.exp_ledger);
-        Self::write_allowance(&env, &from, &spender, allowance - amount, 0);
         Self::write_balance(&env, &from, balance - amount);
         let supply = Self::read_supply(&env) - amount;
         Self::write_supply(&env, supply);
