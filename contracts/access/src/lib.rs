@@ -2,7 +2,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracttype, vec, Address, Env, String, Vec, Symbol};
 
 #[derive(Clone)]
 #[contracttype]
@@ -27,6 +27,12 @@ pub enum Role {
     Admin,
     /// Account authorized to mint tokens.
     Minter,
+    /// Account authorized to freeze contract interactions.
+    Pauser,
+    /// Account authorized to upgrade contract Wasm code.
+    Upgrader,
+    /// Account authorized to burn tokens explicitly.
+    Burner,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,13 +69,42 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     env.storage()
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
+
+    // Emit explicit role granted event
+    env.events().publish(
+        (Symbol::new(env, "role_granted"), role),
+        address.clone(),
+    );
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
     require_admin(env);
-    env.storage()
-        .persistent()
-        .remove(&AdminKey::Role(role, address.clone()));
+    if env.storage().persistent().has(&AdminKey::Role(role, address.clone())) {
+        env.storage()
+            .persistent()
+            .remove(&AdminKey::Role(role, address.clone()));
+    }
+
+    // Emit explicit role revoked event
+    env.events().publish(
+        (Symbol::new(env, "role_revoked"), role),
+        address.clone(),
+    );
+}
+
+pub fn renounce_role(env: &Env, address: &Address, role: Role) {
+    address.require_auth();
+    let key = AdminKey::Role(role, address.clone());
+    if !env.storage().persistent().has(&key) {
+        panic!("AccessControl: cannot renounce an unassigned role");
+    }
+    env.storage().persistent().remove(&key);
+
+    // Emit explicit role renounced event
+    env.events().publish(
+        (Symbol::new(env, "role_renounced"), role),
+        address.clone(),
+    );
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
@@ -154,7 +189,6 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
 
     let proposal = Proposal {
         creator: creator.clone(),
-        action_type,
         description,
         approvals: vec![env, creator],
         executed: false,
@@ -198,7 +232,9 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
         .instance()
         .get(&AdminKey::Proposal(proposal_id))
         .expect("proposal not found");
-    proposal.approvals.len() >= get_threshold(env)
+    
+    let threshold = get_threshold(env);
+    proposal.approvals.len() >= threshold
 }
 
 pub fn mark_executed(env: &Env, proposal_id: u64) {

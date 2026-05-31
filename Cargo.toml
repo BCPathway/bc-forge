@@ -2,8 +2,10 @@
 resolver = "2"
 
 members = [
-    "contracts/*",
+    "contracts/access",
+    "contracts/token",
 ]
+
 
 [profile.release]
 opt-level = "z"
