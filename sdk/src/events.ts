@@ -1,114 +1,124 @@
-/**
- * @bc-forge/sdk — Event parsing and real-time subscription support.
- */
+// @bc-forge/sdk — Event parsing and real-time subscription support.
 
 import { xdr, scValToNative, SorobanRpc } from '@stellar/stellar-sdk';
 
-/**
- * Enumeration of all supported bc-forge contract events.
- */
+/** Enumeration of all supported bc-forge contract events. */
 export enum bcForgeEventType {
-  INITIALIZED = 'init',
+  INITIALIZED = 'initialized',
   MINT = 'mint',
   BURN = 'burn',
-  TRANSFER = 'xfer',
-  TRANSFER_FROM = 'xfer_frm',
+  TRANSFER = 'transfer',
+  TRANSFER_FROM = 'transfer_from',
   APPROVE = 'approve',
-  OWNERSHIP_TRANSFERRED = 'own_xfer',
+  OWNERSHIP_TRANSFERRED = 'ownership_transferred',
   PAUSED = 'paused',
-  UNPAUSED = 'unpause',
+  UNPAUSED = 'unpaused',
   CLAWBACK = 'clawback',
-  LOCKED = 'lock',
+  LOCKED = 'locked',
   SNAPSHOT_CREATED = 'snapshot_created',
+  UPGRADE = 'upgrade',
+  UPDATE_NAME = 'update_name',
+  UPDATE_SYMBOL = 'update_symbol',
 }
 
-/**
- * Structure of a decoded bc-forge event.
- */
-export interface bcForgeEvent {
-  type: bcForgeEventType;
-  ledger: number;
-  contractId: string;
-  data: any;
+/** Header data accompanying each event, following the contract's versioned schema. */
+export interface EventHeader {
+  contractSymbol: string;
+  eventName: bcForgeEventType;
+  version: number;
+  ledgerSeq: number;
+  timestamp: number;
+  txHash: string;
 }
 
-/**
- * Options for event subscriptions.
- */
+/** Fully decoded event with header and payload. */
+export interface DecodedEvent {
+  header: EventHeader;
+  payload: any;
+}
+
+/** Options for event subscription polling. */
 export interface SubscriptionOptions {
-  pollingIntervalMs?: number;
-  startLedger?: number;
+  pollingIntervalMs?: number; // interval between polls (default 3000ms)
+  startLedger?: number; // ledger to start from; defaults to latest
 }
 
-/**
- * Decodes a standard Soroban RPC event into a native bcForgeEvent.
- */
-export function decodeEvent(event: SorobanRpc.Api.EventResponse): bcForgeEvent | null {
-  if (!event.topic || event.topic.length === 0) return null;
+/** Decode a standard Soroban RPC event into a version‑aware DecodedEvent. */
+export function decodeEvent(event: SorobanRpc.Api.EventResponse): DecodedEvent | null {
+  if (!event.topic || event.topic.length < 6) return null;
 
   try {
-    const topicSymbol = scValToNative(event.topic[0]);
-    const type = Object.values(bcForgeEventType).find((t) => t === topicSymbol) as bcForgeEventType;
+    const contractSymbol = scValToNative(event.topic[0]);
+    const eventNameStr = scValToNative(event.topic[1]);
+    const version = Number(scValToNative(event.topic[2]));
+    const ledgerSeq = Number(scValToNative(event.topic[3]));
+    const timestamp = Number(scValToNative(event.topic[4]));
+    const txHash = scValToNative(event.topic[5]);
 
-    if (!type) return null;
+    const eventName = Object.values(bcForgeEventType).find((t) => t === eventNameStr) as bcForgeEventType;
+    if (!eventName) return null;
 
-    return {
-      type,
-      ledger: event.ledger,
-      contractId: event.contractId?.toString() ?? '',
-      data: scValToNative(event.value),
+    const header: EventHeader = {
+      contractSymbol,
+      eventName,
+      version,
+      ledgerSeq,
+      timestamp,
+      txHash,
     };
+
+    const payload = scValToNative(event.value);
+    return { header, payload };
   } catch {
     return null;
   }
 }
 
-/**
- * Decodes raw diagnostic events (often found in transaction results) into bcForgeEvents.
- */
-export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEvent | null {
+/** Decode a diagnostic event (from transaction simulation) similarly. */
+export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): DecodedEvent | null {
   const event = rawEvent.event();
   if (event.type().name !== 'contract') return null;
-
   const body = event.body().v0();
   const topics = body.topics();
-  if (topics.length === 0) return null;
+  if (topics.length < 6) return null;
 
   try {
-    const topicSymbol = scValToNative(topics[0]);
-    const type = Object.values(bcForgeEventType).find((t) => t === topicSymbol) as bcForgeEventType;
+    const contractSymbol = scValToNative(topics[0]);
+    const eventNameStr = scValToNative(topics[1]);
+    const version = Number(scValToNative(topics[2]));
+    const ledgerSeq = Number(scValToNative(topics[3]));
+    const timestamp = Number(scValToNative(topics[4]));
+    const txHash = scValToNative(topics[5]);
 
-    if (!type) return null;
+    const eventName = Object.values(bcForgeEventType).find((t) => t === eventNameStr) as bcForgeEventType;
+    if (!eventName) return null;
 
-    return {
-      type,
-      ledger: 0, // Diagnostic events don't always carry ledger sequence
-      contractId: event.contractId()?.toString('hex') || '',
-      data: scValToNative(body.data()),
+    const header: EventHeader = {
+      contractSymbol,
+      eventName,
+      version,
+      ledgerSeq,
+      timestamp,
+      txHash,
     };
+
+    const payload = scValToNative(body.data());
+    return { header, payload };
   } catch {
     return null;
   }
 }
 
-/**
- * Subscribes to real-time events for a given bc-forge contract.
- *
- * @param rpcUrl      - Soroban RPC endpoint
- * @param contractId  - Target contract ID
- * @param callback    - Function called for every new decoded event
- * @param options     - Polking and ledger range options
- * @returns An unsubscribe function to stop polling.
- */
+/** Subscribe to real‑time contract events with optional polling. */
 export async function subscribeEvents(
   rpcUrl: string,
   contractId: string,
-  callback: (event: bcForgeEvent) => void,
-  options: SubscriptionOptions = {},
+  callback: (event: DecodedEvent) => void,
+  options: SubscriptionOptions = {}
 ): Promise<() => void> {
   const server = new SorobanRpc.Server(rpcUrl);
 
-  // Default to starting from the latest ledger if not specified
+  // Determine starting ledger
   let lastLedger = options.startLedger;
   if (!lastLedger) {
     const latest = await server.getLatestLedger();
@@ -119,39 +129,27 @@ export async function subscribeEvents(
 
   const poll = async () => {
     if (!active) return;
-
     try {
       const response = await server.getEvents({
         startLedger: lastLedger!,
-        filters: [
-          {
-            contractIds: [contractId],
-            type: 'contract',
-          },
-        ],
+        filters: [{ contractIds: [contractId], type: 'contract' }],
       });
-
-      for (const event of response.events) {
-        const decoded = decodeEvent(event);
-        if (decoded) {
-          callback(decoded);
-        }
-        if (event.ledger >= lastLedger!) {
-          lastLedger = event.ledger + 1;
+      for (const ev of response.events) {
+        const decoded = decodeEvent(ev);
+        if (decoded) callback(decoded);
+        if (ev.ledger >= lastLedger!) {
+          lastLedger = ev.ledger + 1;
         }
       }
     } catch {
-      // Retry in the next poll cycle on failure
+      // swallow errors; next poll will retry
     }
-
     if (active) {
       setTimeout(poll, options.pollingIntervalMs || 3000);
     }
   };
 
   poll();
-
-  // Return unsubscribe closure
   return () => {
     active = false;
   };
