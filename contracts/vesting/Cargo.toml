@@ -1,0 +1,23 @@
+[package]
+name = "bc-forge-vesting"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Time-locked token vesting schedules for bc-forge"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "22.0.0"
+bc-forge-admin = { path = "../admin" }
+bc-forge-token = { path = "../token" }
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+bc-forge-token = { path = "../token", features = ["testutils"] }
+
+[features]
+testutils = ["soroban-sdk/testutils"]

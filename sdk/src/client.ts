@@ -470,6 +470,35 @@ export interface BatchMintRecipient {
   }
 
   /**
+   * Build an unsigned burnFrom transaction for offline signing.
+   *
+   * @param spender           - Address authorized to burn tokens
+   * @param from              - Token owner address
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildBurnFromTx(
+    spender: string,
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
    * Sign an unsigned transaction XDR.
    *
    * @param txXdr - Unsigned transaction XDR string
@@ -531,6 +560,105 @@ export interface BatchMintRecipient {
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       sourcePublicKey,
     );
+  }
+
+  /**
+   * Simulate a transferFrom operation.
+   *
+   * @param spender           - Address authorized to spend tokens
+   * @param from              - Token owner address
+   * @param to                - Recipient address
+   * @param amount            - Number of tokens to transfer
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Simulation result
+   */
+  async simulateTransferFrom(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'transfer_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        addressToScVal(to),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Simulate a burn operation.
+   *
+   * @param from              - Address whose tokens to burn
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Burner's public key
+   * @returns Simulation result
+   */
+  async simulateBurn(
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'burn',
+      [addressToScVal(from), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Simulate a burnFrom operation.
+   *
+   * @param spender           - Address authorized to burn tokens
+   * @param from              - Token owner address
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Simulation result
+   */
+  async simulateBurnFrom(
+    spender: string,
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Dry-run a transaction to estimate fees and resources without submitting.
+   *
+   * @param txXdr - Transaction XDR string to simulate
+   * @returns Simulation result with estimated resources, fees, and potential return value
+   */
+  async simulateTx(txXdr: string): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
+    return this.withRetry(async () => {
+      try {
+        const tx = TransactionBuilder.fromXDR(txXdr, this.networkPassphrase);
+        const simulated = await this.server.simulateTransaction(tx);
+
+        if (SorobanRpc.Api.isSimulationError(simulated)) {
+          throw new SimulationError(`Simulation failed: ${simulated.error}`, simulated.error);
+        }
+
+        return simulated;
+      } catch (error: any) {
+        if (error instanceof SimulationError) throw error;
+        throw new RPCError('RPC simulation failed', error);
+      }
+    });
   }
 
   // ─── Multi-Sig / Admin Pool ──────────────────────────────────────────────
