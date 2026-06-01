@@ -230,6 +230,31 @@ export class bcForgeClient {
   }
 
   /**
+   * Create a new snapshot of all token balances.
+   *
+   * @param source - Admin keypair (must be authorized to call this method).
+   * @returns TransactionResult containing snapshot ID as return value.
+   */
+  async createSnapshot(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('create_snapshot', [], source);
+  }
+
+  /**
+   * Query the token balance of an address at a specific snapshot.
+   *
+   * @param address - Stellar public key.
+   * @param snapshotId - Snapshot identifier returned by createSnapshot.
+   * @returns Balance at the given snapshot as bigint.
+   */
+  async getBalanceAtSnapshot(address: string, snapshotId: bigint): Promise<bigint> {
+    const result = await this.queryContract('balance_at_snapshot', [
+      addressToScVal(address),
+      nativeToScVal(snapshotId, { type: 'u64' })
+    ]);
+    return BigInt(scValToNative(result));
+  }
+
+  /**
    * Transfer tokens between addresses.
    *
    * @param from   - Sender address

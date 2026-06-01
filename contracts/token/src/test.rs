@@ -127,3 +127,42 @@ fn test_lockup_ttl_extension() {
         .persistent()
         .has(&crate::DataKey::Lockup(user.clone())));
 }
+
+    #[test]
+    fn test_snapshot_mechanism() {
+        let env = Env::default();
+        env.mock_all_auths();
+        // Setup contract and admin
+        let (client, admin) = setup(&env);
+        // Create two users
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+        // Mint and distribute tokens
+        client.mint(&admin, 1000);
+        client.transfer(&admin, &user1, 300);
+        client.transfer(&admin, &user2, 200);
+        // Create first snapshot
+        let snap1 = BcForgeToken::create_snapshot(env.clone());
+        // Verify balances at snapshot
+        assert_eq!(BcForgeToken::balance_at_snapshot(env.clone(), user1.clone(), snap1), 300);
+        assert_eq!(BcForgeToken::balance_at_snapshot(env.clone(), user2.clone(), snap1), 200);
+        assert_eq!(BcForgeToken::balance_at_snapshot(env.clone(), admin.clone(), snap1), 500);
+        // Perform additional transfers
+        client.transfer(&user1, &admin, 100);
+        client.transfer(&user2, &admin, 50);
+        // Create second snapshot
+        let snap2 = BcForgeToken::create_snapshot(env.clone());
+        // Verify balances at second snapshot reflect new state
+        assert_eq!(BcForgeToken::balance_at_snapshot(env.clone(), user1.clone(), snap2), 200);
+        assert_eq!(BcForgeToken::balance_at_snapshot(env.clone(), user2.clone(), snap2), 150);
+        assert_eq!(BcForgeToken::balance_at_snapshot(env.clone(), admin.clone(), snap2), 650);
+        // Create enough snapshots to exceed MAX_SNAPSHOTS (10)
+        for _ in 0..10 {
+            // simple no-op transfer to change state
+            client.transfer(&admin, &admin, 0);
+            let _ = BcForgeToken::create_snapshot(env.clone());
+        }
+        // The first snapshot (snap1) should have been pruned
+        // Accessing it should return 0 balance
+        assert_eq!(BcForgeToken::balance_at_snapshot(env.clone(), user1.clone(), snap1), 0);
+    }
