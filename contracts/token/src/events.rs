@@ -1,12 +1,7 @@
-//! # bc-forge Token Events
-//!
-//! Structured event emission for all token contract operations.
-//! Events are emitted to the ledger for indexing by off-chain services.
+//! Structured event emission for the token contract.
 
-use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
-use crate::{FeeConfig, FeeExemption};
+use soroban_sdk::{symbol_short, Address, Env, String};
 
-/// Emitted when the token contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
     env.events().publish(
         (symbol_short!("init"),),
@@ -14,7 +9,6 @@ pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String
     );
 }
 
-/// Emitted when tokens are minted.
 pub fn emit_mint(
     env: &Env,
     admin: &Address,
@@ -29,7 +23,6 @@ pub fn emit_mint(
     );
 }
 
-/// Emitted when tokens are burned.
 pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new_supply: i128) {
     env.events().publish(
         (symbol_short!("burn"),),
@@ -37,13 +30,11 @@ pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new
     );
 }
 
-/// Emitted on a standard transfer.
 pub fn emit_transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
     env.events()
         .publish((symbol_short!("xfer"),), (from.clone(), to.clone(), amount));
 }
 
-/// Emitted on a delegated transfer (transfer_from).
 pub fn emit_transfer_from(
     env: &Env,
     spender: &Address,
@@ -64,15 +55,13 @@ pub fn emit_transfer_from(
     );
 }
 
-/// Emitted when an allowance is approved.
-pub fn emit_approve(env: &Env, from: &Address, spender: &Address, amount: i128) {
+pub fn emit_approve(env: &Env, from: &Address, spender: &Address, amount: i128, expiration: u32) {
     env.events().publish(
         (symbol_short!("approve"),),
-        (from.clone(), spender.clone(), amount),
+        (from.clone(), spender.clone(), amount, expiration),
     );
 }
 
-/// Emitted when contract ownership is transferred.
 pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
         (symbol_short!("own_xfer"),),
@@ -110,86 +99,7 @@ pub fn emit_paused(env: &Env, admin: &Address) {
         .publish((symbol_short!("paused"),), (admin.clone(),));
 }
 
-/// Emitted when the contract is unpaused.
 pub fn emit_unpaused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("unpause"),), (admin.clone(),));
-}
-
-/// Emitted when tokens are clawed back.
-pub fn emit_clawback(env: &Env, admin: &Address, from: &Address, to: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("clawback"),),
-        (admin.clone(), from.clone(), to.clone(), amount),
-    );
-}
-
-/// Emitted when tokens are locked.
-pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_time: u64) {
-    env.events().publish(
-        (symbol_short!("lock"),),
-        (user.clone(), amount, unlock_time),
-    );
-}
-
-/// Emitted when locked tokens are withdrawn.
-pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
-    env.events()
-        .publish((symbol_short!("unlock"),), (user.clone(), amount));
-}
-
-/// Emitted when the contract is upgraded.
-pub fn emit_upgrade(env: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
-    env.events().publish(
-        (symbol_short!("upgrade"),),
-        (admin.clone(), new_wasm_hash.clone()),
-    );
-}
-
-/// Emitted when the token name is updated.
-pub fn emit_update_name(env: &Env, admin: &Address, old_name: &String, new_name: &String) {
-    env.events().publish(
-        (symbol_short!("upd_name"),),
-        (admin.clone(), old_name.clone(), new_name.clone()),
-    );
-}
-
-/// Emitted when the token symbol is updated.
-pub fn emit_update_symbol(env: &Env, admin: &Address, old_symbol: &String, new_symbol: &String) {
-    env.events().publish(
-        (symbol_short!("upd_sym"),),
-        (admin.clone(), old_symbol.clone(), new_symbol.clone()),
-    );
-}
-
-/// Emitted when fee configuration is set.
-pub fn emit_fee_config_set(env: &Env, admin: &Address, config: &FeeConfig) {
-    env.events().publish(
-        (symbol_short!("fee_cfg"),),
-        (admin.clone(), config.clone()),
-    );
-}
-
-/// Emitted when treasury address is set.
-pub fn emit_treasury_set(env: &Env, admin: &Address, treasury: &Address) {
-    env.events().publish(
-        (symbol_short!("fee_tre"),),
-        (admin.clone(), treasury.clone()),
-    );
-}
-
-/// Emitted when fee exemption is set.
-pub fn emit_fee_exemption_set(env: &Env, admin: &Address, address: &Address, exemption: &FeeExemption) {
-    env.events().publish(
-        (symbol_short!("fee_exc"),),
-        (admin.clone(), address.clone(), exemption.clone()),
-    );
-}
-
-/// Emitted when fee is charged.
-pub fn emit_fee_charged(env: &Env, payer: &Address, treasury: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("fee_chg"),),
-        (payer.clone(), treasury.clone(), amount),
-    );
 }
