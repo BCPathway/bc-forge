@@ -1,0 +1,14 @@
+[package]
+name = "bc-forge-ttl"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Shared Soroban storage TTL helpers for bc-forge contracts"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+soroban-sdk = "22.0.0"
