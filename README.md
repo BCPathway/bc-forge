@@ -15,6 +15,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **Total Supply Tracking** — Accurate supply updated on every mint/burn
 - **TypeScript SDK** — High-level client for all contract interactions
 - **Modular Architecture** — Separate crates for admin, lifecycle, and token logic
+- **Automatic Storage TTL Management** — Shared helper module extends Soroban contract and persistent storage TTL across calls
 
 ## 📁 Project Structure
 
@@ -25,6 +26,9 @@ bc-forge/
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
 │   ├── lifecycle/                # Pause/unpause lifecycle module
+│   │   ├── Cargo.toml
+│   │   └── src/lib.rs
+│   ├── ttl/                      # Shared storage TTL helpers
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
 │   └── token/                    # Core SEP-41 token contract
@@ -49,6 +53,16 @@ bc-forge/
 ├── LICENSE                       # MIT
 └── README.md                     # This file
 ```
+
+## 🧠 Storage TTL Strategy
+
+To keep Soroban contract state active, bc-forge now includes shared TTL logic that:
+
+- extends the contract instance TTL on every public token, admin, and lifecycle call
+- refreshes persistent storage TTL for balances, allowances, lockups, roles, and proposals
+- treats expired balances and allowances as zero instead of panicking
+
+This makes the system more resilient to Soroban storage expiry while preserving on-chain security semantics.
 
 ## 🛠️ Prerequisites
 
