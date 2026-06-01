@@ -97,6 +97,20 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     });
   });
 
+  describe('buildTransferFromTx', () => {
+    it('should build an unsigned transferFrom transaction XDR', async () => {
+      expect(typeof client.buildTransferFromTx).toBe('function');
+      expect(client.buildTransferFromTx.length).toBe(5); // 5 parameters
+    });
+  });
+
+  describe('buildBurnFromTx', () => {
+    it('should build an unsigned burnFrom transaction XDR', async () => {
+      expect(typeof client.buildBurnFromTx).toBe('function');
+      expect(client.buildBurnFromTx.length).toBe(4); // 4 parameters
+    });
+  });
+
   describe('signTx', () => {
     it('should sign a transaction XDR', () => {
       // Create a mock unsigned transaction XDR (simplified for testing)
@@ -121,6 +135,21 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     it('should have simulateTransfer method', () => {
       expect(typeof client.simulateTransfer).toBe('function');
       expect(client.simulateTransfer.length).toBe(4); // 4 parameters
+    });
+
+    it('should have simulateBurn method', () => {
+      expect(typeof client.simulateBurn).toBe('function');
+      expect(client.simulateBurn.length).toBe(3); // 3 parameters
+    });
+
+    it('should have simulateTransferFrom method', () => {
+      expect(typeof client.simulateTransferFrom).toBe('function');
+      expect(client.simulateTransferFrom.length).toBe(5); // 5 parameters
+    });
+
+    it('should have simulateBurnFrom method', () => {
+      expect(typeof client.simulateBurnFrom).toBe('function');
+      expect(client.simulateBurnFrom.length).toBe(4); // 4 parameters
     });
   });
 });
