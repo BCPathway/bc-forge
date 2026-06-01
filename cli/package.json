@@ -1,0 +1,28 @@
+{
+  "name": "@bc-forge/cli",
+  "version": "1.0.0",
+  "description": "Administrative CLI for bc-forge",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "bc-forge": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc && chmod +x dist/index.js",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@bc-forge/sdk": "file:../sdk",
+    "@stellar/stellar-sdk": "^11.3.0",
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.5",
+    "chalk": "^5.3.0",
+    "conf": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3"
+  }
+}

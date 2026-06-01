@@ -1,0 +1,22 @@
+[package]
+name = "bc-forge-rate-limit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Rate limiting contract for bc-forge token operations"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+keywords = ["soroban", "stellar", "smart-contract", "rate-limiting"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "26.0.1"
+
+[dev-dependencies]
+soroban-sdk = { version = "26.0.1", features = ["testutils"] }
+
+[features]
+testutils = ["soroban-sdk/testutils"]
