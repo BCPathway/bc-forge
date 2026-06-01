@@ -15,7 +15,7 @@ import {
   Keypair,
 } from '@stellar/stellar-sdk';
 
-import { SimulationError, TransactionSubmissionError, TransactionTimeoutError } from './errors';
+import { SimulationError, TransactionError, ValidationError } from './errors';
 
 /**
  * Builds an `invokeHostFunction` transaction for a Soroban contract call.
@@ -179,7 +179,9 @@ export async function buildUnsignedTransaction(
   const simulated = await server.simulateTransaction(tx);
 
   if (SorobanRpc.Api.isSimulationError(simulated)) {
-    throw new Error(`Simulation failed: ${simulated.error}`);
+    // Parse potential Soroban panic message and throw a structured SimulationError
+    const panicMsg = SimulationError.parsePanic(simulated.error);
+    throw new SimulationError('Simulation failed', panicMsg ?? simulated.error, simulated.error);
   }
 
   const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
@@ -243,7 +245,8 @@ export async function simulateTransaction(
   const simulated = await server.simulateTransaction(tx);
 
   if (SorobanRpc.Api.isSimulationError(simulated)) {
-    throw new Error(`Simulation failed: ${simulated.error}`);
+    const panicMsg = SimulationError.parsePanic(simulated.error);
+    throw new SimulationError('Simulation failed', panicMsg ?? simulated.error, simulated.error);
   }
 
   return simulated;
@@ -254,6 +257,8 @@ export async function simulateTransaction(
  */
 export function hashToScVal(hash: string | Buffer): xdr.ScVal {
   const buf = typeof hash === 'string' ? Buffer.from(hash, 'hex') : hash;
-  if (buf.length !== 32) throw new Error('Hash must be exactly 32 bytes');
+  if (buf.length !== 32) {
+    throw new ValidationError('Hash must be exactly 32 bytes');
+  }
   return xdr.ScVal.scvBytes(buf);
 }
