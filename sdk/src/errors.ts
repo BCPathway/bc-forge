@@ -16,7 +16,10 @@ export class bcForgeError extends Error {
  * Thrown when a contract simulation fails.
  */
 export class SimulationError extends bcForgeError {
-  constructor(message: string, public readonly errorDetails?: string) {
+  constructor(
+    message: string,
+    public readonly errorDetails?: string,
+  ) {
     super(message);
     this.name = 'SimulationError';
   }
@@ -26,7 +29,10 @@ export class SimulationError extends bcForgeError {
  * Thrown when a transaction submission fails at the RPC level.
  */
 export class TransactionSubmissionError extends bcForgeError {
-  constructor(message: string, public readonly hash?: string) {
+  constructor(
+    message: string,
+    public readonly hash?: string,
+  ) {
     super(message);
     this.name = 'TransactionSubmissionError';
   }
@@ -36,7 +42,10 @@ export class TransactionSubmissionError extends bcForgeError {
  * Thrown when a transaction is not found after polling.
  */
 export class TransactionTimeoutError extends bcForgeError {
-  constructor(message: string, public readonly hash: string) {
+  constructor(
+    message: string,
+    public readonly hash: string,
+  ) {
     super(message);
     this.name = 'TransactionTimeoutError';
   }
@@ -46,7 +55,10 @@ export class TransactionTimeoutError extends bcForgeError {
  * Thrown when an RPC call fails due to transient network issues.
  */
 export class RPCError extends bcForgeError {
-  constructor(message: string, public readonly originalError?: any) {
+  constructor(
+    message: string,
+    public readonly originalError?: any,
+  ) {
     super(message);
     this.name = 'RPCError';
   }
