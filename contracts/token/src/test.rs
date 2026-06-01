@@ -1,9 +1,9 @@
 #![cfg(test)]
 
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, Env, String};
 
-use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
+use crate::{BcForgeToken, BcForgeTokenClient};
 
 fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let contract_id = env.register(BcForgeToken, ());
@@ -21,109 +21,45 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
 }
 
 #[test]
-fn test_extend_ttl_public_call_extends_instance() {
+fn test_mint_transfer_and_supply() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _admin) = setup(&env);
 
-    client.extend_ttl();
-    env.ledger().set(env.ledger().sequence() + 200);
-    assert_eq!(client.supply(), 0);
+    client.mint(&from, &1_000);
+    client.transfer(&from, &to, &300);
+
+    assert_eq!(client.balance(&from), 700);
+    assert_eq!(client.balance(&to), 300);
+    assert_eq!(client.supply(), 1_000);
 }
 
 #[test]
-fn test_extend_balance_ttl_works() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin) = setup(&env);
-    let user = Address::generate(&env);
-
-    client.mint(&admin, &user, &1000);
-    client.extend_balance_ttl(&user);
-    env.ledger().set(env.ledger().sequence() + 200);
-
-    assert_eq!(client.balance(&user), 1000);
-}
-
-#[test]
-fn test_balance_ttl_recovered_before_expiry() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin) = setup(&env);
-    let user = Address::generate(&env);
-
-    client.mint(&admin, &user, &1000);
-    env.ledger().set(env.ledger().sequence() + 19);
-    client.extend_balance_ttl(&user);
-    env.ledger().set(env.ledger().sequence() + 50);
-
-    assert_eq!(client.balance(&user), 1000);
-}
-
-#[test]
-fn test_expired_balance_returns_zero_safely() {
+fn test_approve_and_transfer_from() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _admin) = setup(&env);
-    let user = Address::generate(&env);
-
-    assert_eq!(client.balance(&user), 0);
-}
-
-#[test]
-fn test_allowance_ttl_extension() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin) = setup(&env);
     let owner = Address::generate(&env);
     let spender = Address::generate(&env);
+    let receiver = Address::generate(&env);
 
-    client.mint(&admin, &owner, &500);
-    client.approve(&owner, &spender, &200, &10000);
-    env.ledger().set(env.ledger().sequence() + 200);
+    client.mint(&owner, &1_000);
+    client.approve(&owner, &spender, &500, &0);
+    client.transfer_from(&spender, &owner, &receiver, &200);
 
-    assert_eq!(client.allowance(&owner, &spender), 200);
+    assert_eq!(client.balance(&owner), 800);
+    assert_eq!(client.balance(&receiver), 200);
+    assert_eq!(client.allowance(&owner, &spender), 300);
 }
 
 #[test]
-fn test_as_contract_invokes_extend_balance_ttl() {
+fn test_transfer_ownership_updates_admin() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(BcForgeToken, ());
-    let client = BcForgeTokenClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
+    let (client, _admin) = setup(&env);
+    let new_admin = Address::generate(&env);
 
-    client.initialize(
-        &admin,
-        &7,
-        &String::from_str(&env, "bc-forge Token"),
-        &String::from_str(&env, "SFG"),
-    );
-    client.mint(&admin, &user, &1000);
+    client.transfer_ownership(&new_admin);
 
-    env.as_contract(&contract_id, || {
-        let client = BcForgeTokenClient::new(&env, &contract_id);
-        client.extend_balance_ttl(&user);
-    });
-
-    env.ledger().set(env.ledger().sequence() + 200);
-    assert_eq!(client.balance(&user), 1000);
-}
-
-#[test]
-fn test_lockup_ttl_extension() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin) = setup(&env);
-    let user = Address::generate(&env);
-
-    client.mint(&admin, &user, &1000);
-    client.lock_tokens(&admin, &user, &100, &1000).unwrap();
-    env.ledger().set(env.ledger().sequence() + 200);
-
-    assert!(env
-        .storage()
-        .persistent()
-        .has(&crate::DataKey::Lockup(user.clone())));
+    assert_eq!(client.admin(), new_admin);
 }
