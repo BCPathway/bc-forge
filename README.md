@@ -64,7 +64,7 @@ bc-forge/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/p3ris0n/bc-forge.git
+git clone https://github.com/BCPathway/bc-forge.git
 cd bc-forge
 ```
 
