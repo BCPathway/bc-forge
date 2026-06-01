@@ -57,6 +57,20 @@ export interface BatchMintRecipient {
   amount: bigint;
 }
 
+export interface BatchTransferRecipient {
+  /** Recipient Stellar public key (G... address) */
+  to: string;
+  /** Number of tokens to transfer */
+  amount: bigint;
+}
+
+export interface BatchApproveSpender {
+  /** Spender Stellar public key (G... address) */
+  spender: string;
+  /** Allowance amount (0 to revoke) */
+  amount: bigint;
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class bcForgeClient {
@@ -227,6 +241,56 @@ export class bcForgeClient {
     );
     const recipientsVec = xdr.ScVal.scvVec(recipientScVals);
     return this.invokeContract('batch_mint', [recipientsVec], source);
+  }
+
+  /**
+   * Batch transfer tokens from one address to multiple recipients.
+   *
+   * @param from       - Sender address
+   * @param recipients - Array of {to, amount} objects (max 50)
+   * @param source     - Sender's keypair
+   */
+  async batchTransfer(
+    from: string,
+    recipients: BatchTransferRecipient[],
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    const recipientsVec = xdr.ScVal.scvVec(
+      recipients.map(({ to, amount }) =>
+        xdr.ScVal.scvVec([addressToScVal(to), i128ToScVal(amount)]),
+      ),
+    );
+    return this.invokeContract(
+      'batch_transfer',
+      [addressToScVal(from), recipientsVec],
+      source,
+    );
+  }
+
+  /**
+   * Batch approve multiple spenders in a single transaction.
+   *
+   * @param from     - Token owner address
+   * @param spenders - Array of {spender, amount} objects (max 50; amount=0 revokes)
+   * @param exp      - Expiration ledger for all approvals (0 for no expiration)
+   * @param source   - Owner's keypair
+   */
+  async batchApprove(
+    from: string,
+    spenders: BatchApproveSpender[],
+    exp: number,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    const spendersVec = xdr.ScVal.scvVec(
+      spenders.map(({ spender, amount }) =>
+        xdr.ScVal.scvVec([addressToScVal(spender), i128ToScVal(amount)]),
+      ),
+    );
+    return this.invokeContract(
+      'batch_approve',
+      [addressToScVal(from), spendersVec, u32ToScVal(exp)],
+      source,
+    );
   }
 
   /**

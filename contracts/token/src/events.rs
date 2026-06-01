@@ -193,3 +193,27 @@ pub fn emit_fee_charged(env: &Env, payer: &Address, treasury: &Address, amount: 
         (payer.clone(), treasury.clone(), amount),
     );
 }
+
+/// Emitted after a batch_transfer completes. Contains the sender and total amount transferred.
+pub fn emit_batch_transfer(env: &Env, from: &Address, count: u32, total: i128) {
+    env.events().publish(
+        (symbol_short!("b_xfer"),),
+        (from.clone(), count, total),
+    );
+}
+
+/// Emitted after a batch_mint completes. Contains the admin and total amount minted.
+pub fn emit_batch_mint(env: &Env, admin: &Address, count: u32, total: i128) {
+    env.events().publish(
+        (symbol_short!("b_mint"),),
+        (admin.clone(), count, total),
+    );
+}
+
+/// Emitted after a batch_approve completes. Contains the owner and number of approvals set.
+pub fn emit_batch_approve(env: &Env, from: &Address, count: u32) {
+    env.events().publish(
+        (symbol_short!("b_appr"),),
+        (from.clone(), count),
+    );
+}

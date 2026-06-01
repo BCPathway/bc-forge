@@ -88,7 +88,7 @@ pub struct FeeExemption {
     /// Address exempt from fees
     pub address: Address,
     /// Exemption type (0 = all operations, 1 = transfers only, 2 = mint only, etc.)
-    pub exemption_type: u8,
+    pub exemption_type: u32,
 }
 
 #[derive(Clone)]
@@ -97,6 +97,8 @@ pub struct Recipient {
     pub address: Address,
     pub amount: i128,
 }
+
+pub const MAX_BATCH_SIZE: u32 = 50;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
@@ -111,6 +113,8 @@ pub enum TokenError {
     FeeNotConfigured = 7,
     InsufficientFeeBalance = 8,
     FeeExemptionNotFound = 9,
+    BatchTooLarge = 10,
+    BatchEmpty = 11,
 }
 
 #[contract]
@@ -121,7 +125,7 @@ impl BcForgeToken {
         ttl::extend_instance_ttl(env);
     }
 
-    fn extend_balance_ttl(env: &Env, id: &Address) {
+    fn extend_balance_ttl_for_addr(env: &Env, id: &Address) {
         ttl::extend_storage_ttl_for_key(
             env,
             &DataKey::Balance(id.clone()),
@@ -187,7 +191,7 @@ impl BcForgeToken {
     fn read_balance(env: &Env, id: &Address) -> i128 {
         let key = DataKey::Balance(id.clone());
         if env.storage().persistent().has(&key) {
-            Self::extend_balance_ttl(env, id);
+            Self::extend_balance_ttl_for_addr(env, id);
         }
         env.storage().persistent().get(&key).unwrap_or(0)
     }
@@ -195,7 +199,7 @@ impl BcForgeToken {
     fn write_balance(env: &Env, id: &Address, balance: i128) {
         let key = DataKey::Balance(id.clone());
         env.storage().persistent().set(&key, &balance);
-        Self::extend_balance_ttl(env, id);
+        Self::extend_balance_ttl_for_addr(env, id);
     }
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
@@ -209,7 +213,7 @@ impl BcForgeToken {
                 exp_ledger: 0,
             });
 
-        if allowance_info.exp_ledger > 0 && env.ledger().sequence() > allowance_info.exp_ledger as u64 {
+        if allowance_info.exp_ledger > 0 && env.ledger().sequence() > allowance_info.exp_ledger {
             return 0;
         }
 
@@ -326,7 +330,7 @@ impl BcForgeToken {
             .get(&DataKey::FeeExemption(address.clone()))
     }
 
-    fn is_fee_exempt(env: &Env, address: &Address, operation_type: u8) -> bool {
+    fn is_fee_exempt(env: &Env, address: &Address, operation_type: u32) -> bool {
         if let Some(exemption) = Self::read_fee_exemption(env, address) {
             // 0 = all operations, 1 = transfers only, 2 = mint only, etc.
             exemption.exemption_type == 0 || exemption.exemption_type == operation_type
@@ -335,7 +339,7 @@ impl BcForgeToken {
         }
     }
 
-    fn calculate_fee(env: &Env, operation_type: u8, complexity: u32) -> i128 {
+    fn calculate_fee(env: &Env, _operation_type: u32, complexity: u32) -> i128 {
         let fee_config = match Self::read_fee_config(env) {
             Ok(config) => config,
             Err(_) => return 0,
@@ -360,7 +364,7 @@ impl BcForgeToken {
         }
     }
 
-    fn charge_fee(env: &Env, payer: &Address, operation_type: u8, complexity: u32) -> Result<(), TokenError> {
+    fn charge_fee(env: &Env, payer: &Address, operation_type: u32, complexity: u32) -> Result<(), TokenError> {
         // Check if payer is exempt
         if Self::is_fee_exempt(env, payer, operation_type) {
             return Ok(());
@@ -389,15 +393,15 @@ impl BcForgeToken {
         Ok(())
     }
 
-    fn set_fee_config(env: &Env, config: &FeeConfig) {
+    fn write_fee_config(env: &Env, config: &FeeConfig) {
         env.storage().instance().set(&DataKey::FeeConfig, config);
     }
 
-    fn set_treasury(env: &Env, treasury: &Address) {
+    fn write_treasury(env: &Env, treasury: &Address) {
         env.storage().instance().set(&DataKey::Treasury, treasury);
     }
 
-    fn set_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
+    fn write_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
         env.storage()
             .persistent()
             .set(&DataKey::FeeExemption(address.clone()), exemption);
@@ -435,7 +439,7 @@ impl BcForgeToken {
     pub fn extend_balance_ttl(env: Env, id: Address) {
         id.require_auth();
         Self::extend_instance_ttl_for_call(&env);
-        Self::extend_balance_ttl(&env, &id);
+        Self::extend_balance_ttl_for_addr(&env, &id);
     }
 
     pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
@@ -458,18 +462,30 @@ impl BcForgeToken {
         let current_admin = Self::read_admin(&env)?;
         current_admin.require_auth();
 
-        for i in 0..recipients.len() {
+        let len = recipients.len();
+        if len == 0 {
+            return Err(TokenError::BatchEmpty);
+        }
+        if len > MAX_BATCH_SIZE {
+            return Err(TokenError::BatchTooLarge);
+        }
+
+        // Validate all entries first (fail-fast)
+        for i in 0..len {
             let recipient = recipients.get(i).expect("recipient should exist");
             if recipient.amount <= 0 {
                 return Err(TokenError::InvalidAmount);
             }
         }
 
-        for i in 0..recipients.len() {
+        let mut total: i128 = 0;
+        for i in 0..len {
             let recipient = recipients.get(i).expect("recipient should exist");
             Self::internal_mint(&env, &current_admin, &recipient.address, recipient.amount)?;
+            total = total.checked_add(recipient.amount).ok_or(TokenError::InvalidAmount)?;
         }
 
+        events::emit_batch_mint(&env, &current_admin, len, total);
         Ok(())
     }
 
@@ -479,14 +495,23 @@ impl BcForgeToken {
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();
 
+        let len = recipients.len();
+        if len == 0 {
+            soroban_sdk::panic_with_error!(&env, TokenError::BatchEmpty);
+        }
+        if len > MAX_BATCH_SIZE {
+            soroban_sdk::panic_with_error!(&env, TokenError::BatchTooLarge);
+        }
+
+        // Validate all entries and compute total (fail-fast, atomic)
         let mut total: i128 = 0;
-        for i in 0..recipients.len() {
+        for i in 0..len {
             let (_, amount) = recipients.get(i).expect("recipient should exist");
             if amount <= 0 {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
             }
             total = match total.checked_add(amount) {
-                Some(total) => total,
+                Some(t) => t,
                 None => soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount),
             };
         }
@@ -495,11 +520,46 @@ impl BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
-        for i in 0..recipients.len() {
+        for i in 0..len {
             let (to, amount) = recipients.get(i).expect("recipient should exist");
-            let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+            // Skip self-transfers (from == to): balance unchanged, still emit event
+            if from != to {
+                let _ = Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+            }
             events::emit_transfer(&env, &from, &to, amount);
         }
+
+        events::emit_batch_transfer(&env, &from, len, total);
+    }
+
+    pub fn batch_approve(env: Env, from: Address, spenders: Vec<(Address, i128)>, exp: u32) {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        from.require_auth();
+
+        let len = spenders.len();
+        if len == 0 {
+            soroban_sdk::panic_with_error!(&env, TokenError::BatchEmpty);
+        }
+        if len > MAX_BATCH_SIZE {
+            soroban_sdk::panic_with_error!(&env, TokenError::BatchTooLarge);
+        }
+
+        // Validate all entries first (fail-fast)
+        for i in 0..len {
+            let (_, amount) = spenders.get(i).expect("spender should exist");
+            if amount < 0 {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
+        }
+
+        for i in 0..len {
+            let (spender, amount) = spenders.get(i).expect("spender should exist");
+            Self::write_allowance(&env, &from, &spender, amount, exp);
+            events::emit_approve(&env, &from, &spender, amount);
+        }
+
+        events::emit_batch_approve(&env, &from, len);
     }
 
     pub fn supply(env: Env) -> i128 {
@@ -723,21 +783,21 @@ impl BcForgeToken {
     pub fn set_fee_config(env: Env, config: FeeConfig) {
         let current_admin = Self::read_admin(&env).expect("contract not initialized");
         current_admin.require_auth();
-        Self::set_fee_config(&env, &config);
+        Self::write_fee_config(&env, &config);
         events::emit_fee_config_set(&env, &current_admin, &config);
     }
 
     pub fn set_treasury(env: Env, treasury: Address) {
         let current_admin = Self::read_admin(&env).expect("contract not initialized");
         current_admin.require_auth();
-        Self::set_treasury(&env, &treasury);
+        Self::write_treasury(&env, &treasury);
         events::emit_treasury_set(&env, &current_admin, &treasury);
     }
 
     pub fn set_fee_exemption(env: Env, address: Address, exemption: FeeExemption) {
         let current_admin = Self::read_admin(&env).expect("contract not initialized");
         current_admin.require_auth();
-        Self::set_fee_exemption(&env, &address, &exemption);
+        Self::write_fee_exemption(&env, &address, &exemption);
         events::emit_fee_exemption_set(&env, &current_admin, &address, &exemption);
     }
 
