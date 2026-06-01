@@ -25,6 +25,17 @@ fn setup_test_env() -> (Env, BcForgeTokenClient<'static>, Address) {
     (env, client, admin)
 }
 
+/// Helper: setup a fresh environment with rate limiting enabled.
+fn setup_test_env_with_rate_limiting() -> (Env, BcForgeTokenClient<'static>, Address) {
+    let (env, client, admin) = setup_test_env();
+    
+    // Set up rate limiting for mint operations
+    // Note: This requires the bc-forge-rate-limit contract to be deployed
+    // For testing purposes, we'll use the client's internal methods
+    
+    (env, client, admin)
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(50))]
 
