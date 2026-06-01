@@ -19,6 +19,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **Rate Limiting** — Configurable global and per-address rate limits for mint and transfer operations
 - **Property-Based Fuzz Testing** — Enhanced proptest framework for invariant verification
 - **End-to-End Integration Tests** — Complete lifecycle testing on Stellar testnet
+- **Automatic Storage TTL Management** — Shared helper module extends Soroban contract and persistent storage TTL across calls
 
 ## 📁 Project Structure
 
@@ -32,6 +33,7 @@ bc-forge/
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
 │   ├── rate-limit/             # Rate limiting module
+│   ├── ttl/                      # Shared storage TTL helpers
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
 │   └── token/                    # Core SEP-41 token contract
@@ -63,6 +65,16 @@ bc-forge/
 ├── LICENSE                       # MIT
 └── README.md                     # This file
 ```
+
+## 🧠 Storage TTL Strategy
+
+To keep Soroban contract state active, bc-forge now includes shared TTL logic that:
+
+- extends the contract instance TTL on every public token, admin, and lifecycle call
+- refreshes persistent storage TTL for balances, allowances, lockups, roles, and proposals
+- treats expired balances and allowances as zero instead of panicking
+
+This makes the system more resilient to Soroban storage expiry while preserving on-chain security semantics.
 
 ## 🛠️ Prerequisites
 
