@@ -15,7 +15,6 @@ import {
 } from '@stellar/stellar-sdk';
 
 import {
-  buildInvokeTransaction,
   submitTransaction,
   addressToScVal,
   i128ToScVal,
@@ -318,6 +317,69 @@ export class bcForgeClient {
   // ─── Offline Transaction Builders ──────────────────────────────────────────
 
   /**
+   * Build an unsigned transaction XDR for offline signing.
+   *
+   * @param method - Contract method name
+   * @param args - Method arguments as ScVal array
+   * @param sourcePublicKey - Public key of the source account
+   * @returns Unsigned transaction XDR string
+   */
+  async buildUnsignedTx(
+    method: string,
+    args: xdr.ScVal[],
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      method,
+      args,
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Submit a signed transaction XDR to the network and poll for the result.
+   *
+   * @param txXdr - Signed transaction XDR string
+   * @returns Transaction result
+   */
+  async submitTx(txXdr: string): Promise<TransactionResult> {
+    const response = await submitTransaction(this.rpcUrl, txXdr);
+
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: (response as any).hash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+
+    return {
+      success: false,
+      hash: (response as any).hash,
+    };
+  }
+
+  /**
+   * Build an unsigned initialize transaction for offline signing.
+   */
+  async buildInitializeTx(
+    admin: string,
+    decimals: number,
+    name: string,
+    symbol: string,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return this.buildUnsignedTx(
+      'initialize',
+      [addressToScVal(admin), u32ToScVal(decimals), stringToScVal(name), stringToScVal(symbol)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
    * Build an unsigned mint transaction for offline signing.
    *
    * @param to              - Recipient address
@@ -326,14 +388,30 @@ export class bcForgeClient {
    * @returns Unsigned transaction XDR string
    */
   async buildMintTx(to: string, amount: bigint, sourcePublicKey: string): Promise<string> {
-    return buildUnsignedTransaction(
-      this.rpcUrl,
-      this.networkPassphrase,
-      this.contractId,
-      'mint',
-      [addressToScVal(to), i128ToScVal(amount)],
-      sourcePublicKey,
+    return this.buildUnsignedTx('mint', [addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned batch mint transaction for offline signing.
+   */
+  async buildBatchMintTx(
+    recipients: BatchMintRecipient[],
+    sourcePublicKey: string,
+  ): Promise<string> {
+    const recipientScVals = recipients.map(({ to, amount }) =>
+      xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('address'),
+          val: addressToScVal(to),
+        }),
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('amount'),
+          val: i128ToScVal(amount),
+        }),
+      ]),
     );
+    const recipientsVec = xdr.ScVal.scvVec(recipientScVals);
+    return this.buildUnsignedTx('batch_mint', [recipientsVec], sourcePublicKey);
   }
 
   /**
@@ -351,10 +429,7 @@ export class bcForgeClient {
     amount: bigint,
     sourcePublicKey: string,
   ): Promise<string> {
-    return buildUnsignedTransaction(
-      this.rpcUrl,
-      this.networkPassphrase,
-      this.contractId,
+    return this.buildUnsignedTx(
       'transfer',
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       sourcePublicKey,
@@ -378,10 +453,7 @@ export class bcForgeClient {
     exp: number,
     sourcePublicKey: string,
   ): Promise<string> {
-    return buildUnsignedTransaction(
-      this.rpcUrl,
-      this.networkPassphrase,
-      this.contractId,
+    return this.buildUnsignedTx(
       'approve',
       [addressToScVal(from), addressToScVal(spender), i128ToScVal(amount), u32ToScVal(exp)],
       sourcePublicKey,
@@ -397,14 +469,169 @@ export class bcForgeClient {
    * @returns Unsigned transaction XDR string
    */
   async buildBurnTx(from: string, amount: bigint, sourcePublicKey: string): Promise<string> {
-    return buildUnsignedTransaction(
-      this.rpcUrl,
-      this.networkPassphrase,
-      this.contractId,
+    return this.buildUnsignedTx(
       'burn',
       [addressToScVal(from), i128ToScVal(amount)],
       sourcePublicKey,
     );
+  }
+
+  /**
+   * Build an unsigned transfer ownership transaction for offline signing.
+   */
+  async buildTransferOwnershipTx(newAdmin: string, sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('transfer_ownership', [addressToScVal(newAdmin)], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned pause transaction for offline signing.
+   */
+  async buildPauseTx(sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('pause', [], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned unpause transaction for offline signing.
+   */
+  async buildUnpauseTx(sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('unpause', [], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned set admin pool transaction for offline signing.
+   */
+  async buildSetAdminPoolTx(
+    pool: string[],
+    threshold: number,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return this.buildUnsignedTx(
+      'set_admin_pool',
+      [
+        nativeToScVal(
+          pool.map((addr) => addressToScVal(addr)),
+          { type: 'vec' },
+        ),
+        u32ToScVal(threshold),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned upgrade transaction for offline signing.
+   */
+  async buildUpgradeTx(newWasmHash: string | Buffer, sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('upgrade', [hashToScVal(newWasmHash)], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned propose action transaction for offline signing.
+   */
+  async buildProposeActionTx(
+    admin: string,
+    action: { Mint: [string, bigint] } | { Pause: [] } | { Unpause: [] },
+    description: string,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    const actionScVal =
+      'Mint' in action
+        ? nativeToScVal({
+            Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
+          })
+        : nativeToScVal(action);
+
+    return this.buildUnsignedTx(
+      'propose_action',
+      [addressToScVal(admin), actionScVal, stringToScVal(description)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned approve proposal transaction for offline signing.
+   */
+  async buildApproveProposalTx(
+    admin: string,
+    proposalId: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return this.buildUnsignedTx(
+      'approve_proposal',
+      [addressToScVal(admin), nativeToScVal(proposalId, { type: 'u64' })],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned execute proposal transaction for offline signing.
+   */
+  async buildExecuteProposalTx(proposalId: bigint, sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx(
+      'execute_proposal',
+      [nativeToScVal(proposalId, { type: 'u64' })],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned set clawback admin transaction for offline signing.
+   */
+  async buildSetClawbackAdminTx(admin: string, sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('set_clawback_admin', [addressToScVal(admin)], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned update name transaction for offline signing.
+   */
+  async buildUpdateNameTx(newName: string, sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('update_name', [stringToScVal(newName)], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned clawback transaction for offline signing.
+   */
+  async buildClawbackTx(
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return this.buildUnsignedTx(
+      'clawback',
+      [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned lock tokens transaction for offline signing.
+   */
+  async buildLockTokensTx(
+    user: string,
+    amount: bigint,
+    unlockTime: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return this.buildUnsignedTx(
+      'lock_tokens',
+      [addressToScVal(user), i128ToScVal(amount), nativeToScVal(unlockTime, { type: 'u64' })],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned withdraw locked tokens transaction for offline signing.
+   */
+  async buildWithdrawLockedTx(user: string, sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('withdraw_locked', [addressToScVal(user)], sourcePublicKey);
+  }
+
+  /**
+   * Build an unsigned update symbol transaction for offline signing.
+   */
+  async buildUpdateSymbolTx(newSymbol: string, sourcePublicKey: string): Promise<string> {
+    return this.buildUnsignedTx('update_symbol', [stringToScVal(newSymbol)], sourcePublicKey);
   }
 
   /**
@@ -714,29 +941,18 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.withRetry(async () => {
       try {
-        const txXdr = await buildInvokeTransaction(
+        const unsignedTx = await buildUnsignedTransaction(
           this.rpcUrl,
           this.networkPassphrase,
           this.contractId,
           method,
           args,
-          source,
+          source.publicKey(),
         );
 
-        const response = await submitTransaction(this.rpcUrl, txXdr);
+        const signedTx = signTransaction(unsignedTx, this.networkPassphrase, source);
 
-        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-          return {
-            success: true,
-            hash: (response as any).hash,
-            returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
-          };
-        }
-
-        return {
-          success: false,
-          hash: (response as any).hash,
-        };
+        return await this.submitTx(signedTx);
       } catch (error: any) {
         // Don't retry on simulation errors (usually logic errors)
         if (error instanceof SimulationError) throw error;

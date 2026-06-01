@@ -32,4 +32,16 @@ describe('MockBcForgeClient', () => {
     expect(await client.getBalance('C')).toBe(300n);
     expect(await client.getAllowance('A', 'B')).toBe(200n);
   });
+
+  it('should support offline building, signing, and submission stubs', async () => {
+    const client = new MockBcForgeClient({} as any);
+    const unsignedTx = await client.buildTransferTx('A', 'B', 100n, 'GA...');
+    expect(unsignedTx).toBe('mock-unsigned-xdr-for-transfer');
+
+    const signedTx = client.signTx(unsignedTx, {} as any);
+    expect(signedTx).toBe('mock-unsigned-xdr-for-transfer-signed');
+
+    const result = await client.submitTx(signedTx);
+    expect(result.success).toBe(true);
+  });
 });
