@@ -25,8 +25,6 @@ fn test_mint_transfer_and_supply() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _admin) = setup(&env);
-    let from = Address::generate(&env);
-    let to = Address::generate(&env);
 
     client.mint(&from, &1_000);
     client.transfer(&from, &to, &300);

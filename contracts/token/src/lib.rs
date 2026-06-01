@@ -5,6 +5,8 @@
 #![no_std]
 
 mod events;
+mod reentrancy_guard;
+mod rate_limit;
 
 #[cfg(test)]
 mod test;
@@ -14,6 +16,8 @@ use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, Env, String,
 };
+use reentrancy_guard::ReentrancyGuard;
+use rate_limit::BcForgeRateLimit;
 
 #[derive(Clone)]
 #[contracttype]
@@ -43,6 +47,9 @@ pub enum TokenError {
     InsufficientBalance = 4,
     InsufficientAllowance = 5,
     ContractPaused = 6,
+    FeeNotConfigured = 7,
+    InsufficientFeeBalance = 8,
+    FeeExemptionNotFound = 9,
 }
 
 #[contract]
@@ -86,11 +93,16 @@ impl BcForgeToken {
     }
 
     fn read_supply(env: &Env) -> i128 {
-        env.storage().instance().get(&DataKey::Supply).unwrap_or(0)
+        let key = DataKey::Supply;
+        if env.storage().instance().has(&key) {
+            ttl::extend_instance_ttl(env);
+        }
+        env.storage().instance().get(&key).unwrap_or(0)
     }
 
     fn write_supply(env: &Env, supply: i128) {
         env.storage().instance().set(&DataKey::Supply, &supply);
+        ttl::extend_instance_ttl(env);
     }
 
     fn read_allowance_data(env: &Env, from: &Address, spender: &Address) -> AllowanceData {
@@ -178,6 +190,35 @@ impl BcForgeToken {
     }
 
     pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+        reentrancy_guard!(&env, "mint_guard", {
+            Self::ensure_initialized(&env)?;
+            Self::ensure_not_paused(&env)?;
+            let current_admin = Self::read_admin(&env)?;
+            current_admin.require_auth();
+            
+            // Check rate limits for mint operation
+            if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
+                return Err(TokenError::InvalidAmount);
+            }
+            
+            Self::internal_mint(&env, &current_admin, &to, amount)
+        })
+    }
+
+    pub fn batch_mint(env: Env, recipients: Vec<Recipient>) -> Result<(), TokenError> {
+        reentrancy_guard!(&env, "batch_mint_guard", {
+            Self::ensure_initialized(&env)?;
+            Self::ensure_not_paused(&env)?;
+            let current_admin = Self::read_admin(&env)?;
+            current_admin.require_auth();
+
+            for i in 0..recipients.len() {
+                let recipient = recipients.get(i).expect("recipient should exist");
+                if recipient.amount <= 0 {
+                    return Err(TokenError::InvalidAmount);
+                }
+            }
+        Self::extend_instance_ttl_for_call(&env);
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
         let admin_address = admin::get_admin(&env);
@@ -186,6 +227,7 @@ impl BcForgeToken {
     }
 
     pub fn supply(env: Env) -> i128 {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_supply(&env)
     }
@@ -219,11 +261,22 @@ impl BcForgeToken {
 #[contractimpl]
 impl TokenInterface for BcForgeToken {
     fn allowance(env: Env, from: Address, spender: Address) -> i128 {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::allowance_amount(&env, &from, &spender)
     }
 
     fn approve(env: Env, from: Address, spender: Address, amount: i128, exp: u32) {
+        reentrancy_guard!(&env, "approve_guard", {
+            Self::panic_on_err(&env, Self::ensure_initialized(&env));
+            from.require_auth();
+            if amount < 0 {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
+            Self::write_allowance(&env, &from, &spender, amount, exp);
+            events::emit_approve(&env, &from, &spender, amount);
+        })
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         from.require_auth();
         if amount < 0 {
@@ -234,11 +287,17 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn balance(env: Env, id: Address) -> i128 {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_balance(&env, &id)
     }
 
     fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        reentrancy_guard!(&env, "transfer_guard", {
+            Self::panic_on_err(&env, Self::ensure_initialized(&env));
+            Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+            from.require_auth();
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();
@@ -250,6 +309,7 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         spender.require_auth();
@@ -275,6 +335,7 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn burn(env: Env, from: Address, amount: i128) {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();
@@ -282,10 +343,10 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
         }
 
-        let balance = Self::read_balance(&env, &from);
-        if balance < amount {
-            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
-        }
+            // Check rate limits for burn operation
+            if !crate::rate_limit::check_burn_rate_limit(&env, &from, amount) {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
 
         let new_balance = balance - amount;
         let new_supply = Self::read_supply(&env) - amount;
@@ -295,6 +356,7 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         spender.require_auth();
@@ -328,11 +390,13 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn decimals(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         env.storage().instance().get(&DataKey::Decimals).unwrap_or(7)
     }
 
     fn name(env: Env) -> String {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         env.storage()
             .instance()
@@ -341,6 +405,7 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn symbol(env: Env) -> String {
+        Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         env.storage()
             .instance()
