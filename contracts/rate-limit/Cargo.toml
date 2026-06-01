@@ -1,12 +1,12 @@
 [package]
-name = "bc-forge-token"
+name = "bc-forge-rate-limit"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Core SEP-41 token contract for bc-forge with admin controls and pausable lifecycle"
+description = "Rate limiting contract for bc-forge token operations"
 repository = "https://github.com/BCPathway/bc-forge"
 license = "MIT"
-keywords = ["soroban", "stellar", "smart-contract", "token", "sep-41"]
+keywords = ["soroban", "stellar", "smart-contract", "rate-limiting"]
 categories = ["cryptography::cryptocurrencies"]
 
 [lib]
@@ -14,14 +14,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "22.0.0"
-bc-forge-admin = { path = "../admin" }
-bc-forge-lifecycle = { path = "../lifecycle" }
-bc-forge-rate-limit = { path = "../rate-limit" }
-bc-forge-ttl = { path = "../ttl" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.0", features = ["testutils"] }
-proptest = "1.4.0"
 
 [features]
 testutils = ["soroban-sdk/testutils"]
