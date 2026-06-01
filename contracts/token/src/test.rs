@@ -561,7 +561,6 @@ fn test_transfer_ownership() {
 }
 
 #[test]
-fn test_two_step_ownership_transfer_happy_path() {
 fn test_role_management() {
     let env = Env::default();
     env.mock_all_auths();
@@ -816,7 +815,6 @@ fn test_mint_unauthorized_panics() {
 // ─── Version ─────────────────────────────────────────────────────────────────
 
 #[test]
-fn test_version() {
 fn test_batch_transfer_multiple_recipients() {
     let env = Env::default();
     env.mock_all_auths();
