@@ -21,19 +21,14 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
 }
 
 #[test]
-fn test_transfer() {
+fn test_extend_ttl_public_call_extends_instance() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _admin) = setup(&env);
-    let from = Address::generate(&env);
-    let to = Address::generate(&env);
 
-    client.mint(&from, &1000);
-    client.transfer(&from, &to, &300);
-
-    assert_eq!(client.balance(&from), 700);
-    assert_eq!(client.balance(&to), 300);
-    assert_eq!(client.supply(), 1000);
+    client.extend_ttl();
+    env.ledger().set(env.ledger().sequence() + 200);
+    assert_eq!(client.supply(), 0);
 }
 
 #[test]

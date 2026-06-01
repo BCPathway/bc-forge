@@ -24,3 +24,5 @@ export { buildInvokeTransaction, submitTransaction, scValToNative } from './util
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
 export * from './mockClient';
+export { WrapperClient } from './wrapperClient';
+export type { WrapperClientConfig } from './wrapperClient';
