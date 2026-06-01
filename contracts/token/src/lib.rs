@@ -5,6 +5,7 @@
 //! role-based access control, clawback regulatory features, lockup/vesting, and multi-sig support.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 mod events;
 mod reentrancy_guard;
@@ -577,6 +578,9 @@ impl BcForgeToken {
         admin::approve_proposal(&env, signer, proposal_id);
     }
 
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        events::emit_upgrade(&env, &admin, &new_wasm_hash);
     pub fn execute_proposal(env: Env, proposal_id: u64) {
         Self::extend_instance_ttl_for_call(&env);
         admin::mark_executed(&env, proposal_id);
@@ -964,6 +968,11 @@ impl BcForgeToken {
         events::emit_update_name(&env, &current_admin, &old_name, &new_name);
         Ok(())
     }
+
+    /// Updates the token symbol. Admin-only.
+    pub fn update_symbol(env: Env, new_symbol: String) {
+        let admin = Self::read_admin(&env);
+        admin.require_auth();
 
     pub fn update_symbol(env: Env, new_symbol: String) -> Result<(), TokenError> {
         Self::extend_instance_ttl_for_call(&env);
