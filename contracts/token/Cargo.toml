@@ -16,9 +16,11 @@ crate-type = ["cdylib", "rlib"]
 soroban-sdk = "22.0.0"
 bc-forge-access = { path = "../access" }
 bc-forge-lifecycle = { path = "../lifecycle" }
+bc-forge-rate-limit = { path = "../rate-limit" }
+bc-forge-ttl = { path = "../ttl" }
 
 [dev-dependencies]
-soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+soroban-sdk = { version = "26.0.1", features = ["testutils"] }
 proptest = "1.4.0"
 
 [features]
