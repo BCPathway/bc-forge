@@ -23,17 +23,26 @@ pub fn set_admin(env: &Env, admin: &Address) {
     env.storage()
         .persistent()
         .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
+    extend_instance_ttl(env);
+    extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
 }
 
 pub fn get_admin(env: &Env) -> Address {
-    env.storage()
+    let admin = env
+        .storage()
         .instance()
         .get(&AdminKey::Admin)
-        .expect("contract not initialized: admin not set")
+        .expect("contract not initialized: admin not set");
+    extend_instance_ttl(env);
+    admin
 }
 
 pub fn has_admin(env: &Env) -> bool {
-    env.storage().instance().has(&AdminKey::Admin)
+    let has = env.storage().instance().has(&AdminKey::Admin);
+    if has {
+        extend_instance_ttl(env);
+    }
+    has
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
@@ -41,6 +50,7 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     env.storage()
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
+    extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
@@ -51,11 +61,9 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
-    if env
-        .storage()
-        .persistent()
-        .has(&AdminKey::Role(Role::Admin, address.clone()))
-    {
+    let admin_key = AdminKey::Role(Role::Admin, address.clone());
+    if env.storage().persistent().has(&admin_key) {
+        extend_storage_ttl_for_key(env, &admin_key);
         return true;
     }
 
