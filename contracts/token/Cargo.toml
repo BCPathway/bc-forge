@@ -4,21 +4,25 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Core SEP-41 token contract for bc-forge with admin controls and pausable lifecycle"
-repository = "https://github.com/BCPathway/bc-forge"
 license = "MIT"
+repository = "https://github.com/BCPathway/bc-forge"
+homepage = "https://github.com/BCPathway/bc-forge"
+readme = "../../README.md"
 keywords = ["soroban", "stellar", "smart-contract", "token", "sep-41"]
-categories = ["cryptography::cryptocurrencies"]
+categories = ["cryptography::cryptocurrencies", "wasm"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = "22.0.0"
+soroban-sdk = "22.0.11"
 bc-forge-admin = { path = "../admin" }
 bc-forge-lifecycle = { path = "../lifecycle" }
+bc-forge-rate-limit = { path = "../rate-limit" }
+bc-forge-ttl = { path = "../ttl" }
 
 [dev-dependencies]
-soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+soroban-sdk = { version = "22.0.11", features = ["testutils"] }
 proptest = "1.4.0"
 
 [features]

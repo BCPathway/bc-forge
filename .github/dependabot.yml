@@ -1,45 +1,86 @@
 version: 2
-
 updates:
-  # ── Rust / Cargo ──────────────────────────────────────────────────────────
-  - package-ecosystem: "cargo"
-    directory: "/"
+  - package-ecosystem: cargo
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "UTC"
-    assignees:
-      - "RemmyAcee"
-    reviewers:
-      - "RemmyAcee"
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
     commit-message:
       prefix: "chore(deps)"
-      prefix-development: "chore(dev-deps)"
-      include: "scope"
-    labels:
-      - "dependencies"
-      - "rust"
-    open-pull-requests-limit: 10
+    groups:
+      cargo-dependencies:
+        patterns:
+          - "*"
 
-  # ── Node.js / npm (SDK) ───────────────────────────────────────────────────
-  - package-ecosystem: "npm"
-    directory: "/sdk"
+  - package-ecosystem: npm
+    directory: /sdk
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "UTC"
-    assignees:
-      - "RemmyAcee"
-    reviewers:
-      - "RemmyAcee"
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - sdk
     commit-message:
       prefix: "chore(deps)"
-      prefix-development: "chore(dev-deps)"
-      include: "scope"
+    groups:
+      sdk-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /cli
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
     labels:
-      - "dependencies"
-      - "javascript"
-    open-pull-requests-limit: 10
-# 
+      - dependencies
+      - cli
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      cli-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /react
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - react
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      react-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /indexer
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - indexer
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      indexer-dependencies:
+        patterns:
+          - "*"
