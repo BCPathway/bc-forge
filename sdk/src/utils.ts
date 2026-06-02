@@ -7,6 +7,7 @@ import {
   TransactionBuilder,
   Networks,
   xdr,
+  Account,
   Address,
   nativeToScVal,
   scValToNative as sdkScValToNative,
@@ -159,7 +160,7 @@ export async function buildUnsignedTransaction(
   contractId: string,
   method: string,
   args: xdr.ScVal[],
-  sourcePublicKey: string
+  sourcePublicKey: string,
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
   const sourceAccount = await server.getAccount(sourcePublicKey);
@@ -198,7 +199,7 @@ export async function buildUnsignedTransaction(
 export function signTransaction(
   txXdr: string,
   networkPassphrase: string,
-  keypair: Keypair
+  keypair: Keypair,
 ): string {
   const tx = TransactionBuilder.fromXDR(txXdr, networkPassphrase);
   tx.sign(keypair);
@@ -222,13 +223,13 @@ export async function simulateTransaction(
   contractId: string,
   method: string,
   args: xdr.ScVal[],
-  sourcePublicKey: string
+  sourcePublicKey: string,
 ): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
   const server = new SorobanRpc.Server(rpcUrl);
-  
+
   // Create a dummy account for simulation
   const account = new Account(sourcePublicKey, '0');
-  
+
   const contract = new Contract(contractId);
 
   const tx = new TransactionBuilder(account, {
@@ -246,6 +247,9 @@ export async function simulateTransaction(
   }
 
   return simulated;
+}
+
+/**
  * Converts a 32-byte hex string or Buffer to an ScVal.
  */
 export function hashToScVal(hash: string | Buffer): xdr.ScVal {
