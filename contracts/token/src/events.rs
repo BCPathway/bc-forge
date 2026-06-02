@@ -78,3 +78,10 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("unpause"),), (admin.clone(),));
 }
+
+pub fn emit_flash_loan(env: &Env, receiver: &Address, amount: i128, fee: i128) {
+    env.events().publish(
+        (symbol_short!("fl_loan"),),
+        (receiver.clone(), amount, fee),
+    );
+}
