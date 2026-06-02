@@ -13,6 +13,7 @@ import {
   xdr,
   nativeToScVal,
 } from '@stellar/stellar-sdk';
+import type { WalletAdapter } from './walletAdapter';
 
 import {
   buildInvokeTransaction,
@@ -39,6 +40,8 @@ export interface bcForgeClientConfig {
   networkPassphrase: string;
   /** Deployed bc-forge token contract ID */
   contractId: string;
+  /** Optional wallet adapter for browser-based signing flows */
+  walletAdapter?: WalletAdapter;
 }
 
 export interface TransactionResult {
@@ -57,6 +60,12 @@ export interface BatchMintRecipient {
   amount: bigint;
 }
 
+/** Role for role-based access control */
+export enum Role {
+  Admin = 'Admin',
+  Minter = 'Minter',
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class bcForgeClient {
@@ -65,6 +74,7 @@ export class bcForgeClient {
   private contractId: string;
   private server: SorobanRpc.Server;
   private contract: Contract;
+  private walletAdapter?: WalletAdapter;
 
   constructor(config: bcForgeClientConfig) {
     this.rpcUrl = config.rpcUrl;
@@ -72,6 +82,25 @@ export class bcForgeClient {
     this.contractId = config.contractId;
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
+    this.walletAdapter = config.walletAdapter;
+  }
+
+  /** Replace or set the wallet adapter at runtime */
+  setWalletAdapter(adapter?: WalletAdapter) {
+    this.walletAdapter = adapter;
+  }
+
+  /** Connect the configured wallet adapter (if any) */
+  async connectWallet(): Promise<string | undefined> {
+    if (!this.walletAdapter) throw new Error('No wallet adapter configured');
+    await this.walletAdapter.connect();
+    return this.walletAdapter.publicKey;
+  }
+
+  /** Disconnect the configured wallet adapter (if any) */
+  async disconnectWallet(): Promise<void> {
+    if (!this.walletAdapter) return;
+    await this.walletAdapter.disconnect();
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
@@ -186,7 +215,7 @@ export class bcForgeClient {
     decimals: number,
     name: string,
     symbol: string,
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'initialize',
@@ -202,7 +231,7 @@ export class bcForgeClient {
    * @param amount - Number of tokens to mint
    * @param source - Admin keypair
    */
-  async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
+  async mint(to: string, amount: bigint, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
   }
 
@@ -212,7 +241,7 @@ export class bcForgeClient {
    * @param recipients - Array of recipient objects
    * @param source     - Admin keypair
    */
-  async batchMint(recipients: BatchMintRecipient[], source: Keypair): Promise<TransactionResult> {
+  async batchMint(recipients: BatchMintRecipient[], source?: Keypair): Promise<TransactionResult> {
     const recipientScVals = recipients.map(({ to, amount }) =>
       xdr.ScVal.scvMap([
         new xdr.ScMapEntry({
@@ -230,6 +259,26 @@ export class bcForgeClient {
   }
 
   /**
+   * Batch transfer tokens to multiple recipients. Sender's keypair must authorize the transaction.
+   *
+   * @param from     - Sender address
+   * @param recipients - Array of recipient objects with address and amount
+   * @param source   - Sender's keypair
+   */
+  async batchTransfer(
+    from: string,
+    recipients: BatchMintRecipient[],
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    const recipientsVec = xdr.ScVal.scvVec(
+      recipients.map(({ to, amount }) =>
+        xdr.ScVal.scvVec([addressToScVal(to), i128ToScVal(amount)]),
+      ),
+    );
+    return this.invokeContract('batch_transfer', [addressToScVal(from), recipientsVec], source);
+  }
+
+  /**
    * Transfer tokens between addresses.
    *
    * @param from   - Sender address
@@ -241,11 +290,39 @@ export class bcForgeClient {
     from: string,
     to: string,
     amount: bigint,
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'transfer',
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      source,
+    );
+  }
+
+  /**
+   * Transfer tokens from one address to another using an approved allowance.
+   *
+   * @param spender - Address authorized to spend tokens
+   * @param from    - Token owner address
+   * @param to      - Recipient address
+   * @param amount  - Number of tokens to transfer
+   * @param source  - Spender's keypair
+   */
+  async transferFrom(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'transfer_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        addressToScVal(to),
+        i128ToScVal(amount),
+      ],
       source,
     );
   }
@@ -262,7 +339,7 @@ export class bcForgeClient {
     from: string,
     spender: string,
     amount: bigint,
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'approve',
@@ -283,8 +360,33 @@ export class bcForgeClient {
    * @param amount - Number of tokens to burn
    * @param source - Burner's keypair
    */
-  async burn(from: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
+  async burn(from: string, amount: bigint, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('burn', [addressToScVal(from), i128ToScVal(amount)], source);
+  }
+
+  /**
+   * Burn tokens from an address using an approved allowance.
+   *
+   * @param spender - Address authorized to burn tokens
+   * @param from    - Token owner address
+   * @param amount  - Number of tokens to burn
+   * @param source  - Spender's keypair
+   */
+  async burnFrom(
+    spender: string,
+    from: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
+      source,
+    );
   }
 
   /**
@@ -293,7 +395,7 @@ export class bcForgeClient {
    * @param newAdmin - New admin address
    * @param source   - Current admin's keypair
    */
-  async transferOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
+  async transferOwnership(newAdmin: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('transfer_ownership', [addressToScVal(newAdmin)], source);
   }
 
@@ -302,7 +404,7 @@ export class bcForgeClient {
    *
    * @param source - Admin keypair
    */
-  async pause(source: Keypair): Promise<TransactionResult> {
+  async pause(source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('pause', [], source);
   }
 
@@ -311,7 +413,7 @@ export class bcForgeClient {
    *
    * @param source - Admin keypair
    */
-  async unpause(source: Keypair): Promise<TransactionResult> {
+  async unpause(source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('unpause', [], source);
   }
 
@@ -362,6 +464,38 @@ export class bcForgeClient {
   }
 
   /**
+   * Build an unsigned transferFrom transaction for offline signing.
+   *
+   * @param spender           - Address authorized to spend tokens
+   * @param from              - Token owner address
+   * @param to                - Recipient address
+   * @param amount            - Number of tokens to transfer
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildTransferFromTx(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'transfer_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        addressToScVal(to),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
    * Build an unsigned approve transaction for offline signing.
    *
    * @param from            - Token owner
@@ -403,6 +537,35 @@ export class bcForgeClient {
       this.contractId,
       'burn',
       [addressToScVal(from), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned burnFrom transaction for offline signing.
+   *
+   * @param spender           - Address authorized to burn tokens
+   * @param from              - Token owner address
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Unsigned transaction XDR string
+   */
+  async buildBurnFromTx(
+    spender: string,
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
       sourcePublicKey,
     );
   }
@@ -471,6 +634,105 @@ export class bcForgeClient {
     );
   }
 
+  /**
+   * Simulate a transferFrom operation.
+   *
+   * @param spender           - Address authorized to spend tokens
+   * @param from              - Token owner address
+   * @param to                - Recipient address
+   * @param amount            - Number of tokens to transfer
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Simulation result
+   */
+  async simulateTransferFrom(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'transfer_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        addressToScVal(to),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Simulate a burn operation.
+   *
+   * @param from              - Address whose tokens to burn
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Burner's public key
+   * @returns Simulation result
+   */
+  async simulateBurn(
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'burn',
+      [addressToScVal(from), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Simulate a burnFrom operation.
+   *
+   * @param spender           - Address authorized to burn tokens
+   * @param from              - Token owner address
+   * @param amount            - Number of tokens to burn
+   * @param sourcePublicKey   - Spender's public key
+   * @returns Simulation result
+   */
+  async simulateBurnFrom(
+    spender: string,
+    from: string,
+    amount: bigint,
+    sourcePublicKey: string,
+  ): Promise<any> {
+    return this.simulate(
+      'burn_from',
+      [
+        addressToScVal(spender),
+        addressToScVal(from),
+        i128ToScVal(amount),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Dry-run a transaction to estimate fees and resources without submitting.
+   *
+   * @param txXdr - Transaction XDR string to simulate
+   * @returns Simulation result with estimated resources, fees, and potential return value
+   */
+  async simulateTx(txXdr: string): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
+    return this.withRetry(async () => {
+      try {
+        const tx = TransactionBuilder.fromXDR(txXdr, this.networkPassphrase);
+        const simulated = await this.server.simulateTransaction(tx);
+
+        if (SorobanRpc.Api.isSimulationError(simulated)) {
+          throw new SimulationError(`Simulation failed: ${simulated.error}`, simulated.error);
+        }
+
+        return simulated;
+      } catch (error: any) {
+        if (error instanceof SimulationError) throw error;
+        throw new RPCError('RPC simulation failed', error);
+      }
+    });
+  }
+
   // ─── Multi-Sig / Admin Pool ──────────────────────────────────────────────
 
   /**
@@ -504,7 +766,7 @@ export class bcForgeClient {
    * @param newWasmHash - 32-byte hex string or Buffer of the new WASM hash
    * @param source      - Admin keypair
    */
-  async upgrade(newWasmHash: string | Buffer, source: Keypair): Promise<TransactionResult> {
+  async upgrade(newWasmHash: string | Buffer, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('upgrade', [hashToScVal(newWasmHash)], source);
   }
 
@@ -520,7 +782,7 @@ export class bcForgeClient {
     admin: string,
     action: { Mint: [string, bigint] } | { Pause: [] } | { Unpause: [] },
     description: string,
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     const actionScVal =
       'Mint' in action
@@ -542,7 +804,7 @@ export class bcForgeClient {
   async approveProposal(
     admin: string,
     proposalId: bigint,
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'approve_proposal',
@@ -554,10 +816,40 @@ export class bcForgeClient {
   /**
    * Execute a proposal once quorum is reached.
    */
-  async executeProposal(proposalId: bigint, source: Keypair): Promise<TransactionResult> {
+  async executeProposal(proposalId: bigint, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'execute_proposal',
       [nativeToScVal(proposalId, { type: 'u64' })],
+      source,
+    );
+  }
+
+  // ─── RBAC / Role Management ────────────────────────────────────────────────
+
+  /**
+   * Grant the Minter role to an address. Admin-only.
+   *
+   * @param address - Address to grant the Minter role to
+   * @param source  - Admin keypair
+   */
+  async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'grant_role',
+      [nativeToScVal(Role.Minter), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Revoke the Minter role from an address. Admin-only.
+   *
+   * @param address - Address to revoke the Minter role from
+   * @param source  - Admin keypair
+   */
+  async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'revoke_role',
+      [nativeToScVal(Role.Minter), addressToScVal(address)],
       source,
     );
   }
@@ -567,7 +859,7 @@ export class bcForgeClient {
   /**
    * Set the designated clawback administrator.
    */
-  async setClawbackAdmin(admin: string, source: Keypair): Promise<TransactionResult> {
+  async setClawbackAdmin(admin: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('set_clawback_admin', [addressToScVal(admin)], source);
   }
 
@@ -577,7 +869,7 @@ export class bcForgeClient {
    * @param newName - The new token name
    * @param source  - Admin keypair
    */
-  async updateName(newName: string, source: Keypair): Promise<TransactionResult> {
+  async updateName(newName: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('update_name', [stringToScVal(newName)], source);
   }
 
@@ -588,7 +880,7 @@ export class bcForgeClient {
     from: string,
     to: string,
     amount: bigint,
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'clawback',
@@ -606,7 +898,7 @@ export class bcForgeClient {
     user: string,
     amount: bigint,
     unlockTime: bigint,
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'lock_tokens',
@@ -618,7 +910,7 @@ export class bcForgeClient {
   /**
    * Withdraw matured locked tokens.
    */
-  async withdrawLocked(user: string, source: Keypair): Promise<TransactionResult> {
+  async withdrawLocked(user: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('withdraw_locked', [addressToScVal(user)], source);
   }
 
@@ -636,12 +928,29 @@ export class bcForgeClient {
   }
 
   /**
+   * Poll for recent contract events using cursor-based pagination.
+   *
+   * @param cursor - Optional cursor for pagination (from previous response)
+   * @returns Events response containing events and next cursor
+   */
+  async pollEvents(cursor?: string): Promise<{ events: any[]; cursor: string }> {
+    const response = await this.server.getEvents({
+      cursor,
+      filters: [{ contractIds: [this.contractId], type: 'contract' }],
+    });
+    return {
+      events: response.events,
+      cursor: response.cursor,
+    };
+  }
+
+  /**
    * Update the token symbol. Admin-only.
    *
    * @param newSymbol - The new token symbol
    * @param source    - Admin keypair
    */
-  async updateSymbol(newSymbol: string, source: Keypair): Promise<TransactionResult> {
+  async updateSymbol(newSymbol: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('update_symbol', [stringToScVal(newSymbol)], source);
   }
 
@@ -710,20 +1019,54 @@ export class bcForgeClient {
   private async invokeContract(
     method: string,
     args: xdr.ScVal[],
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.withRetry(async () => {
       try {
-        const txXdr = await buildInvokeTransaction(
+        // If an explicit Keypair is provided, use the existing signed builder
+        if (source) {
+          const txXdr = await buildInvokeTransaction(
+            this.rpcUrl,
+            this.networkPassphrase,
+            this.contractId,
+            method,
+            args,
+            source,
+          );
+
+          const response = await submitTransaction(this.rpcUrl, txXdr);
+
+          if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+            return {
+              success: true,
+              hash: (response as any).hash,
+              returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+            };
+          }
+
+          return {
+            success: false,
+            hash: (response as any).hash,
+          };
+        }
+
+        // Otherwise, attempt to use the configured wallet adapter
+        if (!this.walletAdapter) throw new Error('No signing source provided');
+        if (!this.walletAdapter.connected || !this.walletAdapter.publicKey)
+          throw new Error('Wallet adapter not connected');
+
+        const unsignedXdr = await buildUnsignedTransaction(
           this.rpcUrl,
           this.networkPassphrase,
           this.contractId,
           method,
           args,
-          source,
+          this.walletAdapter.publicKey,
         );
 
-        const response = await submitTransaction(this.rpcUrl, txXdr);
+        const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr);
+
+        const response = await submitTransaction(this.rpcUrl, signedXdr);
 
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {

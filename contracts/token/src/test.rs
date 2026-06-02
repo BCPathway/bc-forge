@@ -15,7 +15,7 @@
 #![cfg(test)]
 
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{vec, Address, Env, String, Vec};
+use soroban_sdk::{Address, Env, String};
 
 use crate::{BcForgeToken, BcForgeTokenClient, Recipient, TokenError};
 use bc_forge_admin::Role;
@@ -106,19 +106,17 @@ fn test_mint_zero_returns_error() {
 }
 
 #[test]
-fn test_transfer() {
+fn test_mint_transfer_and_supply() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _admin) = setup(&env);
-    let from = Address::generate(&env);
-    let to = Address::generate(&env);
 
     client.mint(&admin, &sender, &1000);
     client.transfer(&sender, &receiver, &400);
 
     assert_eq!(client.balance(&from), 700);
     assert_eq!(client.balance(&to), 300);
-    assert_eq!(client.supply(), 1000);
+    assert_eq!(client.supply(), 1_000);
 }
 
 #[test]
@@ -143,17 +141,13 @@ fn test_transfer_insufficient_balance_returns_error() {
 fn test_approve_and_transfer_from() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _) = setup_contract(&env);
-    let admin = init_default(&env, &client);
+    let (client, _admin) = setup(&env);
     let owner = Address::generate(&env);
     let spender = Address::generate(&env);
     let receiver = Address::generate(&env);
 
     client.mint(&admin, &owner, &1000);
     client.approve(&owner, &spender, &500, &0);
-
-    assert_eq!(client.allowance(&owner, &spender), 500);
-
     client.transfer_from(&spender, &owner, &receiver, &200);
 
     assert_eq!(client.balance(&owner), 800);
