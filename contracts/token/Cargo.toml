@@ -8,19 +8,21 @@ license = "MIT"
 repository = "https://github.com/BCPathway/bc-forge"
 homepage = "https://github.com/BCPathway/bc-forge"
 readme = "../../README.md"
-keywords = ["stellar", "soroban", "token", "sep-41"]
+keywords = ["soroban", "stellar", "smart-contract", "token", "sep-41"]
 categories = ["cryptography::cryptocurrencies", "wasm"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = "22.0.0"
+soroban-sdk = "26.0.1"
 bc-forge-admin = { path = "../admin" }
 bc-forge-lifecycle = { path = "../lifecycle" }
+bc-forge-rate-limit = { path = "../rate-limit" }
+bc-forge-ttl = { path = "../ttl" }
 
 [dev-dependencies]
-soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+soroban-sdk = { version = "26.0.1", features = ["testutils"] }
 proptest = "1.4.0"
 
 [features]
