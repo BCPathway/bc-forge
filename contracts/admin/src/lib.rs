@@ -10,23 +10,16 @@ use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
 pub enum AdminKey {
     Admin,
     Role(Role, Address),
-    /// The pool of administrator addresses for multi-sig.
     AdminPool,
-    /// Minimum signatures required for multi-sig actions.
     Threshold,
-    /// Active proposals: proposal_id -> Proposal.
     Proposal(u64),
-    /// Counter for generating unique proposal IDs.
     ProposalIdCounter,
 }
 
-/// Enumeration of available roles.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
-    /// Global administrator with full control.
     Admin,
-    /// Account authorized to mint tokens.
     Minter,
 }
 
@@ -100,36 +93,25 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
-    let admin_key = AdminKey::Role(Role::Admin, address.clone());
-    if env.storage().persistent().has(&admin_key) {
-        extend_storage_ttl_for_key(env, &admin_key);
-        return true;
-    }
-    let role_key = AdminKey::Role(role, address.clone());
-    let has = env.storage().persistent().has(&role_key);
-    if has {
-        extend_storage_ttl_for_key(env, &role_key);
-    }
-    has
+    env.storage()
+        .persistent()
+        .has(&AdminKey::Role(Role::Admin, address.clone()))
+        || env
+            .storage()
+            .persistent()
+            .has(&AdminKey::Role(role, address.clone()))
 }
 
-// ─── Guards ──────────────────────────────────────────────────────────────────
-
-/// Requires that the stored admin has authorized the current invocation.
 pub fn require_admin(env: &Env) {
-    let admin = get_admin(env);
-    admin.require_auth();
+    get_admin(env).require_auth();
 }
 
-/// Requires that the specified address has the given role and has authorized the invocation.
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
         panic!("unauthorized: missing role");
     }
     address.require_auth();
 }
-
-// ─── Multi-Sig Primitives ───────────────────────────────────────────────────
 
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     if threshold == 0 || threshold > pool.len() {
@@ -143,30 +125,19 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
 }
 
 pub fn get_admin_pool(env: &Env) -> Vec<Address> {
-    let pool = env.storage().instance().get(&AdminKey::AdminPool).unwrap_or_else(|| {
+    env.storage().instance().get(&AdminKey::AdminPool).unwrap_or_else(|| {
         if has_admin(env) {
             vec![env, get_admin(env)]
         } else {
             vec![env]
         }
-    });
-    extend_instance_ttl(env);
-    pool
+    })
 }
 
 pub fn get_threshold(env: &Env) -> u32 {
-    let threshold = env
-        .storage()
-        .instance()
-        .get(&AdminKey::Threshold)
-        .unwrap_or(1);
-    extend_instance_ttl(env);
-    threshold
+    env.storage().instance().get(&AdminKey::Threshold).unwrap_or(1)
 }
 
-// ─── Proposals ──────────────────────────────────────────────────────────────
-
-/// Creates a new proposal for an administrative action.
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
     creator.require_auth();
     let pool = get_admin_pool(env);
@@ -178,7 +149,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         .storage()
         .instance()
         .get(&AdminKey::ProposalIdCounter)
-        .unwrap_or(0);
+        .unwrap_or(0u64);
     env.storage()
         .instance()
         .set(&AdminKey::ProposalIdCounter, &(id + 1));
@@ -189,7 +160,6 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         approvals: vec![env, creator],
         executed: false,
     };
-
     env.storage()
         .instance()
         .set(&AdminKey::Proposal(id), &proposal);
@@ -245,7 +215,7 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .expect("proposal not found");
 
     if proposal.executed {
-        panic!("already executed");
+        panic!("proposal already executed");
     }
     if !is_proposal_ready(env, proposal_id) {
         panic!("threshold not met");
