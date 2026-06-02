@@ -398,6 +398,25 @@ await client.unpause(adminKeypair);
 
 ### Write Methods (require Keypair)
 
+## Wallet Adapter (Browser wallets)
+
+The SDK supports an optional `WalletAdapter` layer so consumers can plug-in browser wallets (Freighter, Albedo, WalletConnect).
+
+Example using a wallet adapter:
+
+```typescript
+import { bcForgeClient, FreighterAdapter } from '@bc-forge/sdk';
+
+const adapter = new FreighterAdapter();
+const client = new bcForgeClient({ rpcUrl, networkPassphrase, contractId, walletAdapter: adapter });
+
+await client.connectWallet();
+await client.mint('GRECIPIENT...', BigInt(1000), /* no Keypair */);
+```
+
+When a `walletAdapter` is configured and connected, write methods may be invoked without passing a `Keypair`; the SDK will build an unsigned transaction and ask the adapter to sign and submit it.
+
+
 | Method | Description |
 |--------|-------------|
 | `initialize(admin, decimals, name, symbol, source)` | One-time contract setup |

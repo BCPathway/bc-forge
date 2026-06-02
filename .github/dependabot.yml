@@ -1,4 +1,91 @@
 version: 2
+<<<<<<< HEAD
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      cargo-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /sdk
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - sdk
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      sdk-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /cli
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - cli
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      cli-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /react
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - react
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      react-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /indexer
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - indexer
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      indexer-dependencies:
+        patterns:
+          - "*"
+=======
 
 updates:
   # ── Rust / Cargo ──────────────────────────────────────────────────────────
@@ -43,3 +130,4 @@ updates:
       - "javascript"
     open-pull-requests-limit: 10
 # 
+>>>>>>> main

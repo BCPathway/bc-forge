@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "contracts/*",
+    "e2e",
 ]
 
 [profile.release]
