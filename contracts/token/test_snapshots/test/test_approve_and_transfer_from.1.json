@@ -163,6 +163,7 @@
                     },
                     {
                       "key": {
+                        "symbol": "exp_ledger"
                         "symbol": "expiration_ledger"
                       },
                       "val": {
