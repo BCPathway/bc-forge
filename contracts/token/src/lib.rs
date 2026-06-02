@@ -37,6 +37,8 @@ struct AllowanceData {
     expiration_ledger: u32,
 }
 
+pub const MAX_BATCH_SIZE: u32 = 50;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
 #[repr(u32)]
@@ -50,6 +52,8 @@ pub enum TokenError {
     FeeNotConfigured = 7,
     InsufficientFeeBalance = 8,
     FeeExemptionNotFound = 9,
+    BatchTooLarge = 10,
+    BatchEmpty = 11,
 }
 
 #[contract]
