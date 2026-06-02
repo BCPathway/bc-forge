@@ -1,6 +1,6 @@
 //! Structured event emission for the token contract.
 
-use soroban_sdk::{symbol_short, Address, Env, String};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String, Symbol};
 
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
     env.events().publish(
@@ -69,6 +69,31 @@ pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Ad
     );
 }
 
+/// Emitted when a new admin is proposed (two-step transfer).
+pub fn emit_ownership_proposed(env: &Env, old_admin: &Address, pending_admin: &Address) {
+    env.events().publish(
+        (symbol_short!("own_prop"),),
+        (old_admin.clone(), pending_admin.clone()),
+    );
+}
+
+/// Emitted when pending admin accepts ownership.
+pub fn emit_ownership_accepted(env: &Env, old_admin: &Address, new_admin: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "own_accept"),),
+        (old_admin.clone(), new_admin.clone()),
+    );
+}
+
+/// Emitted when ownership transfer is cancelled.
+pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "own_cancel"),),
+        (admin.clone(), cancelled_admin.clone()),
+    );
+}
+
+/// Emitted when the contract is paused.
 pub fn emit_paused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("paused"),), (admin.clone(),));

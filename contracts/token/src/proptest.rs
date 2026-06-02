@@ -5,10 +5,10 @@
 
 #![cfg(test)]
 
+use crate::{BcForgeToken, BcForgeTokenClient};
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
-use crate::{BcForgeToken, BcForgeTokenClient};
 
 /// Helper: setup a fresh environment and initialized client.
 fn setup_test_env() -> (Env, BcForgeTokenClient<'static>, Address) {
@@ -16,12 +16,12 @@ fn setup_test_env() -> (Env, BcForgeTokenClient<'static>, Address) {
     env.mock_all_auths();
     let contract_id = env.register(BcForgeToken, ());
     let client = BcForgeTokenClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     let name = String::from_str(&env, "PropTest Token");
     let symbol = String::from_str(&env, "PTT");
     client.initialize(&admin, &7, &name, &symbol);
-    
+
     (env, client, admin)
 }
 
@@ -77,7 +77,7 @@ proptest! {
 
         client.mint(&user, &mint1);
         client.mint(&user, &mint2);
-        
+
         let expected_supply = mint1 + mint2;
         assert_eq!(client.supply(), expected_supply);
 
@@ -119,7 +119,7 @@ proptest! {
                 current_balance_a -= amt;
                 current_balance_b += amt;
             }
-            
+
             if current_balance_b >= amt / 2 {
                 client.transfer(&user_b, &user_c, &(amt / 2));
                 current_balance_b -= amt / 2;

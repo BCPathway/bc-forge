@@ -19,6 +19,16 @@ pub enum AdminKey {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
+    /// Global administrator with full control.
+    Admin = 0,
+    Minter = 1,
+}
+
+/// Enumeration of available roles.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum Role {
+    /// Global administrator with full control.
     Admin,
     Minter,
 }
@@ -93,6 +103,14 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+    // Admins implicitly have all roles.
+    if env
+        .storage()
+        .persistent()
+        .has(&AdminKey::Role(Role::Admin, address.clone()))
+    {
+        return true;
+    }
     env.storage()
         .persistent()
         .has(&AdminKey::Role(Role::Admin, address.clone()))
@@ -101,17 +119,7 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
             .persistent()
             .has(&AdminKey::Role(role, address.clone()))
 }
-
-pub fn require_admin(env: &Env) {
-    get_admin(env).require_auth();
-}
-
-pub fn require_role(env: &Env, role: Role, address: &Address) {
-    if !has_role(env, role, address) {
-        panic!("unauthorized: missing role");
-    }
-    address.require_auth();
-}
+// ─── Multi-Sig Primitives ───────────────────────────────────────────────────
 
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     if threshold == 0 || threshold > pool.len() {
@@ -138,6 +146,24 @@ pub fn get_threshold(env: &Env) -> u32 {
     env.storage().instance().get(&AdminKey::Threshold).unwrap_or(1)
 }
 
+// ─── Guards ──────────────────────────────────────────────────────────────────
+
+/// Requires that the stored admin has authorized the current invocation.
+pub fn require_admin(env: &Env) {
+    let admin = get_admin(env);
+    admin.require_auth();
+}
+
+/// Requires that the specified address has the given role and has authorized the invocation.
+pub fn require_role(env: &Env, role: Role, address: &Address) {
+    if !has_role(env, role, address) {
+        panic!("unauthorized: missing role");
+    }
+    address.require_auth();
+}
+// ─── Proposals ──────────────────────────────────────────────────────────────
+
+/// Creates a new proposal for an administrative action.
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
     creator.require_auth();
     let pool = get_admin_pool(env);
@@ -267,5 +293,68 @@ mod tests {
 
         env.ledger().set(env.ledger().sequence() + 200);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    struct AdminContract;
+
+    #[contractimpl]
+    impl AdminContract {
+        pub fn set(env: Env, admin: Address) {
+            set_admin(&env, &admin);
+        }
+        pub fn set_pool(env: Env, admins: Vec<Address>, threshold: u32) {
+            set_admin_pool(&env, admins, threshold);
+        }
+        pub fn propose(env: Env, creator: Address, desc: String) -> u64 {
+            create_proposal(&env, creator, desc)
+        }
+        pub fn approve(env: Env, admin: Address, id: u64) {
+            approve_proposal(&env, admin, id);
+        }
+        pub fn ready(env: Env, id: u64) -> bool {
+            is_proposal_ready(&env, id)
+        }
+    }
+
+    #[test]
+    fn test_set_and_get_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        client.set(&admin);
+    }
+
+    #[test]
+    fn test_multi_sig() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        client.set_pool(
+            &vec![&env, admin1.clone(), admin2.clone(), admin3.clone()],
+            2,
+        );
+
+        let id = client.propose(&admin1, &String::from_str(&env, "test"));
+        assert!(!client.ready(&id));
+
+        client.approve(&admin2, &id);
+        assert!(client.ready(&id));
     }
 }

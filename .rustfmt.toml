@@ -1,0 +1,16 @@
+# bc-forge workspace formatting configuration
+# Applied by: cargo fmt --all
+# Stable-channel options only.
+# See: https://rust-lang.github.io/rustfmt/
+
+# ── Line length ──────────────────────────────────────────────────────────────
+max_width = 100
+
+# ── Imports ───────────────────────────────────────────────────────────────────
+reorder_imports = true
+reorder_modules = true
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+edition = "2021"
+newline_style = "Unix"
+use_field_init_shorthand = true
