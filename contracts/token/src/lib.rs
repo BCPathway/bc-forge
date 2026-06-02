@@ -21,6 +21,14 @@ use rate_limit::BcForgeRateLimit;
 
 #[derive(Clone)]
 #[contracttype]
+pub enum DataKey {
+    /// The contract admin address (singular).
+    Admin,
+    PendingAdmin,
+    /// Spending allowance: (owner, spender) → amount and expiration.
+    Allowance(Address, Address),
+    AllowanceExp(Address, Address),
+    /// Token balance for an address.
 enum DataKey {
     Balance(Address),
     Allowance(Address, Address),
@@ -124,6 +132,12 @@ impl BcForgeToken {
         }
     }
 
+    /// Reads the full allowance info for (owner → spender), defaulting to zero allowance with no expiration.
+    fn read_allowance_info(env: &Env, from: &Address, spender: &Address) -> AllowanceInfo {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Allowance(from.clone(), spender.clone()))
+            .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
         let data = AllowanceData {
             amount,
