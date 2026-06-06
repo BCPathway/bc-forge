@@ -3,7 +3,7 @@
 //! Implements a reentrancy protection pattern to prevent cross-contract callback attacks.
 //! This guard ensures that state-modifying functions cannot be re-entered during execution.
 
-use soroban_sdk::{contracttype, Env, StorageType};
+use soroban_sdk::{contracttype, symbol_short, Env, Symbol};
 
 /// Reentrancy guard state
 #[derive(Clone, Debug, PartialEq)]
@@ -19,12 +19,12 @@ pub enum ReentrancyGuardState {
 #[contracttype]
 pub struct ReentrancyGuard {
     /// Storage key for the guard state
-    pub state_key: &'static str,
+    pub state_key: Symbol,
 }
 
 impl ReentrancyGuard {
     /// Creates a new reentrancy guard with the given storage key
-    pub fn new(state_key: &'static str) -> Self {
+    pub fn new(state_key: Symbol) -> Self {
         Self { state_key }
     }
 
@@ -33,7 +33,7 @@ impl ReentrancyGuard {
         let current_state = env
             .storage()
             .persistent()
-            .get::<_, ReentrancyGuardState>(self.state_key)
+            .get::<_, ReentrancyGuardState>(&self.state_key)
             .unwrap_or(ReentrancyGuardState::NotEntered);
 
         if current_state == ReentrancyGuardState::Entered {
@@ -42,7 +42,7 @@ impl ReentrancyGuard {
 
         env.storage()
             .persistent()
-            .set(self.state_key, &ReentrancyGuardState::Entered);
+            .set(&self.state_key, &ReentrancyGuardState::Entered);
         true
     }
 
@@ -50,7 +50,7 @@ impl ReentrancyGuard {
     pub fn exit(&self, env: &Env) {
         env.storage()
             .persistent()
-            .set(self.state_key, &ReentrancyGuardState::NotEntered);
+            .set(&self.state_key, &ReentrancyGuardState::NotEntered);
     }
 
     /// Checks if the guard is currently entered
@@ -58,7 +58,7 @@ impl ReentrancyGuard {
         let current_state = env
             .storage()
             .persistent()
-            .get::<_, ReentrancyGuardState>(self.state_key)
+            .get::<_, ReentrancyGuardState>(&self.state_key)
             .unwrap_or(ReentrancyGuardState::NotEntered);
         current_state == ReentrancyGuardState::Entered
     }
@@ -78,7 +78,7 @@ impl ReentrancyGuard {
 #[macro_export]
 macro_rules! reentrancy_guard {
     ($env:expr, $key:expr, $body:block) => {{
-        let guard = $crate::reentrancy_guard::ReentrancyGuard::new($key);
+        let guard = $crate::reentrancy_guard::ReentrancyGuard::new(soroban_sdk::Symbol::new($env, $key));
         guard.require_not_entered($env);
         let result = (|| $body)();
         guard.exit($env);

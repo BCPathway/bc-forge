@@ -12,12 +12,17 @@ mod rate_limit;
 mod test;
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env, String,
+    contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec,
 };
-use reentrancy_guard::ReentrancyGuard;
-use rate_limit::BcForgeRateLimit;
+
+#[contracttype]
+pub struct Recipient {
+    pub to: Address,
+    pub amount: i128,
+}
 
 #[derive(Clone)]
 #[contracttype]
@@ -25,13 +30,11 @@ pub enum DataKey {
     /// The contract admin address (singular).
     Admin,
     PendingAdmin,
-    /// Spending allowance: (owner, spender) → amount and expiration.
+    /// Spending allowance: (owner, spender) -> amount and expiration.
     Allowance(Address, Address),
     AllowanceExp(Address, Address),
     /// Token balance for an address.
-enum DataKey {
     Balance(Address),
-    Allowance(Address, Address),
     Decimals,
     Name,
     Symbol,
@@ -132,12 +135,10 @@ impl BcForgeToken {
         }
     }
 
-    /// Reads the full allowance info for (owner → spender), defaulting to zero allowance with no expiration.
-    fn read_allowance_info(env: &Env, from: &Address, spender: &Address) -> AllowanceInfo {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
+    fn extend_instance_ttl_for_call(env: &Env) {
+        ttl::extend_instance_ttl(env);
+    }
+
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
         let data = AllowanceData {
             amount,
@@ -207,7 +208,7 @@ impl BcForgeToken {
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            let current_admin = Self::read_admin(&env)?;
+            let current_admin = admin::get_admin(&env);
             current_admin.require_auth();
             
             // Check rate limits for mint operation
@@ -223,7 +224,7 @@ impl BcForgeToken {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            let current_admin = Self::read_admin(&env)?;
+            let current_admin = admin::get_admin(&env);
             current_admin.require_auth();
 
             for i in 0..recipients.len() {
@@ -231,13 +232,13 @@ impl BcForgeToken {
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
+                if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, recipient.amount) {
+                    return Err(TokenError::InvalidAmount);
+                }
+                Self::internal_mint(&env, &current_admin, &recipient.to, recipient.amount)?;
             }
-        Self::extend_instance_ttl_for_call(&env);
-        Self::ensure_initialized(&env)?;
-        Self::ensure_not_paused(&env)?;
-        let admin_address = admin::get_admin(&env);
-        admin_address.require_auth();
-        Self::internal_mint(&env, &admin_address, &to, amount)
+            Ok(())
+        })
     }
 
     pub fn supply(env: Env) -> i128 {
@@ -281,6 +282,7 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn approve(env: Env, from: Address, spender: Address, amount: i128, exp: u32) {
+        Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "approve_guard", {
             Self::panic_on_err(&env, Self::ensure_initialized(&env));
             from.require_auth();
@@ -288,16 +290,8 @@ impl TokenInterface for BcForgeToken {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
             }
             Self::write_allowance(&env, &from, &spender, amount, exp);
-            events::emit_approve(&env, &from, &spender, amount);
-        })
-        Self::extend_instance_ttl_for_call(&env);
-        Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        from.require_auth();
-        if amount < 0 {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
-        Self::write_allowance(&env, &from, &spender, amount, exp);
-        events::emit_approve(&env, &from, &spender, amount, exp);
+            events::emit_approve(&env, &from, &spender, amount, exp);
+        });
     }
 
     fn balance(env: Env, id: Address) -> i128 {
@@ -307,19 +301,20 @@ impl TokenInterface for BcForgeToken {
     }
 
     fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "transfer_guard", {
             Self::panic_on_err(&env, Self::ensure_initialized(&env));
             Self::panic_on_err(&env, Self::ensure_not_paused(&env));
             from.require_auth();
-        Self::extend_instance_ttl_for_call(&env);
-        Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
-        from.require_auth();
-        if amount <= 0 {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
-        Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        events::emit_transfer(&env, &from, &to, amount);
+            if amount <= 0 {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
+            if !crate::rate_limit::check_transfer_rate_limit(&env, &from, amount) {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
+            Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+            events::emit_transfer(&env, &from, &to, amount);
+        });
     }
 
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
@@ -357,10 +352,15 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
         }
 
-            // Check rate limits for burn operation
-            if !crate::rate_limit::check_burn_rate_limit(&env, &from, amount) {
-                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-            }
+        // Check rate limits for burn operation
+        if !crate::rate_limit::check_burn_rate_limit(&env, &from, amount) {
+            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+        }
+
+        let balance = Self::read_balance(&env, &from);
+        if balance < amount {
+            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
+        }
 
         let new_balance = balance - amount;
         let new_supply = Self::read_supply(&env) - amount;
