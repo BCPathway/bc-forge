@@ -30,6 +30,8 @@ pub enum DataKey {
     /// The contract admin address (singular).
     Admin,
     PendingAdmin,
+    /// Spending allowance: (owner, spender) → amount and expiration.
+    Allowance(Address, Address),
     /// Spending allowance: (owner, spender) -> amount and expiration.
     Allowance(Address, Address),
     AllowanceExp(Address, Address),
@@ -39,6 +41,17 @@ pub enum DataKey {
     Name,
     Symbol,
     Supply,
+    MaxSupply,
+    ClawbackAdmin,
+    Lockup(Address),
+    ProposalAction(u64),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct LockupInfo {
+    pub amount: i128,
+    pub unlock_time: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -58,6 +71,8 @@ pub enum TokenError {
     InsufficientBalance = 4,
     InsufficientAllowance = 5,
     ContractPaused = 6,
+    MaxSupplyExceeded = 7,
+    MaxSupplyTooLow = 8,
     FeeNotConfigured = 7,
     InsufficientFeeBalance = 8,
     FeeExemptionNotFound = 9,
@@ -103,6 +118,17 @@ impl BcForgeToken {
             .set(&DataKey::Balance(address.clone()), &amount);
     }
 
+    fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
+        let allowance_info: AllowanceInfo = env.storage()
+            .persistent()
+            .get(&DataKey::Allowance(from.clone(), spender.clone()))
+            .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 });
+
+        if allowance_info.exp_ledger > 0 && env.ledger().sequence() > allowance_info.exp_ledger as u64 {
+            0
+        } else {
+            allowance_info.amount
+        }
     fn read_supply(env: &Env) -> i128 {
         let key = DataKey::Supply;
         if env.storage().instance().has(&key) {
@@ -135,6 +161,12 @@ impl BcForgeToken {
         }
     }
 
+    /// Reads the full allowance info for (owner → spender), defaulting to zero allowance with no expiration.
+    fn read_allowance_info(env: &Env, from: &Address, spender: &Address) -> AllowanceInfo {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Allowance(from.clone(), spender.clone()))
+            .unwrap_or(AllowanceInfo { amount: 0, exp_ledger: 0 })
     fn extend_instance_ttl_for_call(env: &Env) {
         ttl::extend_instance_ttl(env);
     }
@@ -163,10 +195,37 @@ impl BcForgeToken {
         Ok(())
     }
 
+    fn read_max_supply(env: &Env) -> i128 {
+        env.storage().instance().get(&DataKey::MaxSupply).unwrap_or(0)
+    }
+
+    fn write_max_supply(env: &Env, max_supply: i128) {
+        env.storage().instance().set(&DataKey::MaxSupply, &max_supply);
+    }
+
+    fn internal_mint(
+        env: &Env,
+        admin: &Address,
+        to: &Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
     fn internal_mint(env: &Env, admin_address: &Address, to: &Address, amount: i128) -> Result<(), TokenError> {
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
+
+        let current_supply = Self::read_supply(env);
+        let max_supply = Self::read_max_supply(env);
+        let new_supply = current_supply.checked_add(amount).ok_or(TokenError::InvalidAmount)?;
+        if max_supply > 0 && new_supply > max_supply {
+            return Err(TokenError::MaxSupplyExceeded);
+        }
+
+        let balance = Self::read_balance(env, to) + amount;
+        Self::write_balance(env, to, balance);
+        Self::write_supply(env, new_supply);
+
+        events::emit_mint(env, admin, to, amount, balance, new_supply);
 
         let new_balance = Self::read_balance(env, to) + amount;
         let new_supply = Self::read_supply(env) + amount;
@@ -185,16 +244,28 @@ impl BcForgeToken {
         decimal: u32,
         name: String,
         symbol: String,
+        max_supply: i128,
     ) -> Result<(), TokenError> {
         if admin::has_admin(&env) {
             return Err(TokenError::AlreadyInitialized);
         }
 
+        if max_supply < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        Self::set_admin(&env, &admin);
         admin::set_admin(&env, &admin_address);
         env.storage().instance().set(&DataKey::Decimals, &decimal);
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
+        Self::write_max_supply(&env, max_supply);
+        events::emit_initialized(&env, &admin, decimal, &name, &symbol);
+        if max_supply > 0 {
+            events::emit_max_supply_set(&env, &admin, max_supply);
+        }
+
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
     }
@@ -254,6 +325,73 @@ impl BcForgeToken {
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
+    }
+
+    pub fn set_max_supply(env: Env, new_cap: i128) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+
+        if new_cap < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let current_supply = Self::read_supply(&env);
+        if new_cap > 0 && new_cap < current_supply {
+            return Err(TokenError::MaxSupplyTooLow);
+        }
+
+        Self::write_max_supply(&env, new_cap);
+        events::emit_max_supply_set(&env, &current_admin, new_cap);
+        Ok(())
+    }
+
+    pub fn get_max_supply(env: Env) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_max_supply(&env)
+    }
+
+    pub fn remaining_mintable(env: Env) -> Option<i128> {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        let max_supply = Self::read_max_supply(&env);
+        if max_supply == 0 {
+            None
+        } else {
+            let supply = Self::read_supply(&env);
+            Some(if supply >= max_supply { 0 } else { max_supply - supply })
+        }
+    }
+
+    pub fn propose_owner(env: Env, new_admin: Address) -> Result<(), TokenError> {
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        events::emit_ownership_proposed(&env, &current_admin, &new_admin);
+        Ok(())
+    }
+
+    pub fn accept_ownership(env: Env) {
+        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
+        pending_admin.require_auth();
+        let old_admin = Self::read_admin(&env).expect("contract not initialized");
+        Self::set_admin(&env, &pending_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        events::emit_ownership_accepted(&env, &old_admin, &pending_admin);
+    }
+
+    pub fn cancel_transfer(env: Env) -> Result<(), TokenError> {
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+        let pending_admin = Self::read_pending_admin(&env).expect("no pending ownership transfer");
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        events::emit_ownership_cancelled(&env, &current_admin, &pending_admin);
+        Ok(())
+    }
+
+    pub fn pending_owner(env: Env) -> Option<Address> {
+        Self::read_pending_admin(&env)
     }
 
     pub fn pause(env: Env) -> Result<(), TokenError> {

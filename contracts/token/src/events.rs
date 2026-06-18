@@ -23,6 +23,12 @@ pub fn emit_mint(
     );
 }
 
+/// Emitted when the maximum mintable supply is configured or updated.
+pub fn emit_max_supply_set(env: &Env, admin: &Address, max_supply: i128) {
+    env.events().publish((symbol_short!("max_supply_set"),), (admin.clone(), max_supply));
+}
+
+/// Emitted when tokens are burned.
 pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new_supply: i128) {
     env.events().publish(
         (symbol_short!("burn"),),
