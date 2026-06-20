@@ -52,10 +52,17 @@ impl BcForgeRateLimit {
             .get::<_, RateLimitConfig>(&DataKey::GlobalRateLimit(operation_type.clone()))
     }
 
-    fn get_address_config(env: &Env, address: &Address, operation_type: &String) -> Option<RateLimitConfig> {
+    fn get_address_config(
+        env: &Env,
+        address: &Address,
+        operation_type: &String,
+    ) -> Option<RateLimitConfig> {
         env.storage()
             .instance()
-            .get::<_, RateLimitConfig>(&DataKey::AddressRateLimit(address.clone(), operation_type.clone()))
+            .get::<_, RateLimitConfig>(&DataKey::AddressRateLimit(
+                address.clone(),
+                operation_type.clone(),
+            ))
     }
 
     fn get_global_state(env: &Env, operation_type: &String) -> RateLimitState {
@@ -71,14 +78,23 @@ impl BcForgeRateLimit {
     fn get_address_state(env: &Env, address: &Address, operation_type: &String) -> RateLimitState {
         env.storage()
             .instance()
-            .get::<_, RateLimitState>(&DataKey::AddressCount(address.clone(), operation_type.clone()))
+            .get::<_, RateLimitState>(&DataKey::AddressCount(
+                address.clone(),
+                operation_type.clone(),
+            ))
             .unwrap_or(RateLimitState {
                 count: 0,
                 last_reset: 0,
             })
     }
 
-    fn reset_if_needed(env: &Env, current_time: u64, config: &RateLimitConfig, state: &mut RateLimitState, key: &DataKey) {
+    fn reset_if_needed(
+        env: &Env,
+        current_time: u64,
+        config: &RateLimitConfig,
+        state: &mut RateLimitState,
+        key: &DataKey,
+    ) {
         if current_time >= state.last_reset + config.window_seconds {
             state.count = 0;
             state.last_reset = current_time;
@@ -97,14 +113,14 @@ impl BcForgeRateLimit {
         env: &Env,
         address: Option<&Address>,
         operation_type: &String,
-        amount: u64,
+        _amount: u64,
     ) -> bool {
         let current_time = Self::get_current_timestamp(env);
 
         // Check global rate limit first
         if let Some(global_config) = Self::get_global_config(env, operation_type) {
             let mut global_state = Self::get_global_state(env, operation_type);
-            
+
             Self::reset_if_needed(
                 env,
                 current_time,
@@ -128,7 +144,7 @@ impl BcForgeRateLimit {
         if let Some(addr) = address {
             if let Some(address_config) = Self::get_address_config(env, addr, operation_type) {
                 let mut address_state = Self::get_address_state(env, addr, operation_type);
-                
+
                 Self::reset_if_needed(
                     env,
                     current_time,
@@ -180,9 +196,10 @@ impl BcForgeRateLimit {
             limit,
             window_seconds,
         };
-        env.storage()
-            .instance()
-            .set(&DataKey::AddressRateLimit(address.clone(), operation_type.clone()), &config);
+        env.storage().instance().set(
+            &DataKey::AddressRateLimit(address.clone(), operation_type.clone()),
+            &config,
+        );
     }
 }
 
@@ -194,10 +211,10 @@ impl BcForgeRateLimit {
         env: Env,
         address: Option<Address>,
         operation_type: soroban_sdk::String,
-        amount: u64,
+        _amount: u64,
     ) -> bool {
         let address_ref = address.as_ref();
-        BcForgeRateLimit::internal_check_rate_limit(&env, address_ref, &operation_type, amount)
+        BcForgeRateLimit::internal_check_rate_limit(&env, address_ref, &operation_type, _amount)
     }
 
     /// Set global rate limit for an operation type
@@ -207,7 +224,12 @@ impl BcForgeRateLimit {
         limit: u64,
         window_seconds: u64,
     ) {
-        BcForgeRateLimit::internal_set_global_rate_limit(&env, &operation_type, limit, window_seconds)
+        BcForgeRateLimit::internal_set_global_rate_limit(
+            &env,
+            &operation_type,
+            limit,
+            window_seconds,
+        )
     }
 
     /// Set per-address rate limit for an operation type
@@ -218,6 +240,12 @@ impl BcForgeRateLimit {
         limit: u64,
         window_seconds: u64,
     ) {
-        BcForgeRateLimit::internal_set_address_rate_limit(&env, &address, &operation_type, limit, window_seconds)
+        BcForgeRateLimit::internal_set_address_rate_limit(
+            &env,
+            &address,
+            &operation_type,
+            limit,
+            window_seconds,
+        )
     }
 }

@@ -326,6 +326,10 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
         }
 
+        if !crate::rate_limit::check_transfer_from_rate_limit(&env, &spender, amount) {
+            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+        }
+
         let allowance = Self::allowance_amount(&env, &from, &spender);
         if allowance < amount {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
@@ -375,6 +379,10 @@ impl TokenInterface for BcForgeToken {
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         spender.require_auth();
         if amount <= 0 {
+            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+        }
+
+        if !crate::rate_limit::check_burn_from_rate_limit(&env, &spender, amount) {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
         }
 
