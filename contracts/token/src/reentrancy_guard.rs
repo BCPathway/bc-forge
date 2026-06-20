@@ -3,7 +3,7 @@
 //! Implements a reentrancy protection pattern to prevent cross-contract callback attacks.
 //! This guard ensures that state-modifying functions cannot be re-entered during execution.
 
-use soroban_sdk::{contracttype, symbol_short, Env, Symbol};
+use soroban_sdk::{contracttype, Env, Symbol};
 
 /// Reentrancy guard state
 #[derive(Clone, Debug, PartialEq)]
@@ -78,7 +78,8 @@ impl ReentrancyGuard {
 #[macro_export]
 macro_rules! reentrancy_guard {
     ($env:expr, $key:expr, $body:block) => {{
-        let guard = $crate::reentrancy_guard::ReentrancyGuard::new(soroban_sdk::Symbol::new($env, $key));
+        let guard =
+            $crate::reentrancy_guard::ReentrancyGuard::new(soroban_sdk::Symbol::new($env, $key));
         guard.require_not_entered($env);
         let result = (|| $body)();
         guard.exit($env);

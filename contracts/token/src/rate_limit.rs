@@ -3,8 +3,8 @@
 //! Integrates the bc-forge-rate-limit contract with the token contract
 //! to enforce rate limiting on mint and transfer operations.
 
-use soroban_sdk::{Address, Env, String};
 use bc_forge_rate_limit::BcForgeRateLimit;
+use soroban_sdk::{Address, Env, String};
 
 /// Operation types for rate limiting
 pub const OPERATION_MINT: &str = "mint";
