@@ -1,10 +1,10 @@
 import { SorobanRpc, xdr, scValToNative } from '@stellar/stellar-sdk';
-import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
+import { getPrismaClient } from './lib/prisma';
 
 dotenv.config();
 
-const prisma = new PrismaClient();
+const prisma = getPrismaClient();
 
 const RPC_URL = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
 const CONTRACT_ID = process.env.CONTRACT_ID;
@@ -12,6 +12,8 @@ const CONTRACT_ID = process.env.CONTRACT_ID;
 if (!CONTRACT_ID) {
   throw new Error('CONTRACT_ID environment variable is required');
 }
+
+const contractId = CONTRACT_ID;
 
 const server = new SorobanRpc.Server(RPC_URL);
 
@@ -44,7 +46,7 @@ export async function runIndexer() {
         filters: [
           {
             type: 'contract',
-            contractIds: [CONTRACT_ID],
+            contractIds: [contractId],
           },
         ],
       });
@@ -71,7 +73,7 @@ export async function runIndexer() {
   }
 }
 
-async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
+async function processEvent(event: SorobanRpc.Api.EventResponse) {
   const topic = scValToNative(event.topic[0]);
   const data = event.value;
 
@@ -85,7 +87,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
             to: decoded[1],
             amount: decoded[2].toString(),
             ledger: event.ledger,
-            txHash: event.txHash,
+            txHash: event.id,
           },
         });
         break;
@@ -98,7 +100,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
             from: decoded[0],
             amount: decoded[1].toString(),
             ledger: event.ledger,
-            txHash: event.txHash,
+            txHash: event.id,
           },
         });
         break;
@@ -112,7 +114,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
             to: decoded[1],
             amount: decoded[2].toString(),
             ledger: event.ledger,
-            txHash: event.txHash,
+            txHash: event.id,
           },
         });
         break;
@@ -126,7 +128,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
             to: decoded[2],
             amount: decoded[3].toString(),
             ledger: event.ledger,
-            txHash: event.txHash,
+            txHash: event.id,
           },
         });
         break;
