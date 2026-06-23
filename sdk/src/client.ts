@@ -26,6 +26,7 @@ import {
   signTransaction,
   simulateTransaction,
   hashToScVal,
+  formatAtomicAmount,
 } from './utils';
 
 import { SimulationError, RPCError } from './errors';
@@ -80,11 +81,14 @@ export class bcForgeClient {
    * Get the token balance for an address.
    *
    * @param address - Stellar public key (G... address)
-   * @returns Token balance as bigint
+   * @returns Token balance as a fixed-scale decimal string.
    */
-  async getBalance(address: string): Promise<bigint> {
-    const result = await this.queryContract('balance', [addressToScVal(address)]);
-    return BigInt(scValToNative(result));
+  async getBalance(address: string): Promise<string> {
+    const [result, decimals] = await Promise.all([
+      this.queryContract('balance', [addressToScVal(address)]),
+      this.getDecimals(),
+    ]);
+    return formatAtomicAmount(BigInt(scValToNative(result)), decimals);
   }
 
   /**
@@ -147,9 +151,9 @@ export class bcForgeClient {
    *
    * @param addresses - Array of Stellar public keys
    * @param batchSize - Maximum number of concurrent queries (default: 10)
-   * @returns Array of balances as bigints
+   * @returns Array of balances as decimal strings.
    */
-  async getBalances(addresses: string[], batchSize: number = 10): Promise<bigint[]> {
+  async getBalances(addresses: string[], batchSize: number = 10): Promise<string[]> {
     return this.executeBatch(addresses, (addr) => this.getBalance(addr), batchSize);
   }
 

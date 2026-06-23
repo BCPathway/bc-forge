@@ -146,7 +146,7 @@ await client.unpause(adminKeypair);
 
 | Method                         | Returns  | Description                  |
 | ------------------------------ | -------- | ---------------------------- |
-| `getBalance(address)`          | `bigint` | Token balance for an address |
+| `getBalance(address)`          | `string` | Token balance for an address, formatted with token decimals |
 | `getTotalSupply()`             | `bigint` | Total circulating supply     |
 | `getName()`                    | `string` | Token name                   |
 | `getSymbol()`                  | `string` | Token symbol                 |

@@ -4,6 +4,7 @@
  * Allows frontend devs to test logic without a live Soroban RPC.
  */
 import type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
+import { formatAtomicAmount } from './utils';
 
 interface AccountState {
   balance: bigint;
@@ -19,8 +20,8 @@ export class MockBcForgeClient {
 
   constructor(_config: bcForgeClientConfig) {}
 
-  async getBalance(address: string): Promise<bigint> {
-    return this.accounts[address]?.balance ?? 0n;
+  async getBalance(address: string): Promise<string> {
+    return formatAtomicAmount(this.accounts[address]?.balance ?? 0n, this.decimals);
   }
 
   async getTotalSupply(): Promise<bigint> {
