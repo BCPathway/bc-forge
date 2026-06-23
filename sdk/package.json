@@ -8,8 +8,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "jest --passWithNoTests",
-    "lint": "eslint 'src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
     "clean": "rm -rf dist"
   },
   "keywords": [

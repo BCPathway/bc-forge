@@ -752,25 +752,34 @@ export class bcForgeClient {
           source,
         );
 
-        const response = await submitTransaction(this.rpcUrl, txXdr);
-
-        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-          return {
-            success: true,
-            hash: (response as any).hash,
-            returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
-          };
-        }
-
-        return {
-          success: false,
-          hash: (response as any).hash,
-        };
+        return this.unwrapTransactionResponse(submitTransaction(this.rpcUrl, txXdr));
       } catch (error: any) {
         // Don't retry on simulation errors (usually logic errors)
         if (error instanceof SimulationError) throw error;
         throw error;
       }
     });
+  }
+
+  /**
+   * Waits for a submitted transaction response and unwraps the final SDK result.
+   */
+  private async unwrapTransactionResponse(
+    responsePromise: Promise<SorobanRpc.Api.GetTransactionResponse>,
+  ): Promise<TransactionResult> {
+    const response = await responsePromise;
+
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: (response as any).hash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+
+    return {
+      success: false,
+      hash: (response as any).hash,
+    };
   }
 }
