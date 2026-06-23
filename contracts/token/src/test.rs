@@ -119,6 +119,7 @@ fn test_transfer_ownership_alias_proposes() {
 }
 
 // ─── Pause / Unpause ─────────────────────────────────────────────────────────
+#[test]
 fn test_batch_transfer_rejects_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();
