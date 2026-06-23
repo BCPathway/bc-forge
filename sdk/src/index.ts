@@ -14,10 +14,13 @@
  * });
  *
  * const balance = await client.getBalance('GABC...DEF');
- * console.log('Balance:', balance.toString());
+ * console.log('Balance:', balance);
  * ```
  */
 
 export { bcForgeClient } from './client';
-export type { bcForgeClientConfig, TransactionResult } from './client';
+export type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
+export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
+export type { bcForgeEvent, SubscriptionOptions } from './events';
+export * from './mockClient';
