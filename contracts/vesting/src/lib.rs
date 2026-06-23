@@ -71,7 +71,9 @@ pub struct VestingContract;
 
 impl VestingContract {
     fn ensure_initialized(env: &Env) -> Result<(), VestingError> {
-        if env.storage().instance().has(&DataKey::Admin) && env.storage().instance().has(&DataKey::Token) {
+        if env.storage().instance().has(&DataKey::Admin)
+            && env.storage().instance().has(&DataKey::Token)
+        {
             Ok(())
         } else {
             Err(VestingError::NotInitialized)
@@ -100,8 +102,14 @@ impl VestingContract {
     }
 
     fn next_schedule_id(env: &Env) -> u64 {
-        let id = env.storage().instance().get(&DataKey::NextScheduleId).unwrap_or(0u64);
-        env.storage().instance().set(&DataKey::NextScheduleId, &(id + 1));
+        let id = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextScheduleId)
+            .unwrap_or(0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::NextScheduleId, &(id + 1));
         id
     }
 
@@ -126,9 +134,10 @@ impl VestingContract {
     }
 
     fn write_beneficiary_schedule_ids(env: &Env, beneficiary: &Address, schedule_ids: &Vec<u64>) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::BeneficiarySchedules(beneficiary.clone()), schedule_ids);
+        env.storage().persistent().set(
+            &DataKey::BeneficiarySchedules(beneficiary.clone()),
+            schedule_ids,
+        );
     }
 
     fn vested_amount(schedule: &StoredVestingSchedule, current_ledger: u32) -> i128 {
@@ -158,7 +167,12 @@ impl VestingContract {
         BcForgeTokenClient::new(env, &token)
     }
 
-    fn authorize_current_contract_call(env: &Env, contract: &Address, fn_name: Symbol, args: Vec<Val>) {
+    fn authorize_current_contract_call(
+        env: &Env,
+        contract: &Address,
+        fn_name: Symbol,
+        args: Vec<Val>,
+    ) {
         let context = ContractContext {
             contract: contract.clone(),
             fn_name,
@@ -205,14 +219,22 @@ impl VestingContract {
 
 #[contractimpl]
 impl VestingContract {
-    pub fn initialize(env: Env, admin_address: Address, token: Address) -> Result<(), VestingError> {
+    pub fn initialize(
+        env: Env,
+        admin_address: Address,
+        token: Address,
+    ) -> Result<(), VestingError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(VestingError::AlreadyInitialized);
         }
 
-        env.storage().instance().set(&DataKey::Admin, &admin_address);
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &admin_address);
         env.storage().instance().set(&DataKey::Token, &token);
-        env.storage().instance().set(&DataKey::NextScheduleId, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::NextScheduleId, &0u64);
         admin::set_admin(&env, &admin_address);
         Ok(())
     }
