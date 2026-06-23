@@ -21,13 +21,11 @@ function range(start: number, end: number): number[] {
   return Array.from({ length: Math.max(end - start + 1, 0) }, (_, i) => start + i);
 }
 
-/** Build the page list, inserting `DOTS` sentinels where pages are collapsed. */
 export function getPaginationRange(
   currentPage: number,
   totalPages: number,
   siblingCount: number,
 ): PageItem[] {
-  // first + last + current + 2*siblings + 2 dots
   const totalPageNumbers = siblingCount * 2 + 5;
 
   if (totalPages <= totalPageNumbers) {
@@ -75,17 +73,7 @@ const disabledStyle: React.CSSProperties = {
   cursor: 'not-allowed',
 };
 
-/**
- * Accessible, reusable pagination control.
- *
- * Renders a `<nav>` landmark containing Previous/Next buttons and numbered page
- * buttons (with ellipses for large ranges). The active page is marked with
- * `aria-current="page"`; out-of-range Prev/Next buttons are `disabled`. All
- * controls are native `<button>`s, so keyboard navigation works out of the box.
- *
- * @example
- * <Pagination currentPage={page} totalPages={20} onPageChange={setPage} />
- */
+/** Accessible pagination: <nav> landmark, native buttons, aria-current, ellipses. */
 export function Pagination({
   currentPage,
   totalPages,

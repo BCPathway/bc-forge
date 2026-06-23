@@ -9,3 +9,6 @@ export type { PaginationProps } from './Pagination';
 
 export { Modal } from './Modal';
 export type { ModalProps } from './Modal';
+
+export { Tooltip } from './Tooltip';
+export type { TooltipProps, TooltipPlacement } from './Tooltip';

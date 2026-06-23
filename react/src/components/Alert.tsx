@@ -20,17 +20,7 @@ const VARIANT_STYLES: Record<AlertVariant, React.CSSProperties> = {
   danger: { backgroundColor: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' },
 };
 
-/**
- * Accessible, reusable alert / notification banner.
- *
- * The ARIA role is chosen from the variant: `danger` and `warning` render as
- * `role="alert"` (assertively announced), while `info` and `success` render as
- * `role="status"` (politely announced). Pass `role` explicitly to override.
- *
- * @example
- * <Alert variant="success" title="Saved">Your changes were stored.</Alert>
- * <Alert variant="danger" onDismiss={() => setError(null)}>Mint failed.</Alert>
- */
+/** Alert banner; role is "alert" for danger/warning and "status" otherwise. */
 export const Alert = forwardRef<HTMLDivElement, AlertProps>(function Alert(
   { variant = 'info', title, onDismiss, dismissLabel = 'Dismiss alert', style, children, ...rest },
   ref,

@@ -42,17 +42,7 @@ const BASE_STYLE: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-/**
- * Accessible, reusable status badge.
- *
- * Renders a `<span>` and forwards every standard span prop (`className`,
- * `style`, `onClick`, `aria-*`, …). When the visible text is not descriptive on
- * its own, pass an `aria-label` so screen readers announce meaningful content.
- *
- * @example
- * <Badge variant="success">Verified</Badge>
- * <Badge variant="danger" size="lg" aria-label="3 failed checks">3</Badge>
- */
+/** Accessible status badge; forwards all standard span props and a ref. */
 export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
   { variant = 'default', size = 'md', style, children, ...rest },
   ref,

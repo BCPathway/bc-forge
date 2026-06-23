@@ -25,15 +25,8 @@ const FOCUSABLE_SELECTOR = [
 ].join(',');
 
 /**
- * Accessible modal dialog with full focus management (WCAG 2.1 AA).
- *
- * - Renders `role="dialog"` with `aria-modal="true"` and `aria-labelledby`
- *   pointing at the title, so screen readers announce it as a modal.
- * - Moves focus into the dialog on open and **restores focus** to the
- *   previously focused element on close.
- * - **Traps** Tab / Shift+Tab within the dialog so focus never escapes to the
- *   page behind it.
- * - Closes on Escape and (optionally) on overlay click.
+ * Accessible modal dialog (WCAG 2.1 AA): role="dialog" + aria-modal, focus moved
+ * in on open and restored on close, Tab/Shift+Tab trapped, Escape/overlay close.
  */
 export function Modal({
   open,
@@ -55,7 +48,6 @@ export function Modal({
     );
   }, []);
 
-  // Remember the trigger, then move focus into the dialog when it opens.
   useEffect(() => {
     if (!open) return;
 
@@ -65,7 +57,6 @@ export function Modal({
     (focusables[0] ?? dialogRef.current)?.focus();
 
     return () => {
-      // Restore focus to the element that had it before the modal opened.
       previouslyFocused.current?.focus?.();
     };
   }, [open, focusableElements]);
@@ -82,7 +73,6 @@ export function Modal({
 
       const focusables = focusableElements();
       if (focusables.length === 0) {
-        // Nothing focusable inside — keep focus on the dialog itself.
         event.preventDefault();
         dialogRef.current?.focus();
         return;

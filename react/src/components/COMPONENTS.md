@@ -5,7 +5,7 @@ with inline styles (no CSS import or Tailwind setup required) and forwards
 standard HTML attributes so it slots into any design system.
 
 ```tsx
-import { Badge, Alert, Pagination, Modal } from '@bc-forge/react';
+import { Badge, Alert, Pagination, Modal, Tooltip } from '@bc-forge/react';
 ```
 
 ## Badge
@@ -92,4 +92,22 @@ Accessible dialog with full focus management (WCAG 2.1 AA):
   <p>Mint 1,000 tokens to G…ABC?</p>
   <button onClick={confirm}>Confirm</button>
 </Modal>
+```
+
+## Tooltip
+
+Shows contextual text on hover **and** keyboard focus, dismissible with Escape.
+Renders `role="tooltip"` and links the trigger via `aria-describedby`. Wraps a
+single focusable element.
+
+| Prop        | Type                                      | Default | Description                  |
+| ----------- | ----------------------------------------- | ------- | ---------------------------- |
+| `content`   | `React.ReactNode`                         | —       | Tooltip contents.            |
+| `children`  | `React.ReactElement`                      | —       | The (focusable) trigger.     |
+| `placement` | `'top' \| 'bottom' \| 'left' \| 'right'`  | `'top'` | Position relative to trigger.|
+
+```tsx
+<Tooltip content="Copy address">
+  <button onClick={copy}>📋</button>
+</Tooltip>
 ```
