@@ -7,6 +7,7 @@
 #![no_std]
 #![allow(clippy::manual_assert)]
 
+use bc_forge_ttl as ttl;
 use soroban_sdk::{contracttype, Address, Env};
 
 /// Storage keys for lifecycle state.
@@ -15,6 +16,10 @@ use soroban_sdk::{contracttype, Address, Env};
 pub enum LifecycleKey {
     /// Boolean flag indicating whether the contract is paused.
     Paused,
+}
+
+fn extend_instance_ttl(env: &Env) {
+    ttl::extend_instance_ttl(env);
 }
 
 // ─── State Management ────────────────────────────────────────────────────────
@@ -33,6 +38,7 @@ pub fn pause(env: Env, admin: Address) {
         panic!("contract is already paused");
     }
     env.storage().instance().set(&LifecycleKey::Paused, &true);
+    extend_instance_ttl(&env);
 }
 
 /// Unpauses the contract. Only callable by the admin.
@@ -49,14 +55,20 @@ pub fn unpause(env: Env, admin: Address) {
         panic!("contract is not paused");
     }
     env.storage().instance().set(&LifecycleKey::Paused, &false);
+    extend_instance_ttl(&env);
 }
 
 /// Returns `true` if the contract is currently paused.
 pub fn is_paused(env: &Env) -> bool {
-    env.storage()
+    let paused = env
+        .storage()
         .instance()
         .get(&LifecycleKey::Paused)
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if env.storage().instance().has(&LifecycleKey::Paused) {
+        extend_instance_ttl(env);
+    }
+    paused
 }
 
 /// Guard function — panics if the contract is paused.
@@ -73,6 +85,7 @@ pub fn require_not_paused(env: &Env) {
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Ledger;
     use soroban_sdk::Env;
 
     use soroban_sdk::{contract, contractimpl};
@@ -157,4 +170,18 @@ mod tests {
         client.pause(&admin);
         client.require_not();
     }
-}
+    #[test]
+    fn test_pause_extends_instance_ttl_across_ledger_advances() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.pause(&admin);
+        let mut ledger_info = env.ledger().get();
+        ledger_info.sequence_number += 200;
+        env.ledger().set(ledger_info);
+
+        assert!(client.is_paused());
+    }}
