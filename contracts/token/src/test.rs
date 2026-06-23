@@ -70,17 +70,19 @@ fn test_propose_accept_ownership() {
     let (client, admin, contract_id) = setup(&env);
     let new_admin = Address::generate(&env);
 
+    client.propose_ownership(&new_admin);
+
     env.as_contract(&contract_id, || {
-        client.propose_ownership(&new_admin);
-
         assert_eq!(admin, BcForgeToken::read_admin(&env).unwrap());
-        assert_eq!(client.pending_owner(), Some(new_admin.clone()));
-
-        client.accept_ownership();
-
-        assert_eq!(BcForgeToken::read_admin(&env).unwrap(), new_admin);
-        assert_eq!(client.pending_owner(), None);
     });
+    assert_eq!(client.pending_owner(), Some(new_admin.clone()));
+
+    client.accept_ownership();
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(BcForgeToken::read_admin(&env).unwrap(), new_admin);
+    });
+    assert_eq!(client.pending_owner(), None);
 }
 
 #[test]
@@ -90,13 +92,13 @@ fn test_cancel_ownership_transfer() {
     let (client, admin, contract_id) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    env.as_contract(&contract_id, || {
-        client.propose_ownership(&new_admin);
-        client.cancel_ownership_transfer();
+    client.propose_ownership(&new_admin);
+    client.cancel_ownership_transfer();
 
+    env.as_contract(&contract_id, || {
         assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
-        assert_eq!(client.pending_owner(), None);
     });
+    assert_eq!(client.pending_owner(), None);
 }
 
 #[test]
@@ -116,12 +118,12 @@ fn test_transfer_ownership_alias_proposes() {
     let (client, admin, contract_id) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    env.as_contract(&contract_id, || {
-        client.propose_ownership(&new_admin);
+    client.propose_ownership(&new_admin);
 
+    env.as_contract(&contract_id, || {
         assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
-        assert_eq!(client.pending_owner(), Some(new_admin));
     });
+    assert_eq!(client.pending_owner(), Some(new_admin));
 }
 
 // Pause / Unpause
