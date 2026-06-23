@@ -11,7 +11,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --watch --dts",
-    "lint": "eslint src/**/*.ts"
+    "lint": "eslint src/**/*.ts",
+    "test": "jest"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
@@ -21,10 +22,19 @@
     "@bc-forge/sdk": "file:../sdk"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/jest": "^30.0.0",
+    "@types/jest-axe": "^3.5.9",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.4.2",
+    "jest-axe": "^10.0.0",
+    "jest-environment-jsdom": "^30.4.1",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
+    "ts-jest": "^29.4.11",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   }
