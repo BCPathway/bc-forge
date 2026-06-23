@@ -1,0 +1,6 @@
+# Default: all files require review from repo owner
+* @BCPathway
+
+# Smart contracts require extra scrutiny
+/contracts/ @BCPathway
+/src/contracts/ @BCPathway
