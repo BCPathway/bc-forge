@@ -9,7 +9,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "@bc-forge/sdk": "file:../sdk",
@@ -21,9 +22,12 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.11.24",
     "@types/node-cron": "^3.0.11",
+    "jest": "^29.7.0",
     "prisma": "^5.10.0",
+    "ts-jest": "^29.1.2",
     "tsx": "^4.7.1",
     "typescript": "^5.3.3"
   }
