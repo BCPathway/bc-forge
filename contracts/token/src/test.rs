@@ -5,7 +5,7 @@ use soroban_sdk::{vec, Address, Env, String, Vec};
 
 use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
 
-fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
+fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address, Address) {
     let contract_id = env.register(BcForgeToken, ());
     let client = BcForgeTokenClient::new(env, &contract_id);
     let admin = Address::generate(env);
@@ -17,14 +17,14 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
         &String::from_str(env, "SFG"),
     );
 
-    (client, admin)
+    (client, admin, contract_id)
 }
 
 #[test]
 fn test_transfer() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin) = setup(&env);
+    let (client, _admin, _) = setup(&env);
     let from = Address::generate(&env);
     let to = Address::generate(&env);
 
@@ -40,7 +40,7 @@ fn test_transfer() {
 fn test_batch_transfer_multiple_recipients() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin) = setup(&env);
+    let (client, _admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient_a = Address::generate(&env);
     let recipient_b = Address::generate(&env);
@@ -67,32 +67,36 @@ fn test_batch_transfer_multiple_recipients() {
 fn test_propose_accept_ownership() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin) = setup(&env);
+    let (client, admin, contract_id) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    client.propose_ownership(&new_admin);
+    env.as_contract(&contract_id, || {
+        client.propose_ownership(&new_admin);
 
-    assert_eq!(admin, BcForgeToken::read_admin(&env).unwrap());
-    assert_eq!(client.pending_owner(), Some(new_admin.clone()));
+        assert_eq!(admin, BcForgeToken::read_admin(&env).unwrap());
+        assert_eq!(client.pending_owner(), Some(new_admin.clone()));
 
-    client.accept_ownership();
+        client.accept_ownership();
 
-    assert_eq!(BcForgeToken::read_admin(&env).unwrap(), new_admin);
-    assert_eq!(client.pending_owner(), None);
+        assert_eq!(BcForgeToken::read_admin(&env).unwrap(), new_admin);
+        assert_eq!(client.pending_owner(), None);
+    });
 }
 
 #[test]
 fn test_cancel_ownership_transfer() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin) = setup(&env);
+    let (client, admin, contract_id) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    client.propose_ownership(&new_admin);
-    client.cancel_ownership_transfer();
+    env.as_contract(&contract_id, || {
+        client.propose_ownership(&new_admin);
+        client.cancel_ownership_transfer();
 
-    assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
-    assert_eq!(client.pending_owner(), None);
+        assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
+        assert_eq!(client.pending_owner(), None);
+    });
 }
 
 #[test]
@@ -100,7 +104,7 @@ fn test_cancel_ownership_transfer() {
 fn test_accept_ownership_without_pending_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin) = setup(&env);
+    let (client, _admin, _) = setup(&env);
 
     client.accept_ownership();
 }
@@ -109,21 +113,23 @@ fn test_accept_ownership_without_pending_panics() {
 fn test_transfer_ownership_alias_proposes() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin) = setup(&env);
+    let (client, admin, contract_id) = setup(&env);
     let new_admin = Address::generate(&env);
 
-    client.propose_ownership(&new_admin);
+    env.as_contract(&contract_id, || {
+        client.propose_ownership(&new_admin);
 
-    assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
-    assert_eq!(client.pending_owner(), Some(new_admin));
+        assert_eq!(BcForgeToken::read_admin(&env).unwrap(), admin);
+        assert_eq!(client.pending_owner(), Some(new_admin));
+    });
 }
 
-// ─── Pause / Unpause ─────────────────────────────────────────────────────────
+// Pause / Unpause
 #[test]
 fn test_batch_transfer_rejects_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin) = setup(&env);
+    let (client, _admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
@@ -144,7 +150,7 @@ fn test_batch_transfer_rejects_invalid_amount() {
 fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin) = setup(&env);
+    let (client, _admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient_a = Address::generate(&env);
     let recipient_b = Address::generate(&env);
@@ -171,7 +177,7 @@ fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
 fn test_batch_transfer_while_paused_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin) = setup(&env);
+    let (client, _admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
