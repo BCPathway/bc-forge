@@ -222,6 +222,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bc-forge-treasury"
+version = "0.1.0"
+dependencies = [
+ "bc-forge-admin",
+ "bc-forge-token",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "bc-forge-ttl"
 version = "0.1.0"
 dependencies = [
