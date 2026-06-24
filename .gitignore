@@ -30,3 +30,9 @@ Thumbs.db
 
 # PR text
 issue_pr.txt
+
+# Build output
+dist/
+indexer/dist/
+cli/dist/
+react/dist/

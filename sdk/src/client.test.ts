@@ -152,4 +152,65 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(client.simulateBurnFrom.length).toBe(4); // 4 parameters
     });
   });
+
+  describe('simulateTx', () => {
+    let originalFromXDR: any;
+    let originalIsSimulationError: any;
+
+    beforeAll(() => {
+      const { TransactionBuilder, rpc } = require('@stellar/stellar-sdk');
+      originalFromXDR = TransactionBuilder.fromXDR;
+      originalIsSimulationError = rpc.Api.isSimulationError;
+    });
+
+    afterAll(() => {
+      const { TransactionBuilder, rpc } = require('@stellar/stellar-sdk');
+      TransactionBuilder.fromXDR = originalFromXDR;
+      rpc.Api.isSimulationError = originalIsSimulationError;
+    });
+
+    it('should return simulated transaction when successful', async () => {
+      const { TransactionBuilder } = require('@stellar/stellar-sdk');
+      TransactionBuilder.fromXDR = jest.fn().mockReturnValue({});
+
+      const mockSimulated = {
+        results: [],
+        minResourceFee: '100',
+      };
+      (client as any).server.simulateTransaction = jest.fn().mockResolvedValue(mockSimulated);
+
+      const result = await client.simulateTx('mock-xdr');
+      expect(result).toEqual(mockSimulated);
+    });
+
+    it('should throw SimulationError if isSimulationError is true', async () => {
+      const { TransactionBuilder, rpc } = require('@stellar/stellar-sdk');
+      TransactionBuilder.fromXDR = jest.fn().mockReturnValue({});
+      rpc.Api.isSimulationError = jest.fn().mockReturnValue(true);
+
+      const mockSimulated = {
+        error: 'Simulation failed details',
+      };
+      (client as any).server.simulateTransaction = jest.fn().mockResolvedValue(mockSimulated);
+
+      const { SimulationError } = require('./errors');
+      await expect(client.simulateTx('mock-xdr')).rejects.toThrow(SimulationError);
+    });
+
+    it('should throw RPCError if simulateTransaction rejects', async () => {
+      const { TransactionBuilder } = require('@stellar/stellar-sdk');
+      TransactionBuilder.fromXDR = jest.fn().mockReturnValue({});
+      (client as any).server.simulateTransaction = jest.fn().mockRejectedValue(new Error('Network error'));
+
+      const originalWithRetry = (client as any).withRetry;
+      (client as any).withRetry = async (fn: any) => fn(); // bypass retries for this test
+
+      const { RPCError } = require('./errors');
+      try {
+        await expect(client.simulateTx('mock-xdr')).rejects.toThrow(RPCError);
+      } finally {
+        (client as any).withRetry = originalWithRetry;
+      }
+    });
+  });
 });

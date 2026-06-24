@@ -7,9 +7,9 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 const RPC_URL = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
-const CONTRACT_ID = process.env.CONTRACT_ID;
+const CONTRACT_ID = process.env.CONTRACT_ID!;
 
-if (!CONTRACT_ID) {
+if (!process.env.CONTRACT_ID) {
   throw new Error('CONTRACT_ID environment variable is required');
 }
 
@@ -41,13 +41,14 @@ export async function runIndexer() {
 
       const response = await server.getEvents({
         startLedger: startLedger,
+        endLedger: endLedger + 1, // exclusive, so includes up to endLedger
         filters: [
           {
             type: 'contract',
             contractIds: [CONTRACT_ID],
           },
         ],
-      });
+      } as any);
 
       for (const event of response.events) {
         await processEvent(event);
@@ -71,7 +72,7 @@ export async function runIndexer() {
   }
 }
 
-async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
+async function processEvent(event: any) {
   const topic = scValToNative(event.topic[0]);
   const data = event.value;
 
@@ -82,6 +83,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
         // (admin, to, amount, new_balance, new_supply)
         await prisma.mint.create({
           data: {
+            eventId: event.id,
             to: decoded[1],
             amount: decoded[2].toString(),
             ledger: event.ledger,
@@ -95,6 +97,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
         // (from, amount, new_balance, new_supply)
         await prisma.burn.create({
           data: {
+            eventId: event.id,
             from: decoded[0],
             amount: decoded[1].toString(),
             ledger: event.ledger,
@@ -108,6 +111,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
         // (from, to, amount)
         await prisma.transfer.create({
           data: {
+            eventId: event.id,
             from: decoded[0],
             to: decoded[1],
             amount: decoded[2].toString(),
@@ -122,6 +126,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
         // (spender, from, to, amount, remaining_allowance)
         await prisma.transfer.create({
           data: {
+            eventId: event.id,
             from: decoded[1],
             to: decoded[2],
             amount: decoded[3].toString(),
