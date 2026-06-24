@@ -22,17 +22,19 @@
     "@bc-forge/sdk": "file:../sdk"
   },
   "devDependencies": {
-    "@testing-library/dom": "^10.4.0",
-    "@testing-library/jest-dom": "^6.4.0",
-    "@testing-library/react": "^16.0.0",
-    "@types/jest": "^29.5.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/jest": "^30.0.0",
+    "@types/jest-axe": "^3.5.9",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
-    "jest": "^29.7.0",
-    "jest-environment-jsdom": "^29.7.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.4.2",
+    "jest-axe": "^10.0.0",
+    "jest-environment-jsdom": "^30.4.1",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
-    "ts-jest": "^29.1.0",
+    "ts-jest": "^29.4.11",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   }
