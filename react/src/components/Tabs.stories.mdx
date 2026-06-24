@@ -1,0 +1,109 @@
+# Tabs
+
+A fully accessible, reusable tabs component implementing the [WAI-ARIA Tabs pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/).
+
+## Import
+
+```tsx
+import { Tabs } from '@bc-forge/react';
+```
+
+## Basic Usage
+
+```tsx
+<Tabs defaultValue="tab1">
+  <Tabs.List>
+    <Tabs.Tab value="tab1">Overview</Tabs.Tab>
+    <Tabs.Tab value="tab2">Details</Tabs.Tab>
+    <Tabs.Tab value="tab3">Settings</Tabs.Tab>
+  </Tabs.List>
+  <Tabs.Panel value="tab1">Overview content</Tabs.Panel>
+  <Tabs.Panel value="tab2">Details content</Tabs.Panel>
+  <Tabs.Panel value="tab3">Settings content</Tabs.Panel>
+</Tabs>
+```
+
+## Props
+
+### Tabs (root)
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `variant` | `'underline' \| 'pills' \| 'tabs'` | `'underline'` | Visual style variant |
+| `size` | `'sm' \| 'md' \| 'lg'` | `'md'` | Size of the tab triggers |
+| `value` | `string` | — | Controlled active tab value |
+| `defaultValue` | `string` | `''` | Initial active tab value (uncontrolled) |
+| `onChange` | `(value: string) => void` | — | Called when the active tab changes |
+
+Accepts all standard `div` HTML attributes (e.g. `className`, `id`, `style`, `data-*`).
+
+### Tabs.Tab
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `value` | `string` | — | **Required.** Unique value identifying this tab |
+| `children` | `ReactNode` | — | Tab label content |
+
+Accepts all standard `button` HTML attributes.
+
+### Tabs.Panel
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `value` | `string` | — | **Required.** Must match a `Tab` value |
+| `children` | `ReactNode` | — | Panel content |
+
+Accepts all standard `div` HTML attributes.
+
+### Tabs.List
+
+Accepts all standard `div` HTML attributes. Renders `role="tablist"` automatically.
+
+## Variants
+
+| Variant | Appearance |
+|---------|------------|
+| `underline` | Blue bottom border on the active tab (classic browser tabs) |
+| `pills` | Blue filled pill for the active tab |
+| `tabs` | Bordered card-style tabs connected to the panel |
+
+## Sizes
+
+| Size | Font-size | Padding |
+|------|-----------|---------|
+| `sm` | 13px | 4px 12px |
+| `md` | 14px | 8px 16px |
+| `lg` | 16px | 12px 24px |
+
+## Accessibility
+
+- `role="tablist"` on the list wrapper
+- `role="tab"` on each trigger button
+- `role="tabpanel"` on each content panel
+- `aria-selected` reflects the active tab
+- `aria-controls` on tab points to its panel's `id`
+- `aria-labelledby` on panel points to its tab's `id`
+- `tabIndex={0}` only on the active tab (roving tabindex)
+- Full keyboard navigation:
+
+| Key | Action |
+|-----|--------|
+| ArrowRight | Activate next tab (wraps) |
+| ArrowLeft | Activate previous tab (wraps) |
+| Home | Activate first tab |
+| End | Activate last tab |
+
+## Controlled Usage
+
+```tsx
+const [active, setActive] = useState('tab1');
+
+<Tabs value={active} onChange={setActive}>
+  <Tabs.List>
+    <Tabs.Tab value="tab1">One</Tabs.Tab>
+    <Tabs.Tab value="tab2">Two</Tabs.Tab>
+  </Tabs.List>
+  <Tabs.Panel value="tab1">Content one</Tabs.Panel>
+  <Tabs.Panel value="tab2">Content two</Tabs.Panel>
+</Tabs>
+```
