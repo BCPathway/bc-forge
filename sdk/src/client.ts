@@ -874,9 +874,10 @@ export class bcForgeClient {
   }
 
   /**
-   * Execute a clawback operation.
+   * Execute a clawback operation. Caller must be the main admin or the designated clawback admin.
    */
   async clawback(
+    caller: string,
     from: string,
     to: string,
     amount: bigint,
@@ -884,7 +885,7 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'clawback',
-      [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      [addressToScVal(caller), addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       source,
     );
   }

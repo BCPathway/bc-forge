@@ -256,6 +256,213 @@ impl BcForgeToken {
         Self::read_supply(&env)
     }
 
+    pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+        Self::extend_instance_ttl_for_call(&env);
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        admin::set_admin_pool(&env, pool, threshold);
+    }
+
+    pub fn propose_action(
+        env: Env,
+        signer: Address,
+        action: TokenAction,
+        description: String,
+    ) -> u64 {
+        Self::extend_instance_ttl_for_call(&env);
+        let id = admin::create_proposal(&env, signer, description);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalAction(id), &action);
+        id
+    }
+
+    pub fn approve_proposal(env: Env, signer: Address, proposal_id: u64) {
+        Self::extend_instance_ttl_for_call(&env);
+        admin::approve_proposal(&env, signer, proposal_id);
+    }
+
+    pub fn execute_proposal(env: Env, proposal_id: u64) {
+        Self::extend_instance_ttl_for_call(&env);
+        admin::mark_executed(&env, proposal_id);
+        let action: TokenAction = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProposalAction(proposal_id))
+            .expect("proposal action not found");
+
+        match action {
+            TokenAction::Mint(to, amount) => {
+                Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+                let current_admin = Self::read_admin(&env).expect("contract not initialized");
+                Self::panic_on_err(&env, Self::internal_mint(&env, &current_admin, &to, amount));
+            }
+            TokenAction::Pause => {
+                let current_admin = Self::read_admin(&env).expect("contract not initialized");
+                bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
+                events::emit_paused(&env, &current_admin);
+            }
+            TokenAction::Unpause => {
+                let current_admin = Self::read_admin(&env).expect("contract not initialized");
+                bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
+                events::emit_unpaused(&env, &current_admin);
+            }
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKey::ProposalAction(proposal_id));
+    }
+
+    pub fn set_clawback_admin(env: Env, clawback_admin: Address) {
+        Self::extend_instance_ttl_for_call(&env);
+        let current_admin = Self::read_admin(&env).expect("contract not initialized");
+        current_admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::ClawbackAdmin, &clawback_admin);
+        ttl::extend_instance_ttl(&env);
+    }
+
+    pub fn clawback(env: Env, caller: Address, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        caller.require_auth();
+
+        let current_admin = Self::read_admin(&env)?;
+        let clawback_admin: Option<Address> = env.storage().instance().get(&DataKey::ClawbackAdmin);
+
+        let is_authorized = caller == current_admin
+            || clawback_admin.map_or(false, |ca| ca == caller);
+
+        if !is_authorized {
+            panic!("unauthorized");
+        }
+
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let _ = Self::move_balance(&env, &from, &to, amount)?;
+        events::emit_clawback(&env, &caller, &from, &to, amount);
+        Ok(())
+    }
+
+    pub fn grant_role(env: Env, role: Role, address: Address) {
+        Self::extend_instance_ttl_for_call(&env);
+        admin::grant_role(&env, role, &address);
+    }
+
+    pub fn revoke_role(env: Env, role: Role, address: Address) {
+        Self::extend_instance_ttl_for_call(&env);
+        admin::revoke_role(&env, role, &address);
+    }
+
+    pub fn has_role(env: Env, role: Role, address: Address) -> bool {
+        Self::extend_instance_ttl_for_call(&env);
+        admin::has_role(&env, role, &address)
+    }
+
+    pub fn lock_tokens(
+        env: Env,
+        user: Address,
+        amount: i128,
+        unlock_time: u64,
+    ) -> Result<(), TokenError> {
+        reentrancy_guard!(&env, "lock_tokens_guard", {
+            let current_admin = Self::read_admin(&env)?;
+            current_admin.require_auth();
+        Self::extend_instance_ttl_for_call(&env);
+        let current_admin = Self::read_admin(&env)?;
+        current_admin.require_auth();
+
+            if amount <= 0 {
+                return Err(TokenError::InvalidAmount);
+            }
+
+            let balance = Self::read_balance(&env, &user);
+            if balance < amount {
+                return Err(TokenError::InsufficientBalance);
+            }
+
+            Self::write_balance(&env, &user, balance - amount);
+            let mut lockup = env
+                .storage()
+                .persistent()
+                .get::<_, LockupInfo>(&DataKey::Lockup(user.clone()))
+                .unwrap_or(LockupInfo {
+                    amount: 0,
+                    unlock_time: 0,
+                });
+            lockup.amount += amount;
+            if unlock_time > lockup.unlock_time {
+                lockup.unlock_time = unlock_time;
+            }
+            env.storage()
+                .persistent()
+                .set(&DataKey::Lockup(user.clone()), &lockup);
+            events::emit_locked(&env, &user, amount, lockup.unlock_time);
+            Ok(())
+        })
+    }
+
+    pub fn withdraw_locked(env: Env, user: Address) {
+        reentrancy_guard!(&env, "withdraw_locked_guard", {
+            user.require_auth();
+            let lockup: LockupInfo = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Lockup(user.clone()))
+                .expect("no lockup found");
+
+            if env.ledger().timestamp() < lockup.unlock_time {
+                panic!("tokens are still locked");
+            }
+        Self::write_balance(&env, &user, balance - amount);
+        let mut lockup = env
+            .storage()
+            .persistent()
+            .get::<_, LockupInfo>(&DataKey::Lockup(user.clone()))
+            .unwrap_or(LockupInfo {
+                amount: 0,
+                unlock_time: 0,
+            });
+        lockup.amount += amount;
+        if unlock_time > lockup.unlock_time {
+            lockup.unlock_time = unlock_time;
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::Lockup(user.clone()), &lockup);
+        Self::extend_lockup_ttl(&env, &user);
+        events::emit_locked(&env, &user, amount, lockup.unlock_time);
+        Ok(())
+    }
+
+    pub fn withdraw_locked(env: Env, user: Address) {
+        Self::extend_instance_ttl_for_call(&env);
+        user.require_auth();
+        let key = DataKey::Lockup(user.clone());
+        if env.storage().persistent().has(&key) {
+            Self::extend_lockup_ttl(&env, &user);
+        }
+        let lockup: LockupInfo = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("no lockup found");
+
+        if env.ledger().timestamp() < lockup.unlock_time {
+            panic!("tokens are still locked");
+        }
+
+            let balance = Self::read_balance(&env, &user);
+            Self::write_balance(&env, &user, balance + lockup.amount);
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Lockup(user.clone()));
+            events::emit_withdraw_locked(&env, &user, lockup.amount);
+        })
+    }
+
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
