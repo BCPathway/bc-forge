@@ -26,51 +26,21 @@ Inline notification banner. The ARIA role is derived from the variant:
 <Alert variant="danger" onDismiss={() => setError(null)}>Mint failed.</Alert>
 ```
 
-## Dropdown
+## Badge
 
-Reusable menu button. Implements the
-[WAI-ARIA Menu Button](https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/)
-pattern with full keyboard navigation (ArrowDown, ArrowUp, Home, End, Enter,
-Space, Escape). Supports controlled and uncontrolled modes.
+Small label used for statuses, counts, or categories. When `onClick` is
+provided the badge becomes a keyboard-focusable interactive control
+(`role="button"`, `tabIndex={0}`, Enter/Space activation). Pass explicit
+`role` or `tabIndex` to override.
 
-```tsx
-import { Dropdown } from '@bc-forge/react';
-```
-
-### DropdownItem
-
-| Field      | Type      | Default | Description              |
-| ---------- | --------- | ------- | ------------------------ |
-| `label`    | `string`  | —       | Display text.            |
-| `value`    | `string`  | —       | Unique identifier.       |
-| `disabled` | `boolean` | —       | Prevents selection.      |
-
-### Dropdown Props
-
-| Prop          | Type                                                        | Default       | Description                                              |
-| ------------- | ----------------------------------------------------------- | ------------- | -------------------------------------------------------- |
-| `items`       | `DropdownItem[]`                                            | —             | Array of menu items.                                     |
-| `value`       | `string`                                                    | —             | Controlled selected value.                               |
-| `defaultValue`| `string`                                                    | —             | Initial selected value (uncontrolled).                   |
-| `onChange`    | `(item: DropdownItem) => void`                              | —             | Called when an item is selected.                         |
-| `variant`     | `'default' \| 'primary' \| 'danger'`                       | `'default'`   | Visual style.                                            |
-| `size`        | `'sm' \| 'md' \| 'lg'`                                     | `'md'`        | Size.                                                    |
-| `placeholder` | `string`                                                    | `'Select...'` | Placeholder when nothing is selected.                    |
-| `disabled`    | `boolean`                                                   | —             | Disables the entire dropdown.                            |
-| `...rest`     | `React.HTMLAttributes<HTMLDivElement>`                      | —             | Any div prop; also forwards a `ref`.                     |
+| Prop      | Type                                                           | Default     | Description                                                      |
+| --------- | -------------------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
+| `variant` | `'default' \| 'primary' \| 'success' \| 'warning' \| 'danger' \| 'info'` | `'default'` | Visual style.                                                    |
+| `size`    | `'sm' \| 'md' \| 'lg'`                                        | `'md'`      | Sizing preset.                                                   |
+| `...rest` | `React.HTMLAttributes<HTMLSpanElement>`                        | —           | Any span prop; also forwards a `ref`.                            |
 
 ```tsx
-<Dropdown
-  items={[
-    { label: 'Manager', value: 'manager' },
-    { label: 'Contributor', value: 'contributor' },
-  ]}
-  placeholder="Select a role"
-  onChange={(item) => console.log(item.value)}
-/>
-<Dropdown
-  variant="primary"
-  size="lg"
-  items={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]}
-/>
+<Badge variant="primary">Live</Badge>
+<Badge variant="success" size="sm">Verified</Badge>
+<Badge variant="warning" onClick={() => alert('clicked')}>Dismiss</Badge>
 ```

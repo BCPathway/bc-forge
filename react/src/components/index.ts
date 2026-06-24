@@ -1,4 +1,5 @@
 export { Alert } from './Alert';
 export type { AlertProps, AlertVariant } from './Alert';
-export { Dropdown } from './Dropdown';
-export type { DropdownProps, DropdownItem, DropdownVariant, DropdownSize } from './Dropdown';
+
+export { Badge } from './Badge';
+export type { BadgeProps, BadgeVariant, BadgeSize } from './Badge';
