@@ -125,17 +125,23 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
 }
 
 pub fn get_admin_pool(env: &Env) -> Vec<Address> {
-    env.storage().instance().get(&AdminKey::AdminPool).unwrap_or_else(|| {
-        if has_admin(env) {
-            vec![env, get_admin(env)]
-        } else {
-            vec![env]
-        }
-    })
+    env.storage()
+        .instance()
+        .get(&AdminKey::AdminPool)
+        .unwrap_or_else(|| {
+            if has_admin(env) {
+                vec![env, get_admin(env)]
+            } else {
+                vec![env]
+            }
+        })
 }
 
 pub fn get_threshold(env: &Env) -> u32 {
-    env.storage().instance().get(&AdminKey::Threshold).unwrap_or(1)
+    env.storage()
+        .instance()
+        .get(&AdminKey::Threshold)
+        .unwrap_or(1)
 }
 
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
