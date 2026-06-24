@@ -194,7 +194,7 @@ impl VestingContract {
         Self::authorize_current_contract_call(
             env,
             &token,
-            symbol_short!("mint").into(),
+            symbol_short!("mint"),
             (&current_contract, amount).into_val(env),
         );
         Self::token_client(env).mint(&current_contract, &amount);
@@ -210,7 +210,7 @@ impl VestingContract {
         Self::authorize_current_contract_call(
             env,
             &token,
-            symbol_short!("transfer").into(),
+            symbol_short!("transfer"),
             (&current_contract, to, amount).into_val(env),
         );
         Self::token_client(env).transfer(&current_contract, to, &amount);
