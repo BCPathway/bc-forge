@@ -71,7 +71,11 @@ fn test_initialize_emits_correct_event() {
     assert_eq!(emitter, contract_id);
 
     // Topics must contain (symbol_short!("init"), admin_address)
-    assert_eq!(topics.len(), 2, "topics should contain init symbol and admin");
+    assert_eq!(
+        topics.len(),
+        2,
+        "topics should contain init symbol and admin"
+    );
 
     let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(
@@ -81,10 +85,7 @@ fn test_initialize_emits_correct_event() {
     );
 
     let topic1: soroban_sdk::Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    assert_eq!(
-        topic1, admin,
-        "second topic should be the admin address"
-    );
+    assert_eq!(topic1, admin, "second topic should be the admin address");
 
     // Data must be (decimal, name, symbol) as Vec<Val>
     // If admin were incorrectly in data, this would have 4 elements
