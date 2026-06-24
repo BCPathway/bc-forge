@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
