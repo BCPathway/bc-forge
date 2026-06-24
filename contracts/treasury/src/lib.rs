@@ -4,7 +4,7 @@ mod events;
 
 use bc_forge_admin as admin;
 use soroban_sdk::token::TokenClient;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, String};
 
 #[contracttype]
 #[derive(Clone)]
