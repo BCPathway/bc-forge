@@ -18,11 +18,14 @@
  * ```
  */
 
-export { bcForgeClient } from './client';
+export { bcForgeClient, Role } from './client';
 export type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
 export * from './mockClient';
-export { WrapperClient } from './wrapperClient';
-export type { WrapperClientConfig } from './wrapperClient';
+
+export type { WalletAdapter } from './walletAdapter';
+export { FreighterAdapter } from './adapters/freighterAdapter';
+export { AlbedoAdapter } from './adapters/albedoAdapter';
+export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
