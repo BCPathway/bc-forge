@@ -4,8 +4,8 @@ use soroban_sdk::{symbol_short, Address, Env, String};
 
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
     env.events().publish(
-        (symbol_short!("init"),),
-        (admin.clone(), decimals, name.clone(), symbol.clone()),
+        (symbol_short!("init"), admin.clone()),
+        (decimals, name.clone(), symbol.clone()),
     );
 }
 

@@ -183,4 +183,5 @@ mod tests {
         env.ledger().set(ledger_info);
 
         assert!(client.is_paused());
-    }}
+    }
+}
