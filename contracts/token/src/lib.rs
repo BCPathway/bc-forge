@@ -14,7 +14,7 @@ mod test;
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, MuxedAddress, String, Vec};
 
 #[contracttype]
 pub struct Recipient {
@@ -309,7 +309,8 @@ impl TokenInterface for BcForgeToken {
         Self::read_balance(&env, &id)
     }
 
-    fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
+        let to = to.address();
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "transfer_guard", {
             Self::panic_on_err(&env, Self::ensure_initialized(&env));
