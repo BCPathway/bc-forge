@@ -208,3 +208,117 @@ fn test_clawback_insufficient_balance_returns_error() {
         )))
     );
 }
+
+#[test]
+fn clawback_negative_amount_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &100);
+    assert_eq!(
+        client.try_clawback(&admin, &victim, &treasury, &-10),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InvalidAmount as u32
+        )))
+    );
+}
+
+#[test]
+fn clawback_full_drain_transfers_all() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &1000);
+    client.clawback(&admin, &victim, &treasury, &1000);
+
+    assert_eq!(client.balance(&victim), 0);
+    assert_eq!(client.balance(&treasury), 1000);
+}
+
+#[test]
+fn clawback_self_is_noop() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+
+    client.mint(&user, &500);
+    // from == to: balance must be unchanged
+    client.clawback(&admin, &user, &user, &200);
+
+    assert_eq!(client.balance(&user), 500);
+}
+
+#[test]
+fn clawback_preserves_total_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &700);
+    let before = client.supply();
+    client.clawback(&admin, &victim, &treasury, &200);
+    let after = client.supply();
+
+    // clawback moves balance, it does not burn -> supply unchanged
+    assert_eq!(before, after);
+}
+
+#[test]
+fn clawback_sequential_until_drained() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.mint(&victim, &1000);
+    client.clawback(&admin, &victim, &treasury, &400);
+    assert_eq!(client.balance(&victim), 600);
+    client.clawback(&admin, &victim, &treasury, &600);
+    assert_eq!(client.balance(&victim), 0);
+    assert_eq!(client.balance(&treasury), 1000);
+}
+
+#[test]
+fn clawback_admin_still_authorized_after_setting_clawback_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let clawback_admin = Address::generate(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    // setting a separate clawback admin must not revoke the original admin
+    client.set_clawback_admin(&clawback_admin);
+    client.mint(&victim, &300);
+    client.clawback(&admin, &victim, &treasury, &100);
+
+    assert_eq!(client.balance(&victim), 200);
+    assert_eq!(client.balance(&treasury), 100);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn clawback_third_party_unauthorized_even_with_clawback_admin_set() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let clawback_admin = Address::generate(&env);
+    let rando = Address::generate(&env);
+    let victim = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.set_clawback_admin(&clawback_admin);
+    client.mint(&victim, &100);
+    // rando is neither admin nor clawback_admin -> must panic
+    client.clawback(&rando, &victim, &treasury, &50);
+}
