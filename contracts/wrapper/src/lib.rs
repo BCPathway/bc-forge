@@ -21,7 +21,8 @@ mod test;
 use bc_forge_admin as admin;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
+    contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env,
+    MuxedAddress, String,
 };
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -442,7 +443,8 @@ impl TokenInterface for WrapperContract {
         Self::read_balance(&env, &id)
     }
 
-    fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
+        let to = to.address();
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         from.require_auth();

@@ -13,7 +13,7 @@ categories = ["cryptography::cryptocurrencies"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = "22.0.11"
+soroban-sdk = "27.0.0-rc.1"
 bc-forge-admin = { path = "../admin" }
 bc-forge-lifecycle = { path = "../lifecycle" }
 
