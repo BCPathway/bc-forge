@@ -8,6 +8,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --passWithNoTests",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
@@ -21,9 +22,12 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.11.24",
     "@types/node-cron": "^3.0.11",
+    "jest": "^29.7.0",
     "prisma": "^5.10.0",
+    "ts-jest": "^29.2.6",
     "tsx": "^4.7.1",
     "typescript": "^5.3.3"
   }

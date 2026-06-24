@@ -7,7 +7,7 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 const RPC_URL = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
-const CONTRACT_ID = process.env.CONTRACT_ID;
+const CONTRACT_ID: string = process.env.CONTRACT_ID ?? '';
 
 if (!CONTRACT_ID) {
   throw new Error('CONTRACT_ID environment variable is required');
@@ -15,28 +15,81 @@ if (!CONTRACT_ID) {
 
 const server = new SorobanRpc.Server(RPC_URL);
 
-/**
- * Main indexer loop to fetch and process Soroban events.
- */
+export const GAP_THRESHOLD = 100;
+
+export interface GapInfo {
+  startLedger: number;
+  isGap: boolean;
+  gapSize: number;
+  isFirstRun: boolean;
+}
+
+export function detectGap(
+  storedLedger: number | undefined | null,
+  currentLedger: number,
+): GapInfo {
+  if (currentLedger < 1) {
+    throw new Error(`Invalid currentLedger: ${currentLedger}. Must be >= 1.`);
+  }
+
+  if (storedLedger == null) {
+    console.log('No previously indexed ledger found. Starting from ledger 1.');
+    return { startLedger: 1, isGap: false, gapSize: 0, isFirstRun: true };
+  }
+
+  const startLedger = storedLedger + 1;
+
+  if (startLedger > currentLedger) {
+    console.warn(
+      `WARNING: Last indexed ledger (${storedLedger}) is ahead of the network ledger (${currentLedger}). ` +
+      `This may indicate a network reset or database inconsistency. Resetting start to current ledger.`,
+    );
+    return { startLedger: currentLedger, isGap: true, gapSize: 0, isFirstRun: false };
+  }
+
+  const gapSize = currentLedger - startLedger;
+
+  if (gapSize > GAP_THRESHOLD) {
+    console.warn(
+      `Gap detected: indexer is ${gapSize} ledgers behind ` +
+      `(start=${startLedger}, current=${currentLedger}). Catching up...`,
+    );
+    return { startLedger, isGap: true, gapSize, isFirstRun: false };
+  }
+
+  return { startLedger, isGap: false, gapSize, isFirstRun: false };
+}
+
+export async function startupGapCheck(): Promise<number> {
+  const lastLedger = await prisma.lastIndexedLedger.findUnique({ where: { id: 1 } });
+  const currentLedger = (await server.getLatestLedger()).sequence;
+  const gapInfo = detectGap(lastLedger?.ledger, currentLedger);
+
+  if (gapInfo.isGap || gapInfo.isFirstRun) {
+    console.log(
+      `Resuming from ledger ${gapInfo.startLedger} ` +
+      `(gap=${gapInfo.gapSize}, firstRun=${gapInfo.isFirstRun})`,
+    );
+  }
+
+  return gapInfo.startLedger;
+}
+
 export async function runIndexer() {
   console.log(`Starting indexer for contract: ${CONTRACT_ID}`);
 
-  // 1. Get the last indexed ledger
-  let lastLedger = await prisma.lastIndexedLedger.findUnique({ where: { id: 1 } });
-  let startLedger = lastLedger ? lastLedger.ledger + 1 : 0;
+  let startLedger = await startupGapCheck();
 
-  // 2. Continuous loop
   while (true) {
     try {
-      const currentLedger = (await server.getLatestLedger()).sequence;
-      
-      if (startLedger > currentLedger) {
-        // Wait for new ledgers
+      const latestLedger = (await server.getLatestLedger()).sequence;
+
+      if (startLedger > latestLedger) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         continue;
       }
 
-      const endLedger = Math.min(startLedger + 1000, currentLedger);
+      const endLedger = Math.min(startLedger + 1000, latestLedger);
       console.log(`Indexing ledgers: ${startLedger} to ${endLedger}`);
 
       const response = await server.getEvents({
@@ -50,10 +103,9 @@ export async function runIndexer() {
       });
 
       for (const event of response.events) {
-        await processEvent(event);
+        await processEvent(event as any);
       }
 
-      // Update last indexed ledger
       await prisma.lastIndexedLedger.upsert({
         where: { id: 1 },
         update: { ledger: endLedger },
@@ -62,7 +114,6 @@ export async function runIndexer() {
 
       startLedger = endLedger + 1;
 
-      // Small delay to avoid hammering the RPC
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
       console.error('Indexer error:', error);
@@ -71,7 +122,7 @@ export async function runIndexer() {
   }
 }
 
-async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
+async function processEvent(event: any) {
   const topic = scValToNative(event.topic[0]);
   const data = event.value;
 
@@ -79,7 +130,6 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
     switch (topic) {
       case 'mint': {
         const decoded = scValToNative(data);
-        // (admin, to, amount, new_balance, new_supply)
         await prisma.mint.create({
           data: {
             to: decoded[1],
@@ -92,7 +142,6 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
       }
       case 'burn': {
         const decoded = scValToNative(data);
-        // (from, amount, new_balance, new_supply)
         await prisma.burn.create({
           data: {
             from: decoded[0],
@@ -105,7 +154,6 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
       }
       case 'xfer': {
         const decoded = scValToNative(data);
-        // (from, to, amount)
         await prisma.transfer.create({
           data: {
             from: decoded[0],
@@ -119,7 +167,6 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
       }
       case 'xfer_frm': {
         const decoded = scValToNative(data);
-        // (spender, from, to, amount, remaining_allowance)
         await prisma.transfer.create({
           data: {
             from: decoded[1],
@@ -133,7 +180,6 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
       }
     }
   } catch (err: any) {
-    // Unique constraint violation might happen if we re-index a ledger
     if (err.code !== 'P2002') {
       console.error(`Error processing event topic ${topic}:`, err);
     }
