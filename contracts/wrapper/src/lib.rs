@@ -146,10 +146,7 @@ impl WrapperContract {
     }
 
     fn read_supply(env: &Env) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Supply)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::Supply).unwrap_or(0)
     }
 
     fn write_supply(env: &Env, supply: i128) {
@@ -211,7 +208,11 @@ impl WrapperContract {
 
     /// Scales `amount` from underlying decimals to wrapper decimals.
     /// Returns `None` on overflow.
-    fn scale_to_wrapper(underlying_decimals: u32, wrapper_decimals: u32, amount: i128) -> Option<i128> {
+    fn scale_to_wrapper(
+        underlying_decimals: u32,
+        wrapper_decimals: u32,
+        amount: i128,
+    ) -> Option<i128> {
         if wrapper_decimals >= underlying_decimals {
             let factor = 10i128.checked_pow(wrapper_decimals - underlying_decimals)?;
             amount.checked_mul(factor)
@@ -223,7 +224,11 @@ impl WrapperContract {
 
     /// Scales `amount` from wrapper decimals back to underlying decimals.
     /// Returns `None` on overflow.
-    fn scale_to_underlying(underlying_decimals: u32, wrapper_decimals: u32, amount: i128) -> Option<i128> {
+    fn scale_to_underlying(
+        underlying_decimals: u32,
+        wrapper_decimals: u32,
+        amount: i128,
+    ) -> Option<i128> {
         if underlying_decimals >= wrapper_decimals {
             let factor = 10i128.checked_pow(underlying_decimals - wrapper_decimals)?;
             amount.checked_mul(factor)
@@ -355,7 +360,9 @@ impl WrapperContract {
         let wrapper_decimals = Self::wrapper_decimals(&env);
         let underlying_amount =
             Self::scale_to_underlying(underlying_decimals, wrapper_decimals, wrapped_amount)
-                .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount));
+                .unwrap_or_else(|| {
+                    soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
+                });
 
         if underlying_amount <= 0 {
             Self::release_lock(&env);
