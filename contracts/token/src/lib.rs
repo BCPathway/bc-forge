@@ -269,8 +269,38 @@ impl BcForgeToken {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
         current_admin.require_auth();
-        admin::set_admin(&env, &new_admin);
-        events::emit_ownership_transferred(&env, &current_admin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        Ok(())
+    }
+
+    pub fn accept_ownership(env: Env) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        let pending_admin = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::PendingAdmin)
+            .expect("no pending ownership transfer");
+        pending_admin.require_auth();
+        let current_admin = admin::get_admin(&env);
+        admin::set_admin(&env, &pending_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        events::emit_ownership_transferred(&env, &current_admin, &pending_admin);
+        Ok(())
+    }
+
+    pub fn cancel_ownership(env: Env) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        let current_admin = admin::get_admin(&env);
+        current_admin.require_auth();
+        let pending_admin = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::PendingAdmin)
+            .expect("no pending ownership transfer");
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        events::emit_ownership_cancelled(&env, &current_admin, &pending_admin);
         Ok(())
     }
 

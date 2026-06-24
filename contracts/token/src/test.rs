@@ -480,3 +480,181 @@ fn test_propose_approve_execute_different_admins() {
     client.approve_upgrade(&approver, &proposal_id);
     client.execute_upgrade(&proposal_id);
 }
+
+// ─── Ownership Cancellation Tests ────────────────────────────────────────────
+
+#[test]
+fn test_transfer_and_accept_ownership() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let new_admin = Address::generate(&env);
+
+    client.transfer_ownership(&new_admin);
+    // Admin should still be the old admin before accept
+    assert_eq!(client.admin(), admin);
+
+    client.accept_ownership();
+    assert_eq!(client.admin(), new_admin);
+}
+
+#[test]
+fn test_transfer_and_cancel_ownership() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let new_admin = Address::generate(&env);
+
+    client.transfer_ownership(&new_admin);
+    assert_eq!(client.admin(), admin);
+
+    client.cancel_ownership();
+    // Admin should remain the old admin after cancel
+    assert_eq!(client.admin(), admin);
+}
+
+#[test]
+#[should_panic(expected = "no pending ownership transfer")]
+fn test_accept_without_pending_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+
+    client.accept_ownership();
+}
+
+#[test]
+#[should_panic(expected = "no pending ownership transfer")]
+fn test_cancel_without_pending_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+
+    client.cancel_ownership();
+}
+
+#[test]
+#[should_panic(expected = "no pending ownership transfer")]
+fn test_accept_after_cancel_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let new_admin = Address::generate(&env);
+
+    client.transfer_ownership(&new_admin);
+    client.cancel_ownership();
+    // Accept should fail after cancel
+    client.accept_ownership();
+}
+
+#[test]
+fn test_transfer_ownership_emits_no_transfer_event_until_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let new_admin = Address::generate(&env);
+
+    client.transfer_ownership(&new_admin);
+
+    // Transfer should NOT emit own_xfer yet
+    let events = env.events().all();
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_ne!(
+            topic0,
+            symbol_short!("own_xfer"),
+            "transfer event should not be emitted yet"
+        );
+    }
+}
+
+#[test]
+fn test_accept_ownership_emits_own_xfer_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let new_admin = Address::generate(&env);
+
+    client.transfer_ownership(&new_admin);
+    client.accept_ownership();
+
+    let events = env.events().all();
+    let last = events.get(events.len() - 1).unwrap();
+    let topics = last.1;
+    let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic0, symbol_short!("own_xfer"));
+}
+
+#[test]
+fn test_cancel_ownership_emits_own_cncl_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let new_admin = Address::generate(&env);
+
+    client.transfer_ownership(&new_admin);
+    client.cancel_ownership();
+
+    let events = env.events().all();
+    let last = events.get(events.len() - 1).unwrap();
+    let topics = last.1;
+    let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic0, symbol_short!("own_cncl"));
+}
+
+#[test]
+fn test_transfer_ownership_overwrites_pending() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+
+    // Transfer to first, then transfer to second (overwrite)
+    client.transfer_ownership(&first);
+    client.transfer_ownership(&second);
+    client.accept_ownership();
+
+    // Second should be the new admin, not first
+    assert_eq!(client.admin(), second);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_accept_ownership_requires_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _contract_id) = setup_contract(&env);
+
+    client.accept_ownership();
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_cancel_ownership_requires_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _contract_id) = setup_contract(&env);
+
+    client.cancel_ownership();
+}
+
+#[test]
+fn test_ownership_flow_transfer_accept_transfer_again() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let admin_b = Address::generate(&env);
+    let admin_c = Address::generate(&env);
+
+    // Transfer A -> B
+    client.transfer_ownership(&admin_b);
+    client.accept_ownership();
+    assert_eq!(client.admin(), admin_b);
+
+    // Transfer B -> C
+    client.transfer_ownership(&admin_c);
+    client.accept_ownership();
+    assert_eq!(client.admin(), admin_c);
+}

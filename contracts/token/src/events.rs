@@ -69,6 +69,13 @@ pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Ad
     );
 }
 
+pub fn emit_ownership_cancelled(env: &Env, admin: &Address, cancelled_admin: &Address) {
+    env.events().publish(
+        (symbol_short!("own_cncl"),),
+        (admin.clone(), cancelled_admin.clone()),
+    );
+}
+
 pub fn emit_paused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("paused"),), (admin.clone(),));
