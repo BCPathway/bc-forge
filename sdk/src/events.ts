@@ -2,7 +2,7 @@
  * @bc-forge/sdk — Event parsing and real-time subscription support.
  */
 
-import { xdr, scValToNative, SorobanRpc } from '@stellar/stellar-sdk';
+import { xdr, scValToNative, rpc } from '@stellar/stellar-sdk';
 
 /**
  * Enumeration of all supported bc-forge contract events.
@@ -43,7 +43,7 @@ export interface SubscriptionOptions {
 /**
  * Decodes a standard Soroban RPC event into a native bcForgeEvent.
  */
-export function decodeEvent(event: SorobanRpc.Api.EventResponse): bcForgeEvent | null {
+export function decodeEvent(event: rpc.Api.EventResponse): bcForgeEvent | null {
   if (!event.topic || event.topic.length === 0) return null;
 
   try {
@@ -83,7 +83,7 @@ export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEve
     return {
       type,
       ledger: 0, // Diagnostic events don't always carry ledger sequence
-      contractId: event.contractId()?.toString('hex') || '',
+      contractId: (event.contractId() as Buffer | null)?.toString('hex') || '',
       data: scValToNative(body.data()),
     };
   } catch {
@@ -106,7 +106,7 @@ export async function subscribeEvents(
   callback: (event: bcForgeEvent) => void,
   options: SubscriptionOptions = {},
 ): Promise<() => void> {
-  const server = new SorobanRpc.Server(rpcUrl);
+  const server = new rpc.Server(rpcUrl);
 
   // Default to starting from the latest ledger if not specified
   let lastLedger = options.startLedger;

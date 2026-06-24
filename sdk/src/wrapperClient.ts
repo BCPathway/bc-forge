@@ -8,7 +8,7 @@
  * compatible token, enabling cross-contract interoperability.
  */
 
-import { SorobanRpc, Contract, TransactionBuilder, Keypair, xdr } from '@stellar/stellar-sdk';
+import { rpc, Contract, TransactionBuilder, Keypair, xdr } from '@stellar/stellar-sdk';
 
 import {
   buildInvokeTransaction,
@@ -43,14 +43,14 @@ export class WrapperClient {
   private rpcUrl: string;
   private networkPassphrase: string;
   private contractId: string;
-  private server: SorobanRpc.Server;
+  private server: rpc.Server;
   private contract: Contract;
 
   constructor(config: WrapperClientConfig) {
     this.rpcUrl = config.rpcUrl;
     this.networkPassphrase = config.networkPassphrase;
     this.contractId = config.contractId;
-    this.server = new SorobanRpc.Server(this.rpcUrl);
+    this.server = new rpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
   }
 
@@ -405,11 +405,11 @@ export class WrapperClient {
 
         const simulated = await this.server.simulateTransaction(tx);
 
-        if (SorobanRpc.Api.isSimulationError(simulated)) {
+        if (rpc.Api.isSimulationError(simulated)) {
           throw new SimulationError(`Query failed: ${simulated.error}`, simulated.error);
         }
 
-        if (!SorobanRpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
+        if (!rpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
           throw new SimulationError('Query returned no result');
         }
 
@@ -439,7 +439,7 @@ export class WrapperClient {
 
         const response = await submitTransaction(this.rpcUrl, txXdr);
 
-        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        if (response.status === rpc.Api.GetTransactionStatus.SUCCESS) {
           return {
             success: true,
             hash: (response as any).hash,

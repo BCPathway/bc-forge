@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "types": ["jest", "node"],
     "outDir": "./dist",
     "rootDir": "./src",
     "declarationDir": "./dist"
