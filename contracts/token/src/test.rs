@@ -543,7 +543,7 @@ fn test_batch_mint_emits_mint_events_per_recipient() {
     let mut mint_count = 0u32;
     for i in 0..events.len() {
         let (_, topics, _) = events.get(i).unwrap();
-        if topics.len() >= 1 {
+        if !topics.is_empty() {
             if let Ok(t0) = topics.get(0).unwrap().try_into_val(&env) {
                 let sym: soroban_sdk::Symbol = t0;
                 if sym == symbol_short!("mint") {
