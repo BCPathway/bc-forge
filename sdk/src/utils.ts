@@ -3,7 +3,7 @@
  */
 
 import {
-  SorobanRpc,
+  rpc,
   TransactionBuilder,
   Networks,
   xdr,
@@ -36,7 +36,7 @@ export async function buildInvokeTransaction(
   args: xdr.ScVal[],
   sourceKeypair: Keypair,
 ): Promise<string> {
-  const server = new SorobanRpc.Server(rpcUrl);
+  const server = new rpc.Server(rpcUrl);
   const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
 
   const contract = new Contract(contractId);
@@ -52,11 +52,11 @@ export async function buildInvokeTransaction(
   // Simulate to get the assembled transaction
   const simulated = await server.simulateTransaction(tx);
 
-  if (SorobanRpc.Api.isSimulationError(simulated)) {
+  if (rpc.Api.isSimulationError(simulated)) {
     throw new SimulationError('Contract simulation failed', simulated.error);
   }
 
-  const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
+  const assembled = rpc.assembleTransaction(tx, simulated).build();
   assembled.sign(sourceKeypair);
 
   return assembled.toXDR();
@@ -72,8 +72,8 @@ export async function buildInvokeTransaction(
 export async function submitTransaction(
   rpcUrl: string,
   txXdr: string,
-): Promise<SorobanRpc.Api.GetTransactionResponse> {
-  const server = new SorobanRpc.Server(rpcUrl);
+): Promise<rpc.Api.GetTransactionResponse> {
+  const server = new rpc.Server(rpcUrl);
   const tx = TransactionBuilder.fromXDR(txXdr, Networks.TESTNET);
 
   const sendResponse = await server.sendTransaction(tx);
@@ -85,7 +85,7 @@ export async function submitTransaction(
   }
 
   // Poll for completion
-  let getResponse: SorobanRpc.Api.GetTransactionResponse;
+  let getResponse: rpc.Api.GetTransactionResponse;
   let attempts = 0;
   const maxAttempts = 30;
 
@@ -94,11 +94,11 @@ export async function submitTransaction(
     getResponse = await server.getTransaction(sendResponse.hash);
     attempts++;
   } while (
-    getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+    getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
     attempts < maxAttempts
   );
 
-  if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
+  if (getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
     throw new TransactionTimeoutError(
       'Transaction not found after maximum polling attempts',
       sendResponse.hash,
@@ -162,7 +162,7 @@ export async function buildUnsignedTransaction(
   args: xdr.ScVal[],
   sourcePublicKey: string,
 ): Promise<string> {
-  const server = new SorobanRpc.Server(rpcUrl);
+  const server = new rpc.Server(rpcUrl);
   const sourceAccount = await server.getAccount(sourcePublicKey);
 
   const contract = new Contract(contractId);
@@ -178,11 +178,11 @@ export async function buildUnsignedTransaction(
   // Simulate to get the assembled transaction
   const simulated = await server.simulateTransaction(tx);
 
-  if (SorobanRpc.Api.isSimulationError(simulated)) {
+  if (rpc.Api.isSimulationError(simulated)) {
     throw new Error(`Simulation failed: ${simulated.error}`);
   }
 
-  const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
+  const assembled = rpc.assembleTransaction(tx, simulated).build();
 
   // Return unsigned transaction
   return assembled.toXDR();
@@ -224,8 +224,8 @@ export async function simulateTransaction(
   method: string,
   args: xdr.ScVal[],
   sourcePublicKey: string,
-): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
-  const server = new SorobanRpc.Server(rpcUrl);
+): Promise<rpc.Api.SimulateTransactionResponse> {
+  const server = new rpc.Server(rpcUrl);
 
   // Create a dummy account for simulation
   const account = new Account(sourcePublicKey, '0');
@@ -242,7 +242,7 @@ export async function simulateTransaction(
 
   const simulated = await server.simulateTransaction(tx);
 
-  if (SorobanRpc.Api.isSimulationError(simulated)) {
+  if (rpc.Api.isSimulationError(simulated)) {
     throw new Error(`Simulation failed: ${simulated.error}`);
   }
 

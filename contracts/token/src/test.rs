@@ -115,9 +115,18 @@ fn test_batch_mint_happy_path_multiple_recipients() {
 
     let recipients = vec![
         &env,
-        Recipient { to: alice.clone(), amount: 100 },
-        Recipient { to: bob.clone(), amount: 200 },
-        Recipient { to: carol.clone(), amount: 300 },
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
+        Recipient {
+            to: carol.clone(),
+            amount: 300,
+        },
     ];
 
     client.batch_mint(&recipients);
@@ -135,7 +144,13 @@ fn test_batch_mint_single_recipient() {
     let (client, _admin) = setup(&env);
 
     let to = Address::generate(&env);
-    let recipients = vec![&env, Recipient { to: to.clone(), amount: 500 }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: to.clone(),
+            amount: 500,
+        },
+    ];
 
     client.batch_mint(&recipients);
 
@@ -180,14 +195,26 @@ fn test_batch_mint_exceeds_global_rate_limit() {
     // First batch_mint within the limit should succeed
     let recipients = vec![
         &env,
-        Recipient { to: alice.clone(), amount: 100 },
-        Recipient { to: bob.clone(), amount: 200 },
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
     ];
     let result = client.try_batch_mint(&recipients);
     assert!(result.is_ok(), "first batch should succeed");
 
     // Second batch with 1 more recipient should fail (rate limit=2, already used 2)
-    let recipients2 = vec![&env, Recipient { to: carol.clone(), amount: 300 }];
+    let recipients2 = vec![
+        &env,
+        Recipient {
+            to: carol.clone(),
+            amount: 300,
+        },
+    ];
     let result2 = client.try_batch_mint(&recipients2);
     assert_eq!(result2, Err(Ok(TokenError::InvalidAmount)));
 }
@@ -216,9 +243,18 @@ fn test_batch_mint_exactly_at_global_limit() {
 
     let recipients = vec![
         &env,
-        Recipient { to: alice.clone(), amount: 100 },
-        Recipient { to: bob.clone(), amount: 200 },
-        Recipient { to: carol.clone(), amount: 300 },
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
+        Recipient {
+            to: carol.clone(),
+            amount: 300,
+        },
     ];
 
     let result = client.try_batch_mint(&recipients);
@@ -251,7 +287,13 @@ fn test_batch_mint_single_recipient_exceeds_global_limit() {
     client.mint(&alice, &100);
 
     // A batch_mint with one recipient should now fail
-    let recipients = vec![&env, Recipient { to: bob.clone(), amount: 200 }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
+    ];
     let result = client.try_batch_mint(&recipients);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
 }
@@ -278,12 +320,24 @@ fn test_batch_mint_global_rate_limit_resets_after_window() {
     let bob = Address::generate(&env);
 
     // First batch should succeed
-    let recipients = vec![&env, Recipient { to: alice.clone(), amount: 100 }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+    ];
     let result = client.try_batch_mint(&recipients);
     assert!(result.is_ok());
 
     // Second batch should fail (rate limit not yet reset)
-    let recipients2 = vec![&env, Recipient { to: bob.clone(), amount: 200 }];
+    let recipients2 = vec![
+        &env,
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
+    ];
     assert_eq!(
         client.try_batch_mint(&recipients2),
         Err(Ok(TokenError::InvalidAmount))
@@ -295,7 +349,13 @@ fn test_batch_mint_global_rate_limit_resets_after_window() {
     env.ledger().set(ledger_info);
 
     // Now the rate limit should be reset
-    let recipients3 = vec![&env, Recipient { to: bob.clone(), amount: 200 }];
+    let recipients3 = vec![
+        &env,
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
+    ];
     let result3 = client.try_batch_mint(&recipients3);
     assert!(result3.is_ok());
     assert_eq!(client.balance(&bob), 200);
@@ -311,10 +371,7 @@ fn test_batch_mint_exceeds_address_rate_limit() {
     // Set a per-address rate limit for the admin: at most 1 mint per window
     env.as_contract(&contract_id, || {
         env.storage().instance().set(
-            &RateLimitDataKey::AddressRateLimit(
-                admin.clone(),
-                String::from_str(&env, "mint"),
-            ),
+            &RateLimitDataKey::AddressRateLimit(admin.clone(), String::from_str(&env, "mint")),
             &RateLimitConfig {
                 limit: 1,
                 window_seconds: 3600,
@@ -326,12 +383,24 @@ fn test_batch_mint_exceeds_address_rate_limit() {
     let bob = Address::generate(&env);
 
     // First batch should succeed
-    let recipients = vec![&env, Recipient { to: alice.clone(), amount: 100 }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+    ];
     let result = client.try_batch_mint(&recipients);
     assert!(result.is_ok());
 
     // Second batch should fail (per-address limit exceeded)
-    let recipients2 = vec![&env, Recipient { to: bob.clone(), amount: 200 }];
+    let recipients2 = vec![
+        &env,
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
+    ];
     assert_eq!(
         client.try_batch_mint(&recipients2),
         Err(Ok(TokenError::InvalidAmount))
@@ -350,15 +419,27 @@ fn test_batch_mint_no_limit_set_always_succeeds() {
     // With no rate limit configured, batch_mint should always succeed
     let recipients = vec![
         &env,
-        Recipient { to: alice.clone(), amount: 100 },
-        Recipient { to: bob.clone(), amount: 200 },
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
     ];
     client.batch_mint(&recipients);
     assert_eq!(client.supply(), 300);
 
     // Subsequent calls should also succeed
     let carol = Address::generate(&env);
-    let recipients2 = vec![&env, Recipient { to: carol.clone(), amount: 300 }];
+    let recipients2 = vec![
+        &env,
+        Recipient {
+            to: carol.clone(),
+            amount: 300,
+        },
+    ];
     client.batch_mint(&recipients2);
     assert_eq!(client.supply(), 600);
 }
@@ -370,7 +451,13 @@ fn test_batch_mint_zero_amount_fails() {
     let (client, _admin) = setup(&env);
 
     let to = Address::generate(&env);
-    let recipients = vec![&env, Recipient { to: to.clone(), amount: 0 }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: to.clone(),
+            amount: 0,
+        },
+    ];
 
     let result = client.try_batch_mint(&recipients);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
@@ -384,7 +471,13 @@ fn test_batch_mint_negative_amount_fails() {
     let (client, _admin) = setup(&env);
 
     let to = Address::generate(&env);
-    let recipients = vec![&env, Recipient { to: to.clone(), amount: -50 }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: to.clone(),
+            amount: -50,
+        },
+    ];
 
     let result = client.try_batch_mint(&recipients);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
@@ -403,8 +496,14 @@ fn test_batch_mint_mixed_valid_and_invalid_fails_at_first_invalid() {
     // Second recipient has zero amount — batch should fail at the zero check
     let recipients = vec![
         &env,
-        Recipient { to: alice.clone(), amount: 100 },
-        Recipient { to: bob.clone(), amount: 0 },
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+        Recipient {
+            to: bob.clone(),
+            amount: 0,
+        },
     ];
 
     let result = client.try_batch_mint(&recipients);
@@ -427,8 +526,14 @@ fn test_batch_mint_emits_mint_events_per_recipient() {
 
     let recipients = vec![
         &env,
-        Recipient { to: alice.clone(), amount: 100 },
-        Recipient { to: bob.clone(), amount: 200 },
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
     ];
 
     client.batch_mint(&recipients);
@@ -461,8 +566,14 @@ fn test_batch_mint_duplicate_recipients_both_receive_tokens() {
     // Same address appears twice in the batch
     let recipients = vec![
         &env,
-        Recipient { to: alice.clone(), amount: 100 },
-        Recipient { to: alice.clone(), amount: 200 },
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+        Recipient {
+            to: alice.clone(),
+            amount: 200,
+        },
     ];
 
     client.batch_mint(&recipients);
@@ -481,7 +592,13 @@ fn test_batch_mint_large_amounts() {
     let to = Address::generate(&env);
     let large_amount: i128 = i128::MAX;
 
-    let recipients = vec![&env, Recipient { to: to.clone(), amount: large_amount }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: to.clone(),
+            amount: large_amount,
+        },
+    ];
 
     let result = client.try_batch_mint(&recipients);
     assert!(result.is_ok());
@@ -505,10 +622,7 @@ fn test_batch_mint_global_and_address_limit_interaction() {
             },
         );
         env.storage().instance().set(
-            &RateLimitDataKey::AddressRateLimit(
-                admin.clone(),
-                String::from_str(&env, "mint"),
-            ),
+            &RateLimitDataKey::AddressRateLimit(admin.clone(), String::from_str(&env, "mint")),
             &RateLimitConfig {
                 limit: 1,
                 window_seconds: 3600,
@@ -520,12 +634,24 @@ fn test_batch_mint_global_and_address_limit_interaction() {
     let bob = Address::generate(&env);
 
     // First batch should hit the address limit first (limit=1)
-    let recipients = vec![&env, Recipient { to: alice.clone(), amount: 100 }];
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: alice.clone(),
+            amount: 100,
+        },
+    ];
     let result = client.try_batch_mint(&recipients);
     assert!(result.is_ok());
 
     // Second batch fails because address limit is exhausted
-    let recipients2 = vec![&env, Recipient { to: bob.clone(), amount: 200 }];
+    let recipients2 = vec![
+        &env,
+        Recipient {
+            to: bob.clone(),
+            amount: 200,
+        },
+    ];
     assert_eq!(
         client.try_batch_mint(&recipients2),
         Err(Ok(TokenError::InvalidAmount))
