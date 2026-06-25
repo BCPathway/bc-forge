@@ -29,6 +29,7 @@ fn setup(
     let vesting = VestingContractClient::new(env, &vesting_id);
     vesting.initialize(&admin, &token_id);
     token.transfer_ownership(&vesting_id);
+    token.accept_ownership();
 
     (token, vesting, admin, beneficiary, vesting_id)
 }
