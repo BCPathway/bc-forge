@@ -25,3 +25,22 @@ Inline notification banner. The ARIA role is derived from the variant:
 <Alert variant="success" title="Saved">Your changes were stored.</Alert>
 <Alert variant="danger" onDismiss={() => setError(null)}>Mint failed.</Alert>
 ```
+
+## Badge
+
+Small label used for statuses, counts, or categories. When `onClick` is
+provided the badge becomes a keyboard-focusable interactive control
+(`role="button"`, `tabIndex={0}`, Enter/Space activation). Pass explicit
+`role` or `tabIndex` to override.
+
+| Prop      | Type                                                           | Default     | Description                                                      |
+| --------- | -------------------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
+| `variant` | `'default' \| 'primary' \| 'success' \| 'warning' \| 'danger' \| 'info'` | `'default'` | Visual style.                                                    |
+| `size`    | `'sm' \| 'md' \| 'lg'`                                        | `'md'`      | Sizing preset.                                                   |
+| `...rest` | `React.HTMLAttributes<HTMLSpanElement>`                        | —           | Any span prop; also forwards a `ref`.                            |
+
+```tsx
+<Badge variant="primary">Live</Badge>
+<Badge variant="success" size="sm">Verified</Badge>
+<Badge variant="warning" onClick={() => alert('clicked')}>Dismiss</Badge>
+```
