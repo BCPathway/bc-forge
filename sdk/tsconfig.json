@@ -12,10 +12,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "types": ["jest", "node"],
     "outDir": "./dist",
     "rootDir": "./src",
-    "declarationDir": "./dist",
-    "types": ["node"]
+    "declarationDir": "./dist"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
