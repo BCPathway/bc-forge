@@ -751,9 +751,8 @@ export class bcForgeClient {
       'set_admin_pool',
       [
         nativeToScVal(
-          pool.map((addr) => addressToScVal(addr)),
-          { type: 'vec' },
-        ),
+            pool.map((addr) => addressToScVal(addr)),
+          ),
         u32ToScVal(threshold),
       ],
       source,
