@@ -19,6 +19,7 @@ bc-forge-lifecycle = { path = "../lifecycle" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.11", features = ["testutils"] }
+bc-forge-token = { path = "../token", features = ["testutils"] }
 
 [features]
 testutils = ["soroban-sdk/testutils"]
