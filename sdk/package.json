@@ -21,7 +21,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.0.1"
+    "@stellar/stellar-sdk": "^15.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

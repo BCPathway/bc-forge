@@ -752,7 +752,6 @@ export class bcForgeClient {
       [
         nativeToScVal(
           pool.map((addr) => addressToScVal(addr)),
-          { type: 'vec' },
         ),
         u32ToScVal(threshold),
       ],
