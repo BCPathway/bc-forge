@@ -82,3 +82,43 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # ─── Indexer CI ─────────────────────────────────────────────────────────
+  indexer:
+    name: Indexer (TypeScript + Prisma)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: indexer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: indexer/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cache the generated Prisma client so it is not rebuilt unless the
+      # schema changes.  The cache key includes the schema hash so any model
+      # change automatically invalidates it.
+      - name: Cache Prisma generated client
+        id: prisma-cache
+        uses: actions/cache@v4
+        with:
+          path: indexer/node_modules/.prisma
+          key: prisma-${{ runner.os }}-${{ hashFiles('indexer/prisma/schema.prisma') }}
+          restore-keys: |
+            prisma-${{ runner.os }}-
+
+      - name: Generate Prisma client
+        if: steps.prisma-cache.outputs.cache-hit != 'true'
+        run: npm run prisma:generate
+
+      - name: Build
+        run: npm run build
