@@ -44,3 +44,21 @@ provided the badge becomes a keyboard-focusable interactive control
 <Badge variant="success" size="sm">Verified</Badge>
 <Badge variant="warning" onClick={() => alert('clicked')}>Dismiss</Badge>
 ```
+
+## Tooltip
+
+Shows contextual text on hover and keyboard focus, dismissible with Escape.
+Renders `role="tooltip"` and links the trigger via `aria-describedby`. Wraps a
+single focusable element.
+
+| Prop        | Type                                      | Default | Description                   |
+| ----------- | ----------------------------------------- | ------- | ----------------------------- |
+| `content`   | `React.ReactNode`                         | (none)  | Tooltip contents.             |
+| `children`  | `React.ReactElement`                      | (none)  | The focusable trigger.        |
+| `placement` | `'top' \| 'bottom' \| 'left' \| 'right'`  | `'top'` | Position relative to trigger. |
+
+```tsx
+<Tooltip content="Copy address">
+  <button onClick={copy}>Copy</button>
+</Tooltip>
+```
