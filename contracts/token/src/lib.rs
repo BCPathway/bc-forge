@@ -6,8 +6,8 @@
 #![allow(clippy::manual_assert)]
 
 mod events;
-mod reentrancy_guard;
 mod rate_limit;
+mod reentrancy_guard;
 
 #[cfg(test)]
 mod test;
@@ -15,9 +15,7 @@ mod test;
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec,
-};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec};
 
 #[contracttype]
 pub struct Recipient {
@@ -160,7 +158,12 @@ impl BcForgeToken {
             .set(&DataKey::Allowance(from.clone(), spender.clone()), &data);
     }
 
-    fn move_balance(env: &Env, from: &Address, to: &Address, amount: i128) -> Result<(), TokenError> {
+    fn move_balance(
+        env: &Env,
+        from: &Address,
+        to: &Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
         let from_balance = Self::read_balance(env, from);
         if from_balance < amount {
             return Err(TokenError::InsufficientBalance);
@@ -174,7 +177,12 @@ impl BcForgeToken {
         Ok(())
     }
 
-    fn internal_mint(env: &Env, admin_address: &Address, to: &Address, amount: i128) -> Result<(), TokenError> {
+    fn internal_mint(
+        env: &Env,
+        admin_address: &Address,
+        to: &Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
@@ -226,12 +234,12 @@ impl BcForgeToken {
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
             current_admin.require_auth();
-            
+
             // Check rate limits for mint operation
             if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
                 return Err(TokenError::InvalidAmount);
             }
-            
+
             Self::internal_mint(&env, &current_admin, &to, amount)
         })
     }
@@ -248,7 +256,8 @@ impl BcForgeToken {
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
-                if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, recipient.amount) {
+                if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, recipient.amount)
+                {
                     return Err(TokenError::InvalidAmount);
                 }
                 Self::internal_mint(&env, &current_admin, &recipient.to, recipient.amount)?;
@@ -637,7 +646,10 @@ impl TokenInterface for BcForgeToken {
     fn decimals(env: Env) -> u32 {
         Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        env.storage().instance().get(&DataKey::Decimals).unwrap_or(7)
+        env.storage()
+            .instance()
+            .get(&DataKey::Decimals)
+            .unwrap_or(7)
     }
 
     fn name(env: Env) -> String {

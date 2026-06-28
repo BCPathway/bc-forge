@@ -81,6 +81,7 @@ macro_rules! reentrancy_guard {
         let guard =
             $crate::reentrancy_guard::ReentrancyGuard::new(soroban_sdk::Symbol::new($env, $key));
         guard.require_not_entered($env);
+        #[allow(clippy::redundant_closure_call)]
         let result = (|| $body)();
         guard.exit($env);
         result
