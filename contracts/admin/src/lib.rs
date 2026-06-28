@@ -1,6 +1,7 @@
 //! Reusable access-control primitives for Soroban contracts.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};

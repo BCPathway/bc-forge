@@ -114,6 +114,18 @@ const version = await client.getVersion();
 console.log('Contract version:', version);
 ```
 
+## Ownership Management
+
+```typescript
+// Step 1: propose a new owner
+await client.proposeOwnership('GNEWADMIN...ADDR', adminKeypair);
+
+// Step 2: the proposed owner accepts
+await client.acceptOwnership(newOwnerKeypair);
+
+// Optional: cancel before acceptance
+await client.cancelOwnershipTransfer(adminKeypair);
+```
 ## Batch Queries
 
 ```typescript
@@ -372,9 +384,13 @@ console.log('Locked tokens withdrawn');
 ## Admin Operations
 
 ```typescript
-// Transfer ownership
+// Backwards-compatible alias for the propose step
 await client.transferOwnership('GNEWADMIN...ADDR', adminKeypair);
+```
 
+## Admin Operations
+
+```typescript
 // Emergency pause / unpause
 await client.pause(adminKeypair);
 await client.unpause(adminKeypair);
@@ -421,6 +437,26 @@ When a `walletAdapter` is configured and connected, write methods may be invoked
 |--------|-------------|
 | `initialize(admin, decimals, name, symbol, source)` | One-time contract setup |
 | `mint(to, amount, source)` | Mint tokens (admin-only) |
+| `transfer(from, to, amount, source)` | Transfer tokens |
+| `approve(from, spender, amount, source)` | Set spending allowance |
+| `burn(from, amount, source)` | Burn tokens |
+| `proposeOwnership(newAdmin, source)` | Propose a new admin |
+| `acceptOwnership(source)` | Accept a pending admin transfer |
+| `cancelOwnershipTransfer(source)` | Cancel a pending admin transfer |
+| `transferOwnership(newAdmin, source)` | Backwards-compatible alias for `proposeOwnership` |
+| `pause(source)` | Pause contract (admin-only) |
+| `unpause(source)` | Unpause contract (admin-only) |
+| Method                                              | Description                                                                 |
+| --------------------------------------------------- | --------------------------------------------------------------------------- |
+| `initialize(admin, decimals, name, symbol, source)` | One-time contract setup                                                     |
+| `mint(to, amount, source)`                          | Mint tokens (admin-only)                                                    |
+| `batchMint(recipients, source)`                     | Mint tokens to multiple `{ to, amount }` recipients atomically (admin-only) |
+| `transfer(from, to, amount, source)`                | Transfer tokens                                                             |
+| `approve(from, spender, amount, source)`            | Set spending allowance                                                      |
+| `burn(from, amount, source)`                        | Burn tokens                                                                 |
+| `transferOwnership(newAdmin, source)`               | Transfer admin role                                                         |
+| `pause(source)`                                     | Pause contract (admin-only)                                                 |
+| `unpause(source)`                                   | Unpause contract (admin-only)                                               |
 | `batchMint(recipients[], source)` | Batch mint to multiple addresses (admin-only) |
 | `transfer(from, to, amount, source)` | Transfer tokens |
 | `approve(from, spender, amount, source)` | Set spending allowance |

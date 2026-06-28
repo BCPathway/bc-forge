@@ -365,6 +365,7 @@ export class bcForgeClient {
   }
 
   /**
+   * Propose a new admin/ownership address. Current admin only.
    * Burn tokens from an address using an approved allowance.
    *
    * @param spender - Address authorized to burn tokens
@@ -395,6 +396,37 @@ export class bcForgeClient {
    * @param newAdmin - New admin address
    * @param source   - Current admin's keypair
    */
+  async proposeOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('propose_ownership', [addressToScVal(newAdmin)], source);
+  }
+
+  /**
+   * Accept a pending ownership transfer. Proposed admin only.
+   *
+   * @param source - Proposed admin's keypair
+   */
+  async acceptOwnership(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('accept_ownership', [], source);
+  }
+
+  /**
+   * Cancel a pending ownership transfer. Current admin only.
+   *
+   * @param source - Current admin's keypair
+   */
+  async cancelOwnershipTransfer(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('cancel_ownership_transfer', [], source);
+  }
+
+  /**
+   * Transfer admin/ownership to a new address.
+   *
+   * @deprecated Use `proposeOwnership` and `acceptOwnership` instead.
+   * @param newAdmin - New admin address
+   * @param source   - Current admin's keypair
+   */
+  async transferOwnership(newAdmin: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('propose_ownership', [addressToScVal(newAdmin)], source);
   async transferOwnership(newAdmin: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('transfer_ownership', [addressToScVal(newAdmin)], source);
   }
@@ -1064,6 +1096,7 @@ export class bcForgeClient {
           this.walletAdapter.publicKey,
         );
 
+        return this.unwrapTransactionResponse(submitTransaction(this.rpcUrl, txXdr));
         const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr);
 
         const response = await submitTransaction(this.rpcUrl, signedXdr);
@@ -1086,5 +1119,27 @@ export class bcForgeClient {
         throw error;
       }
     });
+  }
+
+  /**
+   * Waits for a submitted transaction response and unwraps the final SDK result.
+   */
+  private async unwrapTransactionResponse(
+    responsePromise: Promise<SorobanRpc.Api.GetTransactionResponse>,
+  ): Promise<TransactionResult> {
+    const response = await responsePromise;
+
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: (response as any).hash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+
+    return {
+      success: false,
+      hash: (response as any).hash,
+    };
   }
 }
