@@ -170,7 +170,6 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         .instance()
         .set(&AdminKey::Proposal(id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(id));
     id
 }
 
@@ -199,7 +198,6 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
 pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
@@ -209,7 +207,6 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
         .get(&AdminKey::Proposal(proposal_id))
         .expect("proposal not found");
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
     proposal.approvals.len() >= get_threshold(env)
 }
 
@@ -232,7 +229,6 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
 #[cfg(test)]

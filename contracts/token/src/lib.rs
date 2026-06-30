@@ -14,7 +14,9 @@ mod test;
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
+};
 
 #[contracttype]
 pub struct Recipient {
@@ -37,6 +39,7 @@ pub enum DataKey {
     Name,
     Symbol,
     Supply,
+    UpgradeHash(u64),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -77,6 +80,12 @@ impl BcForgeToken {
         match result {
             Ok(value) => value,
             Err(error) => soroban_sdk::panic_with_error!(env, error),
+        }
+    }
+
+    fn perform_wasm_update(env: &Env, new_wasm_hash: BytesN<32>) {
+        if cfg!(not(test)) {
+            env.deployer().update_current_contract_wasm(new_wasm_hash);
         }
     }
 
@@ -279,6 +288,58 @@ impl BcForgeToken {
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
         Ok(())
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        admin::require_admin(&env);
+        Self::perform_wasm_update(&env, new_wasm_hash);
+    }
+
+    pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        admin::require_admin(&env);
+        admin::set_admin_pool(&env, pool, threshold);
+    }
+
+    pub fn get_admin_pool(env: Env) -> Vec<Address> {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        admin::get_admin_pool(&env)
+    }
+
+    pub fn get_threshold(env: Env) -> u32 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        admin::get_threshold(&env)
+    }
+
+    pub fn propose_upgrade(
+        env: Env,
+        caller: Address,
+        description: String,
+        new_wasm_hash: BytesN<32>,
+    ) -> u64 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        let proposal_id = admin::create_proposal(&env, caller, description);
+        env.storage()
+            .instance()
+            .set(&DataKey::UpgradeHash(proposal_id), &new_wasm_hash);
+        proposal_id
+    }
+
+    pub fn approve_upgrade(env: Env, caller: Address, proposal_id: u64) {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        admin::approve_proposal(&env, caller, proposal_id);
+    }
+
+    pub fn execute_upgrade(env: Env, proposal_id: u64) {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        admin::mark_executed(&env, proposal_id);
+        let wasm_hash: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::UpgradeHash(proposal_id))
+            .expect("upgrade hash not found");
+        Self::perform_wasm_update(&env, wasm_hash);
     }
 }
 
