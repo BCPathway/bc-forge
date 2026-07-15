@@ -1,6 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useBcForgeClient } from './context';
 import { Keypair } from '@stellar/stellar-sdk';
+import type { LockupInfo } from '@bc-forge/sdk';
+
+// ─── useLockups cache ─────────────────────────────────────────────────────────
+const LOCKUP_CACHE_TTL_MS = 30_000;
+const lockupCache = new Map<string, { data: LockupInfo | null; ts: number }>();
+
+function lockupChanged(prev: LockupInfo | null, next: LockupInfo | null): boolean {
+  if (prev === null && next === null) return false;
+  if (prev === null || next === null) return true;
+  return prev.amount !== next.amount || prev.unlockTime !== next.unlockTime;
+}
 
 /**
  * Hook to fetch basic token information (name, symbol, decimals).
@@ -221,4 +232,66 @@ export function useAllowance(owner: string | undefined, spender: string | undefi
   }, [fetchAllowance]);
 
   return { data, loading, error, refetch: fetchAllowance };
+}
+
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 500;
+
+/**
+ * Hook to fetch lockup information for a user address.
+ * Returns cached data within a 30-second TTL to prevent redundant RPC calls.
+ * Retries up to 3 times on transient network failures.
+ */
+export function useLockups(user: string | undefined) {
+  const client = useBcForgeClient();
+  const [data, setData] = useState<LockupInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const prevDataRef = useRef<LockupInfo | null>(null);
+
+  const fetchLockups = useCallback(async (skipCache = false) => {
+    if (!user) return;
+
+    if (!skipCache) {
+      const cached = lockupCache.get(user);
+      if (cached && Date.now() - cached.ts < LOCKUP_CACHE_TTL_MS) {
+        if (lockupChanged(prevDataRef.current, cached.data)) {
+          prevDataRef.current = cached.data;
+          setData(cached.data);
+        }
+        return;
+      }
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const lockupInfo = await client.getLockupInfo(user);
+        lockupCache.set(user, { data: lockupInfo, ts: Date.now() });
+        if (lockupChanged(prevDataRef.current, lockupInfo)) {
+          prevDataRef.current = lockupInfo;
+          setData(lockupInfo);
+        }
+        setIsLoading(false);
+        return;
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err));
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise((res) => setTimeout(res, RETRY_BASE_MS * 2 ** attempt));
+        }
+      }
+    }
+
+    setError(lastErr);
+    setIsLoading(false);
+  }, [client, user]);
+
+  useEffect(() => {
+    fetchLockups();
+  }, [fetchLockups]);
+
+  return { data, isLoading, error, refetch: () => fetchLockups(true) };
 }

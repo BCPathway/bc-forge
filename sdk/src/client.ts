@@ -60,6 +60,13 @@ export interface BatchMintRecipient {
   amount: bigint;
 }
 
+export interface LockupInfo {
+  /** Total locked token amount */
+  amount: bigint;
+  /** Unix timestamp (seconds) after which tokens can be withdrawn */
+  unlockTime: bigint;
+}
+
 /** Role for role-based access control */
 export enum Role {
   Admin = 'Admin',
@@ -912,6 +919,23 @@ export class bcForgeClient {
    */
   async withdrawLocked(user: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('withdraw_locked', [addressToScVal(user)], source);
+  }
+
+  /**
+   * Get lockup info for a user. Returns null if no lockup exists.
+   */
+  async getLockupInfo(user: string): Promise<LockupInfo | null> {
+    try {
+      const result = await this.queryContract('get_lockup_info', [addressToScVal(user)]);
+      const native = scValToNative(result) as { amount: unknown; unlock_time: unknown } | null;
+      if (!native) return null;
+      return {
+        amount: BigInt(String(native.amount ?? 0)),
+        unlockTime: BigInt(String(native.unlock_time ?? 0)),
+      };
+    } catch {
+      return null;
+    }
   }
 
   // ─── Events ──────────────────────────────────────────────────────────────
