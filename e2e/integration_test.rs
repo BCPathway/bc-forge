@@ -9,12 +9,12 @@ use soroban_sdk::{Address, Env, String};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 
 /// Helper to get testnet RPC URL from environment or use default
-fn get_testnet_rpc_url() -> String {
+fn get_testnet_rpc_url() -> std::string::String {
     env::var("STELLAR_TESTNET_RPC_URL").unwrap_or_else(|_| "https://soroban-testnet.stellar.org".to_string())
 }
 
 /// Helper to get testnet network passphrase
-fn get_testnet_network_passphrase() -> String {
+fn get_testnet_network_passphrase() -> std::string::String {
     env::var("STELLAR_TESTNET_PASSPHRASE").unwrap_or_else(|_| "Test SDF Network ; September 2015".to_string())
 }
 
@@ -104,3 +104,5 @@ async fn test_deployment_verification() {
     
     println!("✅ Deployment verification test passed!");
 }
+
+fn main() {}
