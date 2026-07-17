@@ -19,7 +19,7 @@
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@bc-forge/sdk": "file:../sdk",
+    "@bc-forge/sdk": "^0.1.0",
     "@stellar/stellar-sdk": "^16.0.1"
   },
   "devDependencies": {
