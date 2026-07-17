@@ -20,6 +20,8 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var index_exports = {};
 __export(index_exports, {
+  Alert: () => Alert,
+  Badge: () => Badge,
   bcForgeProvider: () => bcForgeProvider,
   useAllowance: () => useAllowance,
   useApprove: () => useApprove,
@@ -222,8 +224,119 @@ function useAllowance(owner, spender) {
   }, [fetchAllowance]);
   return { data, loading, error, refetch: fetchAllowance };
 }
+
+// src/components/Alert.tsx
+var import_react3 = require("react");
+var import_jsx_runtime2 = require("react/jsx-runtime");
+var VARIANT_STYLES = {
+  info: { backgroundColor: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" },
+  success: { backgroundColor: "#f0fdf4", borderColor: "#bbf7d0", color: "#166534" },
+  warning: { backgroundColor: "#fffbeb", borderColor: "#fde68a", color: "#92400e" },
+  danger: { backgroundColor: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }
+};
+var Alert = (0, import_react3.forwardRef)(function Alert2({ variant = "info", title, onDismiss, dismissLabel = "Dismiss alert", style, children, ...rest }, ref) {
+  const defaultRole = variant === "danger" || variant === "warning" ? "alert" : "status";
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+    "div",
+    {
+      ref,
+      role: defaultRole,
+      style: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        padding: "12px 14px",
+        border: "1px solid",
+        borderRadius: 8,
+        ...VARIANT_STYLES[variant],
+        ...style
+      },
+      ...rest,
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
+          title ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { fontWeight: 700, marginBottom: 2 }, children: title }) : null,
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { fontSize: 14 }, children })
+        ] }),
+        onDismiss ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          "button",
+          {
+            type: "button",
+            onClick: onDismiss,
+            "aria-label": dismissLabel,
+            style: {
+              flexShrink: 0,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "inherit",
+              fontSize: 18,
+              lineHeight: 1,
+              padding: 2
+            },
+            children: "\xD7"
+          }
+        ) : null
+      ]
+    }
+  );
+});
+
+// src/components/Badge.tsx
+var import_react4 = require("react");
+var import_jsx_runtime3 = require("react/jsx-runtime");
+var VARIANT_STYLES2 = {
+  default: { backgroundColor: "#f3f4f6", color: "#374151" },
+  primary: { backgroundColor: "#eff6ff", color: "#1e40af" },
+  success: { backgroundColor: "#f0fdf4", color: "#166534" },
+  warning: { backgroundColor: "#fffbeb", color: "#92400e" },
+  danger: { backgroundColor: "#fef2f2", color: "#991b1b" },
+  info: { backgroundColor: "#ecfeff", color: "#155e75" }
+};
+var SIZE_STYLES = {
+  sm: { fontSize: 11, padding: "1px 6px", borderRadius: 8 },
+  md: { fontSize: 12, padding: "2px 8px", borderRadius: 10 },
+  lg: { fontSize: 14, padding: "3px 10px", borderRadius: 12 }
+};
+var BADGE_BASE = {
+  display: "inline-flex",
+  alignItems: "center",
+  fontWeight: 600,
+  lineHeight: 1.4,
+  whiteSpace: "nowrap"
+};
+var Badge = (0, import_react4.forwardRef)(function Badge2({ variant = "default", size = "md", style, onClick, onKeyDown, children, ...rest }, ref) {
+  const isInteractive = Boolean(onClick);
+  const handleKeyDown = (e) => {
+    if (isInteractive && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      onClick(e);
+    }
+    onKeyDown?.(e);
+  };
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    "span",
+    {
+      ref,
+      role: isInteractive ? "button" : void 0,
+      tabIndex: isInteractive ? 0 : void 0,
+      style: {
+        ...BADGE_BASE,
+        ...VARIANT_STYLES2[variant],
+        ...SIZE_STYLES[size],
+        ...isInteractive ? { cursor: "pointer" } : {},
+        ...style
+      },
+      onClick,
+      onKeyDown: handleKeyDown,
+      ...rest,
+      children
+    }
+  );
+});
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  Alert,
+  Badge,
   bcForgeProvider,
   useAllowance,
   useApprove,

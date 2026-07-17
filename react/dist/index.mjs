@@ -187,7 +187,118 @@ function useAllowance(owner, spender) {
   }, [fetchAllowance]);
   return { data, loading, error, refetch: fetchAllowance };
 }
+
+// src/components/Alert.tsx
+import { forwardRef } from "react";
+import { jsx as jsx2, jsxs } from "react/jsx-runtime";
+var VARIANT_STYLES = {
+  info: { backgroundColor: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" },
+  success: { backgroundColor: "#f0fdf4", borderColor: "#bbf7d0", color: "#166534" },
+  warning: { backgroundColor: "#fffbeb", borderColor: "#fde68a", color: "#92400e" },
+  danger: { backgroundColor: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }
+};
+var Alert = forwardRef(function Alert2({ variant = "info", title, onDismiss, dismissLabel = "Dismiss alert", style, children, ...rest }, ref) {
+  const defaultRole = variant === "danger" || variant === "warning" ? "alert" : "status";
+  return /* @__PURE__ */ jsxs(
+    "div",
+    {
+      ref,
+      role: defaultRole,
+      style: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        padding: "12px 14px",
+        border: "1px solid",
+        borderRadius: 8,
+        ...VARIANT_STYLES[variant],
+        ...style
+      },
+      ...rest,
+      children: [
+        /* @__PURE__ */ jsxs("div", { style: { flex: 1, minWidth: 0 }, children: [
+          title ? /* @__PURE__ */ jsx2("div", { style: { fontWeight: 700, marginBottom: 2 }, children: title }) : null,
+          /* @__PURE__ */ jsx2("div", { style: { fontSize: 14 }, children })
+        ] }),
+        onDismiss ? /* @__PURE__ */ jsx2(
+          "button",
+          {
+            type: "button",
+            onClick: onDismiss,
+            "aria-label": dismissLabel,
+            style: {
+              flexShrink: 0,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "inherit",
+              fontSize: 18,
+              lineHeight: 1,
+              padding: 2
+            },
+            children: "\xD7"
+          }
+        ) : null
+      ]
+    }
+  );
+});
+
+// src/components/Badge.tsx
+import { forwardRef as forwardRef2 } from "react";
+import { jsx as jsx3 } from "react/jsx-runtime";
+var VARIANT_STYLES2 = {
+  default: { backgroundColor: "#f3f4f6", color: "#374151" },
+  primary: { backgroundColor: "#eff6ff", color: "#1e40af" },
+  success: { backgroundColor: "#f0fdf4", color: "#166534" },
+  warning: { backgroundColor: "#fffbeb", color: "#92400e" },
+  danger: { backgroundColor: "#fef2f2", color: "#991b1b" },
+  info: { backgroundColor: "#ecfeff", color: "#155e75" }
+};
+var SIZE_STYLES = {
+  sm: { fontSize: 11, padding: "1px 6px", borderRadius: 8 },
+  md: { fontSize: 12, padding: "2px 8px", borderRadius: 10 },
+  lg: { fontSize: 14, padding: "3px 10px", borderRadius: 12 }
+};
+var BADGE_BASE = {
+  display: "inline-flex",
+  alignItems: "center",
+  fontWeight: 600,
+  lineHeight: 1.4,
+  whiteSpace: "nowrap"
+};
+var Badge = forwardRef2(function Badge2({ variant = "default", size = "md", style, onClick, onKeyDown, children, ...rest }, ref) {
+  const isInteractive = Boolean(onClick);
+  const handleKeyDown = (e) => {
+    if (isInteractive && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      onClick(e);
+    }
+    onKeyDown?.(e);
+  };
+  return /* @__PURE__ */ jsx3(
+    "span",
+    {
+      ref,
+      role: isInteractive ? "button" : void 0,
+      tabIndex: isInteractive ? 0 : void 0,
+      style: {
+        ...BADGE_BASE,
+        ...VARIANT_STYLES2[variant],
+        ...SIZE_STYLES[size],
+        ...isInteractive ? { cursor: "pointer" } : {},
+        ...style
+      },
+      onClick,
+      onKeyDown: handleKeyDown,
+      ...rest,
+      children
+    }
+  );
+});
 export {
+  Alert,
+  Badge,
   bcForgeProvider,
   useAllowance,
   useApprove,
