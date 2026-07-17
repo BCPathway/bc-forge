@@ -6,7 +6,7 @@
  */
 
 import {
-  SorobanRpc,
+  rpc as SorobanRpc,
   Contract,
   TransactionBuilder,
   Keypair,
@@ -750,10 +750,7 @@ export class bcForgeClient {
     return this.invokeContract(
       'set_admin_pool',
       [
-        nativeToScVal(
-          pool.map((addr) => addressToScVal(addr)),
-          { type: 'vec' },
-        ),
+        xdr.ScVal.scvVec(pool.map((addr) => addressToScVal(addr))),
         u32ToScVal(threshold),
       ],
       source,
@@ -934,10 +931,10 @@ export class bcForgeClient {
    * @returns Events response containing events and next cursor
    */
   async pollEvents(cursor?: string): Promise<{ events: any[]; cursor: string }> {
-    const response = await this.server.getEvents({
-      cursor,
-      filters: [{ contractIds: [this.contractId], type: 'contract' }],
-    });
+    const req: any = { filters: [{ contractIds: [this.contractId], type: 'contract' }] };
+    if (cursor) req.cursor = cursor;
+    else req.startLedger = 0;
+    const response = await this.server.getEvents(req);
     return {
       events: response.events,
       cursor: response.cursor,

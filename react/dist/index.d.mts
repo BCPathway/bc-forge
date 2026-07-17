@@ -3,11 +3,11 @@ import * as _bc_forge_sdk from '@bc-forge/sdk';
 import { bcForgeClientConfig, bcForgeClient } from '@bc-forge/sdk';
 import { Keypair } from '@stellar/stellar-sdk';
 
-interface bcForgeProviderProps {
+interface BcForgeProviderProps {
     config: bcForgeClientConfig;
     children: ReactNode;
 }
-declare const bcForgeProvider: React.FC<bcForgeProviderProps>;
+declare const BcForgeProvider: React.FC<BcForgeProviderProps>;
 declare const useBcForgeClient: () => bcForgeClient;
 
 /**
@@ -109,4 +109,32 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
  * Enter/Space activation). Pass explicit `role` or `tabIndex` to override. */
 declare const Badge: React.ForwardRefExoticComponent<BadgeProps & React.RefAttributes<HTMLSpanElement>>;
 
-export { Alert, type AlertProps, type AlertVariant, Badge, type BadgeProps, type BadgeSize, type BadgeVariant, bcForgeProvider, type bcForgeProviderProps, useAllowance, useApprove, useBalance, useBcForgeClient, useBcForgeToken, useBurn, useMint, useTotalSupply, useTransfer };
+type DropdownVariant = 'default' | 'primary' | 'danger';
+type DropdownSize = 'sm' | 'md' | 'lg';
+interface DropdownItem {
+    label: string;
+    value: string;
+    disabled?: boolean;
+}
+interface DropdownProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
+    /** Array of menu items to display. */
+    items: DropdownItem[];
+    /** Controlled selected value. */
+    value?: string;
+    /** Initial selected value (uncontrolled). */
+    defaultValue?: string;
+    /** Called when an item is selected. */
+    onChange?: (item: DropdownItem) => void;
+    /** Visual style variant. @default 'default' */
+    variant?: DropdownVariant;
+    /** Size. @default 'md' */
+    size?: DropdownSize;
+    /** Placeholder when no item is selected. @default 'Select...' */
+    placeholder?: string;
+    /** Disables the entire dropdown. */
+    disabled?: boolean;
+}
+/** Reusable dropdown menu with full keyboard navigation and ARIA support. */
+declare const Dropdown: React.ForwardRefExoticComponent<DropdownProps & React.RefAttributes<HTMLDivElement>>;
+
+export { Alert, type AlertProps, type AlertVariant, Badge, type BadgeProps, type BadgeSize, type BadgeVariant, BcForgeProvider, type BcForgeProviderProps, Dropdown, type DropdownItem, type DropdownProps, type DropdownSize, type DropdownVariant, useAllowance, useApprove, useBalance, useBcForgeClient, useBcForgeToken, useBurn, useMint, useTotalSupply, useTransfer };

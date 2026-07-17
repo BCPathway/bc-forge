@@ -1,4 +1,4 @@
-import { SorobanRpc, xdr, scValToNative } from '@stellar/stellar-sdk';
+import { rpc as SorobanRpc, xdr, scValToNative } from '@stellar/stellar-sdk';
 import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 
@@ -44,7 +44,7 @@ export async function runIndexer() {
         filters: [
           {
             type: 'contract',
-            contractIds: [CONTRACT_ID],
+            contractIds: [CONTRACT_ID as string],
           },
         ],
       });
@@ -71,14 +71,15 @@ export async function runIndexer() {
   }
 }
 
-async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
-  const topic = scValToNative(event.topic[0]);
-  const data = event.value;
+async function processEvent(event: SorobanRpc.Api.EventResponse) {
+  if (!event.topic || event.topic.length === 0) return;
+  const topic = scValToNative(event.topic[0] as any);
+  const data = event.value as any;
 
   try {
     switch (topic) {
       case 'mint': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (admin, to, amount, new_balance, new_supply)
         await prisma.mint.create({
           data: {
@@ -91,7 +92,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
         break;
       }
       case 'burn': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (from, amount, new_balance, new_supply)
         await prisma.burn.create({
           data: {
@@ -104,7 +105,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
         break;
       }
       case 'xfer': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (from, to, amount)
         await prisma.transfer.create({
           data: {
@@ -118,7 +119,7 @@ async function processEvent(event: SorobanRpc.Api.RawEventResponse) {
         break;
       }
       case 'xfer_frm': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (spender, from, to, amount, remaining_allowance)
         await prisma.transfer.create({
           data: {
