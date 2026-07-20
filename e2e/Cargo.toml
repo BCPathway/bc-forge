@@ -11,7 +11,7 @@ categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
-soroban-sdk = { version = "22.0.11", features = ["testutils"] }
+soroban-sdk = { version = "27.0.0", features = ["testutils"] }
 bc-forge-token = { path = "../contracts/token", features = ["testutils"] }
 
 [dev-dependencies]
