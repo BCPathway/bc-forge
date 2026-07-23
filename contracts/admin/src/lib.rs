@@ -5,6 +5,9 @@
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
 
+const ZERO_ACCOUNT_ADDRESS_STR: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const ZERO_CONTRACT_ADDRESS_STR: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+
 #[derive(Clone)]
 #[contracttype]
 pub enum AdminKey {
@@ -48,7 +51,17 @@ where
     );
 }
 
+fn require_non_zero_address(env: &Env, address: &Address) {
+    let address_str = address.to_string();
+    let zero_account = String::from_str(env, ZERO_ACCOUNT_ADDRESS_STR);
+    let zero_contract = String::from_str(env, ZERO_CONTRACT_ADDRESS_STR);
+    if address_str == zero_account || address_str == zero_contract {
+        panic!("invalid address: zero address");
+    }
+}
+
 pub fn set_admin(env: &Env, admin: &Address) {
+    require_non_zero_address(env, admin);
     env.storage().instance().set(&AdminKey::Admin, admin);
     env.storage()
         .persistent()
@@ -76,6 +89,7 @@ pub fn has_admin(env: &Env) -> bool {
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
+    require_non_zero_address(env, address);
     if has_admin(env) {
         require_admin(env);
     }
@@ -86,6 +100,7 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
+    require_non_zero_address(env, address);
     require_admin(env);
     env.storage()
         .persistent()
@@ -93,6 +108,7 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+    require_non_zero_address(env, address);
     env.storage()
         .persistent()
         .has(&AdminKey::Role(Role::Admin, address.clone()))
@@ -107,6 +123,7 @@ pub fn require_admin(env: &Env) {
 }
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
+    require_non_zero_address(env, address);
     if !has_role(env, role, address) {
         panic!("unauthorized: missing role");
     }
@@ -116,6 +133,9 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     if threshold == 0 || threshold > pool.len() {
         panic!("invalid threshold for admin pool");
+    }
+    for member in pool.iter() {
+        require_non_zero_address(env, &member);
     }
     env.storage().instance().set(&AdminKey::AdminPool, &pool);
     env.storage()
@@ -145,6 +165,7 @@ pub fn get_threshold(env: &Env) -> u32 {
 }
 
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
+    require_non_zero_address(env, &creator);
     creator.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&creator) {
@@ -175,6 +196,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
 }
 
 pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
+    require_non_zero_address(env, &admin);
     admin.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&admin) {
@@ -258,6 +280,32 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_admin_rejects_zero_account_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let zero_account = Address::from_str(&env, ZERO_ACCOUNT_ADDRESS_STR);
+
+        client.set_admin(&zero_account);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_grant_role_rejects_zero_contract_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let zero_contract = Address::from_str(&env, ZERO_CONTRACT_ADDRESS_STR);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &zero_contract);
     }
 
     #[test]
