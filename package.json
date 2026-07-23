@@ -1,0 +1,13 @@
+{
+  "name": "bc-forge-workspace",
+  "private": true,
+  "workspaces": [
+    "sdk",
+    "react",
+    "cli",
+    "indexer"
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

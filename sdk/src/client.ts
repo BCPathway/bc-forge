@@ -751,10 +751,7 @@ export class bcForgeClient {
     return this.invokeContract(
       'set_admin_pool',
       [
-        nativeToScVal(
-          pool.map((addr) => addressToScVal(addr)),
-          { type: 'vec' },
-        ),
+        xdr.ScVal.scvVec(pool.map((addr) => addressToScVal(addr))),
         u32ToScVal(threshold),
       ],
       source,
@@ -939,6 +936,10 @@ export class bcForgeClient {
       ...(cursor ? { cursor } : {}),
       filters: [{ contractIds: [this.contractId], type: 'contract' }],
     } as any);
+    const req: any = { filters: [{ contractIds: [this.contractId], type: 'contract' }] };
+    if (cursor) req.cursor = cursor;
+    else req.startLedger = 0;
+    const response = await this.server.getEvents(req);
     return {
       events: response.events,
       cursor: response.cursor,

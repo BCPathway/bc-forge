@@ -9,6 +9,13 @@
  */
 
 import { rpc as SorobanRpc, Contract, TransactionBuilder, Keypair, xdr } from '@stellar/stellar-sdk';
+import {
+  rpc as SorobanRpc,
+  Contract,
+  TransactionBuilder,
+  Keypair,
+  xdr,
+} from '@stellar/stellar-sdk';
 
 import {
   buildInvokeTransaction,
@@ -169,11 +176,7 @@ export class WrapperClient {
    * @param source - Caller's keypair
    */
   async wrap(caller: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'wrap',
-      [addressToScVal(caller), i128ToScVal(amount)],
-      source,
-    );
+    return this.invokeContract('wrap', [addressToScVal(caller), i128ToScVal(amount)], source);
   }
 
   /**
@@ -233,12 +236,7 @@ export class WrapperClient {
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'approve',
-      [
-        addressToScVal(from),
-        addressToScVal(spender),
-        i128ToScVal(amount),
-        u32ToScVal(exp),
-      ],
+      [addressToScVal(from), addressToScVal(spender), i128ToScVal(amount), u32ToScVal(exp)],
       source,
     );
   }
@@ -337,11 +335,7 @@ export class WrapperClient {
    * Simulate a wrap operation.
    */
   async simulateWrap(caller: string, amount: bigint, sourcePublicKey: string): Promise<any> {
-    return this.simulate(
-      'wrap',
-      [addressToScVal(caller), i128ToScVal(amount)],
-      sourcePublicKey,
-    );
+    return this.simulate('wrap', [addressToScVal(caller), i128ToScVal(amount)], sourcePublicKey);
   }
 
   /**
