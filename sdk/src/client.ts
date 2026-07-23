@@ -751,10 +751,7 @@ export class bcForgeClient {
     return this.invokeContract(
       'set_admin_pool',
       [
-        nativeToScVal(
-          pool.map((addr) => addressToScVal(addr)),
-          { type: 'vec' },
-        ),
+        xdr.ScVal.scvVec(pool.map((addr) => addressToScVal(addr))),
         u32ToScVal(threshold),
       ],
       source,
@@ -788,8 +785,8 @@ export class bcForgeClient {
     const actionScVal =
       'Mint' in action
         ? nativeToScVal({
-            Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
-          })
+          Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
+        })
         : nativeToScVal(action);
 
     return this.invokeContract(
@@ -935,10 +932,10 @@ export class bcForgeClient {
    * @returns Events response containing events and next cursor
    */
   async pollEvents(cursor?: string): Promise<{ events: any[]; cursor: string }> {
-    const req: any = { filters: [{ contractIds: [this.contractId], type: 'contract' }] };
-    if (cursor) req.cursor = cursor;
-    else req.startLedger = 0;
-    const response = await this.server.getEvents(req);
+    const response = await this.server.getEvents({
+      ...(cursor ? { cursor } : {}),
+      filters: [{ contractIds: [this.contractId], type: 'contract' }],
+    } as any);
     return {
       events: response.events,
       cursor: response.cursor,

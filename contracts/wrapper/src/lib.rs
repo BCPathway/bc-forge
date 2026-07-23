@@ -15,6 +15,9 @@
 
 mod events;
 
+#[cfg(test)]
+mod test;
+
 use bc_forge_admin as admin;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
