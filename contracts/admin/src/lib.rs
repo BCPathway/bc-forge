@@ -2,6 +2,8 @@
 
 #![no_std]
 
+mod events;
+
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
 
@@ -76,13 +78,25 @@ pub fn has_admin(env: &Env) -> bool {
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
-    if has_admin(env) {
+    let admin_set = has_admin(env);
+    if admin_set {
         require_admin(env);
+    }
+    if env
+        .storage()
+        .persistent()
+        .has(&AdminKey::Role(role, address.clone()))
+    {
+        panic!("address already has this role");
     }
     env.storage()
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+    if admin_set {
+        let admin = get_admin(env);
+        events::emit_grant_role(env, &admin, &role, address);
+    }
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
