@@ -1,10 +1,25 @@
-const eslint = require('@eslint/js');
-const tseslint = require('typescript-eslint');
-const reactPlugin = require('eslint-plugin-react');
-const hooksPlugin = require('eslint-plugin-react-hooks');
-const globals = require('globals');
+import eslint from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import reactPlugin from 'eslint-plugin-react';
+import hooksPlugin from 'eslint-plugin-react-hooks';
+import globals from 'globals';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-module.exports = tseslint.config(
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export default tseslint.config(
+  {
+    ignores: ['eslint.config.mjs', 'eslint.config.js', 'dist', 'node_modules', 'build'],
+  },
+  {
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir: __dirname,
+      },
+    },
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
