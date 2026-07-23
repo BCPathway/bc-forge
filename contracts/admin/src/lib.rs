@@ -21,6 +21,7 @@ pub enum AdminKey {
 pub enum Role {
     Admin,
     Minter,
+    Pauser,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,7 +49,16 @@ where
     );
 }
 
+pub fn is_zero_address(env: &Env, address: &Address) -> bool {
+    let zero_addr_str = soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+    let zero_address = Address::from_string(&zero_addr_str);
+    address == &zero_address
+}
+
 pub fn set_admin(env: &Env, admin: &Address) {
+    if is_zero_address(env, admin) {
+        panic!("cannot set admin to zero address");
+    }
     env.storage().instance().set(&AdminKey::Admin, admin);
     env.storage()
         .persistent()
@@ -76,6 +86,9 @@ pub fn has_admin(env: &Env) -> bool {
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
+    if is_zero_address(env, address) {
+        panic!("cannot grant role to zero address");
+    }
     if has_admin(env) {
         require_admin(env);
     }
@@ -86,6 +99,9 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
+    if is_zero_address(env, address) {
+        panic!("cannot revoke role from zero address");
+    }
     require_admin(env);
     env.storage()
         .persistent()
@@ -93,6 +109,9 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+    if is_zero_address(env, address) {
+        return false;
+    }
     env.storage()
         .persistent()
         .has(&AdminKey::Role(Role::Admin, address.clone()))
@@ -271,4 +290,46 @@ mod tests {
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
     }
+
+    #[test]
+    #[should_panic(expected = "cannot set admin to zero address")]
+    fn test_set_admin_zero_address_panics() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let zero_addr_str = soroban_sdk::String::from_str(&env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+        let zero_address = Address::from_string(&zero_addr_str);
+        client.set_admin(&zero_address);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot grant role to zero address")]
+    fn test_grant_role_zero_address_panics() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+
+        let zero_addr_str = soroban_sdk::String::from_str(&env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+        let zero_address = Address::from_string(&zero_addr_str);
+        client.grant_role(&Role::Pauser, &zero_address);
+    }
+
+    #[test]
+    fn test_pauser_role_assignment() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        assert!(!client.has_role(&Role::Pauser, &pauser));
+
+        client.grant_role(&Role::Pauser, &pauser);
+        assert!(client.has_role(&Role::Pauser, &pauser));
+    }
 }
+
