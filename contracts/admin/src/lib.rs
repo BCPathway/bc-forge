@@ -258,6 +258,10 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn revoke_role(env: Env, role: Role, address: Address) {
+            super::revoke_role(&env, role, &address);
+        }
     }
 
     #[test]
@@ -276,5 +280,34 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_revoke_role_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        client.revoke_role(&Role::Minter, &role_holder);
+        assert!(!client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    #[should_panic(expected = "contract not initialized: admin not set")]
+    fn test_revoke_role_panics_if_no_admin_set() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let role_holder = Address::generate(&env);
+
+        client.revoke_role(&Role::Minter, &role_holder);
     }
 }
