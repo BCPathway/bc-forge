@@ -49,6 +49,9 @@ where
 }
 
 pub fn set_admin(env: &Env, admin: &Address) {
+    if has_admin(env) {
+        panic!("admin already set");
+    }
     env.storage().instance().set(&AdminKey::Admin, admin);
     env.storage()
         .persistent()
@@ -276,5 +279,19 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    #[should_panic(expected = "admin already set")]
+    fn test_set_admin_panics_if_already_set() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin(&admin2);
     }
 }
