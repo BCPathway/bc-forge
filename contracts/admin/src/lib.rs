@@ -3,7 +3,16 @@
 #![no_std]
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{
+    contracterror, contracttype, panic_with_error, symbol_short, vec, Address, Env, String, Vec,
+};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum AdminError {
+    InvalidRole = 1,
+}
 
 #[derive(Clone)]
 #[contracttype]
@@ -76,6 +85,9 @@ pub fn has_admin(env: &Env) -> bool {
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
+    if role == Role::Admin {
+        panic_with_error!(env, AdminError::InvalidRole);
+    }
     if has_admin(env) {
         require_admin(env);
     }
@@ -83,6 +95,8 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+    env.events()
+        .publish((symbol_short!("RoleGrant"), role, address.clone()), true);
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
@@ -258,6 +272,35 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1)")]
+    fn test_grant_role_admin_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let role_holder = Address::generate(&env);
+
+        client.grant_role(&Role::Admin, &role_holder);
+    }
+
+    #[test]
+    fn test_grant_role_emits_event() {
+        use soroban_sdk::testutils::Events;
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+
+        let events = env.events().all();
+        assert!(events.len() > 0);
     }
 
     #[test]
