@@ -3,7 +3,20 @@
 #![no_std]
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, vec, Address, Env, String, Vec};
+
+/// Error types for admin operations
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum AdminError {
+    /// Role is not granted to the address, cannot revoke
+    RoleNotGranted = 1,
+    /// Address does not have the required authorization to revoke
+    UnauthorizedRoleRevoke = 2,
+    /// Cannot revoke the last admin role
+    CannotRevokeLastAdmin = 3,
+}
 
 #[derive(Clone)]
 #[contracttype]
@@ -48,6 +61,41 @@ where
     );
 }
 
+/// Emit event when a role is revoked from an address
+fn emit_role_revoked(env: &Env, role: Role, from: &Address, revoked_by: &Address) {
+    env.events().publish(
+        (symbol_short!("revoke_role"),),
+        (role as u32, from.clone(), revoked_by.clone()),
+    );
+}
+
+/// Internal helper to revoke a role from an address without authorization checks
+/// This is called by public functions after they verify authorization
+fn _revoke_role(env: &Env, role: Role, from: &Address, revoked_by: &Address) -> Result<(), AdminError> {
+    // Check if the role is actually granted before attempting to revoke
+    if !has_role(env, role, from) {
+        return Err(AdminError::RoleNotGranted);
+    }
+
+    // Prevent revoking the last admin role - security safeguard
+    if role == Role::Admin {
+        let admin = get_admin(env);
+        if admin == from.clone() {
+            return Err(AdminError::CannotRevokeLastAdmin);
+        }
+    }
+
+    // Remove the role from persistent storage
+    env.storage()
+        .persistent()
+        .remove(&AdminKey::Role(role, from.clone()));
+
+    // Emit event for role revocation operation
+    emit_role_revoked(env, role, from, revoked_by);
+
+    Ok(())
+}
+
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&AdminKey::Admin, admin);
     env.storage()
@@ -85,11 +133,9 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
 }
 
-pub fn revoke_role(env: &Env, role: Role, address: &Address) {
-    require_admin(env);
-    env.storage()
-        .persistent()
-        .remove(&AdminKey::Role(role, address.clone()));
+pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    let admin = require_admin(env);
+    _revoke_role(env, role, address, &admin)
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
@@ -102,8 +148,10 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
             .has(&AdminKey::Role(role, address.clone()))
 }
 
-pub fn require_admin(env: &Env) {
-    get_admin(env).require_auth();
+pub fn require_admin(env: &Env) -> Address {
+    let admin = get_admin(env);
+    admin.require_auth();
+    admin
 }
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
@@ -258,6 +306,19 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+            super::revoke_role(&env, role, &address)
+        }
+
+        pub fn _revoke_role_internal(
+            env: Env,
+            role: Role,
+            from: Address,
+            revoked_by: Address,
+        ) -> Result<(), AdminError> {
+            super::_revoke_role(&env, role, &from, &revoked_by)
+        }
     }
 
     #[test]
@@ -276,5 +337,138 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_revoke_role_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &user);
+        assert!(client.has_role(&Role::Minter, &user));
+
+        // Revoke should succeed
+        let result = client.revoke_role(&Role::Minter, &user);
+        assert!(result.is_ok());
+        assert!(!client.has_role(&Role::Minter, &user));
+    }
+
+    #[test]
+    fn test_revoke_role_not_granted_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Attempting to revoke a role that was never granted should fail
+        let result = client.revoke_role(&Role::Minter, &user);
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), AdminError::RoleNotGranted);
+    }
+
+    #[test]
+    fn test_revoke_last_admin_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        
+        // Attempting to revoke the last admin role should fail
+        let result = client.revoke_role(&Role::Admin, &admin);
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), AdminError::CannotRevokeLastAdmin);
+    }
+
+    #[test]
+    fn test_internal_revoke_role_helper() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &user);
+
+        // Test internal helper directly
+        let result = client._revoke_role_internal(&Role::Minter, &user, &admin);
+        assert!(result.is_ok());
+        assert!(!client.has_role(&Role::Minter, &user));
+    }
+
+    #[test]
+    fn test_revoke_role_multiple_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &user);
+        
+        // User should have Minter role
+        assert!(client.has_role(&Role::Minter, &user));
+
+        // Revoke Minter role
+        let result = client.revoke_role(&Role::Minter, &user);
+        assert!(result.is_ok());
+        
+        // User should no longer have Minter role
+        assert!(!client.has_role(&Role::Minter, &user));
+    }
+
+    #[test]
+    fn test_revoke_role_idempotency() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &user);
+
+        // First revocation should succeed
+        let result1 = client.revoke_role(&Role::Minter, &user);
+        assert!(result1.is_ok());
+
+        // Second revocation should fail (role not granted anymore)
+        let result2 = client.revoke_role(&Role::Minter, &user);
+        assert!(result2.is_err());
+        assert_eq!(result2.err().unwrap(), AdminError::RoleNotGranted);
+    }
+
+    #[test]
+    fn test_revoke_admin_role_from_other_user() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+
+        client.set_admin(&admin1);
+        client.grant_role(&Role::Admin, &admin2);
+
+        // Revoke Admin role from admin2 should succeed (not the last admin)
+        let result = client.revoke_role(&Role::Admin, &admin2);
+        assert!(result.is_ok());
+        assert!(!client.has_role(&Role::Admin, &admin2));
     }
 }
