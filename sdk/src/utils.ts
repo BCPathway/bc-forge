@@ -3,7 +3,7 @@
  */
 
 import {
-  SorobanRpc,
+  rpc as SorobanRpc,
   TransactionBuilder,
   Networks,
   xdr,

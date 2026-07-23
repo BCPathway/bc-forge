@@ -50,7 +50,10 @@ where
 }
 
 pub fn is_zero_address(env: &Env, address: &Address) -> bool {
-    let zero_addr_str = soroban_sdk::String::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+    let zero_addr_str = soroban_sdk::String::from_str(
+        env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    );
     let zero_address = Address::from_string(&zero_addr_str);
     address == &zero_address
 }
@@ -144,17 +147,23 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
 }
 
 pub fn get_admin_pool(env: &Env) -> Vec<Address> {
-    env.storage().instance().get(&AdminKey::AdminPool).unwrap_or_else(|| {
-        if has_admin(env) {
-            vec![env, get_admin(env)]
-        } else {
-            vec![env]
-        }
-    })
+    env.storage()
+        .instance()
+        .get(&AdminKey::AdminPool)
+        .unwrap_or_else(|| {
+            if has_admin(env) {
+                vec![env, get_admin(env)]
+            } else {
+                vec![env]
+            }
+        })
 }
 
 pub fn get_threshold(env: &Env) -> u32 {
-    env.storage().instance().get(&AdminKey::Threshold).unwrap_or(1)
+    env.storage()
+        .instance()
+        .get(&AdminKey::Threshold)
+        .unwrap_or(1)
 }
 
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
@@ -297,7 +306,10 @@ mod tests {
         let env = Env::default();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
-        let zero_addr_str = soroban_sdk::String::from_str(&env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+        let zero_addr_str = soroban_sdk::String::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        );
         let zero_address = Address::from_string(&zero_addr_str);
         client.set_admin(&zero_address);
     }
@@ -311,7 +323,10 @@ mod tests {
         let admin = Address::generate(&env);
         client.set_admin(&admin);
 
-        let zero_addr_str = soroban_sdk::String::from_str(&env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+        let zero_addr_str = soroban_sdk::String::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        );
         let zero_address = Address::from_string(&zero_addr_str);
         client.grant_role(&Role::Pauser, &zero_address);
     }
@@ -332,4 +347,3 @@ mod tests {
         assert!(client.has_role(&Role::Pauser, &pauser));
     }
 }
-

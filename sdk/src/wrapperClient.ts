@@ -8,7 +8,7 @@
  * compatible token, enabling cross-contract interoperability.
  */
 
-import { SorobanRpc, Contract, TransactionBuilder, Keypair, xdr } from '@stellar/stellar-sdk';
+import { rpc as SorobanRpc, Contract, TransactionBuilder, Keypair, xdr } from '@stellar/stellar-sdk';
 
 import {
   buildInvokeTransaction,

@@ -6,7 +6,15 @@ use soroban_sdk::{Address, Env, String};
 
 use crate::{VestingContract, VestingContractClient, VestingError};
 
-fn setup(env: &Env) -> (BcForgeTokenClient<'_>, VestingContractClient<'_>, Address, Address, Address) {
+fn setup(
+    env: &Env,
+) -> (
+    BcForgeTokenClient<'_>,
+    VestingContractClient<'_>,
+    Address,
+    Address,
+    Address,
+) {
     let admin = Address::generate(env);
     let beneficiary = Address::generate(env);
 

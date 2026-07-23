@@ -6,7 +6,7 @@
  */
 
 import {
-  SorobanRpc,
+  rpc as SorobanRpc,
   Contract,
   TransactionBuilder,
   Keypair,
@@ -936,9 +936,9 @@ export class bcForgeClient {
    */
   async pollEvents(cursor?: string): Promise<{ events: any[]; cursor: string }> {
     const response = await this.server.getEvents({
-      cursor,
+      ...(cursor ? { cursor } : {}),
       filters: [{ contractIds: [this.contractId], type: 'contract' }],
-    });
+    } as any);
     return {
       events: response.events,
       cursor: response.cursor,
