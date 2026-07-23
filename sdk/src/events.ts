@@ -83,7 +83,7 @@ export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEve
     return {
       type,
       ledger: 0, // Diagnostic events don't always carry ledger sequence
-      contractId: event.contractId() ? Buffer.from(event.contractId() as any).toString('hex') : '',
+      contractId: event.contractId() ? Buffer.from(event.contractId()! as any).toString('hex') : '',
       data: scValToNative(body.data()),
     };
   } catch {
