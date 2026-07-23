@@ -106,6 +106,27 @@ pub fn require_admin(env: &Env) {
     get_admin(env).require_auth();
 }
 
+/// Convert a `u32` to a [`Role`], returning [`None`] if the value is out of
+/// bounds (i.e. not a valid discriminant).
+///
+/// This is the primary bounds‑checking entry point for roles received as raw
+/// integers (e.g. from proposal parameters or cross‑contract calls).
+pub fn role_from_u32(value: u32) -> Option<Role> {
+    match value {
+        0 => Some(Role::Admin),
+        1 => Some(Role::Minter),
+        _ => None,
+    }
+}
+
+/// Convert a `u32` to a [`Role`], panicking if the value is out of bounds.
+///
+/// # Panics
+/// - If `value` is not a valid [`Role`] discriminant.
+pub fn ensure_role_bounds(value: u32) -> Role {
+    role_from_u32(value).expect("role value out of bounds")
+}
+
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
         panic!("unauthorized: missing role");
@@ -258,6 +279,49 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+    }
+
+    #[test]
+    fn test_role_from_u32_valid() {
+        assert_eq!(role_from_u32(0), Some(Role::Admin));
+        assert_eq!(role_from_u32(1), Some(Role::Minter));
+    }
+
+    #[test]
+    fn test_role_from_u32_out_of_bounds() {
+        assert_eq!(role_from_u32(2), None);
+        assert_eq!(role_from_u32(u32::MAX), None);
+    }
+
+    #[test]
+    fn test_ensure_role_bounds_valid() {
+        assert_eq!(ensure_role_bounds(0), Role::Admin);
+        assert_eq!(ensure_role_bounds(1), Role::Minter);
+    }
+
+    #[test]
+    #[should_panic(expected = "role value out of bounds")]
+    fn test_ensure_role_bounds_panics_on_invalid() {
+        ensure_role_bounds(99);
+    }
+
+    #[test]
+    fn test_role_bounds_storage_compatibility() {
+        // Verify that a role obtained via ensure_role_bounds works identically
+        // to the enum variant when used with storage operations.
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let minter = ensure_role_bounds(1);
+        client.grant_role(&minter, &holder);
+        assert!(client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&minter, &holder));
     }
 
     #[test]
