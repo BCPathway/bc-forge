@@ -14,6 +14,7 @@ pub enum AdminKey {
     Threshold,
     Proposal(u64),
     ProposalIdCounter,
+    SuperAdmin(Address),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,12 +50,24 @@ where
 }
 
 pub fn set_admin(env: &Env, admin: &Address) {
+    if has_admin(env) {
+        panic!("admin already set");
+    }
     env.storage().instance().set(&AdminKey::Admin, admin);
     env.storage()
         .persistent()
         .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
     extend_instance_ttl(env);
     extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
+}
+
+pub fn migrate_admin(env: &Env) {
+    if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
+        env.storage()
+            .persistent()
+            .set(&AdminKey::SuperAdmin(admin.clone()), &true);
+        extend_storage_ttl_for_key(env, &AdminKey::SuperAdmin(admin));
+    }
 }
 
 pub fn get_admin(env: &Env) -> Address {
@@ -258,6 +271,14 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn migrate_admin(env: Env) {
+            super::migrate_admin(&env);
+        }
+
+        pub fn is_super_admin(env: Env, address: Address) -> bool {
+            env.storage().persistent().has(&super::AdminKey::SuperAdmin(address))
+        }
     }
 
     #[test]
@@ -276,5 +297,24 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_migrate_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        
+        // Ensure SuperAdmin mapping isn't active before migration
+        assert!(!client.is_super_admin(&admin));
+
+        client.migrate_admin();
+
+        // Ensure SuperAdmin mapping was populated
+        assert!(client.is_super_admin(&admin));
     }
 }
