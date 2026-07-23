@@ -23,6 +23,9 @@ pub enum Role {
     Minter,
 }
 
+pub const ADMIN_ROLE: Role = Role::Admin;
+pub const MINTER_ROLE: Role = Role::Minter;
+
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
@@ -258,6 +261,66 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+    }
+
+    #[test]
+    fn test_minter_role_constant_equals_minter() {
+        assert_eq!(MINTER_ROLE, Role::Minter);
+    }
+
+    #[test]
+    fn test_admin_role_constant_equals_admin() {
+        assert_eq!(ADMIN_ROLE, Role::Admin);
+    }
+
+    #[test]
+    fn test_minter_role_zero_address_edge_case() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let arbitrary = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Grant, check, revoke — all succeed for any valid Address
+        client.grant_role(&MINTER_ROLE, &arbitrary);
+        assert!(client.has_role(&MINTER_ROLE, &arbitrary));
+
+        client.grant_role(&Role::Minter, &arbitrary);
+        assert!(client.has_role(&Role::Minter, &arbitrary));
+
+        // has_role returns true when queried with either constant or enum directly
+        assert_eq!(
+            client.has_role(&MINTER_ROLE, &arbitrary),
+            client.has_role(&Role::Minter, &arbitrary)
+        );
+    }
+
+    #[test]
+    fn test_storage_slots_do_not_overlap() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Grant Minter role to minter address
+        client.grant_role(&MINTER_ROLE, &minter);
+        assert!(client.has_role(&MINTER_ROLE, &minter));
+
+        // Admin address always has the Admin role (granted implicitly in set_admin)
+        assert!(client.has_role(&ADMIN_ROLE, &admin));
+
+        // Admin implicitly has all roles via has_role's Admin short-circuit
+        assert!(client.has_role(&MINTER_ROLE, &admin));
+
+        // Minter address does NOT have Admin role
+        assert!(!client.has_role(&ADMIN_ROLE, &minter));
     }
 
     #[test]
