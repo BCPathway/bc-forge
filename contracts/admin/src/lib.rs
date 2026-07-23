@@ -76,9 +76,7 @@ pub fn has_admin(env: &Env) -> bool {
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
-    if has_admin(env) {
-        require_admin(env);
-    }
+    require_admin(env);
     env.storage()
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
@@ -276,5 +274,17 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    #[should_panic(expected = "contract not initialized: admin not set")]
+    fn test_grant_role_panics_if_no_admin_set() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let role_holder = Address::generate(&env);
+
+        client.grant_role(&Role::Minter, &role_holder);
     }
 }
