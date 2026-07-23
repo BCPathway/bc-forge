@@ -2,8 +2,19 @@
 
 #![no_std]
 
+mod events;
+
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
+
+/// Errors returned by the admin access-control module.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum AdminError {
+    /// `revoke_role` was called for an (role, address) pair that was never granted.
+    RoleNotGranted = 1,
+}
 
 #[derive(Clone)]
 #[contracttype]
@@ -85,11 +96,18 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
 }
 
-pub fn revoke_role(env: &Env, role: Role, address: &Address) {
-    require_admin(env);
-    env.storage()
-        .persistent()
-        .remove(&AdminKey::Role(role, address.clone()));
+pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let key = AdminKey::Role(role, address.clone());
+    if !env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleNotGranted);
+    }
+
+    env.storage().persistent().remove(&key);
+    events::emit_role_revoked(env, &admin, role, address);
+    Ok(())
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
@@ -258,6 +276,10 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+            super::revoke_role(&env, role, &address)
+        }
     }
 
     #[test]
@@ -276,5 +298,39 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_revoke_role_removes_granted_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        client.revoke_role(&Role::Minter, &role_holder);
+        assert!(!client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_revoke_role_fails_when_role_was_never_granted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let never_granted = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        assert_eq!(
+            client.try_revoke_role(&Role::Minter, &never_granted),
+            Err(Ok(AdminError::RoleNotGranted))
+        );
     }
 }
