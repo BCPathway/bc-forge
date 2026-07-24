@@ -300,11 +300,11 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
-    use soroban_sdk::{contract, contractimpl, Address, Env};
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::{contract, contractimpl, Address, Env};
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
     #[contract]
