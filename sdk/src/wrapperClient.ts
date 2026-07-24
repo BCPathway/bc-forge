@@ -67,7 +67,7 @@ export class WrapperClient {
    */
   async getBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('balance', [addressToScVal(address)]);
-    return BigInt(scValToNative(result));
+    return BigInt(scValToNative(result) as string | number | bigint);
   }
 
   /**
@@ -75,7 +75,7 @@ export class WrapperClient {
    */
   async getTotalSupply(): Promise<bigint> {
     const result = await this.queryContract('supply', []);
-    return BigInt(scValToNative(result));
+    return BigInt(scValToNative(result) as string | number | bigint);
   }
 
   /**
@@ -118,7 +118,7 @@ export class WrapperClient {
       addressToScVal(owner),
       addressToScVal(spender),
     ]);
-    return BigInt(scValToNative(result));
+    return BigInt(scValToNative(result) as string | number | bigint);
   }
 
   /**
@@ -319,7 +319,7 @@ export class WrapperClient {
   /**
    * Simulate a contract invocation without submitting.
    */
-  async simulate(method: string, args: xdr.ScVal[], sourcePublicKey: string): Promise<any> {
+  async simulate(method: string, args: xdr.ScVal[], sourcePublicKey: string): Promise<unknown> {
     return simulateTransaction(
       this.rpcUrl,
       this.networkPassphrase,
@@ -333,7 +333,7 @@ export class WrapperClient {
   /**
    * Simulate a wrap operation.
    */
-  async simulateWrap(caller: string, amount: bigint, sourcePublicKey: string): Promise<any> {
+  async simulateWrap(caller: string, amount: bigint, sourcePublicKey: string): Promise<unknown> {
     return this.simulate('wrap', [addressToScVal(caller), i128ToScVal(amount)], sourcePublicKey);
   }
 
@@ -344,7 +344,7 @@ export class WrapperClient {
     caller: string,
     wrappedAmount: bigint,
     sourcePublicKey: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     return this.simulate(
       'unwrap',
       [addressToScVal(caller), i128ToScVal(wrappedAmount)],
@@ -355,7 +355,7 @@ export class WrapperClient {
   /**
    * Get recent events for the wrapper contract.
    */
-  async getEvents(startLedger?: number): Promise<any[]> {
+  async getEvents(startLedger?: number): Promise<unknown[]> {
     const response = await this.server.getEvents({
       startLedger: startLedger || (await this.server.getLatestLedger()).sequence - 1000,
       filters: [{ contractIds: [this.contractId], type: 'contract' }],
@@ -366,7 +366,7 @@ export class WrapperClient {
   // ─── Internal Helpers ────────────────────────────────────────────────────
 
   private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
-    let lastError: any;
+    let lastError: unknown;
     for (let i = 0; i < retries; i++) {
       try {
         return await fn();
@@ -407,7 +407,7 @@ export class WrapperClient {
         }
 
         return simulated.result.retval;
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SimulationError) throw error;
         throw new RPCError('RPC call failed', error);
       }
@@ -435,16 +435,16 @@ export class WrapperClient {
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {
             success: true,
-            hash: (response as any).hash,
+            hash: response.txHash,
             returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
           };
         }
 
         return {
           success: false,
-          hash: (response as any).hash,
+          hash: response.txHash,
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SimulationError) throw error;
         throw error;
       }
