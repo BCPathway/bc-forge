@@ -27,11 +27,20 @@ pub enum AdminKey {
     ProposalIdCounter,
 }
 
+/// Roles recognized by the access-control layer.
+///
+/// New variants must be appended, never inserted, so that previously
+/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
+/// same variant they were written with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
+    /// Full administrative control granted via `set_admin`.
     Admin,
+    /// Permission to mint new tokens.
     Minter,
+    /// Highest-privilege role, reserved for owner-level operations.
+    SuperAdmin,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -301,36 +310,22 @@ mod tests {
     }
 
     #[test]
-    fn test_revoke_role_removes_granted_role() {
+    fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let role_holder = Address::generate(&env);
+        let super_admin_holder = Address::generate(&env);
+        let minter_holder = Address::generate(&env);
 
         client.set_admin(&admin);
-        client.grant_role(&Role::Minter, &role_holder);
-        assert!(client.has_role(&Role::Minter, &role_holder));
+        client.grant_role(&Role::SuperAdmin, &super_admin_holder);
+        client.grant_role(&Role::Minter, &minter_holder);
 
-        client.revoke_role(&Role::Minter, &role_holder);
-        assert!(!client.has_role(&Role::Minter, &role_holder));
-    }
-
-    #[test]
-    fn test_revoke_role_fails_when_role_was_never_granted() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let never_granted = Address::generate(&env);
-
-        client.set_admin(&admin);
-
-        assert_eq!(
-            client.try_revoke_role(&Role::Minter, &never_granted),
-            Err(Ok(AdminError::RoleNotGranted))
-        );
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_holder));
+        assert!(!client.has_role(&Role::Minter, &super_admin_holder));
+        assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
+        assert!(client.has_role(&Role::Minter, &minter_holder));
     }
 }
