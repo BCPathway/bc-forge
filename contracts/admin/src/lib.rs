@@ -166,9 +166,18 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
+    let admin = get_admin(env);
+    admin.require_auth();
+
     if threshold == 0 || threshold > pool.len() {
         panic!("invalid threshold for admin pool");
     }
+
+    for i in 0..pool.len() {
+        let address = pool.get(i).expect("pool member should exist");
+        require_non_zero_address(env, &address);
+    }
+
     env.storage().instance().set(&AdminKey::AdminPool, &pool);
     env.storage()
         .instance()
@@ -266,6 +275,9 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
 }
 
 pub fn mark_executed(env: &Env, proposal_id: u64) {
+    let admin = get_admin(env);
+    admin.require_auth();
+
     let mut proposal: Proposal = env
         .storage()
         .instance()
@@ -314,6 +326,22 @@ mod tests {
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
+        }
+
+        pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+            super::set_admin_pool(&env, pool, threshold);
+        }
+
+        pub fn create_proposal(env: Env, creator: Address, description: String) -> u64 {
+            super::create_proposal(&env, creator, description)
+        }
+
+        pub fn approve_proposal(env: Env, admin: Address, proposal_id: u64) {
+            super::approve_proposal(&env, admin, proposal_id);
+        }
+
+        pub fn mark_executed(env: Env, proposal_id: u64) {
+            super::mark_executed(&env, proposal_id);
         }
     }
 
@@ -409,6 +437,19 @@ mod tests {
         assert!(!client.has_role(&Role::Admin, &zero_address(&env)));
         assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
         assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_admin_pool_requires_admin_auth() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pool_member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, pool_member], &1);
     }
 
     #[test]
