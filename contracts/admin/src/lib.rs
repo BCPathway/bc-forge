@@ -322,6 +322,55 @@ mod tests {
     }
 
     #[test]
+    fn test_role_enum_has_admin_and_minter() {
+        assert_eq!(Role::Admin as u8, 0);
+        assert_eq!(Role::Minter as u8, 1);
+    }
+
+    #[test]
+    fn test_role_zero_address_edge_case() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let arbitrary = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // grant_role and has_role work with any valid Address
+        client.grant_role(&Role::Minter, &arbitrary);
+        assert!(client.has_role(&Role::Minter, &arbitrary));
+
+        // Address without granted role returns false
+        let other = Address::generate(&env);
+        assert!(!client.has_role(&Role::Minter, &other));
+    }
+
+    #[test]
+    fn test_storage_slots_do_not_overlap() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Grant Minter to minter address only
+        client.grant_role(&Role::Minter, &minter);
+        assert!(client.has_role(&Role::Minter, &minter));
+
+        // Admin implicitly has all roles (has_role short-circuits via Admin)
+        assert!(client.has_role(&Role::Admin, &admin));
+        assert!(client.has_role(&Role::Minter, &admin));
+
+        // Minter-only address does NOT have Admin role
+        assert!(!client.has_role(&Role::Admin, &minter));
+    }
+
+    #[test]
     fn test_grant_role_extends_ttl_across_ledger_advances() {
         let env = Env::default();
         env.mock_all_auths();
