@@ -167,6 +167,12 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
+pub fn get_role_admin(env: &Env, _role: Role) -> Address {
+    let admin = get_admin(env);
+    extend_instance_ttl(env);
+    admin
+}
+
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     if threshold == 0 || threshold > pool.len() {
         panic!("invalid threshold for admin pool");
@@ -318,6 +324,10 @@ mod tests {
             super::has_role(&env, role, &address)
         }
 
+        pub fn get_role_admin(env: Env, role: Role) -> Address {
+            super::get_role_admin(&env, role)
+        }
+
         pub fn require_role(env: Env, role: Role, address: Address) {
             super::require_role(&env, role, &address);
         }
@@ -346,12 +356,34 @@ mod tests {
     }
 
     #[test]
+    fn test_get_role_admin_returns_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let role_admin = client.get_role_admin(&Role::Admin);
+        assert_eq!(role_admin, admin);
+    }
+
+    #[test]
     fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let role_admin = client.get_role_admin(&Role::Admin);
+        assert_eq!(role_admin, admin);
+
+        let minter_admin = client.get_role_admin(&Role::Minter);
+        assert_eq!(minter_admin, admin);
         let super_admin_holder = Address::generate(&env);
         let minter_holder = Address::generate(&env);
 
