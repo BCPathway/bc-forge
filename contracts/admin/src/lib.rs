@@ -322,6 +322,49 @@ mod tests {
     }
 
     #[test]
+    fn test_role_from_u32_valid() {
+        assert_eq!(role_from_u32(0), Some(Role::Admin));
+        assert_eq!(role_from_u32(1), Some(Role::Minter));
+    }
+
+    #[test]
+    fn test_role_from_u32_out_of_bounds() {
+        assert_eq!(role_from_u32(2), None);
+        assert_eq!(role_from_u32(u32::MAX), None);
+    }
+
+    #[test]
+    fn test_ensure_role_bounds_valid() {
+        assert_eq!(ensure_role_bounds(0), Role::Admin);
+        assert_eq!(ensure_role_bounds(1), Role::Minter);
+    }
+
+    #[test]
+    #[should_panic(expected = "role value out of bounds")]
+    fn test_ensure_role_bounds_panics_on_invalid() {
+        ensure_role_bounds(99);
+    }
+
+    #[test]
+    fn test_role_bounds_storage_compatibility() {
+        // Verify that a role obtained via ensure_role_bounds works identically
+        // to the enum variant when used with storage operations.
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let minter = ensure_role_bounds(1);
+        client.grant_role(&minter, &holder);
+        assert!(client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&minter, &holder));
+    }
+
+    #[test]
     fn test_grant_role_extends_ttl_across_ledger_advances() {
         let env = Env::default();
         env.mock_all_auths();
