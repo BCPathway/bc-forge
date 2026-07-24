@@ -2,8 +2,19 @@
 
 #![no_std]
 
+mod events;
+
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
+
+/// Errors returned by the admin access-control module.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum AdminError {
+    /// `revoke_role` was called for an (role, address) pair that was never granted.
+    RoleNotGranted = 1,
+}
 
 #[derive(Clone)]
 #[contracttype]
@@ -17,11 +28,20 @@ pub enum AdminKey {
     AddressRoles(Address),
 }
 
+/// Roles recognized by the access-control layer.
+///
+/// New variants must be appended, never inserted, so that previously
+/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
+/// same variant they were written with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
+    /// Full administrative control granted via `set_admin`.
     Admin,
+    /// Permission to mint new tokens.
     Minter,
+    /// Highest-privilege role, reserved for owner-level operations.
+    SuperAdmin,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -277,8 +297,9 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::{contract, contractimpl, Address, Env};
+    use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
     #[contract]
     struct AdminContract;
@@ -295,6 +316,10 @@ mod tests {
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
+        }
+
+        pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+            super::revoke_role(&env, role, &address)
         }
     }
 
@@ -314,5 +339,66 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin_holder = Address::generate(&env);
+        let minter_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::SuperAdmin, &super_admin_holder);
+        client.grant_role(&Role::Minter, &minter_holder);
+
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_holder));
+        assert!(!client.has_role(&Role::Minter, &super_admin_holder));
+        assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
+        assert!(client.has_role(&Role::Minter, &minter_holder));
+    }
+
+    #[test]
+    fn test_revoke_role_emits_role_revoked_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        client.revoke_role(&Role::Minter, &role_holder);
+
+        let events = env.events().all();
+        assert_eq!(
+            events.len(),
+            1,
+            "expected exactly one event during revoke_role"
+        );
+
+        let (emitter, topics, data) = events.get(0).unwrap();
+        assert_eq!(emitter, contract_id);
+
+        assert_eq!(
+            topics.len(),
+            1,
+            "topics should contain only the role_rvk symbol"
+        );
+        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic0, soroban_sdk::symbol_short!("role_rvk"));
+
+        // Data must be (admin, role, address) as Vec<Val>
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_role, Role::Minter);
+        assert_eq!(event_address, role_holder);
     }
 }
