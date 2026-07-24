@@ -13,7 +13,7 @@ export interface BcForgeProviderProps {
 }
 
 export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({ config, children }) => {
-  const client = useMemo(() => new bcForgeClient(config), [config.rpcUrl, config.networkPassphrase, config.contractId]);
+  const client = useMemo(() => new bcForgeClient(config), [config]);
 
   return (
     <bcForgeContext.Provider value={{ client }}>
