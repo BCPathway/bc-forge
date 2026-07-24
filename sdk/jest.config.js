@@ -16,6 +16,7 @@ module.exports = {
       },
     ],
   },
+  transformIgnorePatterns: [],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
