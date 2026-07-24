@@ -119,7 +119,10 @@ fn test_stranger_lacks_super_admin_role_required_by_upgrade_guard() {
     let has_role = env.as_contract(&contract_id, || {
         bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &stranger)
     });
-    assert!(!has_role, "a freshly generated address must not hold SuperAdmin");
+    assert!(
+        !has_role,
+        "a freshly generated address must not hold SuperAdmin"
+    );
 }
 
 #[test]
