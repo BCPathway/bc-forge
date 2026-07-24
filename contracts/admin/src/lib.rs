@@ -14,6 +14,8 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 pub enum AdminError {
     /// `revoke_role` was called for an (role, address) pair that was never granted.
     RoleNotGranted = 1,
+    /// `require_role` failed because the address does not hold the required role.
+    RoleNotHeld = 2,
 }
 
 /// Storage keys for the access-control layer.
@@ -165,9 +167,15 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
-        panic!("unauthorized: missing role");
+        soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
     address.require_auth();
+}
+
+pub fn get_role_admin(env: &Env, _role: Role) -> Address {
+    let admin = get_admin(env);
+    extend_instance_ttl(env);
+    admin
 }
 
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
@@ -320,6 +328,14 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn get_role_admin(env: Env, role: Role) -> Address {
+            super::get_role_admin(&env, role)
+        }
+
+        pub fn require_role(env: Env, role: Role, address: Address) {
+            super::require_role(&env, role, &address);
+        }
     }
 
     fn zero_address(env: &Env) -> Address {
@@ -338,6 +354,19 @@ mod tests {
         let pauser_holder = Address::generate(&env);
 
         client.set_admin(&admin);
+
+        let role_admin = client.get_role_admin(&Role::Admin);
+        assert_eq!(role_admin, admin);
+
+        let minter_admin = client.get_role_admin(&Role::Minter);
+        assert_eq!(minter_admin, admin);
+
+        let super_admin_admin = client.get_role_admin(&Role::SuperAdmin);
+        assert_eq!(super_admin_admin, admin);
+
+        let pauser_admin = client.get_role_admin(&Role::Pauser);
+        assert_eq!(pauser_admin, admin);
+
         client.grant_role(&Role::SuperAdmin, &super_admin_holder);
         client.grant_role(&Role::Minter, &minter_holder);
         client.grant_role(&Role::Pauser, &pauser_holder);
@@ -373,6 +402,19 @@ mod tests {
         assert!(client.has_role(&Role::Minter, &role_holder));
     }
 
+    #[test]
+    fn test_get_role_admin_returns_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let role_admin = client.get_role_admin(&Role::Admin);
+        assert_eq!(role_admin, admin);
+    }
     #[test]
     #[should_panic(expected = "invalid address: zero address not allowed")]
     fn test_set_admin_rejects_zero_address() {
@@ -481,5 +523,34 @@ mod tests {
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
+    }
+
+    #[test]
+    fn test_require_role_succeeds_when_role_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        client.require_role(&Role::Minter, &role_holder);
+    }
+
+    #[test]
+    fn test_require_role_fails_when_role_not_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let non_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_role(&Role::Minter, &non_holder);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(2))));
     }
 }
