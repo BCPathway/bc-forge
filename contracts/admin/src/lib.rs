@@ -516,7 +516,8 @@ mod tests {
         for event in events.iter() {
             let (emitter, topics, data) = event;
             if emitter == contract_id && topics.len() == 1 {
-                let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+                let topic0: soroban_sdk::Symbol =
+                    topics.get(0).unwrap().try_into_val(&env).unwrap();
                 if topic0 == soroban_sdk::symbol_short!("role_grt") {
                     found_grant_event = true;
                     let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
