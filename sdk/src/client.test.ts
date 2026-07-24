@@ -2,7 +2,8 @@
  * @bc-forge/sdk — Tests for offline transaction builder and simulation methods
  */
 
-import { bcForgeClient } from './client';
+import { jest } from '@jest/globals';
+import { bcForgeClient, type TransactionResult } from './client';
 import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
 
 // Mock data for testing
@@ -39,11 +40,13 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     it('should invoke batch_mint with object recipients', async () => {
       const recipientA = Keypair.random().publicKey();
       const recipientB = Keypair.random().publicKey();
-      const invokeContract = jest.fn().mockResolvedValue({
-        success: true,
-        hash: 'mock-hash',
-        returnValue: null,
-      });
+      const invokeContract = jest
+        .fn<(method: string, args: xdr.ScVal[], source?: Keypair) => Promise<TransactionResult>>()
+        .mockResolvedValue({
+          success: true,
+          hash: 'mock-hash',
+          returnValue: null,
+        });
       (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
         invokeContract;
 
