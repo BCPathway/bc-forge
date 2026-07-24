@@ -2,13 +2,34 @@
 
 #![no_std]
 
-use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+mod events;
 
+use bc_forge_ttl as ttl;
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
+
+/// Errors returned by the admin access-control module.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum AdminError {
+    /// `revoke_role` was called for an (role, address) pair that was never granted.
+    RoleNotGranted = 1,
+}
+
+/// Storage keys for the access-control layer.
+///
+/// `#[contracttype]` derives a distinct ledger key for every variant (and,
+/// for `Role(Role, Address)`, for every `(Role, Address)` pair), so entries
+/// never collide with each other or with the other variants below.
 #[derive(Clone)]
 #[contracttype]
 pub enum AdminKey {
     Admin,
+    /// Maps a `(Role, Address)` pair to `true` when `address` holds `role`.
+    /// This is the Role-to-Address mapping storage structure: membership is
+    /// looked up directly by key rather than by scanning a list, and each
+    /// pair occupies its own ledger entry so grants/revokes for one address
+    /// never touch another's.
     Role(Role, Address),
     AdminPool,
     Threshold,
@@ -16,11 +37,20 @@ pub enum AdminKey {
     ProposalIdCounter,
 }
 
+/// Roles recognized by the access-control layer.
+///
+/// New variants must be appended, never inserted, so that previously
+/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
+/// same variant they were written with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
+    /// Full administrative control granted via `set_admin`.
     Admin,
+    /// Permission to mint new tokens.
     Minter,
+    /// Highest-privilege role, reserved for owner-level operations.
+    SuperAdmin,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +60,22 @@ pub struct Proposal {
     pub description: String,
     pub approvals: Vec<Address>,
     pub executed: bool,
+}
+
+/// Strkey of the well-known Stellar "null" account: an ed25519 public key
+/// whose 32-byte payload is all zeros. No private key can ever produce a
+/// signature for it, so it is used as the canonical zero-address sentinel
+/// that must never be allowed to hold a role.
+const ZERO_ADDRESS_STRKEY: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+fn is_zero_address(env: &Env, address: &Address) -> bool {
+    *address == Address::from_str(env, ZERO_ADDRESS_STRKEY)
+}
+
+fn require_non_zero_address(env: &Env, address: &Address) {
+    if is_zero_address(env, address) {
+        panic!("invalid address: zero address not allowed");
+    }
 }
 
 fn extend_instance_ttl(env: &Env) {
@@ -49,6 +95,7 @@ where
 }
 
 pub fn set_admin(env: &Env, admin: &Address) {
+    require_non_zero_address(env, admin);
     env.storage().instance().set(&AdminKey::Admin, admin);
     env.storage()
         .persistent()
@@ -76,8 +123,9 @@ pub fn has_admin(env: &Env) -> bool {
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
+    require_non_zero_address(env, address);
     if has_admin(env) {
-        require_admin(env);
+        get_admin(env).require_auth();
     }
     env.storage()
         .persistent()
@@ -85,11 +133,19 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
 }
 
-pub fn revoke_role(env: &Env, role: Role, address: &Address) {
-    require_admin(env);
-    env.storage()
-        .persistent()
-        .remove(&AdminKey::Role(role, address.clone()));
+pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    require_non_zero_address(env, address);
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let key = AdminKey::Role(role, address.clone());
+    if !env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleNotGranted);
+    }
+
+    env.storage().persistent().remove(&key);
+    events::emit_role_revoked(env, &admin, role, address);
+    Ok(())
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
@@ -100,31 +156,6 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
             .storage()
             .persistent()
             .has(&AdminKey::Role(role, address.clone()))
-}
-
-pub fn require_admin(env: &Env) {
-    get_admin(env).require_auth();
-}
-
-/// Convert a `u32` to a [`Role`], returning [`None`] if the value is out of
-/// bounds (i.e. not a valid discriminant).
-///
-/// This is the primary bounds‑checking entry point for roles received as raw
-/// integers (e.g. from proposal parameters or cross‑contract calls).
-pub fn role_from_u32(value: u32) -> Option<Role> {
-    match value {
-        0 => Some(Role::Admin),
-        1 => Some(Role::Minter),
-        _ => None,
-    }
-}
-
-/// Convert a `u32` to a [`Role`], panicking if the value is out of bounds.
-///
-/// # Panics
-/// - If `value` is not a valid [`Role`] discriminant.
-pub fn ensure_role_bounds(value: u32) -> Role {
-    role_from_u32(value).expect("role value out of bounds")
 }
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
@@ -260,8 +291,9 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::{contract, contractimpl, Address, Env};
+    use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
     #[contract]
     struct AdminContract;
@@ -276,9 +308,17 @@ mod tests {
             super::grant_role(&env, role, &address);
         }
 
+        pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+            super::revoke_role(&env, role, &address)
+        }
+
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+    }
+
+    fn zero_address(env: &Env) -> Address {
+        Address::from_str(env, super::ZERO_ADDRESS_STRKEY)
     }
 
     #[test]
@@ -340,5 +380,118 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin_holder = Address::generate(&env);
+        let minter_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::SuperAdmin, &super_admin_holder);
+        client.grant_role(&Role::Minter, &minter_holder);
+
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_holder));
+        assert!(!client.has_role(&Role::Minter, &super_admin_holder));
+        assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
+        assert!(client.has_role(&Role::Minter, &minter_holder));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_set_admin_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        client.set_admin(&zero_address(&env));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_grant_role_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &zero_address(&env));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_revoke_role_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.revoke_role(&Role::Minter, &zero_address(&env));
+    }
+
+    #[test]
+    fn test_zero_address_never_holds_a_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        assert!(!client.has_role(&Role::Admin, &zero_address(&env)));
+        assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
+        assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
+    }
+
+    #[test]
+    fn test_revoke_role_emits_role_revoked_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        client.revoke_role(&Role::Minter, &role_holder);
+
+        let events = env.events().all();
+        assert_eq!(
+            events.len(),
+            1,
+            "expected exactly one event during revoke_role"
+        );
+
+        let (emitter, topics, data) = events.get(0).unwrap();
+        assert_eq!(emitter, contract_id);
+
+        assert_eq!(
+            topics.len(),
+            1,
+            "topics should contain only the role_rvk symbol"
+        );
+        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic0, soroban_sdk::symbol_short!("role_rvk"));
+
+        // Data must be (admin, role, address) as Vec<Val>
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_role, Role::Minter);
+        assert_eq!(event_address, role_holder);
     }
 }
