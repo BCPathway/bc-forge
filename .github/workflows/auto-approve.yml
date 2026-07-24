@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Approve Action Required Workflows
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           # Note: A Personal Access Token (PAT) is REQUIRED to approve workflow runs.
           # The default GITHUB_TOKEN does not have the necessary permissions.
@@ -36,10 +36,13 @@ jobs:
               const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
                 owner,
                 repo,
-                head_sha: sha
+                status: 'action_required'
               });
               
-              runsToApprove = runs.workflow_runs.filter(run => run.status === 'action_required');
+              // Filter runs associated with this specific PR
+              runsToApprove = runs.workflow_runs.filter(run => 
+                run.pull_requests && run.pull_requests.some(p => p.number === pull_number)
+              );
               
               if (runsToApprove.length > 0) {
                 break;
