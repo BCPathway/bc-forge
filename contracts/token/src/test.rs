@@ -1,7 +1,7 @@
 use crate::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
-use soroban_sdk::{symbol_short, Address, Env, String, TryIntoVal, Val};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String, TryIntoVal, Val};
 
 fn setup_contract(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let contract_id = env.register(BcForgeToken, ());
@@ -97,4 +97,39 @@ fn test_initialize_emits_correct_event() {
     // Verify the decimal value matches
     let decimal: u32 = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(decimal, 7);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: missing role")]
+fn test_upgrade_rejects_caller_without_super_admin_role() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let stranger = Address::generate(&env);
+    let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+    client.upgrade(&stranger, &new_wasm_hash);
+}
+
+#[test]
+fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let upgrader = Address::generate(&env);
+    let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, bc_forge_admin::Role::SuperAdmin, &upgrader);
+    });
+
+    // The guard passes for a SuperAdmin holder; execution then reaches
+    // `update_current_contract_wasm`, which panics on a bad wasm hash
+    // (there is no installed contract at an all-zero hash). That panic,
+    // not "unauthorized: missing role", proves the guard let the call through.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.upgrade(&upgrader, &new_wasm_hash);
+    }));
+    assert!(result.is_err(), "expected a panic past the auth guard");
 }

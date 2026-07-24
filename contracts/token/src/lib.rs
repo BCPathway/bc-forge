@@ -14,7 +14,9 @@ mod test;
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
+};
 
 #[contracttype]
 pub struct Recipient {
@@ -278,6 +280,22 @@ impl BcForgeToken {
         let admin_address = admin::get_admin(&env);
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
+        Ok(())
+    }
+
+    /// Upgrades the contract's executable to `new_wasm_hash`.
+    ///
+    /// Gated to `Role::SuperAdmin` (or `Role::Admin`, which is a superset of
+    /// every role) since a protocol upgrade can replace all contract logic.
+    pub fn upgrade(
+        env: Env,
+        upgrader: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_role(&env, admin::Role::SuperAdmin, &upgrader);
+        events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
 }
