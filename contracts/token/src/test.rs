@@ -1,3 +1,5 @@
+extern crate std;
+
 use crate::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
