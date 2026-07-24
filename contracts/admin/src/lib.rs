@@ -126,8 +126,12 @@ pub fn has_admin(env: &Env) -> bool {
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
-    if has_admin(env) {
-        get_admin(env).require_auth();
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let key = AdminKey::Role(role, address.clone());
+    if env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleAlreadyGranted);
     }
 
     env.storage().persistent().set(&key, &true);
