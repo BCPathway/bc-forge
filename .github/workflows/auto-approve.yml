@@ -26,18 +26,25 @@ jobs:
             });
             const sha = pr.head.sha;
             
-            // Delay for a few seconds to allow workflows to transition to 'action_required' state
-            await new Promise(r => setTimeout(r, 5000));
-            
-            // Get all workflow runs for this SHA
-            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
-              owner,
-              repo,
-              head_sha: sha
-            });
-            
-            // Filter runs that require approval
-            const runsToApprove = runs.workflow_runs.filter(run => run.status === 'action_required');
+            // Retry loop to allow workflows to transition to 'action_required' state
+            let runsToApprove = [];
+            const maxRetries = 6;
+            for (let i = 0; i < maxRetries; i++) {
+              console.log(`Checking for action_required workflows (attempt ${i + 1}/${maxRetries})...`);
+              await new Promise(r => setTimeout(r, 5000));
+              
+              const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner,
+                repo,
+                head_sha: sha
+              });
+              
+              runsToApprove = runs.workflow_runs.filter(run => run.status === 'action_required');
+              
+              if (runsToApprove.length > 0) {
+                break;
+              }
+            }
             
             console.log(`Found ${runsToApprove.length} workflow runs requiring approval.`);
             
