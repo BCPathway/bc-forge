@@ -64,6 +64,7 @@ export interface BatchMintRecipient {
 export enum Role {
   Admin = 'Admin',
   Minter = 'Minter',
+  SuperAdmin = 'SuperAdmin',
   Pauser = 'Pauser',
 }
 

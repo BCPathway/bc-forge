@@ -16,11 +16,21 @@ pub enum AdminKey {
     ProposalIdCounter,
 }
 
+/// Roles recognized by the access-control layer.
+///
+/// New variants must be appended, never inserted, so that previously
+/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
+/// same variant they were written with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
+    /// Full administrative control granted via `set_admin`.
     Admin,
+    /// Permission to mint new tokens.
     Minter,
+    /// Highest-privilege role, reserved for owner-level operations.
+    SuperAdmin,
+    /// Role allowing emergency pause and unpause operations.
     Pauser,
 }
 
@@ -283,6 +293,35 @@ mod tests {
     }
 
     #[test]
+    fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin_holder = Address::generate(&env);
+        let minter_holder = Address::generate(&env);
+        let pauser_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::SuperAdmin, &super_admin_holder);
+        client.grant_role(&Role::Minter, &minter_holder);
+        client.grant_role(&Role::Pauser, &pauser_holder);
+
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_holder));
+        assert!(!client.has_role(&Role::Minter, &super_admin_holder));
+        assert!(!client.has_role(&Role::Pauser, &super_admin_holder));
+
+        assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
+        assert!(client.has_role(&Role::Minter, &minter_holder));
+        assert!(!client.has_role(&Role::Pauser, &minter_holder));
+
+        assert!(!client.has_role(&Role::SuperAdmin, &pauser_holder));
+        assert!(!client.has_role(&Role::Minter, &pauser_holder));
+        assert!(client.has_role(&Role::Pauser, &pauser_holder));
+    }
+
+    #[test]
     fn test_grant_role_extends_ttl_across_ledger_advances() {
         let env = Env::default();
         env.mock_all_auths();
@@ -329,6 +368,28 @@ mod tests {
         );
         let zero_address = Address::from_string(&zero_addr_str);
         client.grant_role(&Role::Pauser, &zero_address);
+    }
+
+    #[test]
+    fn test_zero_address_never_holds_a_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let zero_addr_str = soroban_sdk::String::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        );
+        let zero_address = Address::from_string(&zero_addr_str);
+
+        assert!(!client.has_role(&Role::Admin, &zero_address));
+        assert!(!client.has_role(&Role::Minter, &zero_address));
+        assert!(!client.has_role(&Role::SuperAdmin, &zero_address));
+        assert!(!client.has_role(&Role::Pauser, &zero_address));
     }
 
     #[test]
