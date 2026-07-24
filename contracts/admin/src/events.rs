@@ -19,4 +19,3 @@ pub fn emit_role_granted(env: &Env, admin: &Address, role: Role, address: &Addre
         (admin.clone(), role, address.clone()),
     );
 }
-
