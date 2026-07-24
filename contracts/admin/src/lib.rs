@@ -14,6 +14,7 @@ pub enum AdminKey {
     Threshold,
     Proposal(u64),
     ProposalIdCounter,
+    AddressRoles(Address),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -75,6 +76,25 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
+pub fn get_address_roles(env: &Env, address: &Address) -> Vec<Role> {
+    let roles = env
+        .storage()
+        .persistent()
+        .get(&AdminKey::AddressRoles(address.clone()))
+        .unwrap_or_else(|| vec![env]);
+    if env.storage().persistent().has(&AdminKey::AddressRoles(address.clone())) {
+        extend_storage_ttl_for_key(env, &AdminKey::AddressRoles(address.clone()));
+    }
+    roles
+}
+
+pub fn set_address_roles(env: &Env, address: &Address, roles: &Vec<Role>) {
+    env.storage()
+        .persistent()
+        .set(&AdminKey::AddressRoles(address.clone()), roles);
+    extend_storage_ttl_for_key(env, &AdminKey::AddressRoles(address.clone()));
+}
+
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
     if has_admin(env) {
         require_admin(env);
@@ -83,6 +103,12 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+
+    let mut roles = get_address_roles(env, address);
+    if !roles.contains(&role) {
+        roles.push_back(role);
+        set_address_roles(env, address, &roles);
+    }
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
@@ -90,6 +116,18 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
     env.storage()
         .persistent()
         .remove(&AdminKey::Role(role, address.clone()));
+
+    let mut roles = get_address_roles(env, address);
+    if let Some(index) = roles.first_index_of(&role) {
+        roles.remove(index);
+        if roles.is_empty() {
+            env.storage()
+                .persistent()
+                .remove(&AdminKey::AddressRoles(address.clone()));
+        } else {
+            set_address_roles(env, address, &roles);
+        }
+    }
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
