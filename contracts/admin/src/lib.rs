@@ -14,6 +14,12 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 pub enum AdminError {
     /// `revoke_role` was called for an (role, address) pair that was never granted.
     RoleNotGranted = 1,
+    /// Migration is already in progress.
+    MigrationAlreadyInProgress = 2,
+    /// Migration is not in progress.
+    MigrationNotInProgress = 3,
+    /// Unauthorized migration admin.
+    UnauthorizedMigrationAdmin = 4,
 }
 
 /// Storage keys for the access-control layer.
@@ -35,6 +41,10 @@ pub enum AdminKey {
     Threshold,
     Proposal(u64),
     ProposalIdCounter,
+    /// Current storage schema version.
+    MigrationVersion,
+    /// Active migration safeguard configuration and state.
+    MigrationSafeguard,
 }
 
 /// Roles recognized by the access-control layer.
@@ -60,6 +70,15 @@ pub struct Proposal {
     pub description: String,
     pub approvals: Vec<Address>,
     pub executed: bool,
+}
+
+/// Safeguard structure for storage migrations.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct MigrationSafeguard {
+    pub version: u32,
+    pub migration_admin: Address,
+    pub in_progress: bool,
 }
 
 /// Strkey of the well-known Stellar "null" account: an ed25519 public key
@@ -291,6 +310,134 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
     extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
+// ─── Storage Migration Safeguard ─────────────────────────────────────────────
+
+/// Returns the current storage schema version, defaulting to 0 if unset.
+pub fn get_migration_version(env: &Env) -> u32 {
+    let version = env
+        .storage()
+        .instance()
+        .get(&AdminKey::MigrationVersion)
+        .unwrap_or(0u32);
+    extend_instance_ttl(env);
+    version
+}
+
+/// Sets the current storage schema version.
+pub fn set_migration_version(env: &Env, version: u32) {
+    if has_admin(env) {
+        require_admin(env);
+    }
+    env.storage()
+        .instance()
+        .set(&AdminKey::MigrationVersion, &version);
+    extend_instance_ttl(env);
+}
+
+/// Initializes storage migration safeguard configuration.
+pub fn initialize_migration_safeguard(env: &Env, migration_admin: &Address, initial_version: u32) {
+    require_non_zero_address(env, migration_admin);
+    if has_admin(env) {
+        require_admin(env);
+    }
+
+    let safeguard = MigrationSafeguard {
+        version: initial_version,
+        migration_admin: migration_admin.clone(),
+        in_progress: false,
+    };
+
+    env.storage()
+        .instance()
+        .set(&AdminKey::MigrationSafeguard, &safeguard);
+    env.storage()
+        .instance()
+        .set(&AdminKey::MigrationVersion, &initial_version);
+    extend_instance_ttl(env);
+}
+
+/// Retrieves the active migration safeguard struct if configured.
+pub fn get_migration_safeguard(env: &Env) -> Option<MigrationSafeguard> {
+    let safeguard = env.storage().instance().get(&AdminKey::MigrationSafeguard);
+    if safeguard.is_some() {
+        extend_instance_ttl(env);
+    }
+    safeguard
+}
+
+/// Returns `true` if a storage migration is currently in progress.
+pub fn is_migration_in_progress(env: &Env) -> bool {
+    get_migration_safeguard(env)
+        .map(|s| s.in_progress)
+        .unwrap_or(false)
+}
+
+/// Starts a storage migration for the given target version.
+pub fn start_migration(
+    env: &Env,
+    migration_admin: &Address,
+    _target_version: u32,
+) -> Result<(), AdminError> {
+    require_non_zero_address(env, migration_admin);
+    migration_admin.require_auth();
+
+    let mut safeguard = get_migration_safeguard(env).unwrap_or(MigrationSafeguard {
+        version: get_migration_version(env),
+        migration_admin: migration_admin.clone(),
+        in_progress: false,
+    });
+
+    if safeguard.migration_admin != *migration_admin {
+        return Err(AdminError::UnauthorizedMigrationAdmin);
+    }
+
+    if safeguard.in_progress {
+        return Err(AdminError::MigrationAlreadyInProgress);
+    }
+
+    safeguard.in_progress = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::MigrationSafeguard, &safeguard);
+    extend_instance_ttl(env);
+    Ok(())
+}
+
+/// Completes a storage migration and updates the schema version.
+pub fn complete_migration(
+    env: &Env,
+    migration_admin: &Address,
+    new_version: u32,
+) -> Result<(), AdminError> {
+    require_non_zero_address(env, migration_admin);
+    migration_admin.require_auth();
+
+    let mut safeguard = match get_migration_safeguard(env) {
+        Some(s) => s,
+        None => return Err(AdminError::MigrationNotInProgress),
+    };
+
+    if safeguard.migration_admin != *migration_admin {
+        return Err(AdminError::UnauthorizedMigrationAdmin);
+    }
+
+    if !safeguard.in_progress {
+        return Err(AdminError::MigrationNotInProgress);
+    }
+
+    safeguard.version = new_version;
+    safeguard.in_progress = false;
+
+    env.storage()
+        .instance()
+        .set(&AdminKey::MigrationSafeguard, &safeguard);
+    env.storage()
+        .instance()
+        .set(&AdminKey::MigrationVersion, &new_version);
+    extend_instance_ttl(env);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +465,42 @@ mod tests {
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
+        }
+
+        pub fn initialize_migration_safeguard(
+            env: Env,
+            migration_admin: Address,
+            initial_version: u32,
+        ) {
+            super::initialize_migration_safeguard(&env, &migration_admin, initial_version);
+        }
+
+        pub fn get_migration_version(env: Env) -> u32 {
+            super::get_migration_version(&env)
+        }
+
+        pub fn get_migration_safeguard(env: Env) -> Option<MigrationSafeguard> {
+            super::get_migration_safeguard(&env)
+        }
+
+        pub fn is_migration_in_progress(env: Env) -> bool {
+            super::is_migration_in_progress(&env)
+        }
+
+        pub fn start_migration(
+            env: Env,
+            migration_admin: Address,
+            target_version: u32,
+        ) -> Result<(), AdminError> {
+            super::start_migration(&env, &migration_admin, target_version)
+        }
+
+        pub fn complete_migration(
+            env: Env,
+            migration_admin: Address,
+            new_version: u32,
+        ) -> Result<(), AdminError> {
+            super::complete_migration(&env, &migration_admin, new_version)
         }
     }
 
@@ -454,5 +637,124 @@ mod tests {
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
+    }
+
+    #[test]
+    fn test_migration_safeguard_lifecycle() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let migration_admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        assert_eq!(client.get_migration_version(), 0);
+
+        client.initialize_migration_safeguard(&migration_admin, &1);
+        assert_eq!(client.get_migration_version(), 1);
+        assert!(!client.is_migration_in_progress());
+
+        let safeguard = client
+            .get_migration_safeguard()
+            .expect("safeguard should exist");
+        assert_eq!(safeguard.version, 1);
+        assert_eq!(safeguard.migration_admin, migration_admin);
+        assert!(!safeguard.in_progress);
+
+        client.start_migration(&migration_admin, &2);
+        assert!(client.is_migration_in_progress());
+
+        // Starting again while in progress should fail
+        assert_eq!(
+            client.try_start_migration(&migration_admin, &2),
+            Err(Ok(AdminError::MigrationAlreadyInProgress))
+        );
+
+        client.complete_migration(&migration_admin, &2);
+        assert!(!client.is_migration_in_progress());
+        assert_eq!(client.get_migration_version(), 2);
+    }
+
+    #[test]
+    fn test_migration_safeguard_storage_slots_do_not_overlap() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let migration_admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        client.initialize_migration_safeguard(&migration_admin, &5);
+
+        // Assert all slots maintain distinct, uncorrupted state
+        assert!(client.has_role(&Role::Minter, &role_holder));
+        assert_eq!(client.get_migration_version(), 5);
+
+        client.start_migration(&migration_admin, &6);
+
+        // Migration state change should not mutate admin or role storage
+        assert!(client.has_role(&Role::Minter, &role_holder));
+        assert!(client.is_migration_in_progress());
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_initialize_migration_safeguard_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let zero = zero_address(&env);
+        client.initialize_migration_safeguard(&zero, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_start_migration_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let zero = zero_address(&env);
+        client.start_migration(&zero, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_complete_migration_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let zero = zero_address(&env);
+        client.complete_migration(&zero, &2);
+    }
+
+    #[test]
+    fn test_migration_unauthorized_admin_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let migration_admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.initialize_migration_safeguard(&migration_admin, &1);
+
+        assert_eq!(
+            client.try_start_migration(&unauthorized, &2),
+            Err(Ok(AdminError::UnauthorizedMigrationAdmin))
+        );
+
+        client.start_migration(&migration_admin, &2);
+
+        assert_eq!(
+            client.try_complete_migration(&unauthorized, &2),
+            Err(Ok(AdminError::UnauthorizedMigrationAdmin))
+        );
     }
 }
