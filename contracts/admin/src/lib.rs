@@ -14,6 +14,8 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 pub enum AdminError {
     /// `revoke_role` was called for an (role, address) pair that was never granted.
     RoleNotGranted = 1,
+    /// `require_role` failed because the address does not hold the required role.
+    RoleNotHeld = 2,
 }
 
 /// Storage keys for the access-control layer.
@@ -164,7 +166,7 @@ pub fn require_admin(env: &Env) {
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
-        panic!("unauthorized: missing role");
+        soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
     address.require_auth();
 }
@@ -319,6 +321,10 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn require_role(env: Env, role: Role, address: Address) {
+            super::require_role(&env, role, &address);
+        }
     }
 
     fn zero_address(env: &Env) -> Address {
@@ -454,5 +460,37 @@ mod tests {
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
+    }
+
+    #[test]
+    fn test_require_role_succeeds_when_role_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        client.require_role(&Role::Minter, &role_holder);
+    }
+
+    #[test]
+    fn test_require_role_fails_when_role_not_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let non_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_role(&Role::Minter, &non_holder);
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(2)))
+        );
     }
 }
