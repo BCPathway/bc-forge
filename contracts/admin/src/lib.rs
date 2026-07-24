@@ -298,6 +298,19 @@ mod tests {
 
     #[test]
     fn test_get_role_admin_returns_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let role_admin = client.get_role_admin(&Role::Admin);
+        assert_eq!(role_admin, admin);
+    }
+
+    #[test]
     fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
         let env = Env::default();
         env.mock_all_auths();
