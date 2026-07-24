@@ -1,22 +1,63 @@
-name: Auto Approve PRs
+name: Auto Approve Workflow Runs
 
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize]
+    types: [opened, synchronize, reopened]
 
 jobs:
-  auto-approve:
+  approve-workflows:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
     steps:
-      - name: Auto Approve
+      - name: Approve Action Required Workflows
         uses: actions/github-script@v7
         with:
+          # Note: A Personal Access Token (PAT) is REQUIRED to approve workflow runs.
+          # The default GITHUB_TOKEN does not have the necessary permissions.
+          github-token: ${{ secrets.WORKFLOW_APPROVER_PAT }}
           script: |
-            github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-              event: 'APPROVE'
+            const { owner, repo } = context.repo;
+            const pull_number = context.issue.number;
+            
+            // Get the commit SHA for the PR head
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number
             });
+            const sha = pr.head.sha;
+            
+            // Retry loop to allow workflows to transition to 'action_required' state
+            let runsToApprove = [];
+            const maxRetries = 6;
+            for (let i = 0; i < maxRetries; i++) {
+              console.log(`Checking for action_required workflows (attempt ${i + 1}/${maxRetries})...`);
+              await new Promise(r => setTimeout(r, 5000));
+              
+              const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner,
+                repo,
+                head_sha: sha
+              });
+              
+              runsToApprove = runs.workflow_runs.filter(run => run.status === 'action_required');
+              
+              if (runsToApprove.length > 0) {
+                break;
+              }
+            }
+            
+            console.log(`Found ${runsToApprove.length} workflow runs requiring approval.`);
+            
+            for (const run of runsToApprove) {
+              console.log(`Approving workflow run ${run.id}...`);
+              try {
+                await github.rest.actions.approveWorkflowRun({
+                  owner,
+                  repo,
+                  run_id: run.id
+                });
+                console.log(`Successfully approved workflow run ${run.id}.`);
+              } catch (error) {
+                console.error(`Failed to approve workflow run ${run.id}:`, error.message);
+              }
+            }

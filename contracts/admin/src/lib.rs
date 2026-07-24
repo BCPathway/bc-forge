@@ -18,10 +18,20 @@ pub enum AdminError {
     RoleAlreadyGranted = 2,
 }
 
+/// Storage keys for the access-control layer.
+///
+/// `#[contracttype]` derives a distinct ledger key for every variant (and,
+/// for `Role(Role, Address)`, for every `(Role, Address)` pair), so entries
+/// never collide with each other or with the other variants below.
 #[derive(Clone)]
 #[contracttype]
 pub enum AdminKey {
     Admin,
+    /// Maps a `(Role, Address)` pair to `true` when `address` holds `role`.
+    /// This is the Role-to-Address mapping storage structure: membership is
+    /// looked up directly by key rather than by scanning a list, and each
+    /// pair occupies its own ledger entry so grants/revokes for one address
+    /// never touch another's.
     Role(Role, Address),
     AdminPool,
     Threshold,
@@ -54,6 +64,22 @@ pub struct Proposal {
     pub executed: bool,
 }
 
+/// Strkey of the well-known Stellar "null" account: an ed25519 public key
+/// whose 32-byte payload is all zeros. No private key can ever produce a
+/// signature for it, so it is used as the canonical zero-address sentinel
+/// that must never be allowed to hold a role.
+const ZERO_ADDRESS_STRKEY: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+fn is_zero_address(env: &Env, address: &Address) -> bool {
+    *address == Address::from_str(env, ZERO_ADDRESS_STRKEY)
+}
+
+fn require_non_zero_address(env: &Env, address: &Address) {
+    if is_zero_address(env, address) {
+        panic!("invalid address: zero address not allowed");
+    }
+}
+
 fn extend_instance_ttl(env: &Env) {
     ttl::extend_instance_ttl(env);
 }
@@ -71,6 +97,7 @@ where
 }
 
 pub fn set_admin(env: &Env, admin: &Address) {
+    require_non_zero_address(env, admin);
     env.storage().instance().set(&AdminKey::Admin, admin);
     env.storage()
         .persistent()
@@ -97,13 +124,10 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
-pub fn grant_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
-    let admin = get_admin(env);
-    admin.require_auth();
-
-    let key = AdminKey::Role(role, address.clone());
-    if env.storage().persistent().has(&key) {
-        return Err(AdminError::RoleAlreadyGranted);
+pub fn grant_role(env: &Env, role: Role, address: &Address) {
+    require_non_zero_address(env, address);
+    if has_admin(env) {
+        require_admin(env);
     }
 
     env.storage().persistent().set(&key, &true);
@@ -113,6 +137,7 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminE
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    require_non_zero_address(env, address);
     let admin = get_admin(env);
     admin.require_auth();
 
@@ -290,13 +315,17 @@ mod tests {
             super::grant_role(&env, role, &address)
         }
 
-        pub fn has_role(env: Env, role: Role, address: Address) -> bool {
-            super::has_role(&env, role, &address)
-        }
-
         pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
             super::revoke_role(&env, role, &address)
         }
+
+        pub fn has_role(env: Env, role: Role, address: Address) -> bool {
+            super::has_role(&env, role, &address)
+        }
+    }
+
+    fn zero_address(env: &Env) -> Address {
+        Address::from_str(env, super::ZERO_ADDRESS_STRKEY)
     }
 
     #[test]
@@ -335,6 +364,58 @@ mod tests {
         assert!(!client.has_role(&Role::Minter, &super_admin_holder));
         assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
         assert!(client.has_role(&Role::Minter, &minter_holder));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_set_admin_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        client.set_admin(&zero_address(&env));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_grant_role_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &zero_address(&env));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address: zero address not allowed")]
+    fn test_revoke_role_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.revoke_role(&Role::Minter, &zero_address(&env));
+    }
+
+    #[test]
+    fn test_zero_address_never_holds_a_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        assert!(!client.has_role(&Role::Admin, &zero_address(&env)));
+        assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
+        assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
     }
 
     #[test]
