@@ -932,10 +932,10 @@ export class bcForgeClient {
    * @returns Events response containing events and next cursor
    */
   async pollEvents(cursor?: string): Promise<{ events: any[]; cursor: string }> {
-    const response = await this.server.getEvents({
-      ...(cursor ? { cursor } : {}),
-      filters: [{ contractIds: [this.contractId], type: 'contract' }],
-    } as any);
+    const req: any = { filters: [{ contractIds: [this.contractId], type: 'contract' }] };
+    if (cursor) req.cursor = cursor;
+    else req.startLedger = 0;
+    const response = await this.server.getEvents(req);
     return {
       events: response.events,
       cursor: response.cursor,

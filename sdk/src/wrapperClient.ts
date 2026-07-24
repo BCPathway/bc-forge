@@ -9,13 +9,6 @@
  */
 
 import { rpc as SorobanRpc, Contract, TransactionBuilder, Keypair, xdr } from '@stellar/stellar-sdk';
-import {
-  rpc as SorobanRpc,
-  Contract,
-  TransactionBuilder,
-  Keypair,
-  xdr,
-} from '@stellar/stellar-sdk';
 
 import {
   buildInvokeTransaction,

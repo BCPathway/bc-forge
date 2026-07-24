@@ -16,7 +16,6 @@
     "rootDir": "./src",
     "declarationDir": "./dist",
     "types": ["jest", "node"]
-    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
