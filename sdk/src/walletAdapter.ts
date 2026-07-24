@@ -13,4 +13,3 @@ export interface WalletAdapter {
   /** Sign an unsigned transaction XDR and return signed XDR */
   signTransaction(unsignedTxXdr: string): Promise<string>;
 }
-
