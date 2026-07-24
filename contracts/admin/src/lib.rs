@@ -93,13 +93,22 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .has(&AdminKey::Role(Role::Admin, address.clone()))
-        || env
-            .storage()
-            .persistent()
-            .has(&AdminKey::Role(role, address.clone()))
+    // Admin role implicitly grants all other roles.
+    // Check the Admin mapping first unless the caller already asks for Admin.
+    if role != Role::Admin {
+        let admin_key = AdminKey::Role(Role::Admin, address.clone());
+        if env.storage().persistent().has(&admin_key) {
+            extend_storage_ttl_for_key(env, &admin_key);
+            return true;
+        }
+    }
+
+    let role_key = AdminKey::Role(role, address.clone());
+    let has = env.storage().persistent().has(&role_key);
+    if has {
+        extend_storage_ttl_for_key(env, &role_key);
+    }
+    has
 }
 
 pub fn require_admin(env: &Env) {
