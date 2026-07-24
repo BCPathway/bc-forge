@@ -2,8 +2,19 @@
 
 #![no_std]
 
+mod events;
+
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
+
+/// Errors returned by the admin access-control module.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum AdminError {
+    /// `revoke_role` was called for an (role, address) pair that was never granted.
+    RoleNotGranted = 1,
+}
 
 // IMPORTANT (storage migration):
 // `#[contracttype]` enums are serialized into XDR union tags. Adding a new
@@ -40,8 +51,20 @@ pub enum AdminKey {
 #[contracttype]
 pub enum Role {
     SuperAdmin,
+/// Roles recognized by the access-control layer.
+///
+/// New variants must be appended, never inserted, so that previously
+/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
+/// same variant they were written with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum Role {
+    /// Full administrative control granted via `set_admin`.
     Admin,
+    /// Permission to mint new tokens.
     Minter,
+    /// Highest-privilege role, reserved for owner-level operations.
+    SuperAdmin,
 }
 
 /// Top-level alias for the SuperAdmin role constant, so downstream
@@ -202,6 +225,18 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) {
     env.storage()
         .persistent()
         .remove(&AdminKey::Role(role, address.clone()));
+pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let key = AdminKey::Role(role, address.clone());
+    if !env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleNotGranted);
+    }
+
+    env.storage().persistent().remove(&key);
+    events::emit_role_revoked(env, &admin, role, address);
+    Ok(())
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
@@ -370,6 +405,8 @@ mod tests {
 
         pub fn set_super_admin(env: Env, super_admin: Address) {
             super::set_super_admin(&env, &super_admin);
+        pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+            super::revoke_role(&env, role, &address)
         }
     }
 
@@ -422,6 +459,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "invalid zero address")]
     fn test_grant_role_rejects_zero_address() {
+    fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
@@ -511,5 +549,16 @@ mod tests {
 
         super::revoke_role(&env, &Role::Minter, &minter);
         assert!(!client.has_role(&Role::Minter, &minter));
+        let super_admin_holder = Address::generate(&env);
+        let minter_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::SuperAdmin, &super_admin_holder);
+        client.grant_role(&Role::Minter, &minter_holder);
+
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_holder));
+        assert!(!client.has_role(&Role::Minter, &super_admin_holder));
+        assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
+        assert!(client.has_role(&Role::Minter, &minter_holder));
     }
 }
