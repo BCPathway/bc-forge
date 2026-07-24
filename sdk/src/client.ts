@@ -50,7 +50,7 @@ export interface TransactionResult {
   /** Transaction hash */
   hash: string;
   /** Return value from the contract (if any) */
-  returnValue?: any;
+  returnValue?: unknown;
 }
 
 export interface BatchMintRecipient {
@@ -115,7 +115,7 @@ export class bcForgeClient {
    */
   async getBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('balance', [addressToScVal(address)]);
-    return BigInt(scValToNative(result));
+    return BigInt(scValToNative(result) as string | number | bigint);
   }
 
   /**
@@ -125,7 +125,7 @@ export class bcForgeClient {
    */
   async getTotalSupply(): Promise<bigint> {
     const result = await this.queryContract('supply', []);
-    return BigInt(scValToNative(result));
+    return BigInt(scValToNative(result) as string | number | bigint);
   }
 
   /**
@@ -160,7 +160,7 @@ export class bcForgeClient {
       addressToScVal(owner),
       addressToScVal(spender),
     ]);
-    return BigInt(scValToNative(result));
+    return BigInt(scValToNative(result) as string | number | bigint);
   }
 
   /**
@@ -319,12 +319,7 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'transfer_from',
-      [
-        addressToScVal(spender),
-        addressToScVal(from),
-        addressToScVal(to),
-        i128ToScVal(amount),
-      ],
+      [addressToScVal(spender), addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       source,
     );
   }
@@ -382,11 +377,7 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'burn_from',
-      [
-        addressToScVal(spender),
-        addressToScVal(from),
-        i128ToScVal(amount),
-      ],
+      [addressToScVal(spender), addressToScVal(from), i128ToScVal(amount)],
       source,
     );
   }
@@ -487,12 +478,7 @@ export class bcForgeClient {
       this.networkPassphrase,
       this.contractId,
       'transfer_from',
-      [
-        addressToScVal(spender),
-        addressToScVal(from),
-        addressToScVal(to),
-        i128ToScVal(amount),
-      ],
+      [addressToScVal(spender), addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       sourcePublicKey,
     );
   }
@@ -563,11 +549,7 @@ export class bcForgeClient {
       this.networkPassphrase,
       this.contractId,
       'burn_from',
-      [
-        addressToScVal(spender),
-        addressToScVal(from),
-        i128ToScVal(amount),
-      ],
+      [addressToScVal(spender), addressToScVal(from), i128ToScVal(amount)],
       sourcePublicKey,
     );
   }
@@ -591,7 +573,7 @@ export class bcForgeClient {
    * @param sourcePublicKey - Public key for simulation context
    * @returns Simulation result with return value and cost
    */
-  async simulate(method: string, args: xdr.ScVal[], sourcePublicKey: string): Promise<any> {
+  async simulate(method: string, args: xdr.ScVal[], sourcePublicKey: string): Promise<unknown> {
     return simulateTransaction(
       this.rpcUrl,
       this.networkPassphrase,
@@ -610,7 +592,7 @@ export class bcForgeClient {
    * @param sourcePublicKey - Admin's public key
    * @returns Simulation result
    */
-  async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise<any> {
+  async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise<unknown> {
     return this.simulate('mint', [addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
   }
 
@@ -628,7 +610,7 @@ export class bcForgeClient {
     to: string,
     amount: bigint,
     sourcePublicKey: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     return this.simulate(
       'transfer',
       [addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
@@ -652,15 +634,10 @@ export class bcForgeClient {
     to: string,
     amount: bigint,
     sourcePublicKey: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     return this.simulate(
       'transfer_from',
-      [
-        addressToScVal(spender),
-        addressToScVal(from),
-        addressToScVal(to),
-        i128ToScVal(amount),
-      ],
+      [addressToScVal(spender), addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
       sourcePublicKey,
     );
   }
@@ -673,16 +650,8 @@ export class bcForgeClient {
    * @param sourcePublicKey   - Burner's public key
    * @returns Simulation result
    */
-  async simulateBurn(
-    from: string,
-    amount: bigint,
-    sourcePublicKey: string,
-  ): Promise<any> {
-    return this.simulate(
-      'burn',
-      [addressToScVal(from), i128ToScVal(amount)],
-      sourcePublicKey,
-    );
+  async simulateBurn(from: string, amount: bigint, sourcePublicKey: string): Promise<unknown> {
+    return this.simulate('burn', [addressToScVal(from), i128ToScVal(amount)], sourcePublicKey);
   }
 
   /**
@@ -699,14 +668,10 @@ export class bcForgeClient {
     from: string,
     amount: bigint,
     sourcePublicKey: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     return this.simulate(
       'burn_from',
-      [
-        addressToScVal(spender),
-        addressToScVal(from),
-        i128ToScVal(amount),
-      ],
+      [addressToScVal(spender), addressToScVal(from), i128ToScVal(amount)],
       sourcePublicKey,
     );
   }
@@ -728,7 +693,7 @@ export class bcForgeClient {
         }
 
         return simulated;
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SimulationError) throw error;
         throw new RPCError('RPC simulation failed', error);
       }
@@ -751,10 +716,7 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'set_admin_pool',
-      [
-        xdr.ScVal.scvVec(pool.map((addr) => addressToScVal(addr))),
-        u32ToScVal(threshold),
-      ],
+      [xdr.ScVal.scvVec(pool.map((addr) => addressToScVal(addr))), u32ToScVal(threshold)],
       source,
     );
   }
@@ -918,7 +880,7 @@ export class bcForgeClient {
   /**
    * Get recent events for the contract.
    */
-  async getEvents(startLedger?: number): Promise<any[]> {
+  async getEvents(startLedger?: number): Promise<unknown[]> {
     const response = await this.server.getEvents({
       startLedger: startLedger || (await this.server.getLatestLedger()).sequence - 1000,
       filters: [{ contractIds: [this.contractId], type: 'contract' }],
@@ -932,11 +894,15 @@ export class bcForgeClient {
    * @param cursor - Optional cursor for pagination (from previous response)
    * @returns Events response containing events and next cursor
    */
-  async pollEvents(cursor?: string): Promise<{ events: any[]; cursor: string }> {
-    const req: any = { filters: [{ contractIds: [this.contractId], type: 'contract' }] };
+  async pollEvents(cursor?: string): Promise<{ events: unknown[]; cursor: string }> {
+    const req: Record<string, unknown> = {
+      filters: [{ contractIds: [this.contractId], type: 'contract' }],
+    };
     if (cursor) req.cursor = cursor;
     else req.startLedger = 0;
-    const response = await this.server.getEvents(req);
+    const response = await this.server.getEvents(
+      req as Parameters<typeof this.server.getEvents>[0],
+    );
     return {
       events: response.events,
       cursor: response.cursor,
@@ -959,7 +925,7 @@ export class bcForgeClient {
    * Internal helper to execute a task with retries.
    */
   private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
-    let lastError: any;
+    let lastError: unknown;
     for (let i = 0; i < retries; i++) {
       try {
         return await fn();
@@ -1005,7 +971,7 @@ export class bcForgeClient {
         }
 
         return simulated.result.retval;
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SimulationError) throw error;
         throw new RPCError('RPC call failed', error);
       }
@@ -1038,14 +1004,14 @@ export class bcForgeClient {
           if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
             return {
               success: true,
-              hash: (response as any).hash,
+              hash: (response as unknown as { hash: string }).hash,
               returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
             };
           }
 
           return {
             success: false,
-            hash: (response as any).hash,
+            hash: (response as unknown as { hash: string }).hash,
           };
         }
 
@@ -1070,16 +1036,16 @@ export class bcForgeClient {
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {
             success: true,
-            hash: (response as any).hash,
+            hash: (response as unknown as { hash: string }).hash,
             returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
           };
         }
 
         return {
           success: false,
-          hash: (response as any).hash,
+          hash: (response as unknown as { hash: string }).hash,
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Don't retry on simulation errors (usually logic errors)
         if (error instanceof SimulationError) throw error;
         throw error;

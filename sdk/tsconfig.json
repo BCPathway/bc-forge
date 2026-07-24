@@ -15,7 +15,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "declarationDir": "./dist",
-    "types": ["jest", "node"],
+    "types": ["node", "jest"],
     "allowJs": true
   },
   "include": ["src/**/*"],
