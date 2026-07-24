@@ -124,10 +124,14 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
-pub fn grant_role(env: &Env, role: Role, address: &Address) {
+pub fn grant_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
-    if has_admin(env) {
-        require_admin(env);
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let key = AdminKey::Role(role, address.clone());
+    if env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleAlreadyGranted);
     }
 
     env.storage().persistent().set(&key, &true);
@@ -434,11 +438,11 @@ mod tests {
         let events = env.events().all();
         assert_eq!(
             events.len(),
-            1,
-            "expected exactly one event during revoke_role"
+            2,
+            "expected exactly two events during grant and revoke"
         );
 
-        let (emitter, topics, data) = events.get(0).unwrap();
+        let (emitter, topics, data) = events.get(1).unwrap();
         assert_eq!(emitter, contract_id);
 
         assert_eq!(
@@ -457,5 +461,92 @@ mod tests {
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
+    }
+
+    #[test]
+    fn test_revoke_role_removes_granted_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        client.revoke_role(&Role::Minter, &role_holder);
+        assert!(!client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_revoke_role_fails_when_role_was_never_granted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let never_granted = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        assert_eq!(
+            client.try_revoke_role(&Role::Minter, &never_granted),
+            Err(Ok(AdminError::RoleNotGranted))
+        );
+    }
+
+    #[test]
+    fn test_grant_role_adds_role_and_emits_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        // Verify event emission
+        let events = env.events().all();
+        let mut found_grant_event = false;
+        for event in events.iter() {
+            let (emitter, topics, data) = event;
+            if emitter == contract_id && topics.len() == 1 {
+                let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+                if topic0 == soroban_sdk::symbol_short!("role_grt") {
+                    found_grant_event = true;
+                    let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+                    let evt_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+                    let evt_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+                    let evt_addr: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+                    assert_eq!(evt_admin, admin);
+                    assert_eq!(evt_role, Role::Minter);
+                    assert_eq!(evt_addr, role_holder);
+                }
+            }
+        }
+        assert!(found_grant_event, "role_grt event not found");
+    }
+
+    #[test]
+    fn test_grant_role_fails_when_role_already_granted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+
+        assert_eq!(
+            client.try_grant_role(&Role::Minter, &role_holder),
+            Err(Ok(AdminError::RoleAlreadyGranted))
+        );
     }
 }
