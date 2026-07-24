@@ -1,13 +1,11 @@
 module.exports = {
-  preset: 'ts-jest',
+  preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
   // Limit Jest scans only to the src directory to ignore compiled js tests in dist
   roots: ['<rootDir>/src'],
-  // transform TS and JS with ts-jest so modern syntax in the SDK is transpiled
+  extensionsToTreatAsEsm: ['.ts'],
   transform: {
-    '^.+\\.(ts|tsx|js|jsx|mjs|cjs)$': 'ts-jest',
+    '^.+\\.tsx?$': ['ts-jest', { useESM: true, tsconfig: { module: 'ESNext' } }],
   },
-  // By default Jest ignores node_modules. Allow transforming @stellar/stellar-sdk
-  transformIgnorePatterns: ['/node_modules/(?!@stellar/stellar-sdk)'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
 };
