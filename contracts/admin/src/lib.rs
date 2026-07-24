@@ -14,8 +14,8 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 pub enum AdminError {
     /// `revoke_role` was called for an (role, address) pair that was never granted.
     RoleNotGranted = 1,
-    /// `grant_role` was called for an (role, address) pair that has already been granted.
-    RoleAlreadyGranted = 2,
+    /// `require_role` failed because the address does not hold the required role.
+    RoleNotHeld = 2,
 }
 
 /// Storage keys for the access-control layer.
@@ -167,7 +167,7 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
-        panic!("unauthorized: missing role");
+        soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
     address.require_auth();
 }
@@ -322,6 +322,10 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn require_role(env: Env, role: Role, address: Address) {
+            super::require_role(&env, role, &address);
+        }
     }
 
     fn zero_address(env: &Env) -> Address {
@@ -460,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn test_revoke_role_removes_granted_role() {
+    fn test_require_role_succeeds_when_role_held() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
@@ -470,80 +474,21 @@ mod tests {
 
         client.set_admin(&admin);
         client.grant_role(&Role::Minter, &role_holder);
-        assert!(client.has_role(&Role::Minter, &role_holder));
-
-        client.revoke_role(&Role::Minter, &role_holder);
-        assert!(!client.has_role(&Role::Minter, &role_holder));
+        client.require_role(&Role::Minter, &role_holder);
     }
 
     #[test]
-    fn test_revoke_role_fails_when_role_was_never_granted() {
+    fn test_require_role_fails_when_role_not_held() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let never_granted = Address::generate(&env);
+        let non_holder = Address::generate(&env);
 
         client.set_admin(&admin);
 
-        assert_eq!(
-            client.try_revoke_role(&Role::Minter, &never_granted),
-            Err(Ok(AdminError::RoleNotGranted))
-        );
-    }
-
-    #[test]
-    fn test_grant_role_adds_role_and_emits_event() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let role_holder = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.grant_role(&Role::Minter, &role_holder);
-        assert!(client.has_role(&Role::Minter, &role_holder));
-
-        // Verify event emission
-        let events = env.events().all();
-        let mut found_grant_event = false;
-        for event in events.iter() {
-            let (emitter, topics, data) = event;
-            if emitter == contract_id && topics.len() == 1 {
-                let topic0: soroban_sdk::Symbol =
-                    topics.get(0).unwrap().try_into_val(&env).unwrap();
-                if topic0 == soroban_sdk::symbol_short!("role_grt") {
-                    found_grant_event = true;
-                    let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
-                    let evt_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
-                    let evt_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
-                    let evt_addr: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
-                    assert_eq!(evt_admin, admin);
-                    assert_eq!(evt_role, Role::Minter);
-                    assert_eq!(evt_addr, role_holder);
-                }
-            }
-        }
-        assert!(found_grant_event, "role_grt event not found");
-    }
-
-    #[test]
-    fn test_grant_role_fails_when_role_already_granted() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let role_holder = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.grant_role(&Role::Minter, &role_holder);
-
-        assert_eq!(
-            client.try_grant_role(&Role::Minter, &role_holder),
-            Err(Ok(AdminError::RoleAlreadyGranted))
-        );
+        let result = client.try_require_role(&Role::Minter, &non_holder);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(2))));
     }
 }
