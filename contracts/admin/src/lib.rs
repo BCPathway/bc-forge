@@ -2,8 +2,19 @@
 
 #![no_std]
 
+mod events;
+
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
+
+/// Errors returned by the admin access-control module.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum AdminError {
+    /// `revoke_role` was called for an (role, address) pair that was never granted.
+    RoleNotGranted = 1,
+}
 
 /// Storage keys for the access-control layer.
 ///
@@ -122,12 +133,19 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
 }
 
-pub fn revoke_role(env: &Env, role: Role, address: &Address) {
+pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
-    require_admin(env);
-    env.storage()
-        .persistent()
-        .remove(&AdminKey::Role(role, address.clone()));
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let key = AdminKey::Role(role, address.clone());
+    if !env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleNotGranted);
+    }
+
+    env.storage().persistent().remove(&key);
+    events::emit_role_revoked(env, &admin, role, address);
+    Ok(())
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
@@ -293,8 +311,8 @@ mod tests {
             super::grant_role(&env, role, &address);
         }
 
-        pub fn revoke_role(env: Env, role: Role, address: Address) {
-            super::revoke_role(&env, role, &address);
+        pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+            super::revoke_role(&env, role, &address)
         }
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
