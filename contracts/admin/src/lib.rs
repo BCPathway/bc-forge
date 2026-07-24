@@ -488,9 +488,6 @@ mod tests {
         client.set_admin(&admin);
 
         let result = client.try_require_role(&Role::Minter, &non_holder);
-        assert_eq!(
-            result,
-            Err(Ok(soroban_sdk::Error::from_contract_error(2)))
-        );
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(2))));
     }
 }
