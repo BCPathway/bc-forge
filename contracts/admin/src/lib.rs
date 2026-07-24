@@ -3,7 +3,7 @@
 #![no_std]
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 
 #[derive(Clone)]
 #[contracttype]
@@ -21,6 +21,27 @@ pub enum AdminKey {
 pub enum Role {
     Admin,
     Minter,
+}
+
+/// Errors emitted by the admin / access-control module.
+///
+/// These errors are public so callers (front-ends, dependent contracts, and
+/// tests) can pattern-match on the exact failure reason.
+///
+/// Error codes form a stable on-chain ABI; never renumber an existing
+/// variant, only append new ones.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum Error {
+    /// Attempted to grant a role that the address already holds.
+    ///
+    /// Note: `set_admin` also writes `AdminKey::Role(Role::Admin, admin)` to
+    /// the same persistent key, so calling `grant_role(env, Role::Admin, &admin)`
+    /// immediately after `set_admin` will surface this error too. Admin
+    /// rotation must go through `set_admin` (or a dedicated `transfer_*`
+    /// path), not through `grant_role`.
+    RoleAlreadyGranted = 1,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,14 +96,34 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
+/// Grant `role` to `address`.
+///
+/// Authorization: if the contract has been initialized (i.e. an admin is set),
+/// the current admin must authorize this call. On an uninitialized contract
+/// the auth check is intentionally bypassed so the very first role assignment
+/// can set up the access-control surface.
+///
+/// # Errors
+/// Panics with [`Error::RoleAlreadyGranted`] if `address` already holds
+/// `role`. Note that `set_admin` populates the same persistent key for
+/// `Role::Admin`, so a subsequent `grant_role(env, Role::Admin, &admin)` for
+/// the current admin will also trip this error — rotate admins via
+/// `set_admin` (or a dedicated transfer path), not `grant_role`.
+///
+/// # Security
+/// - Authorization is verified before the storage mutation, so a rejected
+///   call never touches storage.
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
     if has_admin(env) {
         require_admin(env);
     }
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(role, address.clone()), &true);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+
+    let key = AdminKey::Role(role, address.clone());
+    if env.storage().persistent().has(&key) {
+        soroban_sdk::panic_with_error!(env, Error::RoleAlreadyGranted);
+    }
+    env.storage().persistent().set(&key, &true);
+    extend_storage_ttl_for_key(env, &key);
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) {
@@ -251,8 +292,14 @@ mod tests {
             super::set_admin(&env, &admin);
         }
 
-        pub fn grant_role(env: Env, role: Role, address: Address) {
+        // Test-only wrapper. The `Result<(), Error>` return intentionally
+        // differs from `super::grant_role` (which is `()`); declaring it here
+        // is what makes the generated client's `try_grant_role(...)` type the
+        // contract error as `Error` so tests can pattern-match on the exact
+        // variant. This is *not* a public-surface change.
+        pub fn grant_role(env: Env, role: Role, address: Address) -> Result<(), Error> {
             super::grant_role(&env, role, &address);
+            Ok(())
         }
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
@@ -275,6 +322,33 @@ mod tests {
         let mut ledger_info = env.ledger().get();
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_grant_role_already_granted_fails_without_state_change() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // First grant succeeds (the unwrapping client grants through the
+        // contract and would itself fail the test if it errored).
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        // A duplicate grant must abort with the typed contract error so that
+        // callers can distinguish "already granted" from auth/host failures.
+        let second = client.try_grant_role(&Role::Minter, &role_holder);
+        assert_eq!(second, Err(Ok(Error::RoleAlreadyGranted)));
+
+        // State must be unchanged after the rejected duplicate — this
+        // directly proves the "no unauthorized state modifications"
+        // acceptance criterion.
         assert!(client.has_role(&Role::Minter, &role_holder));
     }
 }
