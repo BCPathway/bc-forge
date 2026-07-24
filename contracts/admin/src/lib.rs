@@ -14,8 +14,10 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 pub enum AdminError {
     /// `revoke_role` was called for an (role, address) pair that was never granted.
     RoleNotGranted = 1,
+    /// `grant_role` was called for an (role, address) pair that has already been granted.
+    RoleAlreadyGranted = 2,
     /// `require_role` failed because the address does not hold the required role.
-    RoleNotHeld = 2,
+    RoleNotHeld = 3,
 }
 
 /// Storage keys for the access-control layer.
@@ -489,6 +491,6 @@ mod tests {
         client.set_admin(&admin);
 
         let result = client.try_require_role(&Role::Minter, &non_holder);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(2))));
+        assert_eq!(result, Err(Ok(AdminError::RoleNotHeld)));
     }
 }
