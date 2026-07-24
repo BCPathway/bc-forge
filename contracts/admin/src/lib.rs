@@ -328,6 +328,8 @@ mod tests {
 
         pub fn get_role_admin(env: Env, role: Role) -> Address {
             super::get_role_admin(&env, role)
+        }
+
         pub fn require_role(env: Env, role: Role, address: Address) {
             super::require_role(&env, role, &address);
         }
