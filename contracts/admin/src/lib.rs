@@ -21,6 +21,7 @@ pub enum AdminKey {
 pub enum Role {
     Admin,
     Minter,
+    Pauser,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -258,6 +259,14 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn revoke_role(env: Env, role: Role, address: Address) {
+            super::revoke_role(&env, role, &address);
+        }
+
+        pub fn require_role(env: Env, role: Role, address: Address) {
+            super::require_role(&env, role, &address);
+        }
     }
 
     #[test]
@@ -276,5 +285,67 @@ mod tests {
         ledger_info.sequence_number += 200;
         env.ledger().set(ledger_info);
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_grant_and_check_pauser_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Pauser, &pauser);
+
+        assert!(client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
+    fn test_pauser_role_does_not_grant_minter() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Pauser, &pauser);
+
+        assert!(client.has_role(&Role::Pauser, &pauser));
+        assert!(!client.has_role(&Role::Minter, &pauser));
+    }
+
+    #[test]
+    fn test_revoke_pauser_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Pauser, &pauser);
+        assert!(client.has_role(&Role::Pauser, &pauser));
+
+        client.revoke_role(&Role::Pauser, &pauser);
+        assert!(!client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
+    #[should_panic(expected = "unauthorized: missing role")]
+    fn test_require_pauser_role_panics_when_missing() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let non_pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.require_role(&Role::Pauser, &non_pauser);
     }
 }
