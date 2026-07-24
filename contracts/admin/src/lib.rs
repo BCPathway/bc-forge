@@ -301,8 +301,6 @@ mod tests {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::testutils::{Address as _, Ledger};
-    use soroban_sdk::{contract, contractimpl, Address, Env};
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
     #[contract]
