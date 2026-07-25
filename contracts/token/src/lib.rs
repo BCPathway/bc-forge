@@ -195,6 +195,7 @@ impl BcForgeToken {
         symbol: String,
     ) -> Result<(), TokenError> {
         if admin::has_admin(&env) {
+            admin::require_role(&env, admin::Role::Admin, &admin_address);
             return Err(TokenError::AlreadyInitialized);
         }
 
@@ -217,7 +218,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            current_admin.require_auth();
+            admin::require_role(&env, admin::Role::Admin, &current_admin);
 
             // Check rate limits for mint operation
             if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
@@ -233,7 +234,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            current_admin.require_auth();
+            admin::require_role(&env, admin::Role::Admin, &current_admin);
 
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
@@ -259,7 +260,7 @@ impl BcForgeToken {
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
-        current_admin.require_auth();
+        admin::require_role(&env, admin::Role::Admin, &current_admin);
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
@@ -268,6 +269,7 @@ impl BcForgeToken {
     pub fn pause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        admin::require_role(&env, admin::Role::Admin, &admin_address);
         bc_forge_lifecycle::pause(env.clone(), admin_address.clone());
         events::emit_paused(&env, &admin_address);
         Ok(())
@@ -276,6 +278,7 @@ impl BcForgeToken {
     pub fn unpause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        admin::require_role(&env, admin::Role::Admin, &admin_address);
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
         Ok(())

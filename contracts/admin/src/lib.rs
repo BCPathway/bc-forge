@@ -125,7 +125,7 @@ pub fn has_admin(env: &Env) -> bool {
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
     require_non_zero_address(env, address);
     if has_admin(env) {
-        get_admin(env).require_auth();
+        require_role(env, Role::Admin, &get_admin(env));
     }
     env.storage()
         .persistent()
@@ -136,7 +136,7 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
     let admin = get_admin(env);
-    admin.require_auth();
+    require_role(env, Role::Admin, &admin);
 
     let key = AdminKey::Role(role, address.clone());
     if !env.storage().persistent().has(&key) {
