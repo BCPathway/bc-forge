@@ -18,6 +18,8 @@ pub enum AdminError {
     RoleNotHeld = 2,
     /// `require_role_guard` failed: the caller is not authorized for this role.
     UnauthorizedRole = 3,
+    /// `grant_role` was called for an (role, address) pair that was already granted.
+    RoleAlreadyGranted = 4,
 }
 
 /// Storage keys for the access-control layer.
@@ -113,7 +115,7 @@ pub fn set_admin(env: &Env, admin: &Address) {
     }
     env.storage().instance().set(&AdminKey::Admin, admin);
     extend_instance_ttl(env);
-    _grant_role(env, admin, Role::Admin, admin);
+    _grant_role(env, admin, Role::Admin, admin).ok();
 }
 
 pub fn migrate_admin(env: &Env) {
@@ -143,7 +145,7 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
-pub fn grant_role(env: &Env, role: Role, address: &Address) {
+pub fn grant_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     let admin = if has_admin(env) {
         let admin = get_admin(env);
         admin.require_auth();
@@ -151,16 +153,24 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     } else {
         panic!("contract not initialized: admin not set");
     };
-    _grant_role(env, &admin, role, address);
+    _grant_role(env, &admin, role, address)
 }
 
-fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
+fn _grant_role(
+    env: &Env,
+    admin: &Address,
+    role: Role,
+    address: &Address,
+) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(role, address.clone()), &true);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+    let key = AdminKey::Role(role, address.clone());
+    if env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleAlreadyGranted);
+    }
+    env.storage().persistent().set(&key, &true);
+    extend_storage_ttl_for_key(env, &key);
     events::emit_role_granted(env, admin, role, address);
+    Ok(())
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
@@ -377,8 +387,8 @@ mod tests {
             super::set_admin(&env, &admin);
         }
 
-        pub fn grant_role(env: Env, role: Role, address: Address) {
-            super::grant_role(&env, role, &address);
+        pub fn grant_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+            super::grant_role(&env, role, &address)
         }
 
         pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
@@ -856,5 +866,44 @@ mod tests {
         assert!(!client.has_role(&Role::Admin, &zero_address(&env)));
         assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
         assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
+    }
+
+    #[test]
+    fn test_grant_role_fails_when_role_already_granted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+
+        let result = client.try_grant_role(&Role::Minter, &role_holder);
+        assert!(
+            result.is_err(),
+            "expected try_grant_role to fail when role is already granted"
+        );
+    }
+
+    #[test]
+    fn test_grant_role_succeeds_after_revoke() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        client.revoke_role(&Role::Minter, &role_holder);
+        assert!(!client.has_role(&Role::Minter, &role_holder));
+
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
     }
 }

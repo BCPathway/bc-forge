@@ -152,7 +152,7 @@ fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
     let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
 
     env.as_contract(&contract_id, || {
-        bc_forge_admin::grant_role(&env, bc_forge_admin::Role::SuperAdmin, &upgrader);
+        bc_forge_admin::grant_role(&env, bc_forge_admin::Role::SuperAdmin, &upgrader).unwrap();
     });
 
     // The guard passes for a SuperAdmin holder, so execution reaches
