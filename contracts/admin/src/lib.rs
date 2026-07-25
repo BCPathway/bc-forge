@@ -112,12 +112,8 @@ pub fn set_admin(env: &Env, admin: &Address) {
         events::emit_role_revoked(env, &old_admin, Role::Admin, &old_admin);
     }
     env.storage().instance().set(&AdminKey::Admin, admin);
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
-    events::emit_role_granted(env, admin, Role::Admin, admin);
+    _grant_role(env, admin, Role::Admin, admin);
 }
 
 pub fn migrate_admin(env: &Env) {
@@ -148,7 +144,6 @@ pub fn has_admin(env: &Env) -> bool {
 }
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
-    require_non_zero_address(env, address);
     let admin = if has_admin(env) {
         let admin = get_admin(env);
         admin.require_auth();
@@ -156,11 +151,16 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     } else {
         panic!("contract not initialized: admin not set");
     };
+    _grant_role(env, &admin, role, address);
+}
+
+fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
+    require_non_zero_address(env, address);
     env.storage()
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
-    events::emit_role_granted(env, &admin, role, address);
+    events::emit_role_granted(env, admin, role, address);
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
