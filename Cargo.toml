@@ -3,7 +3,9 @@ resolver = "2"
 
 members = [
     "contracts/*",
+    "e2e"
 ]
+default-members = ["contracts/*"]
 
 [profile.release]
 opt-level = "z"

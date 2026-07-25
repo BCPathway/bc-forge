@@ -1,10 +1,10 @@
-import { SorobanRpc, xdr, scValToNative } from '@stellar/stellar-sdk';
+import { rpc as SorobanRpc, xdr, scValToNative } from '@stellar/stellar-sdk';
+import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
-import { getPrismaClient } from './lib/prisma';
 
 dotenv.config();
 
-const prisma = getPrismaClient();
+const prisma = new PrismaClient();
 
 const RPC_URL = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
 const CONTRACT_ID = process.env.CONTRACT_ID;
@@ -12,8 +12,6 @@ const CONTRACT_ID = process.env.CONTRACT_ID;
 if (!CONTRACT_ID) {
   throw new Error('CONTRACT_ID environment variable is required');
 }
-
-const contractId = CONTRACT_ID;
 
 const server = new SorobanRpc.Server(RPC_URL);
 
@@ -46,7 +44,7 @@ export async function runIndexer() {
         filters: [
           {
             type: 'contract',
-            contractIds: [contractId],
+            contractIds: [CONTRACT_ID as string],
           },
         ],
       });
@@ -74,39 +72,40 @@ export async function runIndexer() {
 }
 
 async function processEvent(event: SorobanRpc.Api.EventResponse) {
-  const topic = scValToNative(event.topic[0]);
-  const data = event.value;
+  if (!event.topic || event.topic.length === 0) return;
+  const topic = scValToNative(event.topic[0] as any);
+  const data = event.value as any;
 
   try {
     switch (topic) {
       case 'mint': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (admin, to, amount, new_balance, new_supply)
         await prisma.mint.create({
           data: {
             to: decoded[1],
             amount: decoded[2].toString(),
             ledger: event.ledger,
-            txHash: event.id,
+            txHash: event.txHash,
           },
         });
         break;
       }
       case 'burn': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (from, amount, new_balance, new_supply)
         await prisma.burn.create({
           data: {
             from: decoded[0],
             amount: decoded[1].toString(),
             ledger: event.ledger,
-            txHash: event.id,
+            txHash: event.txHash,
           },
         });
         break;
       }
       case 'xfer': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (from, to, amount)
         await prisma.transfer.create({
           data: {
@@ -114,13 +113,13 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
             to: decoded[1],
             amount: decoded[2].toString(),
             ledger: event.ledger,
-            txHash: event.id,
+            txHash: event.txHash,
           },
         });
         break;
       }
       case 'xfer_frm': {
-        const decoded = scValToNative(data);
+        const decoded = scValToNative(data as any);
         // (spender, from, to, amount, remaining_allowance)
         await prisma.transfer.create({
           data: {
@@ -128,7 +127,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
             to: decoded[2],
             amount: decoded[3].toString(),
             ledger: event.ledger,
-            txHash: event.id,
+            txHash: event.txHash,
           },
         });
         break;

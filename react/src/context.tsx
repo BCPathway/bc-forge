@@ -7,13 +7,13 @@ interface bcForgeContextType {
 
 const bcForgeContext = createContext<bcForgeContextType>({ client: null });
 
-export interface bcForgeProviderProps {
+export interface BcForgeProviderProps {
   config: bcForgeClientConfig;
   children: ReactNode;
 }
 
-export const bcForgeProvider: React.FC<bcForgeProviderProps> = ({ config, children }) => {
-  const client = useMemo(() => new bcForgeClient(config), [config.rpcUrl, config.networkPassphrase, config.contractId]);
+export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({ config, children }) => {
+  const client = useMemo(() => new bcForgeClient(config), [config]);
 
   return (
     <bcForgeContext.Provider value={{ client }}>
@@ -25,7 +25,7 @@ export const bcForgeProvider: React.FC<bcForgeProviderProps> = ({ config, childr
 export const useBcForgeClient = () => {
   const context = useContext(bcForgeContext);
   if (!context.client) {
-    throw new Error('useBcForgeClient must be used within a bcForgeProvider');
+    throw new Error('useBcForgeClient must be used within a BcForgeProvider');
   }
   return context.client;
 };

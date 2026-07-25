@@ -15,6 +15,11 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **Total Supply Tracking** — Accurate supply updated on every mint/burn
 - **TypeScript SDK** — High-level client for all contract interactions
 - **Modular Architecture** — Separate crates for admin, lifecycle, and token logic
+- **Reentrancy Protection** — Comprehensive reentrancy guards for all state-modifying functions
+- **Rate Limiting** — Configurable global and per-address rate limits for mint and transfer operations
+- **Property-Based Fuzz Testing** — Enhanced proptest framework for invariant verification
+- **End-to-End Integration Tests** — Complete lifecycle testing on Stellar testnet
+- **Automatic Storage TTL Management** — Shared helper module extends Soroban contract and persistent storage TTL across calls
 
 ## 📁 Project Structure
 
@@ -27,12 +32,23 @@ bc-forge/
 │   ├── lifecycle/                # Pause/unpause lifecycle module
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
+│   ├── rate-limit/             # Rate limiting module
+│   ├── ttl/                      # Shared storage TTL helpers
+│   │   ├── Cargo.toml
+│   │   └── src/lib.rs
 │   └── token/                    # Core SEP-41 token contract
 │       ├── Cargo.toml
 │       └── src/
 │           ├── lib.rs            # Token contract implementation
 │           ├── events.rs         # Structured event emissions
+│           ├── proptest.rs       # Property-based fuzz testing
+│           ├── reentrancy_guard.rs # Reentrancy protection
+│           ├── rate_limit.rs     # Rate limit integration
 │           └── test.rs           # Unit tests
+├── e2e/                          # End-to-end integration tests
+│   ├── Cargo.toml              # E2E test dependencies
+│   ├── integration_test.rs     # Integration test suite
+│   └── README.md               # E2E test documentation
 ├── sdk/                          # TypeScript SDK
 │   ├── src/
 │   │   ├── index.ts              # Entry point
@@ -49,6 +65,16 @@ bc-forge/
 ├── LICENSE                       # MIT
 └── README.md                     # This file
 ```
+
+## 🧠 Storage TTL Strategy
+
+To keep Soroban contract state active, bc-forge now includes shared TTL logic that:
+
+- extends the contract instance TTL on every public token, admin, and lifecycle call
+- refreshes persistent storage TTL for balances, allowances, lockups, roles, and proposals
+- treats expired balances and allowances as zero instead of panicking
+
+This makes the system more resilient to Soroban storage expiry while preserving on-chain security semantics.
 
 ## 🛠️ Prerequisites
 
@@ -305,6 +331,14 @@ fix/<issue-number>-<description>         # Bug fixes
 docs/<issue-number>-<description>        # Documentation
 test/<issue-number>-<description>        # Test improvements
 ```
+
+## 🔒 Security
+
+Security is our top priority. If you discover a security vulnerability in bc-forge, please report it responsibly following our [Security Policy](SECURITY.md).
+
+**Important**: Do not report security vulnerabilities through GitHub issues, discussions, or other public channels. All security reports must be made privately to **security@bc-forge.org**.
+
+For more details about our vulnerability disclosure process, supported versions, scope, and response timeline, please review the [SECURITY.md](SECURITY.md) file.
 
 ## 📄 License
 

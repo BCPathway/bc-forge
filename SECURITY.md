@@ -1,31 +1,69 @@
 # Security Policy
 
+This document outlines how security issues should be reported and handled for the bc-forge project.
+
 ## Supported Versions
 
-We actively support the following versions of bc-forge:
+The following versions of bc-forge are currently supported for security updates:
 
-| Version | Supported |
-| --- | --- |
-| `main` branch | Yes |
-| Latest tagged release | Yes |
-| Older released versions | No |
-
-If a vulnerability affects an older release, please still report it. We may not ship fixes for every historical version, but we will review the impact and decide whether backporting is appropriate.
+| Version | Supported | Notes |
+|---------|-----------|-------|
+| 1.0.0   | ✅ Yes    | Current stable release |
+| < 1.0.0 | ❌ No     | Unsupported legacy versions |
 
 ## Reporting a Vulnerability
 
-Please report security issues privately so we can investigate before any public disclosure.
+**Security vulnerabilities must be reported privately.** Do not disclose them publicly or through GitHub issues, discussions, or other public channels.
 
-Preferred contact methods:
+To report a security vulnerability, please contact the maintainers directly at: **security@bc-forge.org**
 
-1. GitHub Security Advisories for a private report.
-2. GitHub Discussions for non-sensitive coordination and general security questions.
+When reporting, please include:
+- A clear description of the vulnerability
+- Steps to reproduce the issue
+- The affected component (Smart Contract, SDK, etc.)
+- Any relevant environment details
+- Your preferred contact method and response timeline
 
-Please include:
+We follow responsible disclosure practices and will work with you to understand and resolve the issue before public disclosure.
 
-- A clear description of the issue
-- The affected component and version, if known
-- Steps to reproduce
-- Any proof of concept, logs, or screenshots that help us confirm the impact
+## Scope
 
-We aim to acknowledge reports promptly and work with reporters toward a safe fix and coordinated disclosure.
+The following types of issues are in scope for security rewards and coordinated disclosure:
+
+- Smart contract bugs (logic errors, reentrancy, arithmetic overflows/underflows)
+- Access control bypasses (admin privilege escalation, unauthorized minting/transfers)
+- Token supply manipulation (minting without authorization, burning without proper checks)
+- SDK authentication or authorization flaws that could lead to unauthorized contract interactions
+- Anything that could result in loss of funds, protocol compromise, or financial impact
+
+## Out of Scope
+
+The following issues are explicitly out of scope:
+
+- Typos, grammatical errors, or minor documentation issues
+- User interface or user experience opinions and suggestions
+- Feature requests or enhancement proposals
+- Gas optimizations without security implications
+- Issues affecting unsupported versions
+- Theoretical vulnerabilities with no practical exploit path
+
+## Response Timeline
+
+We aim to respond to security reports in a timely manner:
+
+- **Acknowledgement**: Within 48 hours of receiving your report
+- **Initial triage**: Within 7 days to assess severity and impact
+- **Ongoing updates**: Regular communication about progress toward resolution
+- **Resolution**: We will work to fix confirmed vulnerabilities in a timeframe appropriate to their severity (critical issues typically addressed within 14 days)
+
+For critical vulnerabilities that pose immediate risk to users, we may coordinate emergency releases.
+
+## Responsible Disclosure
+
+We ask that researchers follow responsible disclosure practices:
+- Do not exploit vulnerabilities beyond what is necessary to demonstrate the issue
+- Do not share details with third parties until coordinated disclosure is complete
+- Allow us reasonable time to address the issue before public disclosure
+- Respect user privacy and data protection requirements
+
+We appreciate the security community's efforts to help keep bc-forge secure.

@@ -3,7 +3,7 @@
  */
 
 import {
-  SorobanRpc,
+  rpc as SorobanRpc,
   TransactionBuilder,
   Networks,
   xdr,
@@ -139,7 +139,7 @@ export function u32ToScVal(value: number): xdr.ScVal {
 /**
  * Converts an ScVal to a native JS type.
  */
-export function scValToNative(scVal: xdr.ScVal): any {
+export function scValToNative(scVal: xdr.ScVal): unknown {
   return sdkScValToNative(scVal);
 }
 

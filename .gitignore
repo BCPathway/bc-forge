@@ -1,7 +1,7 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is tracked for reproducible WASM builds (Soroban/Stellar requirement)
 
 # Soroban compiled output
 *.wasm
@@ -30,3 +30,4 @@ Thumbs.db
 
 # PR text
 issue_pr.txt
+.opencode

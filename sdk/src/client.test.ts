@@ -2,7 +2,8 @@
  * @bc-forge/sdk — Tests for offline transaction builder and simulation methods
  */
 
-import { bcForgeClient } from './client';
+import { jest } from '@jest/globals';
+import { bcForgeClient, type TransactionResult } from './client';
 import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
 
 // Mock data for testing
@@ -39,11 +40,13 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     it('should invoke batch_mint with object recipients', async () => {
       const recipientA = Keypair.random().publicKey();
       const recipientB = Keypair.random().publicKey();
-      const invokeContract = jest.fn().mockResolvedValue({
-        success: true,
-        hash: 'mock-hash',
-        returnValue: null,
-      });
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash',
+          returnValue: null,
+        }),
+      );
       (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
         invokeContract;
 
@@ -56,7 +59,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       );
 
       expect(invokeContract).toHaveBeenCalledTimes(1);
-      const [method, args, source] = invokeContract.mock.calls[0];
+      const [method, args, source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
       expect(method).toBe('batch_mint');
       expect(args).toHaveLength(2);
       expect(source).toBe(adminKeypair);
@@ -97,6 +100,20 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     });
   });
 
+  describe('buildTransferFromTx', () => {
+    it('should build an unsigned transferFrom transaction XDR', async () => {
+      expect(typeof client.buildTransferFromTx).toBe('function');
+      expect(client.buildTransferFromTx.length).toBe(5); // 5 parameters
+    });
+  });
+
+  describe('buildBurnFromTx', () => {
+    it('should build an unsigned burnFrom transaction XDR', async () => {
+      expect(typeof client.buildBurnFromTx).toBe('function');
+      expect(client.buildBurnFromTx.length).toBe(4); // 4 parameters
+    });
+  });
+
   describe('signTx', () => {
     it('should sign a transaction XDR', () => {
       // Create a mock unsigned transaction XDR (simplified for testing)
@@ -121,6 +138,21 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     it('should have simulateTransfer method', () => {
       expect(typeof client.simulateTransfer).toBe('function');
       expect(client.simulateTransfer.length).toBe(4); // 4 parameters
+    });
+
+    it('should have simulateBurn method', () => {
+      expect(typeof client.simulateBurn).toBe('function');
+      expect(client.simulateBurn.length).toBe(3); // 3 parameters
+    });
+
+    it('should have simulateTransferFrom method', () => {
+      expect(typeof client.simulateTransferFrom).toBe('function');
+      expect(client.simulateTransferFrom.length).toBe(5); // 5 parameters
+    });
+
+    it('should have simulateBurnFrom method', () => {
+      expect(typeof client.simulateBurnFrom).toBe('function');
+      expect(client.simulateBurnFrom.length).toBe(4); // 4 parameters
     });
   });
 });
