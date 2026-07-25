@@ -52,11 +52,16 @@ pub enum AdminKey {
 pub enum Role {
     /// Full administrative control granted via `set_admin`.
     Admin,
+<<<<<<< Updated upstream
     /// Permission to mint new tokens.
     Minter,
     /// Highest-privilege role, reserved for owner-level operations.
     SuperAdmin,
     /// Role allowing emergency pause and unpause operations.
+=======
+    SuperAdmin,
+    Minter,
+>>>>>>> Stashed changes
     Pauser,
 }
 
@@ -179,6 +184,7 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+<<<<<<< Updated upstream
     if is_zero_address(env, address) {
         return false;
     }
@@ -199,6 +205,19 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     events::emit_role_checked(env, address, role, has);
 
     has
+=======
+    env.storage()
+        .persistent()
+        .has(&AdminKey::Role(Role::Admin, address.clone()))
+        || env
+            .storage()
+            .persistent()
+            .has(&AdminKey::Role(Role::SuperAdmin, address.clone()))
+        || env
+            .storage()
+            .persistent()
+            .has(&AdminKey::Role(role, address.clone()))
+>>>>>>> Stashed changes
 }
 
 // /// Requires that the stored admin has authorized the current invocation.

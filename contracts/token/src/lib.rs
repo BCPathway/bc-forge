@@ -283,6 +283,7 @@ impl BcForgeToken {
         Ok(())
     }
 
+<<<<<<< Updated upstream
     /// Upgrades the contract's executable to `new_wasm_hash`.
     ///
     /// Gated to `Role::SuperAdmin` (or `Role::Admin`, which is a superset of
@@ -296,6 +297,19 @@ impl BcForgeToken {
         admin::require_super_admin(&env, &upgrader);
         events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+=======
+    pub fn pause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::pause(env.clone(), caller.clone());
+        events::emit_paused(&env, &caller);
+        Ok(())
+    }
+
+    pub fn unpause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::unpause(env.clone(), caller.clone());
+        events::emit_unpaused(&env, &caller);
+>>>>>>> Stashed changes
         Ok(())
     }
 }

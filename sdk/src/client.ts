@@ -63,8 +63,12 @@ export interface BatchMintRecipient {
 /** Role for role-based access control */
 export enum Role {
   Admin = 'Admin',
-  Minter = 'Minter',
   SuperAdmin = 'SuperAdmin',
+  Minter = 'Minter',
+<<<<<<< Updated upstream
+  SuperAdmin = 'SuperAdmin',
+=======
+>>>>>>> Stashed changes
   Pauser = 'Pauser',
 }
 
