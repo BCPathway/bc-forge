@@ -19,3 +19,14 @@ pub fn emit_role_revoked(env: &Env, admin: &Address, role: Role, address: &Addre
         (admin.clone(), role, address.clone()),
     );
 }
+
+/// Emitted when `has_role` checks whether an address holds a role.
+///
+/// Topics: `role_chk`
+/// Data:   `(address, role, result)`
+pub fn emit_role_checked(env: &Env, address: &Address, role: Role, result: bool) {
+    env.events().publish(
+        (symbol_short!("role_chk"),),
+        (address.clone(), role, result),
+    );
+}
