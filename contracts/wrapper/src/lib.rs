@@ -29,7 +29,10 @@ use soroban_sdk::{
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// The contract admin address.
+    /// Legacy admin slot — kept for ABI/storage compatibility. The contract
+    /// now reads/writes the admin via `bc_forge_admin::has_admin` /
+    /// `bc_forge_admin::get_admin`, so this variant is intentionally unused.
+    #[allow(dead_code)]
     Admin,
     /// The underlying SEP-41 token contract address being wrapped.
     UnderlyingToken,

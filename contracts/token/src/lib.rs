@@ -29,6 +29,7 @@ pub struct Recipient {
 pub enum DataKey {
     /// Admin address — stored here for caller convenience; delegates to AdminKey::Admin.
     Admin,
+    /// Legacy pending admin — unused; the transfer-ownership flow uses `admin::set_admin` directly.
     PendingAdmin,
     /// Spending allowance: (owner, spender) -> amount and expiration ledger.
     Allowance(Address, Address),

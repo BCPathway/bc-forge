@@ -16,6 +16,10 @@ use soroban_sdk::{
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
+    /// Legacy admin slot — kept for ABI/storage compatibility. The contract
+    /// now reads/writes the admin via `bc_forge_admin::has_admin` /
+    /// `bc_forge_admin::get_admin`, so this variant is intentionally unused.
+    #[allow(dead_code)]
     Admin,
     Token,
     NextScheduleId,
