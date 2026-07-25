@@ -27,11 +27,12 @@ pub struct Recipient {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// The contract admin address (singular).
+    /// Admin address — stored here for caller convenience; delegates to AdminKey::Admin.
     Admin,
     PendingAdmin,
-    /// Spending allowance: (owner, spender) -> amount and expiration.
+    /// Spending allowance: (owner, spender) -> amount and expiration ledger.
     Allowance(Address, Address),
+    /// Legacy allowance expiration — stored per-key; prefer AllowanceData struct.
     AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),

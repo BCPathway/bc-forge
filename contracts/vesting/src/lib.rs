@@ -71,9 +71,7 @@ pub struct VestingContract;
 
 impl VestingContract {
     fn ensure_initialized(env: &Env) -> Result<(), VestingError> {
-        if env.storage().instance().has(&DataKey::Admin)
-            && env.storage().instance().has(&DataKey::Token)
-        {
+        if admin::has_admin(env) && env.storage().instance().has(&DataKey::Token) {
             Ok(())
         } else {
             Err(VestingError::NotInitialized)
@@ -88,10 +86,7 @@ impl VestingContract {
     }
 
     fn read_admin(env: &Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("vesting admin not set")
+        admin::get_admin(env)
     }
 
     fn read_token(env: &Env) -> Address {
@@ -224,13 +219,10 @@ impl VestingContract {
         admin_address: Address,
         token: Address,
     ) -> Result<(), VestingError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if admin::has_admin(&env) {
             return Err(VestingError::AlreadyInitialized);
         }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Admin, &admin_address);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage()
             .instance()
