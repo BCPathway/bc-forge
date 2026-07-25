@@ -64,6 +64,8 @@ export interface BatchMintRecipient {
 export enum Role {
   Admin = 'Admin',
   Minter = 'Minter',
+  SuperAdmin = 'SuperAdmin',
+  Pauser = 'Pauser',
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
@@ -746,8 +748,8 @@ export class bcForgeClient {
     const actionScVal =
       'Mint' in action
         ? nativeToScVal({
-            Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
-          })
+          Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
+        })
         : nativeToScVal(action);
 
     return this.invokeContract(
