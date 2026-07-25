@@ -155,6 +155,7 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminE
         .set(&AdminKey::Role(role, address.clone()), &true);
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
     events::emit_role_granted(env, &admin, role, address);
+    Ok(())
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
