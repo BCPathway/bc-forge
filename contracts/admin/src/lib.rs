@@ -21,6 +21,7 @@ pub enum AdminKey {
 pub enum Role {
     Admin,
     Minter,
+    Pauser,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -111,6 +112,10 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
         panic!("unauthorized: missing role");
     }
     address.require_auth();
+}
+
+pub fn require_pauser(env: &Env, address: &Address) {
+    require_role(env, Role::Pauser, address)
 }
 
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
