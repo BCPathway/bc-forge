@@ -201,6 +201,15 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     has
 }
 
+// /// Requires that the stored admin has authorized the current invocation.
+// ///
+// /// # Panics
+// /// Panics if the caller is not the admin or if no admin is set.
+// pub fn require_admin(env: &Env) {
+//     let admin = get_admin(env);
+//     admin.require_auth();
+// }
+
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
