@@ -128,6 +128,7 @@ pub fn grant_role(env: &Env, role: Role, address: &Address) {
     let admin_set = has_admin(env);
     if admin_set {
         require_admin(env);
+    }
     require_non_zero_address(env, address);
     if has_admin(env) {
         get_admin(env).require_auth();
