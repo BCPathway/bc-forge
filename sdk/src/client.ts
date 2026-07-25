@@ -232,9 +232,8 @@ async getBalance(address: string): Promise<bigint> {
    * @param amount - Number of tokens to mint
    * @param source - Admin keypair
    */
-async mint(to: string, amount: bigint, source?: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('mint', [addressToScVal(source!.publicKey()), addressToScVal(to), i128ToScVal(amount)], source);
-  }
+async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('mint', [addressToScVal(source.publicKey()), addressToScVal(to), i128ToScVal(amount)], source);
   }
 
   /**
@@ -243,11 +242,11 @@ async mint(to: string, amount: bigint, source?: Keypair): Promise<TransactionRes
    * @param recipients - Array of recipient objects
    * @param source     - Admin keypair
    */
-  async batchMint(recipients: BatchMintRecipient[], source?: Keypair): Promise<TransactionResult> {
+  async batchMint(recipients: BatchMintRecipient[], source: Keypair): Promise<TransactionResult> {
     const recipientScVals = recipients.map(({ to, amount }) =>
       xdr.ScVal.scvMap([
         new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('address'),
+          key: xdr.ScVal.scvSymbol('to'),
           val: addressToScVal(to),
         }),
         new xdr.ScMapEntry({

@@ -30,7 +30,7 @@ pub enum DataKey {
     Admin,
     /// Pending admin address for a two-step ownership transfer.
     PendingAdmin,
-/// Spending allowance: (owner, spender) -> amount and expiration.
+    /// Spending allowance: (owner, spender) -> amount and expiration.
     Allowance(Address, Address),
     AllowanceExp(Address, Address),
     /// Token balance for an address.
@@ -103,7 +103,7 @@ impl BcForgeToken {
             .set(&DataKey::Balance(address.clone()), &amount);
     }
 
-fn read_supply(env: &Env) -> i128 {
+    fn read_supply(env: &Env) -> i128 {
         let key = DataKey::Supply;
         if env.storage().instance().has(&key) {
             ttl::extend_instance_ttl(env);
@@ -208,7 +208,7 @@ impl BcForgeToken {
         Ok(())
     }
 
-pub fn admin(env: Env) -> Address {
+    pub fn admin(env: Env) -> Address {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         admin::get_admin(&env)
     }

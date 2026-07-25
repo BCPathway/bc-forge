@@ -74,7 +74,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       if (firstRecipient === null) {
         throw new Error('Expected batch_mint recipients to be ScVal maps');
       }
-      expect(firstRecipient[0].key().sym().toString()).toBe('address');
+      expect(firstRecipient[0].key().sym().toString()).toBe('to');
       expect(firstRecipient[1].key().sym().toString()).toBe('amount');
     });
   });
