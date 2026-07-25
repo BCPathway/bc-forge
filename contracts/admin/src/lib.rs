@@ -55,6 +55,8 @@ pub enum Role {
     Minter,
     /// Highest-privilege role, reserved for owner-level operations.
     SuperAdmin,
+    /// Role allowing emergency pause and unpause operations.
+    Pauser,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -153,6 +155,9 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+    if is_zero_address(env, address) {
+        return false;
+    }
     env.storage()
         .persistent()
         .has(&AdminKey::Role(Role::Admin, address.clone()))
@@ -359,6 +364,48 @@ mod tests {
     }
 
     #[test]
+    fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin_holder = Address::generate(&env);
+        let minter_holder = Address::generate(&env);
+        let pauser_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let role_admin = client.get_role_admin(&Role::Admin);
+        assert_eq!(role_admin, admin);
+
+        let minter_admin = client.get_role_admin(&Role::Minter);
+        assert_eq!(minter_admin, admin);
+
+        let super_admin_admin = client.get_role_admin(&Role::SuperAdmin);
+        assert_eq!(super_admin_admin, admin);
+
+        let pauser_admin = client.get_role_admin(&Role::Pauser);
+        assert_eq!(pauser_admin, admin);
+
+        client.grant_role(&Role::SuperAdmin, &super_admin_holder);
+        client.grant_role(&Role::Minter, &minter_holder);
+        client.grant_role(&Role::Pauser, &pauser_holder);
+
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_holder));
+        assert!(!client.has_role(&Role::Minter, &super_admin_holder));
+        assert!(!client.has_role(&Role::Pauser, &super_admin_holder));
+
+        assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
+        assert!(client.has_role(&Role::Minter, &minter_holder));
+        assert!(!client.has_role(&Role::Pauser, &minter_holder));
+
+        assert!(!client.has_role(&Role::SuperAdmin, &pauser_holder));
+        assert!(!client.has_role(&Role::Minter, &pauser_holder));
+        assert!(client.has_role(&Role::Pauser, &pauser_holder));
+    }
+
+    #[test]
     fn test_grant_role_extends_ttl_across_ledger_advances() {
         let env = Env::default();
         env.mock_all_auths();
@@ -389,35 +436,6 @@ mod tests {
         let role_admin = client.get_role_admin(&Role::Admin);
         assert_eq!(role_admin, admin);
     }
-
-    #[test]
-    fn test_super_admin_role_storage_does_not_overlap_with_other_roles() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-
-        let role_admin = client.get_role_admin(&Role::Admin);
-        assert_eq!(role_admin, admin);
-
-        let minter_admin = client.get_role_admin(&Role::Minter);
-        assert_eq!(minter_admin, admin);
-        let super_admin_holder = Address::generate(&env);
-        let minter_holder = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.grant_role(&Role::SuperAdmin, &super_admin_holder);
-        client.grant_role(&Role::Minter, &minter_holder);
-
-        assert!(client.has_role(&Role::SuperAdmin, &super_admin_holder));
-        assert!(!client.has_role(&Role::Minter, &super_admin_holder));
-        assert!(!client.has_role(&Role::SuperAdmin, &minter_holder));
-        assert!(client.has_role(&Role::Minter, &minter_holder));
-    }
-
     #[test]
     #[should_panic(expected = "invalid address: zero address not allowed")]
     fn test_set_admin_rejects_zero_address() {
@@ -468,6 +486,23 @@ mod tests {
         assert!(!client.has_role(&Role::Admin, &zero_address(&env)));
         assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
         assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
+        assert!(!client.has_role(&Role::Pauser, &zero_address(&env)));
+    }
+
+    #[test]
+    fn test_pauser_role_assignment() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        assert!(!client.has_role(&Role::Pauser, &pauser));
+
+        client.grant_role(&Role::Pauser, &pauser);
+        assert!(client.has_role(&Role::Pauser, &pauser));
     }
 
     #[test]
