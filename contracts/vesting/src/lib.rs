@@ -250,7 +250,7 @@ impl VestingContract {
     ) -> Result<u64, VestingError> {
         Self::ensure_initialized(&env)?;
         let admin_address = Self::read_admin(&env);
-        admin::require_role(&env, admin::Role::Admin, &admin_address);
+        admin::require_role_guard(&env, admin::Role::Admin, &admin_address);
 
         if amount <= 0 {
             return Err(VestingError::InvalidAmount);
@@ -328,7 +328,7 @@ impl VestingContract {
     pub fn revoke(env: Env, schedule_id: u64) -> Result<i128, VestingError> {
         Self::ensure_initialized(&env)?;
         let admin_address = Self::read_admin(&env);
-        admin::require_role(&env, admin::Role::Admin, &admin_address);
+        admin::require_role_guard(&env, admin::Role::Admin, &admin_address);
 
         let current_ledger = env.ledger().sequence();
         let mut stored = Self::read_schedule(&env, schedule_id)?;

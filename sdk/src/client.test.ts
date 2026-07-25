@@ -40,13 +40,13 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     it('should invoke batch_mint with object recipients', async () => {
       const recipientA = Keypair.random().publicKey();
       const recipientB = Keypair.random().publicKey();
-      const invokeContract = jest
-        .fn<(method: string, args: xdr.ScVal[], source?: Keypair) => Promise<TransactionResult>>()
-        .mockResolvedValue({
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
           success: true,
           hash: 'mock-hash',
           returnValue: null,
-        });
+        }),
+      );
       (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
         invokeContract;
 
@@ -59,7 +59,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       );
 
       expect(invokeContract).toHaveBeenCalledTimes(1);
-      const [method, args, source] = invokeContract.mock.calls[0];
+      const [method, args, source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
       expect(method).toBe('batch_mint');
       expect(args).toHaveLength(1);
       expect(source).toBe(adminKeypair);

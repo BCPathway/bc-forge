@@ -14,7 +14,9 @@ mod test;
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
+};
 
 #[contracttype]
 pub struct Recipient {
@@ -218,7 +220,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            admin::require_role(&env, admin::Role::Admin, &current_admin);
+            admin::require_minter(&env, &current_admin);
 
             // Check rate limits for mint operation
             if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
@@ -234,7 +236,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            admin::require_role(&env, admin::Role::Admin, &current_admin);
+            admin::require_minter(&env, &current_admin);
 
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
@@ -260,7 +262,7 @@ impl BcForgeToken {
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
-        admin::require_role(&env, admin::Role::Admin, &current_admin);
+        admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
@@ -281,6 +283,22 @@ impl BcForgeToken {
         admin::require_role(&env, admin::Role::Admin, &admin_address);
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
+        Ok(())
+    }
+
+    /// Upgrades the contract's executable to `new_wasm_hash`.
+    ///
+    /// Gated to `Role::SuperAdmin` (or `Role::Admin`, which is a superset of
+    /// every role) since a protocol upgrade can replace all contract logic.
+    pub fn upgrade(
+        env: Env,
+        upgrader: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &upgrader);
+        events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
 }
