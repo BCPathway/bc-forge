@@ -1,4 +1,4 @@
-use crate::{BcForgeToken, BcForgeTokenClient};
+use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::{symbol_short, Address, BytesN, Env, String, TryIntoVal, Val};
@@ -160,4 +160,74 @@ fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
     // installed contract at an all-zero wasm hash. That panic proves the
     // guard let the call through instead of blocking it.
     client.upgrade(&upgrader, &new_wasm_hash);
+}
+
+#[test]
+fn test_default_max_supply_is_unlimited() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    assert_eq!(client.get_max_supply(), i128::MAX);
+}
+
+#[test]
+fn test_set_max_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    client.set_max_supply(&admin, &1_000);
+    assert_eq!(client.get_max_supply(), 1_000);
+}
+
+#[test]
+fn test_mint_beyond_max_supply_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+
+    client.set_max_supply(&admin, &500);
+
+    // Mint up to the cap
+    assert!(client.try_mint(&user, &400).is_ok());
+
+    // Mint remaining
+    assert!(client.try_mint(&user, &100).is_ok());
+    assert_eq!(client.supply(), 500);
+
+    // Mint beyond cap should fail
+    let result = client.try_mint(&user, &1);
+    assert_eq!(result, Err(Ok(TokenError::MaxSupplyExceeded)));
+}
+
+#[test]
+fn test_batch_mint_beyond_max_supply_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+
+    client.set_max_supply(&admin, &500);
+
+    let recipients = soroban_sdk::vec![
+        &env,
+        crate::Recipient {
+            to: user.clone(),
+            amount: 600,
+        },
+    ];
+
+    let result = client.try_batch_mint(&recipients);
+    assert_eq!(result, Err(Ok(TokenError::MaxSupplyExceeded)));
+}
+
+#[test]
+fn test_set_max_supply_rejects_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    let result = client.try_set_max_supply(&admin, &-1);
+    assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
 }
