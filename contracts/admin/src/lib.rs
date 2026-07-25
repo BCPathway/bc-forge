@@ -532,8 +532,8 @@ mod tests {
         let role_holder = Address::generate(&env);
 
         client.set_admin(&admin);
-        assert_eq!(client.grant_role(&Role::Minter, &role_holder), Ok(()));
-        assert_eq!(client.revoke_role(&Role::Minter, &role_holder), Ok(()));
+        client.grant_role(&Role::Minter, &role_holder);
+        client.revoke_role(&Role::Minter, &role_holder);
 
         let events = env.events().all();
         assert_eq!(
@@ -573,7 +573,7 @@ mod tests {
         let role_holder = Address::generate(&env);
 
         client.set_admin(&admin);
-        assert_eq!(client.grant_role(&Role::Minter, &role_holder), Ok(()));
+        client.grant_role(&Role::Minter, &role_holder);
         assert!(client.has_role(&Role::Minter, &role_holder));
 
         let events = env.events().all();
@@ -608,13 +608,11 @@ mod tests {
         let role_holder = Address::generate(&env);
 
         client.set_admin(&admin);
-        assert_eq!(client.grant_role(&Role::Minter, &role_holder), Ok(()));
+        client.grant_role(&Role::Minter, &role_holder);
 
         assert_eq!(
             client.try_grant_role(&Role::Minter, &role_holder),
-            Err(Ok(soroban_sdk::Error::from_contract_error(
-                AdminError::RoleAlreadyGranted as u32
-            )))
+            Err(Ok(AdminError::RoleAlreadyGranted))
         );
     }
 
@@ -628,10 +626,10 @@ mod tests {
         let role_holder = Address::generate(&env);
 
         client.set_admin(&admin);
-        assert_eq!(client.grant_role(&Role::Minter, &role_holder), Ok(()));
+        client.grant_role(&Role::Minter, &role_holder);
         assert!(client.has_role(&Role::Minter, &role_holder));
 
-        assert_eq!(client.revoke_role(&Role::Minter, &role_holder), Ok(()));
+        client.revoke_role(&Role::Minter, &role_holder);
         assert!(!client.has_role(&Role::Minter, &role_holder));
     }
 
@@ -648,9 +646,7 @@ mod tests {
 
         assert_eq!(
             client.try_revoke_role(&Role::Minter, &never_granted),
-            Err(Ok(soroban_sdk::Error::from_contract_error(
-                AdminError::RoleNotGranted as u32
-            )))
+            Err(Ok(AdminError::RoleNotGranted))
         );
     }
 
@@ -664,7 +660,7 @@ mod tests {
         let role_holder = Address::generate(&env);
 
         client.set_admin(&admin);
-        assert_eq!(client.grant_role(&Role::Minter, &role_holder), Ok(()));
+        client.grant_role(&Role::Minter, &role_holder);
         client.require_role(&Role::Minter, &role_holder);
     }
 
