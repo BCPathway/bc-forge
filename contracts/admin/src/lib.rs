@@ -39,6 +39,7 @@ pub enum AdminKey {
     Threshold,
     Proposal(u64),
     ProposalIdCounter,
+    SuperAdmin(Address),
 }
 
 /// Roles recognized by the access-control layer.
@@ -108,6 +109,15 @@ pub fn set_admin(env: &Env, admin: &Address) {
         .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
     extend_instance_ttl(env);
     extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
+}
+
+pub fn migrate_admin(env: &Env) {
+    if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
+        env.storage()
+            .persistent()
+            .set(&AdminKey::SuperAdmin(admin.clone()), &true);
+        extend_storage_ttl_for_key(env, &AdminKey::SuperAdmin(admin));
+    }
 }
 
 pub fn get_admin(env: &Env) -> Address {
