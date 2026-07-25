@@ -109,6 +109,7 @@ pub fn set_admin(env: &Env, admin: &Address) {
         .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
     extend_instance_ttl(env);
     extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
+    events::emit_role_granted(env, admin, Role::Admin, admin);
 }
 
 pub fn migrate_admin(env: &Env) {
@@ -140,13 +141,18 @@ pub fn has_admin(env: &Env) -> bool {
 
 pub fn grant_role(env: &Env, role: Role, address: &Address) {
     require_non_zero_address(env, address);
-    if has_admin(env) {
-        get_admin(env).require_auth();
-    }
+    let admin = if has_admin(env) {
+        let admin = get_admin(env);
+        admin.require_auth();
+        admin
+    } else {
+        panic!("contract not initialized: admin not set");
+    };
     env.storage()
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
     extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+    events::emit_role_granted(env, &admin, role, address);
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
@@ -562,6 +568,44 @@ mod tests {
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
+    }
+
+    #[test]
+    fn test_set_admin_emits_role_granted_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let events = env.events().all();
+        assert_eq!(
+            events.len(),
+            1,
+            "expected exactly one event during set_admin"
+        );
+
+        let (emitter, topics, data) = events.get(0).unwrap();
+        assert_eq!(emitter, contract_id);
+
+        assert_eq!(
+            topics.len(),
+            1,
+            "topics should contain only the role_grnt symbol"
+        );
+        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic0, soroban_sdk::symbol_short!("role_grnt"));
+
+        // Data must be (admin, role, address) as Vec<Val>
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_role, Role::Admin);
+        assert_eq!(event_address, admin);
     }
 
     #[test]
