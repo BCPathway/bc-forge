@@ -217,7 +217,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            current_admin.require_auth();
+            admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
 
             // Check rate limits for mint operation
             if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
@@ -233,7 +233,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            current_admin.require_auth();
+            admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
 
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
@@ -259,7 +259,7 @@ impl BcForgeToken {
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
-        current_admin.require_auth();
+        admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
