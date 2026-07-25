@@ -796,7 +796,11 @@ export class bcForgeClient {
   async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'grant_role',
-      [nativeToScVal(Role.Minter), addressToScVal(address)],
+      [
+        addressToScVal(source.publicKey()),
+        nativeToScVal(Role.Minter),
+        addressToScVal(address),
+      ],
       source,
     );
   }
