@@ -176,6 +176,10 @@ pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
+pub fn require_minter(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Minter, address);
+}
+
 pub fn get_role_admin(env: &Env, _role: Role) -> Address {
     let admin = get_admin(env);
     extend_instance_ttl(env);
@@ -343,6 +347,10 @@ mod tests {
 
         pub fn require_role_guard(env: Env, role: Role, address: Address) {
             super::require_role_guard(&env, role, &address);
+        }
+
+        pub fn require_minter(env: Env, address: Address) {
+            super::require_minter(&env, &address);
         }
     }
 
@@ -558,6 +566,47 @@ mod tests {
         client.set_admin(&admin);
 
         let result = client.try_require_role_guard(&Role::Minter, &non_holder);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    fn test_require_minter_succeeds_when_minter_role_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::Minter, &minter);
+        client.require_minter(&minter);
+    }
+
+    #[test]
+    fn test_require_minter_succeeds_for_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.require_minter(&admin);
+    }
+
+    #[test]
+    fn test_require_minter_fails_when_not_minter() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let non_minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_minter(&non_minter);
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
     }
 }
