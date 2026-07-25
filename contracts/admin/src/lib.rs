@@ -17,9 +17,9 @@ pub enum AdminError {
     /// `grant_role` was called for an (role, address) pair that has already been granted.
     RoleAlreadyGranted = 2,
     /// `require_role` failed because the address does not hold the required role.
-    RoleNotHeld = 2,
+    RoleNotHeld = 3,
     /// `require_role_guard` failed: the caller is not authorized for this role.
-    UnauthorizedRole = 3,
+    UnauthorizedRole = 4,
 }
 
 /// Storage keys for the access-control layer.
@@ -714,7 +714,12 @@ mod tests {
         client.set_admin(&admin);
 
         let result = client.try_require_role_guard(&Role::Minter, &non_holder);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(
+                AdminError::UnauthorizedRole as u32
+            )))
+        );
     }
 
     #[test]
@@ -755,6 +760,11 @@ mod tests {
         client.set_admin(&admin);
 
         let result = client.try_require_minter(&non_minter);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(
+                AdminError::UnauthorizedRole as u32
+            )))
+        );
     }
 }
