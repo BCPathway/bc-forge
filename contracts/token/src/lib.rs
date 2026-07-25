@@ -293,7 +293,7 @@ impl BcForgeToken {
         new_wasm_hash: BytesN<32>,
     ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        admin::require_role(&env, admin::Role::SuperAdmin, &upgrader);
+        admin::require_super_admin(&env, &upgrader);
         events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
