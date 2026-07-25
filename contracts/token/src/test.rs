@@ -151,9 +151,18 @@ fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
     let upgrader = Address::generate(&env);
     let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
 
+    // Grant SuperAdmin directly via storage write instead of calling
+    // bc_forge_admin::grant_role inside `as_contract`. The grant_role
+    // helper calls `admin.require_auth()` which fails inside an
+    // `as_contract` block because there is no invocation frame for the
+    // host-level auth check (even with mock_all_auths). Writing the
+    // storage entry directly achieves the same state without the auth
+    // gate.
     env.as_contract(&contract_id, || {
-        bc_forge_admin::grant_role(&env, bc_forge_admin::Role::SuperAdmin, &upgrader)
-            .unwrap();
+        env.storage().persistent().set(
+            &bc_forge_admin::AdminKey::Role(bc_forge_admin::Role::SuperAdmin, upgrader.clone()),
+            &true,
+        );
     });
 
     // The guard passes for a SuperAdmin holder, so execution reaches
