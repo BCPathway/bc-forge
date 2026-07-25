@@ -207,7 +207,7 @@ export class bcForgeClient {
    * @param source - Admin keypair
    */
   async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
+    return this.invokeContract('mint', [addressToScVal(source.publicKey()), addressToScVal(to), i128ToScVal(amount)], source);
   }
 
   /**
@@ -230,7 +230,7 @@ export class bcForgeClient {
       ]),
     );
     const recipientsVec = xdr.ScVal.scvVec(recipientScVals);
-    return this.invokeContract('batch_mint', [recipientsVec], source);
+    return this.invokeContract('batch_mint', [addressToScVal(source.publicKey()), recipientsVec], source);
   }
 
   /**
@@ -364,7 +364,7 @@ export class bcForgeClient {
       this.networkPassphrase,
       this.contractId,
       'mint',
-      [addressToScVal(to), i128ToScVal(amount)],
+      [addressToScVal(sourcePublicKey), addressToScVal(to), i128ToScVal(amount)],
       sourcePublicKey,
     );
   }
@@ -479,7 +479,7 @@ export class bcForgeClient {
    * @returns Simulation result
    */
   async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise<any> {
-    return this.simulate('mint', [addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
+    return this.simulate('mint', [addressToScVal(sourcePublicKey), addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
   }
 
   /**

@@ -24,11 +24,11 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address, Address) {
 fn test_transfer() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _) = setup(&env);
+    let (client, admin, _) = setup(&env);
     let from = Address::generate(&env);
     let to = Address::generate(&env);
 
-    client.mint(&from, &1000);
+    client.mint(&admin, &from, &1000);
     client.transfer(&from, &to, &300);
 
     assert_eq!(client.balance(&from), 700);
@@ -40,13 +40,13 @@ fn test_transfer() {
 fn test_batch_transfer_multiple_recipients() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _) = setup(&env);
+    let (client, admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient_a = Address::generate(&env);
     let recipient_b = Address::generate(&env);
     let recipient_c = Address::generate(&env);
 
-    client.mint(&from, &1000);
+    client.mint(&admin, &from, &1000);
 
     let recipients = vec![
         &env,
@@ -131,11 +131,11 @@ fn test_transfer_ownership_alias_proposes() {
 fn test_batch_transfer_rejects_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _) = setup(&env);
+    let (client, admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
-    client.mint(&from, &1000);
+    client.mint(&admin, &from, &1000);
 
     let recipients = vec![&env, (recipient.clone(), 0_i128)];
     assert_eq!(
@@ -152,12 +152,12 @@ fn test_batch_transfer_rejects_invalid_amount() {
 fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _) = setup(&env);
+    let (client, admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient_a = Address::generate(&env);
     let recipient_b = Address::generate(&env);
 
-    client.mint(&from, &100);
+    client.mint(&admin, &from, &100);
 
     let recipients = vec![
         &env,
@@ -179,11 +179,11 @@ fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
 fn test_batch_transfer_while_paused_returns_error() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _) = setup(&env);
+    let (client, admin, _) = setup(&env);
     let from = Address::generate(&env);
     let recipient = Address::generate(&env);
 
-    client.mint(&from, &100);
+    client.mint(&admin, &from, &100);
     client.pause();
 
     let recipients: Vec<(Address, i128)> = vec![&env, (recipient, 10_i128)];

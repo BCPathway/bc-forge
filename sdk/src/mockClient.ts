@@ -44,14 +44,14 @@ export class MockBcForgeClient {
     return this.accounts[owner]?.allowances[spender] ?? 0n;
   }
 
-  async mint(to: string, amount: bigint): Promise<TransactionResult> {
+  async mint(from: string, to: string, amount: bigint): Promise<TransactionResult> {
     if (!this.accounts[to]) this.accounts[to] = { balance: 0n, allowances: {} };
     this.accounts[to].balance += amount;
     this.totalSupply += amount;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
-  async batchMint(recipients: BatchMintRecipient[]): Promise<TransactionResult> {
+  async batchMint(from: string, recipients: BatchMintRecipient[]): Promise<TransactionResult> {
     if (recipients.length === 0) {
       return { success: false, hash: 'mock-hash', returnValue: 'Recipients list cannot be empty' };
     }

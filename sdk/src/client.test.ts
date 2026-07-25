@@ -58,10 +58,10 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(invokeContract).toHaveBeenCalledTimes(1);
       const [method, args, source] = invokeContract.mock.calls[0];
       expect(method).toBe('batch_mint');
-      expect(args).toHaveLength(1);
+      expect(args).toHaveLength(2);
       expect(source).toBe(adminKeypair);
 
-      const recipientsVec = args[0] as xdr.ScVal;
+      const [minterArg, recipientsVec] = args as [string, xdr.ScVal];
       const recipients = recipientsVec.vec();
       if (recipients === null) {
         throw new Error('Expected batch_mint argument to be an ScVal vec');

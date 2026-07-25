@@ -94,6 +94,11 @@ pub fn require_admin(env: &Env) {
     admin.require_auth();
 }
 
+/// Requires that the caller has the Minter role and has authorized the invocation.
+pub fn require_minter(env: &Env, minter: &Address) {
+    require_role(env, Role::Minter, minter);
+}
+
 /// Requires that the specified address has the given role and has authorized the invocation.
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {

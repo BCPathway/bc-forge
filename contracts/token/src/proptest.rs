@@ -34,11 +34,11 @@ proptest! {
         initial_mint in 1..i128::MAX / 4,
         transfer_amount in 1..i128::MAX / 4
     ) {
-        let (env, client, _) = setup_test_env();
+        let (env, client, admin) = setup_test_env();
         let user_a = Address::generate(&env);
         let user_b = Address::generate(&env);
 
-        client.mint(&user_a, &initial_mint);
+        client.mint(&admin, &user_a, &initial_mint);
         let initial_supply = client.supply();
 
         // If transfer_amount > initial_mint, it should panic (insufficient balance)
@@ -61,11 +61,11 @@ proptest! {
         mint2 in 1..i128::MAX / 4,
         burn_amount in 1..i128::MAX / 4
     ) {
-        let (env, client, _) = setup_test_env();
+        let (env, client, admin) = setup_test_env();
         let user = Address::generate(&env);
 
-        client.mint(&user, &mint1);
-        client.mint(&user, &mint2);
+        client.mint(&admin, &user, &mint1);
+        client.mint(&admin, &user, &mint2);
         
         let expected_supply = mint1 + mint2;
         assert_eq!(client.supply(), expected_supply);
@@ -89,12 +89,12 @@ proptest! {
         t2 in 1..i128::MAX / 8,
         t3 in 1..i128::MAX / 8
     ) {
-        let (env, client, _) = setup_test_env();
+        let (env, client, admin) = setup_test_env();
         let user_a = Address::generate(&env);
         let user_b = Address::generate(&env);
         let user_c = Address::generate(&env);
 
-        client.mint(&user_a, &initial_balance);
+        client.mint(&admin, &user_a, &initial_balance);
 
         // Simple sequence of transfers
         let amounts = [t1, t2, t3];

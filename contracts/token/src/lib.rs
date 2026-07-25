@@ -228,19 +228,17 @@ impl BcForgeToken {
         Ok(())
     }
 
-    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+    pub fn mint(env: Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
-        let current_admin = Self::read_admin(&env)?;
-        current_admin.require_auth();
-        Self::internal_mint(&env, &current_admin, &to, amount)
+        admin::require_minter(&env, &minter);
+        Self::internal_mint(&env, &minter, &to, amount)
     }
 
-    pub fn batch_mint(env: Env, recipients: Vec<Recipient>) -> Result<(), TokenError> {
+    pub fn batch_mint(env: Env, minter: Address, recipients: Vec<Recipient>) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
-        let current_admin = Self::read_admin(&env)?;
-        current_admin.require_auth();
+        admin::require_minter(&env, &minter);
 
         for i in 0..recipients.len() {
             let recipient = recipients.get(i).expect("recipient should exist");
@@ -251,7 +249,7 @@ impl BcForgeToken {
 
         for i in 0..recipients.len() {
             let recipient = recipients.get(i).expect("recipient should exist");
-            Self::internal_mint(&env, &current_admin, &recipient.address, recipient.amount)?;
+            Self::internal_mint(&env, &minter, &recipient.address, recipient.amount)?;
         }
 
         Ok(())
