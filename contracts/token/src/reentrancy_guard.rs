@@ -81,9 +81,19 @@ macro_rules! reentrancy_guard {
         let guard =
             $crate::reentrancy_guard::ReentrancyGuard::new(soroban_sdk::Symbol::new($env, $key));
         guard.require_not_entered($env);
-        #[allow(clippy::redundant_closure_call)]
-        let result = (|| $body)();
-        guard.exit($env);
-        result
+        struct GuardExit<'a> {
+            env: &'a soroban_sdk::Env,
+            guard: &'a $crate::reentrancy_guard::ReentrancyGuard,
+        }
+        impl<'a> Drop for GuardExit<'a> {
+            fn drop(&mut self) {
+                self.guard.exit(self.env);
+            }
+        }
+        let _exit_guard = GuardExit {
+            env: $env,
+            guard: &guard,
+        };
+        $body
     }};
 }

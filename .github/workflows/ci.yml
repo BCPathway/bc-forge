@@ -39,7 +39,7 @@ jobs:
         run: cargo test --all
 
       - name: Install Tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
 
       - name: Run coverage (Tarpaulin)
         run: cargo tarpaulin --workspace --out Html --out Xml --out Stdout
@@ -54,7 +54,7 @@ jobs:
       - name: Build WASM
         env:
           CARGO_INCREMENTAL: 0
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: cargo build --workspace --exclude bc-forge-e2e-tests --target wasm32-unknown-unknown --release
 
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────
   sdk:
