@@ -65,6 +65,8 @@ export interface BatchMintRecipient {
 export enum Role {
   Admin = 'Admin',
   Minter = 'Minter',
+  SuperAdmin = 'SuperAdmin',
+  Pauser = 'Pauser',
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
@@ -748,8 +750,8 @@ async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise
     const actionScVal =
       'Mint' in action
         ? nativeToScVal({
-            Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
-          })
+          Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
+        })
         : nativeToScVal(action);
 
     return this.invokeContract(

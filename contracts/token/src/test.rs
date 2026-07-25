@@ -58,11 +58,12 @@ fn test_initialize_emits_correct_event() {
     let events = env.events().all();
     assert_eq!(
         events.len(),
-        1,
-        "expected exactly one event during initialization"
+        2,
+        "expected exactly two events during initialization"
     );
 
-    let (emitter, topics, data) = events.get(0).unwrap();
+    // The init event is emitted second (after set_admin emits RoleGranted)
+    let (emitter, topics, data) = events.get(1).unwrap();
 
     assert_eq!(emitter, contract_id);
 
