@@ -149,6 +149,10 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+    if is_zero_address(env, address) {
+        return false;
+    }
+
     env.storage()
         .persistent()
         .has(&AdminKey::Role(Role::Admin, address.clone()))
@@ -163,6 +167,23 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
         panic!("unauthorized: missing role");
     }
     address.require_auth();
+}
+
+pub fn get_role_admin(env: &Env, _role: Role) -> Address {
+    let admin = get_admin(env);
+    extend_instance_ttl(env);
+    admin
+}
+
+pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
+    if !has_role(env, role, address) {
+        panic!("unauthorized: missing role");
+    }
+    address.require_auth();
+}
+
+pub fn require_minter(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Minter, address);
 }
 
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
@@ -326,6 +347,22 @@ mod tests {
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
+        }
+
+        pub fn get_role_admin(env: Env, role: Role) -> Address {
+            super::get_role_admin(&env, role)
+        }
+
+        pub fn require_role(env: Env, role: Role, address: Address) {
+            super::require_role(&env, role, &address);
+        }
+
+        pub fn require_role_guard(env: Env, role: Role, address: Address) {
+            super::require_role_guard(&env, role, &address);
+        }
+
+        pub fn require_minter(env: Env, address: Address) {
+            super::require_minter(&env, &address);
         }
 
         pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
