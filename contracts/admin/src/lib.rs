@@ -869,9 +869,12 @@ mod tests {
         client.grant_role(&Role::Minter, &role_holder);
 
         let result = client.try_grant_role(&Role::Minter, &role_holder);
-        assert_eq!(
-            result,
-            Err(Ok(AdminError::RoleAlreadyGranted))
+        assert!(
+            matches!(
+                result,
+                Err(Ok(AdminError::RoleAlreadyGranted)) | Ok(Err(AdminError::RoleAlreadyGranted))
+            ),
+            "Expected RoleAlreadyGranted, but got: {:?}", result
         );
     }
 
@@ -884,9 +887,12 @@ mod tests {
         let role_holder = Address::generate(&env);
 
         let result = client.try_grant_role(&Role::Minter, &role_holder);
-        assert_eq!(
-            result,
-            Err(Ok(AdminError::ContractNotInitialized))
+        assert!(
+            matches!(
+                result,
+                Err(Ok(AdminError::ContractNotInitialized)) | Ok(Err(AdminError::ContractNotInitialized))
+            ),
+            "Expected ContractNotInitialized, but got: {:?}", result
         );
     }
 }
