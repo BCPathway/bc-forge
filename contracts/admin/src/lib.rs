@@ -186,8 +186,24 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     let admin_key = AdminKey::Role(Role::Admin, address.clone());
     let role_key = AdminKey::Role(role, address.clone());
 
-    let has =
-        env.storage().persistent().has(&admin_key) || env.storage().persistent().has(&role_key);
+    // Admin implicitly holds all roles, and the SuperAdmin migration
+    // mapping (AdminKey::SuperAdmin) must also be consulted so that
+    // addresses migrated via `migrate_admin` retain SuperAdmin access
+    // even after the Admin role is transferred to a new address.
+    let has_super_admin_mapping = if role == Role::SuperAdmin {
+        let super_admin_key = AdminKey::SuperAdmin(address.clone());
+        let has = env.storage().persistent().has(&super_admin_key);
+        if has {
+            extend_storage_ttl_for_key(env, &super_admin_key);
+        }
+        has
+    } else {
+        false
+    };
+
+    let has = env.storage().persistent().has(&admin_key)
+        || env.storage().persistent().has(&role_key)
+        || has_super_admin_mapping;
 
     if env.storage().persistent().has(&admin_key) {
         extend_storage_ttl_for_key(env, &admin_key);
@@ -230,6 +246,10 @@ pub fn require_minter(env: &Env, address: &Address) {
 
 pub fn require_super_admin(env: &Env, address: &Address) {
     require_role_guard(env, Role::SuperAdmin, address);
+}
+
+pub fn require_pauser(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Pauser, address);
 }
 
 pub fn get_role_admin(env: &Env, _role: Role) -> Address {
@@ -407,6 +427,10 @@ mod tests {
 
         pub fn require_super_admin(env: Env, address: Address) {
             super::require_super_admin(&env, &address);
+        }
+
+        pub fn require_pauser(env: Env, address: Address) {
+            super::require_pauser(&env, &address);
         }
     }
 
