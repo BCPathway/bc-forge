@@ -212,19 +212,27 @@ proptest! {
         assert_eq!(new_supply, initial_supply + mint_amount);
         assert_eq!(client.balance(&user_b), mint_amount);
 
+        let mut expected_a = initial_mint;
+        let mut expected_b = mint_amount;
+        let mut current_supply = new_supply;
+
         // Transfer
-        if transfer_amount <= initial_mint {
+        if transfer_amount <= expected_a {
             client.transfer(&user_a, &user_b, &transfer_amount);
-            assert_eq!(client.balance(&user_a), initial_mint - transfer_amount);
-            assert_eq!(client.balance(&user_b), mint_amount + transfer_amount);
-            assert_eq!(client.supply(), new_supply);
+            expected_a -= transfer_amount;
+            expected_b += transfer_amount;
+            assert_eq!(client.balance(&user_a), expected_a);
+            assert_eq!(client.balance(&user_b), expected_b);
+            assert_eq!(client.supply(), current_supply);
         }
 
         // Burn
-        if burn_amount <= initial_mint {
+        if burn_amount <= expected_a {
             client.burn(&user_a, &burn_amount);
-            assert_eq!(client.balance(&user_a), initial_mint - transfer_amount - burn_amount);
-            assert_eq!(client.supply(), new_supply - burn_amount);
+            expected_a -= burn_amount;
+            current_supply -= burn_amount;
+            assert_eq!(client.balance(&user_a), expected_a);
+            assert_eq!(client.supply(), current_supply);
         }
     }
 }
