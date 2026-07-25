@@ -146,7 +146,7 @@ fn test_upgrade_rejects_caller_without_super_admin_role() {
 fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin) = setup(&env);
+    let (client, admin) = setup(&env);
     let contract_id = client.address.clone();
     let upgrader = Address::generate(&env);
     let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
