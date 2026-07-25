@@ -1,7 +1,6 @@
 //! Reusable access-control primitives for Soroban contracts.
 
 #![no_std]
-#![allow(clippy::manual_assert)]
 
 mod events;
 

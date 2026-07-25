@@ -3,7 +3,6 @@
 //! A compact SEP-41-compatible token used by the vesting contract tests.
 
 #![no_std]
-#![allow(clippy::manual_assert)]
 
 mod events;
 mod rate_limit;
@@ -183,9 +182,10 @@ impl BcForgeToken {
         Self::write_balance(env, to, new_balance);
         Self::write_supply(env, new_supply);
         events::emit_mint(env, admin_address, to, amount, new_balance, new_supply);
-Ok(())
+        Ok(())
     }
 }
+
 #[contractimpl]
 impl BcForgeToken {
     pub fn initialize(
@@ -290,7 +290,7 @@ impl BcForgeToken {
         Self::read_supply(&env)
     }
 
-pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
+    pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
         current_admin.require_auth();
@@ -298,6 +298,7 @@ pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
     }
+
     pub fn pause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
@@ -377,7 +378,7 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
-let allowance_data = Self::read_allowance_data(&env, &from, &spender);
+        let allowance_data = Self::read_allowance_data(&env, &from, &spender);
         Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
         Self::write_allowance(
             &env,
