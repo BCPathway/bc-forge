@@ -217,7 +217,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
+            admin::require_minter(&env, &current_admin);
 
             // Check rate limits for mint operation
             if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
@@ -233,7 +233,7 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             let current_admin = admin::get_admin(&env);
-            admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
+            admin::require_minter(&env, &current_admin);
 
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
