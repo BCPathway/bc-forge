@@ -103,6 +103,10 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
             .has(&AdminKey::Role(role, address.clone()))
 }
 
+pub fn get_role_admin(env: &Env, _role: Role) -> Address {
+    get_admin(env)
+}
+
 pub fn require_admin(env: &Env) {
     get_admin(env).require_auth();
 }
@@ -263,6 +267,29 @@ mod tests {
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
             super::has_role(&env, role, &address)
         }
+
+        pub fn get_role_admin(env: Env, role: Role) -> Address {
+            super::get_role_admin(&env, role)
+        }
+    }
+
+    #[test]
+    fn test_get_role_admin_returns_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let result = client.get_role_admin(&Role::Minter);
+        assert_eq!(result, admin);
+
+        let result = client.get_role_admin(&Role::Pauser);
+        assert_eq!(result, admin);
+
+        let result = client.get_role_admin(&Role::Admin);
+        assert_eq!(result, admin);
     }
 
     #[test]
