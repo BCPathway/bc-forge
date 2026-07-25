@@ -1,6 +1,6 @@
 //! Structured event emission for the token contract.
 
-use soroban_sdk::{symbol_short, Address, Env, String};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
 
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
     env.events().publish(
@@ -77,4 +77,11 @@ pub fn emit_paused(env: &Env, admin: &Address) {
 pub fn emit_unpaused(env: &Env, admin: &Address) {
     env.events()
         .publish((symbol_short!("unpause"),), (admin.clone(),));
+}
+
+pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) {
+    env.events().publish(
+        (symbol_short!("upgraded"),),
+        (upgrader.clone(), new_wasm_hash.clone()),
+    );
 }
