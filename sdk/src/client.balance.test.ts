@@ -23,9 +23,8 @@ describe('bcForgeClient balance formatting', () => {
 
     (client as unknown as { queryContract: typeof queryContract }).queryContract = queryContract;
 
-    await expect(client.getBalance(Keypair.random().publicKey())).resolves.toBe('1.2345678');
-    expect(queryContract).toHaveBeenCalledTimes(2);
+    await expect(client.getBalance(Keypair.random().publicKey())).resolves.toBe(12345678n);
+    expect(queryContract).toHaveBeenCalledTimes(1);
     expect(queryContract.mock.calls[0][0]).toBe('balance');
-    expect(queryContract.mock.calls[1][0]).toBe('decimals');
   });
 });

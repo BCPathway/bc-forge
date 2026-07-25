@@ -170,7 +170,7 @@ fn test_batch_transfer_while_paused_returns_error() {
     client.mint(&admin, &from, &100);
     client.pause();
 
-    let recipients: Vec<(Address, i128)> = vec![&env, (recipient, 10_i128)];
+    let recipients = vec![&env, (recipient, 10_i128)];
     let result = client.try_batch_transfer(&from, &recipients);
     assert!(result.is_err());
 }

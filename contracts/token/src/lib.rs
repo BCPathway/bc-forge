@@ -227,7 +227,11 @@ impl BcForgeToken {
         })
     }
 
-    pub fn batch_mint(env: Env, minter: Address, recipients: Vec<Recipient>) -> Result<(), TokenError> {
+    pub fn batch_mint(
+        env: Env,
+        minter: Address,
+        recipients: Vec<Recipient>,
+    ) -> Result<(), TokenError> {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
@@ -248,7 +252,11 @@ impl BcForgeToken {
         })
     }
 
-    pub fn batch_transfer(env: Env, from: Address, recipients: Vec<(Address, i128)>) -> Result<(), TokenError> {
+    pub fn batch_transfer(
+        env: Env,
+        from: Address,
+        recipients: Vec<(Address, i128)>,
+    ) -> Result<(), TokenError> {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "batch_transfer_guard", {
             Self::ensure_initialized(&env)?;
