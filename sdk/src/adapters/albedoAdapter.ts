@@ -23,7 +23,8 @@ export class AlbedoAdapter implements WalletAdapter {
     const albedo = (globalThis as any).albedo;
     if (!albedo) throw new Error('Albedo not available in this environment');
     // Albedo's signing interface varies; attempt common patterns
-    const signed = await albedo.signTransaction?.(unsignedTxXdr) || (await albedo.signTx?.(unsignedTxXdr));
+    const signed =
+      (await albedo.signTransaction?.(unsignedTxXdr)) || (await albedo.signTx?.(unsignedTxXdr));
     if (!signed) throw new Error('Albedo failed to sign transaction');
     return signed.xdr || signed;
   }
