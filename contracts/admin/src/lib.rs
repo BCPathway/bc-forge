@@ -857,4 +857,45 @@ mod tests {
         assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
         assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
     }
+
+    #[test]
+    fn test_require_super_admin_succeeds_when_super_admin_role_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&Role::SuperAdmin, &super_admin);
+        client.require_super_admin(&super_admin);
+    }
+
+    #[test]
+    fn test_require_super_admin_succeeds_for_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.require_super_admin(&admin);
+    }
+
+    #[test]
+    fn test_require_super_admin_fails_with_unauthorized_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_super_admin(&unauthorized);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
 }
