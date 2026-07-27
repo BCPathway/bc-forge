@@ -175,6 +175,9 @@ fn test_batch_transfer_while_paused_returns_error() {
     let recipients = vec![&env, (recipient, 10_i128)];
     let result = client.try_batch_transfer(&from, &recipients);
     assert!(result.is_err());
+}
+
+#[test]
 fn test_stranger_lacks_super_admin_role_required_by_upgrade_guard() {
     // Soroban's test host converts any escaped guest panic into a generic
     // "Error(Contract, #N)" report, discarding the original panic message
@@ -264,14 +267,14 @@ fn test_mint_beyond_max_supply_fails() {
     client.set_max_supply(&admin, &500);
 
     // Mint up to the cap
-    assert!(client.try_mint(&user, &400).is_ok());
+    assert!(client.try_mint(&admin, &user, &400).is_ok());
 
     // Mint remaining
-    assert!(client.try_mint(&user, &100).is_ok());
+    assert!(client.try_mint(&admin, &user, &100).is_ok());
     assert_eq!(client.supply(), 500);
 
     // Mint beyond cap should fail
-    let result = client.try_mint(&user, &1);
+    let result = client.try_mint(&admin, &user, &1);
     assert_eq!(result, Err(Ok(TokenError::MaxSupplyExceeded)));
 }
 
@@ -292,7 +295,7 @@ fn test_batch_mint_beyond_max_supply_fails() {
         },
     ];
 
-    let result = client.try_batch_mint(&recipients);
+    let result = client.try_batch_mint(&admin, &recipients);
     assert_eq!(result, Err(Ok(TokenError::MaxSupplyExceeded)));
 }
 

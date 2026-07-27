@@ -179,9 +179,9 @@ async getBalance(address: string): Promise<bigint> {
    *
    * @param addresses - Array of Stellar public keys
    * @param batchSize - Maximum number of concurrent queries (default: 10)
-   * @returns Array of balances as decimal strings.
+   * @returns Array of balances as bigint values.
    */
-  async getBalances(addresses: string[], batchSize: number = 10): Promise<string[]> {
+  async getBalances(addresses: string[], batchSize: number = 10): Promise<bigint[]> {
     return this.executeBatch(addresses, (addr) => this.getBalance(addr), batchSize);
   }
 

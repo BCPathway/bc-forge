@@ -1,4 +1,4 @@
-import { Keypair, SorobanRpc, xdr } from '@stellar/stellar-sdk';
+import { Keypair, rpc as SorobanRpc, xdr } from '@stellar/stellar-sdk';
 import { bcForgeClient } from './client';
 import * as utils from './utils';
 
