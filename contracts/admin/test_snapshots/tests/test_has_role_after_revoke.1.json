@@ -16,6 +16,9 @@
               "function_name": "grant_role",
               "args": [
                 {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
                   "vec": [
                     {
                       "symbol": "Minter"

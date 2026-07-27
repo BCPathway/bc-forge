@@ -85,3 +85,10 @@ pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) 
         (upgrader.clone(), new_wasm_hash.clone()),
     );
 }
+
+pub fn emit_max_supply_changed(env: &Env, caller: &Address, new_max_supply: i128) {
+    env.events().publish(
+        (symbol_short!("max_sup"),),
+        (caller.clone(), new_max_supply),
+    );
+}
