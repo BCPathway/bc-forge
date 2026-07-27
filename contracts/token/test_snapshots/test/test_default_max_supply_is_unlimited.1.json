@@ -5,6 +5,7 @@
   },
   "auth": [
     [],
+    [],
     []
   ],
   "ledger": {
@@ -127,12 +128,27 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "MaxSupply"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 9223372036854775807,
+                            "lo": 18446744073709551615
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Name"
                             }
                           ]
                         },
                         "val": {
-                          "string": "bc-forge-deploy"
+                          "string": "bc-forge Token"
                         }
                       },
                       {
@@ -159,7 +175,7 @@
                           ]
                         },
                         "val": {
-                          "string": "SFGD"
+                          "string": "SFG"
                         }
                       }
                     ]
@@ -195,73 +211,5 @@
       ]
     ]
   },
-  "events": [
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "role_grnt"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Admin"
-                    }
-                  ]
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "init"
-              },
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "u32": 7
-                },
-                {
-                  "string": "bc-forge-deploy"
-                },
-                {
-                  "string": "SFGD"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    }
-  ]
+  "events": []
 }
