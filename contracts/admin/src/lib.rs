@@ -248,9 +248,10 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 }
 
 /// Requires that the caller has the Minter role and has authorized the invocation.
-pub fn require_minter(env: &Env, minter: &Address) {
-    require_role(env, Role::Minter, minter);
+pub fn require_minter(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Minter, address);
 }
+
 // /// Requires that the stored admin has authorized the current invocation.
 // ///
 // /// # Panics
@@ -272,10 +273,6 @@ pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
         soroban_sdk::panic_with_error!(env, AdminError::UnauthorizedRole);
     }
     address.require_auth();
-}
-
-pub fn require_minter(env: &Env, address: &Address) {
-    require_role_guard(env, Role::Minter, address);
 }
 
 pub fn require_super_admin(env: &Env, address: &Address) {

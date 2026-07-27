@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { Keypair, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import { bcForgeClient } from './client';
 
@@ -9,7 +10,8 @@ describe('bcForgeClient balance formatting', () => {
       contractId: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
     });
 
-    const queryContract = jest.fn().mockImplementation(async (method: string) => {
+    const queryContract = jest.fn(async (...args: unknown[]) => {
+      const method = args[0] as string;
       if (method === 'balance') {
         return nativeToScVal(12345678n, { type: 'i128' });
       }
