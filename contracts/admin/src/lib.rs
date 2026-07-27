@@ -12,9 +12,9 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 #[contracterror]
 #[repr(u32)]
 pub enum AdminError {
-    /// `revoke_role` was called for an (role, address) pair that was never granted.
+    /// A role operation was attempted for an (role, address) pair that was never granted.
     RoleNotGranted = 1,
-    /// `require_role` failed because the address does not hold the required role.
+    /// An address does not hold the required role (e.g. revoke_role called on non-holder).
     RoleNotHeld = 2,
     /// `require_role_guard` failed: the caller is not authorized for this role.
     UnauthorizedRole = 3,
@@ -213,7 +213,7 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
 
     let key = AdminKey::Role(role, address.clone());
     if !env.storage().persistent().has(&key) {
-        return Err(AdminError::RoleNotGranted);
+        return Err(AdminError::RoleNotHeld);
     }
 
     env.storage().persistent().remove(&key);
