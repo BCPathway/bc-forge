@@ -356,6 +356,7 @@ impl BcForgeToken {
     pub fn pause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        admin::require_pauser(&env, &admin_address);
         bc_forge_lifecycle::pause(env.clone(), admin_address.clone());
         events::emit_paused(&env, &admin_address);
         Ok(())
@@ -364,6 +365,7 @@ impl BcForgeToken {
     pub fn unpause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        admin::require_pauser(&env, &admin_address);
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
         Ok(())

@@ -396,17 +396,19 @@ impl WrapperContract {
         Self::read_supply(&env)
     }
 
-    /// Pause all wrap/unwrap and transfer operations. Admin-only.
+    /// Pause all wrap/unwrap and transfer operations. Pauser-only.
     pub fn pause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
+        admin::require_pauser(&env, &current_admin);
         bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
         events::emit_paused(&env, &current_admin);
         Ok(())
     }
 
-    /// Unpause operations. Admin-only.
+    /// Unpause operations. Pauser-only.
     pub fn unpause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
+        admin::require_pauser(&env, &current_admin);
         bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
         events::emit_unpaused(&env, &current_admin);
         Ok(())
