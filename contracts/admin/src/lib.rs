@@ -247,10 +247,6 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     has
 }
 
-/// Requires that the caller has the Minter role and has authorized the invocation.
-pub fn require_minter(env: &Env, minter: &Address) {
-    require_role(env, Role::Minter, minter);
-}
 // /// Requires that the stored admin has authorized the current invocation.
 // ///
 // /// # Panics
@@ -706,6 +702,48 @@ mod tests {
 
         client.grant_role(&admin, &Role::Pauser, &pauser);
         assert!(client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
+    fn test_non_super_admin_cannot_grant_pauser() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let caller = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // A non-privileged caller cannot grant the Pauser role — the call is
+        // rejected with AdminError::UnauthorizedRole (error code 3).
+        let result = client.try_grant_role(&caller, &Role::Pauser, &target);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        // The target address must not hold Pauser.
+        assert!(!client.has_role(&Role::Pauser, &target));
+
+        // Edge case: even an address that holds a different role (Minter) but
+        // not SuperAdmin also cannot grant Pauser.
+        let minter = Address::generate(&env);
+        let another_target = Address::generate(&env);
+        client.grant_role(&admin, &Role::Minter, &minter);
+        assert!(client.has_role(&Role::Minter, &minter));
+
+        let result = client.try_grant_role(&minter, &Role::Pauser, &another_target);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Pauser, &another_target));
+
+        // Edge case: an address that itself holds Pauser (but not SuperAdmin)
+        // cannot grant Pauser to a different address.
+        let pauser_holder = Address::generate(&env);
+        let yet_another = Address::generate(&env);
+        client.grant_role(&admin, &Role::Pauser, &pauser_holder);
+        assert!(client.has_role(&Role::Pauser, &pauser_holder));
+
+        let result = client.try_grant_role(&pauser_holder, &Role::Pauser, &yet_another);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Pauser, &yet_another));
     }
 
     #[test]
