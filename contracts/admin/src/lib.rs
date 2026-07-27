@@ -67,6 +67,27 @@ pub enum Role {
     Pauser,
 }
 
+/// Errors emitted by the admin / access-control module.
+///
+/// These errors are public so callers (front-ends, dependent contracts, and
+/// tests) can pattern-match on the exact failure reason.
+///
+/// Error codes form a stable on-chain ABI; never renumber an existing
+/// variant, only append new ones.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[contracterror]
+#[repr(u32)]
+pub enum Error {
+    /// Attempted to grant a role that the address already holds.
+    ///
+    /// Note: `set_admin` also writes `AdminKey::Role(Role::Admin, admin)` to
+    /// the same persistent key, so calling `grant_role(env, Role::Admin, &admin)`
+    /// immediately after `set_admin` will surface this error too. Admin
+    /// rotation must go through `set_admin` (or a dedicated `transfer_*`
+    /// path), not through `grant_role`.
+    RoleAlreadyGranted = 1,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
@@ -629,6 +650,24 @@ mod tests {
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // First grant succeeds (the unwrapping client grants through the
+        // contract and would itself fail the test if it errored).
+        client.grant_role(&Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        // A duplicate grant must abort with the typed contract error so that
+        // callers can distinguish "already granted" from auth/host failures.
+        let second = client.try_grant_role(&Role::Minter, &role_holder);
+        assert_eq!(second, Err(Ok(Error::RoleAlreadyGranted)));
+
+        // State must be unchanged after the rejected duplicate — this
+        // directly proves the "no unauthorized state modifications"
+        // acceptance criterion.
+        assert!(client.has_role(&Role::Minter, &role_holder));
 
         client.set_admin(&admin);
 
