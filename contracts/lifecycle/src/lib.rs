@@ -5,6 +5,7 @@
 //! all token transfers and minting until the admin unpauses.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracttype, Address, Env};
