@@ -282,6 +282,10 @@ pub fn require_super_admin(env: &Env, address: &Address) {
     require_role_guard(env, Role::SuperAdmin, address);
 }
 
+pub fn require_pauser(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Pauser, address);
+}
+
 pub fn get_role_admin(env: &Env, _role: Role) -> Address {
     let admin = get_admin(env);
     extend_instance_ttl(env);
@@ -461,6 +465,10 @@ mod tests {
 
         pub fn require_super_admin(env: Env, address: Address) {
             super::require_super_admin(&env, &address);
+        }
+
+        pub fn require_pauser(env: Env, address: Address) {
+            super::require_pauser(&env, &address);
         }
     }
 
