@@ -120,6 +120,7 @@ fn is_valid_role(role: Role) -> bool {
     )
 }
 
+
 /// One-time storage initialization.
 ///
 /// Sets `admin` as the contract administrator and records the initial
@@ -213,7 +214,7 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
 
     let key = AdminKey::Role(role, address.clone());
     if !env.storage().persistent().has(&key) {
-        return Err(AdminError::RoleNotGranted);
+        return Err(AdminError::RoleNotHeld);
     }
 
     env.storage().persistent().remove(&key);
@@ -736,19 +737,19 @@ mod tests {
 
         client.set_admin(&admin);
 
-        // Revoking a Pauser role that was never granted is a RoleNotGranted error.
+        // Revoking a Pauser role that was never granted is a RoleNotHeld error.
         assert_eq!(
             client.try_revoke_role(&Role::Pauser, &pauser),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
 
         // And revoking is not silently repeatable: a second revoke after a
-        // successful one reports RoleNotGranted rather than succeeding again.
+        // successful one reports RoleNotHeld rather than succeeding again.
         client.grant_role(&admin, &Role::Pauser, &pauser);
         client.revoke_role(&Role::Pauser, &pauser);
         assert_eq!(
             client.try_revoke_role(&Role::Pauser, &pauser),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
     }
 
@@ -844,19 +845,19 @@ mod tests {
 
         client.set_admin(&admin);
 
-        // Revoking a Minter role that was never granted is a RoleNotGranted error.
+        // Revoking a Minter role that was never granted is a RoleNotHeld error.
         assert_eq!(
             client.try_revoke_role(&Role::Minter, &minter),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
 
         // Revocation is not silently repeatable: a second revoke after a
-        // successful one likewise reports RoleNotGranted.
+        // successful one likewise reports RoleNotHeld.
         client.grant_role(&admin, &Role::Minter, &minter);
         client.revoke_role(&Role::Minter, &minter);
         assert_eq!(
             client.try_revoke_role(&Role::Minter, &minter),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
     }
 
@@ -1391,7 +1392,7 @@ mod tests {
     // ── #426: revoke_role role-parameter validation ──────────────────────────
 
     #[test]
-    fn test_revoke_role_returns_role_not_granted_when_never_granted() {
+    fn test_revoke_role_returns_role_not_held_when_never_granted() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
@@ -1401,6 +1402,6 @@ mod tests {
 
         client.set_admin(&admin);
         let result = client.try_revoke_role(&Role::Pauser, &user);
-        assert_eq!(result, Err(Ok(AdminError::RoleNotGranted)));
+        assert_eq!(result, Err(Ok(AdminError::RoleNotHeld)));
     }
 }
