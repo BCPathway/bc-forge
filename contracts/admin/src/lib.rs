@@ -101,6 +101,15 @@ where
     );
 }
 
+fn require_non_zero_address(env: &Env, address: &Address) {
+    let address_str = address.to_string();
+    let zero_account = String::from_str(env, ZERO_ACCOUNT_ADDRESS_STR);
+    let zero_contract = String::from_str(env, ZERO_CONTRACT_ADDRESS_STR);
+    if address_str == zero_account || address_str == zero_contract {
+        panic!("invalid address: zero address");
+    }
+}
+
 pub fn set_admin(env: &Env, admin: &Address) {
     require_non_zero_address(env, admin);
     if has_admin(env) {
@@ -211,6 +220,7 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 // }
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
+    require_non_zero_address(env, address);
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
@@ -242,6 +252,9 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     if threshold == 0 || threshold > pool.len() {
         panic!("invalid threshold for admin pool");
     }
+    for member in pool.iter() {
+        require_non_zero_address(env, &member);
+    }
     env.storage().instance().set(&AdminKey::AdminPool, &pool);
     env.storage()
         .instance()
@@ -270,6 +283,7 @@ pub fn get_threshold(env: &Env) -> u32 {
 }
 
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
+    require_non_zero_address(env, &creator);
     creator.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&creator) {
@@ -300,6 +314,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
 }
 
 pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
+    require_non_zero_address(env, &admin);
     admin.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&admin) {
