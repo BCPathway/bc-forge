@@ -222,25 +222,28 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
+    // Zero address never holds any role.
     if is_zero_address(env, address) {
         return false;
     }
 
-    let admin_key = AdminKey::Role(Role::Admin, address.clone());
-    let role_key = AdminKey::Role(role, address.clone());
-
-    let has =
-        env.storage().persistent().has(&admin_key) || env.storage().persistent().has(&role_key);
-
-    if env.storage().persistent().has(&admin_key) {
-        extend_storage_ttl_for_key(env, &admin_key);
+    // Admin role implicitly grants all other roles.
+    // Check the Admin mapping first unless the caller already asks for Admin.
+    if role != Role::Admin {
+        let admin_key = AdminKey::Role(Role::Admin, address.clone());
+        if env.storage().persistent().has(&admin_key) {
+            extend_storage_ttl_for_key(env, &admin_key);
+            events::emit_role_checked(env, address, role, true);
+            return true;
+        }
     }
-    if env.storage().persistent().has(&role_key) {
+
+    let role_key = AdminKey::Role(role, address.clone());
+    let has = env.storage().persistent().has(&role_key);
+    if has {
         extend_storage_ttl_for_key(env, &role_key);
     }
-
     events::emit_role_checked(env, address, role, has);
-
     has
 }
 
