@@ -54,8 +54,8 @@ async fn test_complete_lifecycle() {
     let symbol = String::from_str(&env, "SFGT");
     client.initialize(&admin, &7, &name, &symbol);
 
-    // Mint tokens
-    client.mint(&user_a, &1000000);
+    // Mint tokens (admin acts as minter)
+    client.mint(&admin, &user_a, &1000000);
 
     // Transfer tokens
     client.transfer(&user_a, &user_b, &500000);
@@ -87,7 +87,7 @@ async fn test_parallel_execution() {
 
     // Mint to all users in parallel (simulated)
     for user in &users {
-        client.mint(user, &1000);
+        client.mint(&admin, user, &1000);
     }
 
     // Verify all users have correct balance
