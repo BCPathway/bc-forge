@@ -195,9 +195,9 @@ impl VestingContract {
             env,
             &token,
             symbol_short!("mint"),
-            (&current_contract, amount).into_val(env),
+            (&current_contract, &current_contract, amount).into_val(env),
         );
-        Self::token_client(env).mint(&current_contract, &amount);
+        Self::token_client(env).mint(&current_contract, &current_contract, &amount);
     }
 
     fn transfer_from_vault(env: &Env, to: &Address, amount: i128) {

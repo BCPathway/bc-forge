@@ -29,6 +29,7 @@ pub struct Recipient {
 pub enum DataKey {
     /// The contract admin address (singular).
     Admin,
+    /// Pending admin address for a two-step ownership transfer.
     PendingAdmin,
     /// Spending allowance: (owner, spender) -> amount and expiration.
     Allowance(Address, Address),
@@ -39,6 +40,7 @@ pub enum DataKey {
     Name,
     Symbol,
     Supply,
+    MaxSupply,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -61,6 +63,7 @@ pub enum TokenError {
     FeeNotConfigured = 7,
     InsufficientFeeBalance = 8,
     FeeExemptionNotFound = 9,
+    MaxSupplyExceeded = 10,
 }
 
 #[contract]
@@ -113,6 +116,21 @@ impl BcForgeToken {
 
     fn write_supply(env: &Env, supply: i128) {
         env.storage().instance().set(&DataKey::Supply, &supply);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn read_max_supply(env: &Env) -> i128 {
+        let key = DataKey::MaxSupply;
+        if env.storage().instance().has(&key) {
+            ttl::extend_instance_ttl(env);
+        }
+        env.storage().instance().get(&key).unwrap_or(i128::MAX)
+    }
+
+    fn write_max_supply(env: &Env, max_supply: i128) {
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxSupply, &max_supply);
         ttl::extend_instance_ttl(env);
     }
 
@@ -178,8 +196,13 @@ impl BcForgeToken {
             return Err(TokenError::InvalidAmount);
         }
 
-        let new_balance = Self::read_balance(env, to) + amount;
+        let max_supply = Self::read_max_supply(env);
         let new_supply = Self::read_supply(env) + amount;
+        if new_supply > max_supply {
+            return Err(TokenError::MaxSupplyExceeded);
+        }
+
+        let new_balance = Self::read_balance(env, to) + amount;
         Self::write_balance(env, to, new_balance);
         Self::write_supply(env, new_supply);
         events::emit_mint(env, admin_address, to, amount, new_balance, new_supply);
@@ -205,6 +228,7 @@ impl BcForgeToken {
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
+        Self::write_max_supply(&env, i128::MAX);
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
     }
@@ -214,26 +238,31 @@ impl BcForgeToken {
         admin::get_admin(&env)
     }
 
-    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+    pub fn mint(env: Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
+            admin::require_minter(&env, &minter);
             let current_admin = admin::get_admin(&env);
             admin::require_minter(&env, &current_admin);
 
-            // Check rate limits for mint operation
-            if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
+            if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
                 return Err(TokenError::InvalidAmount);
             }
 
-            Self::internal_mint(&env, &current_admin, &to, amount)
+            Self::internal_mint(&env, &minter, &to, amount)
         })
     }
 
-    pub fn batch_mint(env: Env, recipients: Vec<Recipient>) -> Result<(), TokenError> {
+    pub fn batch_mint(
+        env: Env,
+        minter: Address,
+        recipients: Vec<Recipient>,
+    ) -> Result<(), TokenError> {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
+            admin::require_minter(&env, &minter);
             let current_admin = admin::get_admin(&env);
             admin::require_minter(&env, &current_admin);
 
@@ -242,12 +271,52 @@ impl BcForgeToken {
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
-                if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, recipient.amount)
-                {
+                if !crate::rate_limit::check_mint_rate_limit(&env, &minter, recipient.amount) {
                     return Err(TokenError::InvalidAmount);
                 }
-                Self::internal_mint(&env, &current_admin, &recipient.to, recipient.amount)?;
+                Self::internal_mint(&env, &minter, &recipient.to, recipient.amount)?;
             }
+
+            Ok(())
+        })
+    }
+
+    pub fn batch_transfer(
+        env: Env,
+        from: Address,
+        recipients: Vec<(Address, i128)>,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        reentrancy_guard!(&env, "batch_transfer_guard", {
+            Self::ensure_initialized(&env)?;
+            Self::ensure_not_paused(&env)?;
+            from.require_auth();
+
+            let mut total: i128 = 0;
+            for i in 0..recipients.len() {
+                let (_, amount) = recipients.get(i).expect("recipient should exist");
+                if amount <= 0 {
+                    return Err(TokenError::InvalidAmount);
+                }
+                total = match total.checked_add(amount) {
+                    Some(total) => total,
+                    None => return Err(TokenError::InvalidAmount),
+                };
+            }
+
+            if Self::read_balance(&env, &from) < total {
+                return Err(TokenError::InsufficientBalance);
+            }
+
+            for i in 0..recipients.len() {
+                let (to, amount) = recipients.get(i).expect("recipient should exist");
+                if !crate::rate_limit::check_transfer_rate_limit(&env, &from, amount) {
+                    return Err(TokenError::InvalidAmount);
+                }
+                Self::move_balance(&env, &from, &to, amount)?;
+                events::emit_transfer(&env, &from, &to, amount);
+            }
+
             Ok(())
         })
     }
@@ -256,6 +325,23 @@ impl BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_supply(&env)
+    }
+
+    pub fn get_max_supply(env: Env) -> i128 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_max_supply(&env)
+    }
+
+    pub fn set_max_supply(env: Env, caller: Address, max_supply: i128) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        if max_supply < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        admin::require_minter(&env, &caller);
+        Self::write_max_supply(&env, max_supply);
+        events::emit_max_supply_changed(&env, &caller, max_supply);
+        Ok(())
     }
 
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
