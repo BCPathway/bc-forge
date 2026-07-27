@@ -324,7 +324,7 @@ mod tests {
         }
     }
 
-    fn setup() -> (Env, soroban_sdk::Address, soroban_sdk::ContractId) {
+    fn setup() -> (Env, soroban_sdk::Address, soroban_sdk::Address) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -359,7 +359,7 @@ mod tests {
         let op = soroban_sdk::String::from_str(&env, "transfer");
         client.set_address_rate_limit(&admin_addr, &addr, &op, &50, &120);
 
-        let result = client.check_rate_limit(&Some(&addr), &op, &1);
+        let result = client.check_rate_limit(&Some(addr), &op, &1);
         assert!(result);
     }
 
