@@ -6,6 +6,7 @@
 
 #![no_std]
 
+use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracttype, Address, Env};
 
@@ -31,8 +32,10 @@ fn extend_instance_ttl(env: &Env) {
 ///
 /// # Panics
 /// Panics if the contract is already paused.
-pub fn pause(env: Env, admin: Address) {
-    admin.require_auth();
+pub fn pause(env: Env, caller: Address) {
+    // Cross-module RBAC check: verify the caller holds the Pauser role
+    // via the bc-forge-admin module before allowing the pause operation.
+    admin::require_role_guard(&env, admin::Role::Pauser, &caller);
     if is_paused(&env) {
         panic!("contract is already paused");
     }
@@ -48,8 +51,10 @@ pub fn pause(env: Env, admin: Address) {
 ///
 /// # Panics
 /// Panics if the contract is not paused.
-pub fn unpause(env: Env, admin: Address) {
-    admin.require_auth();
+pub fn unpause(env: Env, caller: Address) {
+    // Cross-module RBAC check: verify the caller holds the Pauser role
+    // via the bc-forge-admin module before allowing the unpause operation.
+    admin::require_role_guard(&env, admin::Role::Pauser, &caller);
     if !is_paused(&env) {
         panic!("contract is not paused");
     }
@@ -94,11 +99,17 @@ mod tests {
 
     #[contractimpl]
     impl LifecycleContract {
-        pub fn pause(env: Env, admin: Address) {
-            super::pause(env, admin);
+        /// Expose admin::set_admin for test setup so the lifecycle RBAC
+        /// checks (which require the caller to hold Role::Pauser) pass.
+        pub fn set_admin(env: Env, admin: Address) {
+            admin::set_admin(&env, &admin);
         }
-        pub fn unpause(env: Env, admin: Address) {
-            super::unpause(env, admin);
+
+        pub fn pause(env: Env, caller: Address) {
+            super::pause(env, caller);
+        }
+        pub fn unpause(env: Env, caller: Address) {
+            super::unpause(env, caller);
         }
         pub fn is_paused(env: Env) -> bool {
             super::is_paused(&env)
@@ -106,6 +117,16 @@ mod tests {
         pub fn require_not(env: Env) {
             super::require_not_paused(&env);
         }
+    }
+
+    /// Helper: register the test contract, set up admin storage, and
+    /// return the client and admin address.
+    fn setup_test(env: &Env) -> (LifecycleContractClient<'_>, Address) {
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        client.set_admin(&admin);
+        (client, admin)
     }
 
     #[test]
@@ -121,10 +142,10 @@ mod tests {
     fn test_pause_and_unpause() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup_test(&env);
 
+        // Admin holds Role::Admin which implicitly grants Role::Pauser,
+        // so the cross-module RBAC check in lifecycle::pause passes.
         client.pause(&admin);
         assert!(client.is_paused());
 
@@ -137,9 +158,7 @@ mod tests {
     fn test_double_pause_panics() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup_test(&env);
 
         client.pause(&admin);
         client.pause(&admin);
@@ -150,9 +169,7 @@ mod tests {
     fn test_unpause_when_not_paused_panics() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup_test(&env);
 
         client.unpause(&admin);
     }
@@ -162,20 +179,17 @@ mod tests {
     fn test_require_not_paused_panics_when_paused() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup_test(&env);
 
         client.pause(&admin);
         client.require_not();
     }
+
     #[test]
     fn test_pause_extends_instance_ttl_across_ledger_advances() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup_test(&env);
 
         client.pause(&admin);
         let mut ledger_info = env.ledger().get();
@@ -183,5 +197,41 @@ mod tests {
         env.ledger().set(ledger_info);
 
         assert!(client.is_paused());
+    }
+
+    #[test]
+    fn test_pause_without_pauser_role_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        // No admin storage initialized — the caller holds no role,
+        // so the cross-module RBAC check should reject the call.
+        let stranger = Address::generate(&env);
+
+        let result = client.try_pause(&stranger);
+        // AdminError::UnauthorizedRole has error code 3
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(3)))
+        );
+    }
+
+    #[test]
+    fn test_unpause_without_pauser_role_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        // No admin storage initialized — the caller holds no role,
+        // so the cross-module RBAC check should reject the call.
+        let stranger = Address::generate(&env);
+
+        let result = client.try_unpause(&stranger);
+        // AdminError::UnauthorizedRole has error code 3
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(3)))
+        );
     }
 }
