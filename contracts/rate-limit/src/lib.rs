@@ -270,8 +270,8 @@ mod tests {
             admin::set_admin(&env, &admin);
         }
 
-        pub fn grant_role(env: Env, role: admin::Role, address: Address) {
-            admin::grant_role(&env, role, &address);
+        pub fn grant_role(env: Env, caller: Address, role: admin::Role, address: Address) {
+            admin::grant_role(&env, &caller, role, &address);
         }
     }
 
