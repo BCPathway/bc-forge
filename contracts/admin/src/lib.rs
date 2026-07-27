@@ -114,10 +114,10 @@ where
 /// pass a discriminant that is outside the defined set.  This helper guards
 /// against that by exhaustively matching every known variant.
 fn is_valid_role(role: Role) -> bool {
-    matches!(
+    return matches!(
         role,
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
-    )
+    );
 }
 
 /// One-time storage initialization.
@@ -247,10 +247,6 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     has
 }
 
-/// Requires that the caller has the Minter role and has authorized the invocation.
-pub fn require_minter(env: &Env, minter: &Address) {
-    require_role(env, Role::Minter, minter);
-}
 // /// Requires that the stored admin has authorized the current invocation.
 // ///
 // /// # Panics
@@ -274,6 +270,7 @@ pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
+/// Requires that the caller has the Minter role and has authorized the invocation.
 pub fn require_minter(env: &Env, address: &Address) {
     require_role_guard(env, Role::Minter, address);
 }
