@@ -119,8 +119,6 @@ fn is_valid_role(role: Role) -> bool {
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
     )
 }
-
-
 /// One-time storage initialization.
 ///
 /// Sets `admin` as the contract administrator and records the initial
