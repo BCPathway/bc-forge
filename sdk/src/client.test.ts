@@ -61,10 +61,10 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(invokeContract).toHaveBeenCalledTimes(1);
       const [method, args, source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
       expect(method).toBe('batch_mint');
-      expect(args).toHaveLength(1);
+      expect(args).toHaveLength(2);
       expect(source).toBe(adminKeypair);
 
-      const recipientsVec = args[0] as xdr.ScVal;
+      const [minterArg, recipientsVec] = args as [string, xdr.ScVal];
       const recipients = recipientsVec.vec();
       if (recipients === null) {
         throw new Error('Expected batch_mint argument to be an ScVal vec');
@@ -74,7 +74,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       if (firstRecipient === null) {
         throw new Error('Expected batch_mint recipients to be ScVal maps');
       }
-      expect(firstRecipient[0].key().sym().toString()).toBe('address');
+      expect(firstRecipient[0].key().sym().toString()).toBe('to');
       expect(firstRecipient[1].key().sym().toString()).toBe('amount');
     });
   });

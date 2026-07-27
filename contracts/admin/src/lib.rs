@@ -247,6 +247,10 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     has
 }
 
+/// Requires that the caller has the Minter role and has authorized the invocation.
+pub fn require_minter(env: &Env, minter: &Address) {
+    require_role(env, Role::Minter, minter);
+}
 // /// Requires that the stored admin has authorized the current invocation.
 // ///
 // /// # Panics

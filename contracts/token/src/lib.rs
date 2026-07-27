@@ -29,6 +29,7 @@ pub struct Recipient {
 pub enum DataKey {
     /// The contract admin address (singular).
     Admin,
+    /// Pending admin address for a two-step ownership transfer.
     PendingAdmin,
     /// Spending allowance: (owner, spender) -> amount and expiration.
     Allowance(Address, Address),
@@ -237,26 +238,31 @@ impl BcForgeToken {
         admin::get_admin(&env)
     }
 
-    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+    pub fn mint(env: Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
+            admin::require_minter(&env, &minter);
             let current_admin = admin::get_admin(&env);
             admin::require_minter(&env, &current_admin);
 
-            // Check rate limits for mint operation
-            if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
+            if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
                 return Err(TokenError::InvalidAmount);
             }
 
-            Self::internal_mint(&env, &current_admin, &to, amount)
+            Self::internal_mint(&env, &minter, &to, amount)
         })
     }
 
-    pub fn batch_mint(env: Env, recipients: Vec<Recipient>) -> Result<(), TokenError> {
+    pub fn batch_mint(
+        env: Env,
+        minter: Address,
+        recipients: Vec<Recipient>,
+    ) -> Result<(), TokenError> {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
+            admin::require_minter(&env, &minter);
             let current_admin = admin::get_admin(&env);
             admin::require_minter(&env, &current_admin);
 
@@ -265,12 +271,52 @@ impl BcForgeToken {
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
-                if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, recipient.amount)
-                {
+                if !crate::rate_limit::check_mint_rate_limit(&env, &minter, recipient.amount) {
                     return Err(TokenError::InvalidAmount);
                 }
-                Self::internal_mint(&env, &current_admin, &recipient.to, recipient.amount)?;
+                Self::internal_mint(&env, &minter, &recipient.to, recipient.amount)?;
             }
+
+            Ok(())
+        })
+    }
+
+    pub fn batch_transfer(
+        env: Env,
+        from: Address,
+        recipients: Vec<(Address, i128)>,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        reentrancy_guard!(&env, "batch_transfer_guard", {
+            Self::ensure_initialized(&env)?;
+            Self::ensure_not_paused(&env)?;
+            from.require_auth();
+
+            let mut total: i128 = 0;
+            for i in 0..recipients.len() {
+                let (_, amount) = recipients.get(i).expect("recipient should exist");
+                if amount <= 0 {
+                    return Err(TokenError::InvalidAmount);
+                }
+                total = match total.checked_add(amount) {
+                    Some(total) => total,
+                    None => return Err(TokenError::InvalidAmount),
+                };
+            }
+
+            if Self::read_balance(&env, &from) < total {
+                return Err(TokenError::InsufficientBalance);
+            }
+
+            for i in 0..recipients.len() {
+                let (to, amount) = recipients.get(i).expect("recipient should exist");
+                if !crate::rate_limit::check_transfer_rate_limit(&env, &from, amount) {
+                    return Err(TokenError::InvalidAmount);
+                }
+                Self::move_balance(&env, &from, &to, amount)?;
+                events::emit_transfer(&env, &from, &to, amount);
+            }
+
             Ok(())
         })
     }
