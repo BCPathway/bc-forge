@@ -20,6 +20,11 @@ pub enum AdminError {
     UnauthorizedRole = 3,
     /// An operation was attempted with the canonical zero address.
     InvalidAddress = 4,
+    /// A role value that is not recognized by this contract was supplied.
+    InvalidRole = 5,
+    /// The contract has already been initialized; calling `init_storage` again
+    /// is not allowed.
+    AlreadyInitialized = 6,
 }
 
 /// Storage keys for the access-control layer.
@@ -103,6 +108,40 @@ where
     );
 }
 
+/// Returns `true` if `role` is one of the recognized variants.
+///
+/// Because `Role` is a `#[contracttype]` enum, an attacker could in theory
+/// pass a discriminant that is outside the defined set.  This helper guards
+/// against that by exhaustively matching every known variant.
+fn is_valid_role(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
+    )
+}
+
+/// One-time storage initialization.
+///
+/// Sets `admin` as the contract administrator and records the initial
+/// `AdminKey::Admin` instance-storage entry.  Panics if the contract has
+/// already been initialized so that no second caller can overwrite the admin.
+///
+/// # Errors
+/// Returns [`AdminError::AlreadyInitialized`] if storage has already been set up.
+pub fn init_storage(env: &Env, admin: &Address) -> Result<(), AdminError> {
+    if env.storage().instance().has(&AdminKey::Admin) {
+        return Err(AdminError::AlreadyInitialized);
+    }
+    require_non_zero_address(env, admin);
+    env.storage().instance().set(&AdminKey::Admin, admin);
+    env.storage()
+        .persistent()
+        .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
+    extend_instance_ttl(env);
+    extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
+    Ok(())
+}
+
 pub fn set_admin(env: &Env, admin: &Address) {
     require_non_zero_address(env, admin);
     if has_admin(env) {
@@ -147,6 +186,10 @@ pub fn has_admin(env: &Env) -> bool {
 
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
+    require_non_zero_address(env, address);
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
     _grant_role(env, caller, role, address);
 }
 
@@ -160,6 +203,10 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
 }
 
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    // #426 – parameter validation: reject unknown role variants and the zero address.
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
     require_non_zero_address(env, address);
     let admin = get_admin(env);
     admin.require_auth();
@@ -371,6 +418,10 @@ mod tests {
     impl AdminContract {
         pub fn set_admin(env: Env, admin: Address) {
             super::set_admin(&env, &admin);
+        }
+
+        pub fn init_storage(env: Env, admin: Address) -> Result<(), AdminError> {
+            super::init_storage(&env, &admin)
         }
 
         pub fn grant_role(env: Env, caller: Address, role: Role, address: Address) {
@@ -1123,5 +1174,95 @@ mod tests {
         assert!(!client.has_role(&Role::Admin, &zero_address(&env)));
         assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
         assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
+    }
+
+    // ── #417: RoleGranted event ──────────────────────────────────────────────
+
+    #[test]
+    fn test_grant_role_emits_role_granted_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let grantee = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &grantee);
+
+        let events = env.events().all();
+        assert_eq!(
+            events.len(),
+            2,
+            "expected two events (one from set_admin, one from grant_role)"
+        );
+
+        let (emitter, topics, data) = events.get(1).unwrap();
+        assert_eq!(emitter, contract_id);
+
+        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic0, soroban_sdk::symbol_short!("role_grnt"));
+
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_role, Role::Minter);
+        assert_eq!(event_address, grantee);
+    }
+
+    // ── #405: init_storage ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_init_storage_sets_admin_and_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.init_storage(&admin);
+        assert!(client.has_role(&Role::Admin, &admin));
+    }
+
+    #[test]
+    fn test_init_storage_rejects_double_init() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.init_storage(&admin);
+        let result = client.try_init_storage(&admin);
+        assert_eq!(result, Err(Ok(AdminError::AlreadyInitialized)));
+    }
+
+    #[test]
+    fn test_init_storage_rejects_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let result = client.try_init_storage(&zero_address(&env));
+        assert_eq!(result, Err(Ok(AdminError::InvalidAddress)));
+    }
+
+    // ── #426: revoke_role role-parameter validation ──────────────────────────
+
+    #[test]
+    fn test_revoke_role_returns_role_not_granted_when_never_granted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let result = client.try_revoke_role(&Role::Pauser, &user);
+        assert_eq!(result, Err(Ok(AdminError::RoleNotGranted)));
     }
 }
