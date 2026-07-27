@@ -746,6 +746,73 @@ mod tests {
     }
 
     #[test]
+    fn test_super_admin_can_revoke_minter() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // The admin holds SuperAdmin implicitly (the Admin role implies all roles).
+        // Grant Minter, confirm it is held, then have the SuperAdmin revoke it.
+        client.grant_role(&admin, &Role::Minter, &minter);
+        assert!(client.has_role(&Role::Minter, &minter));
+
+        client.revoke_role(&Role::Minter, &minter);
+        assert!(!client.has_role(&Role::Minter, &minter));
+    }
+
+    #[test]
+    fn test_super_admin_revoke_minter_when_not_granted_errors() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Revoking a Minter role that was never granted is a RoleNotGranted error.
+        assert_eq!(
+            client.try_revoke_role(&Role::Minter, &minter),
+            Err(Ok(AdminError::RoleNotGranted))
+        );
+
+        // Revocation is not silently repeatable: a second revoke after a
+        // successful one likewise reports RoleNotGranted.
+        client.grant_role(&admin, &Role::Minter, &minter);
+        client.revoke_role(&Role::Minter, &minter);
+        assert_eq!(
+            client.try_revoke_role(&Role::Minter, &minter),
+            Err(Ok(AdminError::RoleNotGranted))
+        );
+    }
+
+    #[test]
+    fn test_super_admin_revoke_minter_preserves_other_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+
+        client.revoke_role(&Role::Minter, &holder);
+
+        // Only the Minter role is removed; the unrelated Pauser role is untouched.
+        assert!(!client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&Role::Pauser, &holder));
+    }
+
+    #[test]
     fn test_set_admin_emits_role_granted_event() {
         let env = Env::default();
         env.mock_all_auths();
