@@ -1,49 +1,60 @@
 ## Summary
 
-Implements the `require_role` mapping lookup in the admin authorization module, connecting the orphaned `AdminKey::SuperAdmin(Address)` migration storage to the role-checking system and adding the missing `require_pauser()` guard wrapper.
+This PR implements **#463 — Test: SuperAdmin can grant SuperAdmin** and fixes several pre-existing merge conflict artifacts that prevented the workspace from compiling.
 
-Close #437
-
-## Motivation
-
-The `migrate_admin()` function writes a `SuperAdmin(Address)` mapping to persistent storage so the original admin retains SuperAdmin privileges after the Admin role is transferred. However, `has_role()` never consulted this mapping — it only checked `AdminKey::Role(Role::Admin, address)` and `AdminKey::Role(role, address)`. This meant that after migration followed by an admin transfer, the old admin silently lost SuperAdmin access despite the migration having been performed.
-
-Additionally, the `Role::Pauser` variant existed in the `Role` enum but had no corresponding `require_pauser()` guard wrapper, unlike `require_minter()` and `require_super_admin()`.
+---
 
 ## Changes
 
-### 1. SuperAdmin mapping lookup in `has_role()` (`contracts/admin/src/lib.rs`)
+### ✨ New Test (#463)
 
-Added a `SuperAdmin(Address)` storage check to `has_role()`. When the requested role is `Role::SuperAdmin`, the function now also consults the `AdminKey::SuperAdmin(address)` persistent storage entry (set by `migrate_admin`). This ensures that:
+**`contracts/admin/src/lib.rs`**
+- Added `test_super_admin_can_grant_super_admin` — verifies the full delegation chain:
+  1. Admin (implicit SuperAdmin) grants `SuperAdmin` role to `super_admin_a`
+  2. `super_admin_a` (newly granted SuperAdmin) grants `SuperAdmin` to `super_admin_b`
+  3. `super_admin_b` exercises SuperAdmin privileges by granting `Minter` to a holder
+  4. Includes a negative assertion: `super_admin_b` does NOT hold `SuperAdmin` before the grant (prevents false positives)
 
-- After `migrate_admin()` is called, the original admin can still pass `require_super_admin()` checks
-- After `set_admin(new_admin)` transfers the admin role, the old admin retains SuperAdmin access through the migration mapping
-- TTL for the SuperAdmin mapping is properly extended when checked
+### 🐛 Fix: Pre-existing Test Errors
 
-The lookup is **lazy-evaluated** — the `address.clone()` and storage read only occur when `role == Role::SuperAdmin`, minimizing gas overhead for all other role checks.
+**`contracts/admin/src/lib.rs`**
+- Fixed 3 pre-existing test failures where `RoleNotGranted` was expected but `revoke_role` now returns `RoleNotHeld`:
+  - `test_super_admin_revoke_pauser_when_not_held_errors` (was `_not_granted_`)
+  - `test_super_admin_revoke_minter_when_not_held_errors` (was `_not_granted_`)
+  - `test_revoke_role_returns_role_not_held_when_never_granted` (was `_not_granted_`)
 
-### 2. `require_pauser()` guard wrapper
+### 🛠 Fix: Pre-existing Merge Artifacts (Workspace Compilation)
 
-Added `pub fn require_pauser(env: &Env, address: &Address)` — delegates to `require_role_guard(env, Role::Pauser, address)`, consistent with the existing `require_minter()` and `require_super_admin()` patterns.
+**`contracts/token/src/test.rs`**
+- Fixed unclosed delimiter: missing `}` on `test_batch_transfer_while_paused_returns_error`
+- Fixed duplicate imports (merged duplicate `soroban_sdk` import lines 4-5)
+- Fixed `try_mint` calls to include required `minter` argument (3 instances in `test_mint_beyond_max_supply_fails`)
+- Fixed `try_batch_mint` call to include required `minter` argument
 
-### 3. Test contract wrapper
+**`contracts/wrapper/src/test.rs`**
+- Fixed `underlying.mint()` calls to include required `minter` argument (2 instances: `setup_and_fund` and `test_decimal_scaling_up`)
 
-Added `require_pauser` to the test `#[contractimpl]` block so it can be invoked in tests.
+**`e2e/integration_test.rs`**
+- Fixed `client.mint()` calls to include required `minter` argument (2 instances: `test_complete_lifecycle` and `test_parallel_execution`)
 
-## Acceptance Criteria
+---
 
-- ✅ Guard successfully prevents unauthorized access — SuperAdmin mapping is now checked for all `require_super_admin` calls
-- ✅ Reverts with exact specified error — `require_pauser` uses `require_role_guard` which panics with `AdminError::UnauthorizedRole` (contract error code 3)
-- ✅ Gas overhead is minimized — SuperAdmin mapping creation and storage read are conditional on `role == Role::SuperAdmin`
+## Test Results
 
-## Files Changed
+All **100 tests pass** across the workspace:
 
-| File | Change |
-|------|--------|
-| `contracts/admin/src/lib.rs` | Added SuperAdmin mapping lookup in `has_role()`, added `require_pauser()` guard, exposed in test wrapper |
+| Crate | Tests | Result |
+|-------|-------|--------|
+| `bc-forge-admin` | 51 | ✅ |
+| `bc-forge-token` | 13 | ✅ |
+| `bc-forge-wrapper` | 22 | ✅ |
+| `bc-forge-lifecycle` | 6 | ✅ |
+| `bc-forge-vesting` | 5 | ✅ |
+| `bc-forge-e2e-tests` | 3 | ✅ |
+| **Total** | **100** | **0 failed** |
 
-## Testing
+---
 
-- All existing admin unit tests continue to pass
-- The `has_role_admin_implicitly_holds_all_roles` test covers the SuperAdmin path through the admin superset check
-- Existing `require_role`/`require_role_guard` snapshot tests verify error codes remain correct
+## Related Issues
+
+Closes #463

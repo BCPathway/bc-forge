@@ -1,36 +1,10 @@
 {
   "generators": {
-    "address": 3,
+    "address": 2,
     "nonce": 0
   },
   "auth": [
     [],
-    [],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "set_max_supply",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 500
-                  }
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
     []
   ],
   "ledger": {
@@ -159,8 +133,8 @@
                         },
                         "val": {
                           "i128": {
-                            "hi": 0,
-                            "lo": 500
+                            "hi": 9223372036854775807,
+                            "lo": 18446744073709551615
                           }
                         }
                       },
@@ -173,7 +147,7 @@
                           ]
                         },
                         "val": {
-                          "string": "bc-forge Token"
+                          "string": "Test Token"
                         }
                       },
                       {
@@ -200,7 +174,7 @@
                           ]
                         },
                         "val": {
-                          "string": "SFG"
+                          "string": "TST"
                         }
                       }
                     ]
@@ -211,39 +185,6 @@
             "ext": "v0"
           },
           4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": 801925984706572462
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 801925984706572462
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
         ]
       ],
       [
@@ -279,7 +220,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "role_chk"
+                "symbol": "role_grnt"
               }
             ],
             "data": {
@@ -290,19 +231,19 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
                 {
-                  "bool": true
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 }
               ]
             }
           }
         }
       },
-      "failed_call": true
+      "failed_call": false
     },
     {
       "event": {
@@ -313,30 +254,29 @@
           "v0": {
             "topics": [
               {
-                "symbol": "role_chk"
+                "symbol": "init"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  "u32": 7
                 },
                 {
-                  "vec": [
-                    {
-                      "symbol": "Minter"
-                    }
-                  ]
+                  "string": "Test Token"
                 },
                 {
-                  "bool": true
+                  "string": "TST"
                 }
               ]
             }
           }
         }
       },
-      "failed_call": true
+      "failed_call": false
     }
   ]
 }

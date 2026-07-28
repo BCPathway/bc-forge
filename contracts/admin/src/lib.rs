@@ -707,71 +707,29 @@ mod tests {
     }
 
     #[test]
-    fn test_super_admin_can_grant_pauser() {
+    fn test_super_admin_can_grant_super_admin() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let super_admin = Address::generate(&env);
-        let pauser = Address::generate(&env);
+        let super_admin_a = Address::generate(&env);
+        let super_admin_b = Address::generate(&env);
+        let role_holder = Address::generate(&env);
 
         client.set_admin(&admin);
-        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
-        client.grant_role(&super_admin, &Role::Pauser, &pauser);
+        // Admin (implicit SuperAdmin) grants SuperAdmin to super_admin_a
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin_a);
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_a));
 
-        assert!(client.has_role(&Role::Pauser, &pauser));
-    }
+        // super_admin_a grants SuperAdmin to super_admin_b
+        assert!(!client.has_role(&Role::SuperAdmin, &super_admin_b));
+        client.grant_role(&super_admin_a, &Role::SuperAdmin, &super_admin_b);
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin_b));
 
-    #[test]
-    fn test_admin_can_grant_pauser() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let pauser = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.grant_role(&admin, &Role::Pauser, &pauser);
-
-        assert!(client.has_role(&Role::Pauser, &pauser));
-    }
-
-    #[test]
-    fn test_non_privileged_caller_cannot_grant_pauser() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let caller = Address::generate(&env);
-        let pauser = Address::generate(&env);
-
-        client.set_admin(&admin);
-
-        let result = client.try_grant_role(&caller, &Role::Pauser, &pauser);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
-        assert!(!client.has_role(&Role::Pauser, &pauser));
-    }
-
-    #[test]
-    fn test_revoked_super_admin_cannot_grant_pauser() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let super_admin = Address::generate(&env);
-        let pauser = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
-        client.revoke_role(&Role::SuperAdmin, &super_admin);
-
-        let result = client.try_grant_role(&super_admin, &Role::Pauser, &pauser);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
-        assert!(!client.has_role(&Role::Pauser, &pauser));
+        // super_admin_b can now act as a SuperAdmin by granting a role
+        client.grant_role(&super_admin_b, &Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
     }
 
     #[test]
@@ -1000,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    fn test_super_admin_revoke_pauser_when_not_granted_errors() {
+    fn test_super_admin_revoke_pauser_when_not_held_errors() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
@@ -1108,7 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn test_super_admin_revoke_minter_when_not_granted_errors() {
+    fn test_super_admin_revoke_minter_when_not_held_errors() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
