@@ -3,7 +3,7 @@
  */
 
 import { jest } from '@jest/globals';
-import { bcForgeClient, type TransactionResult } from './client';
+import { bcForgeClient } from './client';
 import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
 
 // Mock data for testing
@@ -64,7 +64,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(args).toHaveLength(2);
       expect(source).toBe(adminKeypair);
 
-      const [minterArg, recipientsVec] = args as [string, xdr.ScVal];
+      const [, recipientsVec] = args as [string, xdr.ScVal];
       const recipients = recipientsVec.vec();
       if (recipients === null) {
         throw new Error('Expected batch_mint argument to be an ScVal vec');

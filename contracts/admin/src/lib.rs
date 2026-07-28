@@ -1,4 +1,127 @@
-//! Reusable access-control primitives for Soroban contracts.
+//! Reusable access-control primitives for Soroban contracts with multi-sig governance.
+//!
+//! # Storage Layout
+//!
+//! All state is stored under the [`AdminKey`] enum, which is registered as a
+//! [`contracttype`]. Each variant maps to a unique storage slot, domain-separated
+//! by the Soroban storage API (`instance()` vs `persistent()`).
+//!
+//! ## `AdminKey` Variants
+//!
+//! | Variant | Domain | Value Type | Description | TTL Extended |
+//! |---|---|---|---|---|
+//! | `Admin` | `instance()` | `Address` | Singular contract admin address | Every read/write |
+//! | `Role(Role, Address)` | `persistent()` | `bool` (`true`) | Role membership flag | On grant/admin-set |
+//! | `AdminPool` | `instance()` | `Vec<Address>` | Multi-sig admin pool members | On set |
+//! | `Threshold` | `instance()` | `u32` | Approvals required to pass a proposal | On set |
+//! | `Proposal(u64)` | `instance()` | `Proposal` | Governance proposal data | Every read/write |
+//! | `ProposalIdCounter` | `instance()` | `u64` | Auto-incrementing proposal ID generator | No |
+//! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
+//!
+//! ## `Role` Enum
+//!
+//! | Variant | Description |
+//! |---|---|
+//! | `Admin` | Full administrative control over the contract |
+//! | `Minter` | Token minting privilege |
+//! | `SuperAdmin` | Highest-privilege role reserved for owner-level operations |
+//! | `Pauser` | Role allowing emergency pause and unpause operations |
+//!
+//! ## `AdminError` Codes
+//!
+//! | Code | Variant | Triggered by |
+//! |---|---|---|
+//! | `1` | `RoleNotGranted` | `revoke_role` on an ungranted `(Role, Address)` pair |
+//! | `2` | `RoleNotHeld` | `require_role` failure (missing role) |
+//! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//!
+//! ## Event Emissions
+//!
+//! | Event | Topic | Emitted by | Data |
+//! |---|---|---|---|
+//! | `role_grnt` | Role grant | `set_admin`, `grant_role` | `(admin, role, address)` |
+//! | `role_rvk`  | Role revoke | `revoke_role` | `(admin, role, address)` |
+//! | `role_chk`  | Role check | `has_role` | `(address, role, result)` |
+//!
+//! ## Storage Domain Separation
+//!
+//! - **`instance()`** — Contract-wide singleton state. Used for admin address, admin
+//!   pool, threshold, proposals, and the proposal ID counter.
+//! - **`persistent()`** — Per-key state with independent TTL. Used for role
+//!   assignments and the SuperAdmin mapping, since each `(Role, Address)` or
+//!   `SuperAdmin(Address)` pair has its own lifecycle.
+//!
+//! ## Invariants & Edge Cases
+//!
+//! ### Storage Slot Isolation
+//! - All [`AdminKey`] variants use unique enum discriminants, so no two variants
+//!   serialize to the same storage slot. Domain separation (`instance()` vs
+//!   `persistent()`) provides an additional layer of isolation.
+//! - The [`AdminKey`] enum is a distinct type from any other contract's `DataKey`
+//!   enum, ensuring zero slot overlap even when the admin module is used alongside
+//!   contract-specific storage.
+//!
+//! ### Zero/Unset Admin
+//! - [`get_admin`] panics with `"contract not initialized: admin not set"` if no
+//!   admin has been stored. This is the only way to "detect" a missing admin.
+//! - [`has_admin`] returns `false` when no admin is stored — callers use this to
+//!   gate initialization without panicking.
+//! - `grant_role` panics with `"contract not initialized: admin not set"` when
+//!   invoked on an uninitialized contract, since no admin can authorize the grant.
+//! - `revoke_role` and the `require_*` guards delegate to [`get_admin`] /
+//!   `has_role` and therefore inherit the same panic / `false` behavior.
+//! - [`set_admin`] and `grant_role` reject the Stellar zero-address sentinel
+//!   (`GAAAA…WHF`) via `require_non_zero_address` — the all-zero ed25519 public
+//!   key can never sign, so holding a role there would be unrecoverable.
+//! - [`has_role`] also short-circuits to `false` for the zero-address sentinel
+//!   without consulting storage.
+//! - [`set_admin`] accepts any other valid [`Address`]; it does **not** verify
+//!   that the address is controllable, because that check happens later via
+//!   [`soroban_sdk::Address::require_auth`]. Callers SHOULD confirm the new admin
+//!   address is correct before calling.
+//!
+//! ### Role Management
+//! - [`has_role`] grants universal role access: any address with the `Admin` role
+//!   is considered to have every role. This simplifies authorization — admins
+//!   implicitly inherit all privileges.
+//! - [`revoke_role`] removes the persistent storage entry but does **not** prevent
+//!   the address from being re-granted the role. It also does not protect against
+//!   self-revocation (an admin revoking their own admin role).
+//!
+//! ### Guard Failure Modes
+//! - [`require_role`] panics with [`AdminError::RoleNotHeld`] when the role check
+//!   fails, and then enforces `address.require_auth()` on success.
+//! - [`require_role_guard`] panics with [`AdminError::UnauthorizedRole`] on failure,
+//!   and similarly enforces `address.require_auth()` on success. The `guard`
+//!   variant is the right choice when only authorization is being checked, not
+//!   authorization + business logic.
+//! - [`require_minter`] and [`require_super_admin`] are thin wrappers around
+//!   [`require_role_guard`] for the named roles.
+//!
+//! ### Multi-sig / Proposal Guarantees
+//! - [`set_admin_pool`] requires `threshold > 0` and `threshold <= pool.len()`,
+//!   preventing unusable governance configurations.
+//! - [`get_admin_pool`] falls back to `[admin]` if no explicit pool was set,
+//!   ensuring single-admin contracts are always compatible.
+//! - [`create_proposal`] automatically records the creator as the first approval,
+//!   preventing self-created proposals from needing a redundant second approval.
+//! - [`approve_proposal`] rejects duplicate approvals and already-executed
+//!   proposals, preserving idempotent safety.
+//! - [`is_proposal_ready`] compares the count of unique approving admins against
+//!   the configured threshold.
+//! - [`mark_executed`] sets the `executed` flag to `true`, making the proposal
+//!   immutable. It panics if the threshold has not been met or if the proposal
+//!   was already executed.
+//!
+//! ### Migration
+//! - [`migrate_admin`] is a one-shot upgrade helper: it copies the singular admin
+//!   stored under [`AdminKey::Admin`] into [`AdminKey::SuperAdmin`], enabling the
+//!   [`require_super_admin`] guard for legacy contracts without resetting state.
+//!
+//! ### Reentrancy
+//! - This module does **not** implement reentrancy guards. Callers wrapping
+//!   multi-step operations (e.g., create → approve → execute proposal) should
+//!   protect those flows at a higher level.
 
 #![no_std]
 
@@ -35,6 +158,7 @@ pub enum AdminError {
 #[derive(Clone)]
 #[contracttype]
 pub enum AdminKey {
+    /// The singular contract admin address, set via `set_admin`.
     Admin,
     /// Maps a `(Role, Address)` pair to `true` when `address` holds `role`.
     /// This is the Role-to-Address mapping storage structure: membership is
@@ -42,10 +166,15 @@ pub enum AdminKey {
     /// pair occupies its own ledger entry so grants/revokes for one address
     /// never touch another's.
     Role(Role, Address),
+    /// Multi-sig admin pool addresses, set via `set_admin_pool`.
     AdminPool,
+    /// Multi-sig approval threshold, set alongside the pool.
     Threshold,
+    /// Governance proposal data, keyed by proposal ID.
     Proposal(u64),
+    /// Auto-incrementing counter for proposal IDs.
     ProposalIdCounter,
+    /// Super-admin mapping populated by `migrate_admin` for legacy contracts.
     SuperAdmin(Address),
 }
 
@@ -119,7 +248,6 @@ fn is_valid_role(role: Role) -> bool {
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
     )
 }
-
 /// One-time storage initialization.
 ///
 /// Sets `admin` as the contract administrator and records the initial
@@ -270,12 +398,17 @@ pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
+/// Requires that the caller has the Minter role and has authorized the invocation.
 pub fn require_minter(env: &Env, address: &Address) {
     require_role_guard(env, Role::Minter, address);
 }
 
 pub fn require_super_admin(env: &Env, address: &Address) {
     require_role_guard(env, Role::SuperAdmin, address);
+}
+
+pub fn require_pauser(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Pauser, address);
 }
 
 pub fn get_role_admin(env: &Env, _role: Role) -> Address {
@@ -457,6 +590,10 @@ mod tests {
 
         pub fn require_super_admin(env: Env, address: Address) {
             super::require_super_admin(&env, &address);
+        }
+
+        pub fn require_pauser(env: Env, address: Address) {
+            super::require_pauser(&env, &address);
         }
     }
 
@@ -777,19 +914,19 @@ mod tests {
 
         client.set_admin(&admin);
 
-        // Revoking a Pauser role that was never granted is a RoleNotGranted error.
+        // Revoking a Pauser role that was never granted is a RoleNotHeld error.
         assert_eq!(
             client.try_revoke_role(&Role::Pauser, &pauser),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
 
         // And revoking is not silently repeatable: a second revoke after a
-        // successful one reports RoleNotGranted rather than succeeding again.
+        // successful one reports RoleNotHeld rather than succeeding again.
         client.grant_role(&admin, &Role::Pauser, &pauser);
         client.revoke_role(&Role::Pauser, &pauser);
         assert_eq!(
             client.try_revoke_role(&Role::Pauser, &pauser),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
     }
 
@@ -885,19 +1022,19 @@ mod tests {
 
         client.set_admin(&admin);
 
-        // Revoking a Minter role that was never granted is a RoleNotGranted error.
+        // Revoking a Minter role that was never granted is a RoleNotHeld error.
         assert_eq!(
             client.try_revoke_role(&Role::Minter, &minter),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
 
         // Revocation is not silently repeatable: a second revoke after a
-        // successful one likewise reports RoleNotGranted.
+        // successful one likewise reports RoleNotHeld.
         client.grant_role(&admin, &Role::Minter, &minter);
         client.revoke_role(&Role::Minter, &minter);
         assert_eq!(
             client.try_revoke_role(&Role::Minter, &minter),
-            Err(Ok(AdminError::RoleNotGranted))
+            Err(Ok(AdminError::RoleNotHeld))
         );
     }
 
@@ -1432,7 +1569,7 @@ mod tests {
     // ── #426: revoke_role role-parameter validation ──────────────────────────
 
     #[test]
-    fn test_revoke_role_returns_role_not_granted_when_never_granted() {
+    fn test_revoke_role_returns_role_not_held_when_never_granted() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
@@ -1442,6 +1579,6 @@ mod tests {
 
         client.set_admin(&admin);
         let result = client.try_revoke_role(&Role::Pauser, &user);
-        assert_eq!(result, Err(Ok(AdminError::RoleNotGranted)));
+        assert_eq!(result, Err(Ok(AdminError::RoleNotHeld)));
     }
 }
