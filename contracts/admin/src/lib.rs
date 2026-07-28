@@ -1388,6 +1388,71 @@ mod tests {
     }
 
     #[test]
+    fn test_require_pauser_succeeds_when_pauser_role_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Pauser, &pauser);
+        client.require_pauser(&pauser);
+    }
+
+    #[test]
+    fn test_require_pauser_succeeds_for_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.require_pauser(&admin);
+    }
+
+    #[test]
+    fn test_require_pauser_fails_when_not_pauser() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_pauser(&unauthorized);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    fn test_revoked_pauser_cannot_pause() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Pauser, &pauser);
+
+        // Pauser must be able to pause while they hold the role.
+        client.require_pauser(&pauser);
+
+        // Revoke the Pauser role.
+        client.revoke_role(&Role::Pauser, &pauser);
+
+        // After revocation, require_pauser must fail with UnauthorizedRole.
+        let result = client.try_require_pauser(&pauser);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
     fn test_has_role_returns_false_when_no_role_held() {
         let env = Env::default();
         env.mock_all_auths();
