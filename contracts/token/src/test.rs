@@ -315,8 +315,11 @@ fn test_revoked_minter_cannot_mint() {
 
     // Assert that the revoked minter is rejected when trying to mint
     let result = client.try_mint(&minter, &user, &100);
-    assert!(result.is_err(), "expected minting to fail after role revocation");
-    
+    assert!(
+        result.is_err(),
+        "expected minting to fail after role revocation"
+    );
+
     // Assert that the user's balance remains unchanged
     assert_eq!(client.balance(&user), 100);
 }
