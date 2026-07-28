@@ -1551,7 +1551,7 @@ mod tests {
 
         // A caller without SuperAdmin role cannot revoke roles.
         let result = client.try_revoke_role(&caller, &Role::Minter, &role_holder);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert_eq!(result, Err(Ok(AdminError::UnauthorizedRole)));
         // The role holder should still hold the role after a failed revoke.
         assert!(client.has_role(&Role::Minter, &role_holder));
     }
