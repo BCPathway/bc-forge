@@ -391,7 +391,10 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
-pub fn get_role_admin(env: &Env, _role: Role) -> Address {
+pub fn get_role_admin(env: &Env, role: Role) -> Address {
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
     let admin = get_admin(env);
     extend_instance_ttl(env);
     admin
