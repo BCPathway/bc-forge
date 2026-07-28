@@ -330,7 +330,12 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
-pub fn revoke_role(env: &Env, caller: &Address, role: Role, address: &Address) -> Result<(), AdminError> {
+pub fn revoke_role(
+    env: &Env,
+    caller: &Address,
+    role: Role,
+    address: &Address,
+) -> Result<(), AdminError> {
     require_super_admin(env, caller);
     // #426 – parameter validation: reject unknown role variants and the zero address.
     if !is_valid_role(role) {
@@ -578,7 +583,12 @@ mod tests {
             super::grant_role(&env, &caller, role, &address);
         }
 
-        pub fn revoke_role(env: Env, caller: Address, role: Role, address: Address) -> Result<(), AdminError> {
+        pub fn revoke_role(
+            env: Env,
+            caller: Address,
+            role: Role,
+            address: Address,
+        ) -> Result<(), AdminError> {
             super::revoke_role(&env, &caller, role, &address)
         }
 
