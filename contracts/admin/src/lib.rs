@@ -89,8 +89,9 @@
 //!   self-revocation (an admin revoking their own admin role).
 //!
 //! ### Guard Failure Modes
-//! - [`require_role`] panics with [`AdminError::RoleNotHeld`] when the role check
-//!   fails, and then enforces `address.require_auth()` on success.
+//! - [`require_role`] panics with [`AdminError::InvalidRole`] when an unrecognized
+//!   role discriminant is supplied, then with [`AdminError::RoleNotHeld`] when the
+//!   role check fails, and finally enforces `address.require_auth()` on success.
 //! - [`require_role_guard`] panics with [`AdminError::UnauthorizedRole`] on failure,
 //!   and similarly enforces `address.require_auth()` on success. The `guard`
 //!   variant is the right choice when only authorization is being checked, not
@@ -400,6 +401,9 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 // }
 
 pub fn require_role(env: &Env, role: Role, address: &Address) {
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
@@ -1283,6 +1287,25 @@ mod tests {
         client.set_admin(&admin);
         client.grant_role(&admin, &Role::Minter, &role_holder);
         client.require_role(&Role::Minter, &role_holder);
+    }
+
+    #[test]
+    fn test_require_role_accepts_every_valid_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // The admin implicitly holds every role, so `require_role` must pass the
+        // `is_valid_role` gate and succeed for each recognized variant rather
+        // than reverting with `InvalidRole`.
+        client.require_role(&Role::Admin, &admin);
+        client.require_role(&Role::Minter, &admin);
+        client.require_role(&Role::SuperAdmin, &admin);
+        client.require_role(&Role::Pauser, &admin);
     }
 
     #[test]
