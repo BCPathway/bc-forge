@@ -294,6 +294,10 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 
 ## 🏗️ Smart Contract Architecture
 
+The [architecture specification](docs/ARCHITECTURE.md) documents the current
+workspace modules, runtime call paths, storage ownership, wrapper invariants,
+and upgrade boundaries.
+
 ```
 ┌─────────────────────────────────────────────────┐
 │                  BcForgeToken                   │
