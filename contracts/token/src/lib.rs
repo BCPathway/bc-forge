@@ -27,12 +27,14 @@ pub struct Recipient {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// The contract admin address (singular).
+    /// Admin address — stored here for caller convenience; delegates to AdminKey::Admin.
     Admin,
-    /// Pending admin address for a two-step ownership transfer.
+    /// Legacy pending admin — unused; retained to preserve storage discriminant order.
+    /// The transfer-ownership flow uses `admin::set_admin` directly.
     PendingAdmin,
-    /// Spending allowance: (owner, spender) -> amount and expiration.
+    /// Spending allowance: (owner, spender) -> amount and expiration ledger.
     Allowance(Address, Address),
+    /// Legacy allowance expiration — stored per-key; prefer AllowanceData struct.
     AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),
@@ -243,8 +245,6 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             admin::require_minter(&env, &minter);
-            let current_admin = admin::get_admin(&env);
-            admin::require_minter(&env, &current_admin);
 
             if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
                 return Err(TokenError::InvalidAmount);
@@ -263,8 +263,6 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
             admin::require_minter(&env, &minter);
-            let current_admin = admin::get_admin(&env);
-            admin::require_minter(&env, &current_admin);
 
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");

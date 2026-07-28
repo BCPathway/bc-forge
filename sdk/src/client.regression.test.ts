@@ -1,8 +1,7 @@
+import { jest } from '@jest/globals';
 import { Keypair, rpc as SorobanRpc, xdr } from '@stellar/stellar-sdk';
-import { bcForgeClient } from './client';
-import * as utils from './utils';
 
-jest.mock('./utils', () => ({
+jest.unstable_mockModule('./utils', () => ({
   buildInvokeTransaction: jest.fn(),
   submitTransaction: jest.fn(),
   addressToScVal: jest.fn((value: string) => value),
@@ -16,7 +15,16 @@ jest.mock('./utils', () => ({
   hashToScVal: jest.fn(),
 }));
 
+let utils: typeof import('./utils');
+let bcForgeClient: typeof import('./client').bcForgeClient;
+
 describe('bcForgeClient regression coverage', () => {
+  beforeAll(async () => {
+    utils = await import('./utils');
+    const clientMod = await import('./client');
+    bcForgeClient = clientMod.bcForgeClient;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });

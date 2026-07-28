@@ -1,8 +1,7 @@
 use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
-use soroban_sdk::{symbol_short, vec, Address, Env, String, TryIntoVal, Val};
-use soroban_sdk::{symbol_short, Address, BytesN, Env, String, TryIntoVal, Val};
+use soroban_sdk::{symbol_short, vec, Address, BytesN, Env, String, TryIntoVal, Val};
 
 fn setup_contract(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let contract_id = env.register(BcForgeToken, ());
