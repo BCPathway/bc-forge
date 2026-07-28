@@ -235,6 +235,20 @@ impl BcForgeToken {
         Ok(())
     }
 
+    fn read_fee_config(env: &Env) -> Result<FeeConfig, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeConfig)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    fn read_treasury(env: &Env) -> Result<Address, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
     fn write_fee_config(env: &Env, config: &FeeConfig) {
         env.storage().instance().set(&DataKey::FeeConfig, config);
         ttl::extend_instance_ttl(env);
@@ -431,10 +445,23 @@ impl BcForgeToken {
         Ok(())
     }
 
-    /// Updates the contract fee configuration. Admin-only.
+    pub fn pause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::pause(env.clone(), caller.clone());
+        events::emit_paused(&env, &caller);
+        Ok(())
+    }
+
+    pub fn unpause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::unpause(env.clone(), caller.clone());
+        events::emit_unpaused(&env, &caller);
+        Ok(())
+    }
+
     pub fn set_fee_config(env: Env, caller: Address, config: FeeConfig) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        admin::require_fee_admin(&env, &caller);
+        admin::require_admin(&env, &caller);
         if config.base_fee < 0 || config.max_fee < 0 {
             return Err(TokenError::InvalidAmount);
         }
@@ -443,16 +470,24 @@ impl BcForgeToken {
         Ok(())
     }
 
-    /// Sets the treasury address that receives collected fees. Admin-only.
+    pub fn get_fee_config(env: Env) -> Result<FeeConfig, TokenError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_fee_config(&env)
+    }
+
     pub fn set_treasury(env: Env, caller: Address, treasury: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        admin::require_fee_admin(&env, &caller);
+        admin::require_admin(&env, &caller);
         Self::write_treasury(&env, &treasury);
         events::emit_treasury_set(&env, &caller, &treasury);
         Ok(())
     }
 
-    /// Grants a fee exemption to `address`. Admin-only.
+    pub fn get_treasury(env: Env) -> Result<Address, TokenError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_treasury(&env)
+    }
+
     pub fn set_fee_exemption(
         env: Env,
         caller: Address,
@@ -460,46 +495,22 @@ impl BcForgeToken {
         exemption: FeeExemption,
     ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        admin::require_fee_admin(&env, &caller);
+        admin::require_admin(&env, &caller);
         Self::write_fee_exemption(&env, &address, &exemption);
         events::emit_fee_exemption_set(&env, &caller, &address, &exemption);
         Ok(())
     }
 
-    /// Removes a fee exemption from `address`. Admin-only.
     pub fn remove_fee_exemption(
         env: Env,
         caller: Address,
         address: Address,
     ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        admin::require_fee_admin(&env, &caller);
-        if !env
-            .storage()
-            .instance()
-            .has(&DataKey::FeeExemption(address.clone()))
-        {
-            return Err(TokenError::FeeExemptionNotFound);
-        }
+        admin::require_admin(&env, &caller);
         Self::delete_fee_exemption(&env, &address);
         events::emit_fee_exemption_removed(&env, &caller, &address);
         Ok(())
-    }
-
-    pub fn get_fee_config(env: Env) -> Result<FeeConfig, TokenError> {
-        Self::ensure_initialized(&env)?;
-        env.storage()
-            .instance()
-            .get(&DataKey::FeeConfig)
-            .ok_or(TokenError::FeeNotConfigured)
-    }
-
-    pub fn get_treasury(env: Env) -> Result<Address, TokenError> {
-        Self::ensure_initialized(&env)?;
-        env.storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .ok_or(TokenError::FeeNotConfigured)
     }
 }
 
