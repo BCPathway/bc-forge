@@ -402,21 +402,21 @@ export class bcForgeClient {
   }
 
   /**
-   * Pause all token operations. Admin-only.
+   * Pause all token operations. Admin or Pauser-only.
    *
-   * @param source - Admin keypair
+   * @param source - Admin or Pauser keypair
    */
-  async pause(source?: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('pause', [], source);
+  async pause(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('pause', [addressToScVal(source.publicKey())], source);
   }
 
   /**
-   * Unpause token operations. Admin-only.
+   * Unpause token operations. Admin or Pauser-only.
    *
-   * @param source - Admin keypair
+   * @param source - Admin or Pauser keypair
    */
-  async unpause(source?: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('unpause', [], source);
+  async unpause(source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('unpause', [addressToScVal(source.publicKey())], source);
   }
 
   // ─── Offline Transaction Builders ──────────────────────────────────────────

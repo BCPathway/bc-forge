@@ -553,7 +553,6 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
@@ -704,6 +703,40 @@ mod tests {
         client.grant_role(&super_admin, &Role::Minter, &role_holder);
 
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_super_admin_can_grant_minter() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.grant_role(&super_admin, &Role::Minter, &minter);
+
+        assert!(client.has_role(&Role::Minter, &minter));
+    }
+
+    #[test]
+    fn test_non_super_admin_cannot_grant_minter() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let caller = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_grant_role(&caller, &Role::Minter, &target);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Minter, &target));
     }
 
     #[test]
@@ -1743,3 +1776,6 @@ mod tests {
         assert_eq!(result, Err(Ok(AdminError::RoleNotHeld)));
     }
 }
+
+#[cfg(test)]
+mod proptest;

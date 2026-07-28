@@ -351,18 +351,48 @@ impl BcForgeToken {
         Ok(())
     }
 
-    pub fn pause(env: Env) -> Result<(), TokenError> {
+    pub fn pause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
-        bc_forge_lifecycle::pause(env.clone(), admin_address.clone());
+
+        if caller != admin_address && !admin::has_role(&env, admin::Role::Pauser, &caller) {
+            return Err(TokenError::ContractPaused);
+        }
+
+        if caller == admin_address {
+            admin_address.require_auth();
+        } else {
+            caller.require_auth();
+        }
+
+        if bc_forge_lifecycle::is_paused(&env) {
+            panic!("contract is already paused");
+        }
+
+        bc_forge_lifecycle::set_paused(&env, true);
         events::emit_paused(&env, &admin_address);
         Ok(())
     }
 
-    pub fn unpause(env: Env) -> Result<(), TokenError> {
+    pub fn unpause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
-        bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
+
+        if caller != admin_address && !admin::has_role(&env, admin::Role::Pauser, &caller) {
+            return Err(TokenError::ContractPaused);
+        }
+
+        if caller == admin_address {
+            admin_address.require_auth();
+        } else {
+            caller.require_auth();
+        }
+
+        if !bc_forge_lifecycle::is_paused(&env) {
+            panic!("contract is not paused");
+        }
+
+        bc_forge_lifecycle::set_paused(&env, false);
         events::emit_unpaused(&env, &admin_address);
         Ok(())
     }
