@@ -54,7 +54,7 @@ async fn test_complete_lifecycle() {
     let symbol = String::from_str(&env, "SFGT");
     client.initialize(&admin, &7, &name, &symbol);
 
-    // Mint tokens (admin acts as minter)
+    // Mint tokens
     client.mint(&admin, &user_a, &1000000);
 
     // Transfer tokens

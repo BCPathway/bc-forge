@@ -27,7 +27,6 @@ import {
   signTransaction,
   simulateTransaction,
   hashToScVal,
-  formatAtomicAmount,
 } from './utils';
 
 import { SimulationError, RPCError } from './errors';
@@ -114,7 +113,7 @@ export class bcForgeClient {
    * @param address - Stellar public key (G... address)
    * @returns Token balance as a fixed-scale decimal string.
    */
-async getBalance(address: string): Promise<bigint> {
+  async getBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('balance', [addressToScVal(address)]);
     return BigInt(scValToNative(result) as string | number | bigint);
   }
@@ -234,8 +233,12 @@ async getBalance(address: string): Promise<bigint> {
    * @param amount - Number of tokens to mint
    * @param source - Admin keypair
    */
-async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('mint', [addressToScVal(source.publicKey()), addressToScVal(to), i128ToScVal(amount)], source);
+  async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'mint',
+      [addressToScVal(source.publicKey()), addressToScVal(to), i128ToScVal(amount)],
+      source,
+    );
   }
 
   /**
@@ -258,7 +261,11 @@ async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResu
       ]),
     );
     const recipientsVec = xdr.ScVal.scvVec(recipientScVals);
-    return this.invokeContract('batch_mint', [addressToScVal(source.publicKey()), recipientsVec], source);
+    return this.invokeContract(
+      'batch_mint',
+      [addressToScVal(source.publicKey()), recipientsVec],
+      source,
+    );
   }
 
   /**
@@ -390,7 +397,7 @@ async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResu
    * @param newAdmin - New admin address
    * @param source   - Current admin's keypair
    */
-async transferOwnership(newAdmin: string, source?: Keypair): Promise<TransactionResult> {
+  async transferOwnership(newAdmin: string, source?: Keypair): Promise<TransactionResult> {
     return this.invokeContract('transfer_ownership', [addressToScVal(newAdmin)], source);
   }
 
@@ -594,8 +601,12 @@ async transferOwnership(newAdmin: string, source?: Keypair): Promise<Transaction
    * @param sourcePublicKey - Admin's public key
    * @returns Simulation result
    */
-async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise<unknown> {
-    return this.simulate('mint', [addressToScVal(sourcePublicKey), addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
+  async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise<unknown> {
+    return this.simulate(
+      'mint',
+      [addressToScVal(sourcePublicKey), addressToScVal(to), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
   }
 
   /**
@@ -750,8 +761,8 @@ async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise
     const actionScVal =
       'Mint' in action
         ? nativeToScVal({
-          Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
-        })
+            Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
+          })
         : nativeToScVal(action);
 
     return this.invokeContract(
@@ -798,11 +809,7 @@ async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise
   async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'grant_role',
-      [
-        addressToScVal(source.publicKey()),
-        nativeToScVal(Role.Minter),
-        addressToScVal(address),
-      ],
+      [addressToScVal(source.publicKey()), nativeToScVal(Role.Minter), addressToScVal(address)],
       source,
     );
   }
@@ -1035,7 +1042,7 @@ async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise
           this.walletAdapter.publicKey,
         );
 
-const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr);
+        const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr);
 
         const response = await submitTransaction(this.rpcUrl, signedXdr);
 
@@ -1070,14 +1077,14 @@ const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr);
     if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
       return {
         success: true,
-        hash: (response as any).hash,
+        hash: (response as unknown as { hash: string }).hash,
         returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
       };
     }
 
     return {
       success: false,
-      hash: (response as any).hash,
+      hash: (response as unknown as { hash: string }).hash,
     };
   }
 }
