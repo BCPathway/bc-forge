@@ -391,6 +391,12 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
+pub fn get_role_admin(env: &Env, _role: Role) -> Address {
+    let admin = get_admin(env);
+    extend_instance_ttl(env);
+    admin
+}
+
 pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::UnauthorizedRole);
@@ -411,16 +417,19 @@ pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
 }
 
-pub fn get_role_admin(env: &Env, _role: Role) -> Address {
-    let admin = get_admin(env);
-    extend_instance_ttl(env);
-    admin
-}
-
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
+    let admin = get_admin(env);
+    admin.require_auth();
+
     if threshold == 0 || threshold > pool.len() {
         panic!("invalid threshold for admin pool");
     }
+
+    for i in 0..pool.len() {
+        let address = pool.get(i).expect("pool member should exist");
+        require_non_zero_address(env, &address);
+    }
+
     env.storage().instance().set(&AdminKey::AdminPool, &pool);
     env.storage()
         .instance()
@@ -518,6 +527,9 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
 }
 
 pub fn mark_executed(env: &Env, proposal_id: u64) {
+    let admin = get_admin(env);
+    admin.require_auth();
+
     let mut proposal: Proposal = env
         .storage()
         .instance()
@@ -586,6 +598,22 @@ mod tests {
 
         pub fn require_minter(env: Env, address: Address) {
             super::require_minter(&env, &address);
+        }
+
+        pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+            super::set_admin_pool(&env, pool, threshold);
+        }
+
+        pub fn create_proposal(env: Env, creator: Address, description: String) -> u64 {
+            super::create_proposal(&env, creator, description)
+        }
+
+        pub fn approve_proposal(env: Env, admin: Address, proposal_id: u64) {
+            super::approve_proposal(&env, admin, proposal_id);
+        }
+
+        pub fn mark_executed(env: Env, proposal_id: u64) {
+            super::mark_executed(&env, proposal_id);
         }
 
         pub fn require_super_admin(env: Env, address: Address) {
@@ -839,6 +867,19 @@ mod tests {
 
         client.grant_role(&admin, &Role::Pauser, &pauser);
         assert!(client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_admin_pool_requires_admin_auth() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pool_member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, pool_member], &1);
     }
 
     #[test]
