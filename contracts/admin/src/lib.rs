@@ -1032,11 +1032,24 @@ mod tests {
         let events = env.events().all();
         assert_eq!(
             events.len(),
-            1,
-            "expected exactly one event during revoke_role"
+            2,
+            "expected two events: role_chk from require_super_admin and role_rvk from revoke"
         );
 
-        let (emitter, topics, data) = events.get(0).unwrap();
+        // Find the role_rvk event (the role_chk event from require_role_guard comes first).
+        let rvk_event = events
+            .iter()
+            .find(|(_, topics, _)| {
+                let topic: soroban_sdk::Symbol = topics
+                    .get(0)
+                    .unwrap_or_else(|| panic!("event must have a topic"))
+                    .try_into_val(&env)
+                    .unwrap_or_else(|_| soroban_sdk::Symbol::new(&env, ""));
+                topic == soroban_sdk::symbol_short!("role_rvk")
+            })
+            .expect("role_rvk event must be present");
+
+        let (emitter, topics, data) = rvk_event;
         assert_eq!(emitter, contract_id);
 
         assert_eq!(
@@ -1047,11 +1060,12 @@ mod tests {
         let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
         assert_eq!(topic0, soroban_sdk::symbol_short!("role_rvk"));
 
-        // Data must be (admin, role, address) as Vec<Val>
+        // Data must be (caller, role, address) as Vec<Val>
         let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
         let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
         let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
         let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        // The caller (admin) is now stored as the event admin instead of get_admin()
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
