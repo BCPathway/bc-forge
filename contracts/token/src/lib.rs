@@ -66,7 +66,7 @@ pub struct FeeConfig {
 #[contracttype]
 pub struct FeeExemption {
     /// 0 = all operations, 1 = transfers only, 2 = mint only.
-    pub exemption_type: u8,
+    pub exemption_type: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -252,7 +252,7 @@ impl BcForgeToken {
         ttl::extend_instance_ttl(env);
     }
 
-    fn remove_fee_exemption(env: &Env, address: &Address) {
+    fn delete_fee_exemption(env: &Env, address: &Address) {
         env.storage()
             .instance()
             .remove(&DataKey::FeeExemption(address.clone()));
@@ -481,7 +481,7 @@ impl BcForgeToken {
         {
             return Err(TokenError::FeeExemptionNotFound);
         }
-        Self::remove_fee_exemption(&env, &address);
+        Self::delete_fee_exemption(&env, &address);
         events::emit_fee_exemption_removed(&env, &caller, &address);
         Ok(())
     }
