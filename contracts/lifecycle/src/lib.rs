@@ -5,6 +5,7 @@
 //! all token transfers and minting until an authorized caller unpauses.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;

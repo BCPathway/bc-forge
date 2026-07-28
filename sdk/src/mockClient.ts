@@ -4,6 +4,7 @@
  * Allows frontend devs to test logic without a live Soroban RPC.
  */
 import type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
+import { formatAtomicAmount } from './utils';
 
 interface AccountState {
   balance: bigint;
@@ -19,8 +20,8 @@ export class MockBcForgeClient {
 
   constructor(_config: bcForgeClientConfig) {}
 
-  async getBalance(address: string): Promise<bigint> {
-    return this.accounts[address]?.balance ?? 0n;
+  async getBalance(address: string): Promise<string> {
+    return formatAtomicAmount(this.accounts[address]?.balance ?? 0n, this.decimals);
   }
 
   async getTotalSupply(): Promise<bigint> {
@@ -43,14 +44,14 @@ export class MockBcForgeClient {
     return this.accounts[owner]?.allowances[spender] ?? 0n;
   }
 
-  async mint(to: string, amount: bigint): Promise<TransactionResult> {
+  async mint(from: string, to: string, amount: bigint): Promise<TransactionResult> {
     if (!this.accounts[to]) this.accounts[to] = { balance: 0n, allowances: {} };
     this.accounts[to].balance += amount;
     this.totalSupply += amount;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
-  async batchMint(recipients: BatchMintRecipient[]): Promise<TransactionResult> {
+  async batchMint(from: string, recipients: BatchMintRecipient[]): Promise<TransactionResult> {
     if (recipients.length === 0) {
       return { success: false, hash: 'mock-hash', returnValue: 'Recipients list cannot be empty' };
     }
