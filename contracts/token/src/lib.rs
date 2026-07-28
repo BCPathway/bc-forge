@@ -459,11 +459,7 @@ impl BcForgeToken {
         Ok(())
     }
 
-    pub fn set_fee_config(
-        env: Env,
-        caller: Address,
-        config: FeeConfig,
-    ) -> Result<(), TokenError> {
+    pub fn set_fee_config(env: Env, caller: Address, config: FeeConfig) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         admin::require_admin(&env, &caller);
         if config.base_fee < 0 || config.max_fee < 0 {
@@ -479,11 +475,7 @@ impl BcForgeToken {
         Self::read_fee_config(&env)
     }
 
-    pub fn set_treasury(
-        env: Env,
-        caller: Address,
-        treasury: Address,
-    ) -> Result<(), TokenError> {
+    pub fn set_treasury(env: Env, caller: Address, treasury: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         admin::require_admin(&env, &caller);
         Self::write_treasury(&env, &treasury);
