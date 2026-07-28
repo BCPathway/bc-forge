@@ -31,8 +31,8 @@
 //!
 //! | Code | Variant | Triggered by |
 //! |---|---|---|
-//! | `1` | `RoleNotGranted` | `revoke_role` on an ungranted `(Role, Address)` pair |
-//! | `2` | `RoleNotHeld` | `require_role` failure (missing role) |
+//! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
+//! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
 //!
 //! ## Event Emissions
@@ -135,7 +135,7 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 #[contracterror]
 #[repr(u32)]
 pub enum AdminError {
-    /// A role operation was attempted for an (role, address) pair that was never granted.
+    /// Unused; kept for ABI stability. Prefer [`AdminError::RoleNotHeld`].
     RoleNotGranted = 1,
     /// An address does not hold the required role (e.g. revoke_role called on non-holder).
     RoleNotHeld = 2,
@@ -343,12 +343,23 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
     let admin = get_admin(env);
     admin.require_auth();
 
+    _revoke_role(env, role, address)
+}
+
+/// Removes a role assignment without performing authorization.
+///
+/// This helper is intentionally private. Callers exposed by a contract must
+/// perform their authorization checks before delegating the state change here.
+fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    require_non_zero_address(env, address);
+
     let key = AdminKey::Role(role, address.clone());
     if !env.storage().persistent().has(&key) {
         return Err(AdminError::RoleNotHeld);
     }
 
     env.storage().persistent().remove(&key);
+    let admin = get_admin(env);
     events::emit_role_revoked(env, &admin, role, address);
     Ok(())
 }
@@ -1213,6 +1224,43 @@ mod tests {
         assert_eq!(event_admin2, new_admin);
         assert_eq!(event_role2, Role::Admin);
         assert_eq!(event_address2, new_admin);
+    }
+
+    #[test]
+    fn test_internal_revoke_role_removes_assignment() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &role_holder);
+
+        let result = env.as_contract(&contract_id, || {
+            _revoke_role(&env, Role::Minter, &role_holder)
+        });
+
+        assert_eq!(result, Ok(()));
+        assert!(!client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_internal_revoke_role_rejects_unassigned_role_without_modifying_state() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        env.as_contract(&contract_id, || set_admin(&env, &admin));
+
+        let result = env.as_contract(&contract_id, || {
+            _revoke_role(&env, Role::Minter, &role_holder)
+        });
+
+        assert_eq!(result, Err(AdminError::RoleNotHeld));
+        assert!(env.as_contract(&contract_id, || has_role(&env, Role::Admin, &admin)));
     }
 
     #[test]
