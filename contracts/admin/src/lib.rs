@@ -52,16 +52,11 @@ pub enum AdminKey {
 pub enum Role {
     /// Full administrative control granted via `set_admin`.
     Admin,
-<<<<<<< Updated upstream
     /// Permission to mint new tokens.
     Minter,
     /// Highest-privilege role, reserved for owner-level operations.
     SuperAdmin,
     /// Role allowing emergency pause and unpause operations.
-=======
-    SuperAdmin,
-    Minter,
->>>>>>> Stashed changes
     Pauser,
 }
 
@@ -184,40 +179,33 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
 }
 
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
-<<<<<<< Updated upstream
     if is_zero_address(env, address) {
         return false;
     }
 
-    let admin_key = AdminKey::Role(Role::Admin, address.clone());
-    let role_key = AdminKey::Role(role, address.clone());
+    if role != Role::Admin && role != Role::SuperAdmin {
+        let admin_key = AdminKey::Role(Role::Admin, address.clone());
+        if env.storage().persistent().has(&admin_key) {
+            extend_storage_ttl_for_key(env, &admin_key);
+            events::emit_role_checked(env, address, role, true);
+            return true;
+        }
 
-    let has =
-        env.storage().persistent().has(&admin_key) || env.storage().persistent().has(&role_key);
-
-    if env.storage().persistent().has(&admin_key) {
-        extend_storage_ttl_for_key(env, &admin_key);
+        let super_admin_key = AdminKey::Role(Role::SuperAdmin, address.clone());
+        if env.storage().persistent().has(&super_admin_key) {
+            extend_storage_ttl_for_key(env, &super_admin_key);
+            events::emit_role_checked(env, address, role, true);
+            return true;
+        }
     }
-    if env.storage().persistent().has(&role_key) {
+
+    let role_key = AdminKey::Role(role, address.clone());
+    let has = env.storage().persistent().has(&role_key);
+    if has {
         extend_storage_ttl_for_key(env, &role_key);
     }
-
     events::emit_role_checked(env, address, role, has);
-
     has
-=======
-    env.storage()
-        .persistent()
-        .has(&AdminKey::Role(Role::Admin, address.clone()))
-        || env
-            .storage()
-            .persistent()
-            .has(&AdminKey::Role(Role::SuperAdmin, address.clone()))
-        || env
-            .storage()
-            .persistent()
-            .has(&AdminKey::Role(role, address.clone()))
->>>>>>> Stashed changes
 }
 
 // /// Requires that the stored admin has authorized the current invocation.

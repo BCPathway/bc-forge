@@ -65,10 +65,6 @@ export enum Role {
   Admin = 'Admin',
   SuperAdmin = 'SuperAdmin',
   Minter = 'Minter',
-<<<<<<< Updated upstream
-  SuperAdmin = 'SuperAdmin',
-=======
->>>>>>> Stashed changes
   Pauser = 'Pauser',
 }
 
