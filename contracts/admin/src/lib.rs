@@ -1703,4 +1703,74 @@ mod tests {
         let result = client.try_revoke_role(&Role::Pauser, &user);
         assert_eq!(result, Err(Ok(AdminError::RoleNotHeld)));
     }
+
+    // ── revoke non-existent role ───────────────────────────────────────────
+
+    #[test]
+    fn test_revoke_nonexistent_role_is_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Revoking a role that was never granted returns RoleNotHeld.
+        assert_eq!(
+            client.try_revoke_role(&Role::Minter, &user),
+            Err(Ok(AdminError::RoleNotHeld))
+        );
+    }
+
+    #[test]
+    fn test_revoke_nonexistent_role_does_not_discard_held_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Grant Pauser only; revoking Minter (never granted) must fail
+        // and must leave Pauser intact.
+        client.grant_role(&admin, &Role::Pauser, &user);
+        assert!(client.has_role(&Role::Pauser, &user));
+
+        assert_eq!(
+            client.try_revoke_role(&Role::Minter, &user),
+            Err(Ok(AdminError::RoleNotHeld))
+        );
+        assert!(
+            client.has_role(&Role::Pauser, &user),
+            "Pauser role must survive a failed revoke of a different role"
+        );
+    }
+
+    #[test]
+    fn test_double_revoke_of_previously_granted_role_is_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Grant then revoke Minter; a second revoke must return RoleNotHeld.
+        client.grant_role(&admin, &Role::Minter, &user);
+        assert!(client.has_role(&Role::Minter, &user));
+
+        client.revoke_role(&Role::Minter, &user);
+        assert!(!client.has_role(&Role::Minter, &user));
+
+        assert_eq!(
+            client.try_revoke_role(&Role::Minter, &user),
+            Err(Ok(AdminError::RoleNotHeld))
+        );
+    }
 }
