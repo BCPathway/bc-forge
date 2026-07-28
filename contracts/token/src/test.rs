@@ -289,3 +289,37 @@ fn test_set_max_supply_rejects_negative() {
     let result = client.try_set_max_supply(&admin, &-1);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
 }
+
+#[test]
+fn test_revoked_minter_cannot_mint() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let minter = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    // Grant Minter role
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &minter);
+    });
+
+    // Assert that the newly minted tokens are added to the user's balance
+    assert!(client.try_mint(&minter, &user, &100).is_ok());
+    assert_eq!(client.balance(&user), 100);
+
+    // Revoke Minter role
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::revoke_role(&env, bc_forge_admin::Role::Minter, &minter).unwrap();
+    });
+
+    // Assert that the revoked minter is rejected when trying to mint
+    let result = client.try_mint(&minter, &user, &100);
+    assert!(
+        result.is_err(),
+        "expected minting to fail after role revocation"
+    );
+
+    // Assert that the user's balance remains unchanged
+    assert_eq!(client.balance(&user), 100);
+}
