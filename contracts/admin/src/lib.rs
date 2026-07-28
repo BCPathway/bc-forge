@@ -330,14 +330,13 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
-pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+pub fn revoke_role(env: &Env, caller: &Address, role: Role, address: &Address) -> Result<(), AdminError> {
+    require_super_admin(env, caller);
     // #426 – parameter validation: reject unknown role variants and the zero address.
     if !is_valid_role(role) {
         soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
     }
     require_non_zero_address(env, address);
-    let admin = get_admin(env);
-    admin.require_auth();
 
     let key = AdminKey::Role(role, address.clone());
     if !env.storage().persistent().has(&key) {
@@ -345,7 +344,7 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
     }
 
     env.storage().persistent().remove(&key);
-    events::emit_role_revoked(env, &admin, role, address);
+    events::emit_role_revoked(env, caller, role, address);
     Ok(())
 }
 
@@ -579,8 +578,8 @@ mod tests {
             super::grant_role(&env, &caller, role, &address);
         }
 
-        pub fn revoke_role(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
-            super::revoke_role(&env, role, &address)
+        pub fn revoke_role(env: Env, caller: Address, role: Role, address: Address) -> Result<(), AdminError> {
+            super::revoke_role(&env, &caller, role, &address)
         }
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
@@ -779,7 +778,7 @@ mod tests {
 
         client.set_admin(&admin);
         client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
-        client.revoke_role(&Role::SuperAdmin, &super_admin);
+        client.revoke_role(&admin, &Role::SuperAdmin, &super_admin);
 
         let result = client.try_grant_role(&super_admin, &Role::Minter, &role_holder);
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
@@ -862,7 +861,7 @@ mod tests {
         let admin = Address::generate(&env);
 
         client.set_admin(&admin);
-        let result = client.try_revoke_role(&Role::Minter, &zero_address(&env));
+        let result = client.try_revoke_role(&admin, &Role::Minter, &zero_address(&env));
         assert_eq!(result, Err(Ok(AdminError::InvalidAddress)));
     }
 
@@ -956,7 +955,7 @@ mod tests {
         client.grant_role(&admin, &Role::Pauser, &pauser);
         assert!(client.has_role(&Role::Pauser, &pauser));
 
-        client.revoke_role(&Role::Pauser, &pauser);
+        client.revoke_role(&admin, &Role::Pauser, &pauser);
         assert!(!client.has_role(&Role::Pauser, &pauser));
     }
 
@@ -973,16 +972,16 @@ mod tests {
 
         // Revoking a Pauser role that was never granted is a RoleNotHeld error.
         assert_eq!(
-            client.try_revoke_role(&Role::Pauser, &pauser),
+            client.try_revoke_role(&admin, &Role::Pauser, &pauser),
             Err(Ok(AdminError::RoleNotHeld))
         );
 
         // And revoking is not silently repeatable: a second revoke after a
         // successful one reports RoleNotHeld rather than succeeding again.
         client.grant_role(&admin, &Role::Pauser, &pauser);
-        client.revoke_role(&Role::Pauser, &pauser);
+        client.revoke_role(&admin, &Role::Pauser, &pauser);
         assert_eq!(
-            client.try_revoke_role(&Role::Pauser, &pauser),
+            client.try_revoke_role(&admin, &Role::Pauser, &pauser),
             Err(Ok(AdminError::RoleNotHeld))
         );
     }
@@ -1000,7 +999,7 @@ mod tests {
         client.grant_role(&admin, &Role::Pauser, &holder);
         client.grant_role(&admin, &Role::Minter, &holder);
 
-        client.revoke_role(&Role::Pauser, &holder);
+        client.revoke_role(&admin, &Role::Pauser, &holder);
 
         // Only the Pauser role is removed; the unrelated Minter role is untouched.
         assert!(!client.has_role(&Role::Pauser, &holder));
@@ -1018,7 +1017,7 @@ mod tests {
 
         client.set_admin(&admin);
         client.grant_role(&admin, &Role::Minter, &role_holder);
-        client.revoke_role(&Role::Minter, &role_holder);
+        client.revoke_role(&admin, &Role::Minter, &role_holder);
 
         let events = env.events().all();
         assert_eq!(
@@ -1064,7 +1063,7 @@ mod tests {
         client.grant_role(&admin, &Role::Minter, &minter);
         assert!(client.has_role(&Role::Minter, &minter));
 
-        client.revoke_role(&Role::Minter, &minter);
+        client.revoke_role(&admin, &Role::Minter, &minter);
         assert!(!client.has_role(&Role::Minter, &minter));
     }
 
@@ -1081,16 +1080,16 @@ mod tests {
 
         // Revoking a Minter role that was never granted is a RoleNotHeld error.
         assert_eq!(
-            client.try_revoke_role(&Role::Minter, &minter),
+            client.try_revoke_role(&admin, &Role::Minter, &minter),
             Err(Ok(AdminError::RoleNotHeld))
         );
 
         // Revocation is not silently repeatable: a second revoke after a
         // successful one likewise reports RoleNotHeld.
         client.grant_role(&admin, &Role::Minter, &minter);
-        client.revoke_role(&Role::Minter, &minter);
+        client.revoke_role(&admin, &Role::Minter, &minter);
         assert_eq!(
-            client.try_revoke_role(&Role::Minter, &minter),
+            client.try_revoke_role(&admin, &Role::Minter, &minter),
             Err(Ok(AdminError::RoleNotHeld))
         );
     }
@@ -1108,7 +1107,7 @@ mod tests {
         client.grant_role(&admin, &Role::Minter, &holder);
         client.grant_role(&admin, &Role::Pauser, &holder);
 
-        client.revoke_role(&Role::Minter, &holder);
+        client.revoke_role(&admin, &Role::Minter, &holder);
 
         // Only the Minter role is removed; the unrelated Pauser role is untouched.
         assert!(!client.has_role(&Role::Minter, &holder));
@@ -1251,7 +1250,7 @@ mod tests {
 
         client.set_admin(&admin);
         client.grant_role(&admin, &Role::Minter, &role_holder);
-        client.revoke_role(&Role::Minter, &role_holder);
+        client.revoke_role(&admin, &Role::Minter, &role_holder);
 
         let result = client.try_require_role(&Role::Minter, &role_holder);
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(2))));
@@ -1326,7 +1325,7 @@ mod tests {
 
         client.set_admin(&admin);
         client.grant_role(&admin, &Role::Minter, &role_holder);
-        client.revoke_role(&Role::Minter, &role_holder);
+        client.revoke_role(&admin, &Role::Minter, &role_holder);
 
         let result = client.try_require_role_guard(&Role::Minter, &role_holder);
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
@@ -1502,7 +1501,7 @@ mod tests {
         client.require_pauser(&pauser);
 
         // Revoke the Pauser role.
-        client.revoke_role(&Role::Pauser, &pauser);
+        client.revoke_role(&admin, &Role::Pauser, &pauser);
 
         // After revocation, require_pauser must fail with UnauthorizedRole.
         let result = client.try_require_pauser(&pauser);
@@ -1527,6 +1526,27 @@ mod tests {
     }
 
     #[test]
+    fn test_non_super_admin_cannot_revoke_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let caller = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &role_holder);
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        // A caller without SuperAdmin role cannot revoke roles.
+        let result = client.try_revoke_role(&caller, &Role::Minter, &role_holder);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        // The role holder should still hold the role after a failed revoke.
+        assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
     fn test_has_role_after_revoke() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1539,7 +1559,7 @@ mod tests {
         client.grant_role(&admin, &Role::Minter, &minter);
         assert!(client.has_role(&Role::Minter, &minter));
 
-        client.revoke_role(&Role::Minter, &minter);
+        client.revoke_role(&admin, &Role::Minter, &minter);
         assert!(!client.has_role(&Role::Minter, &minter));
     }
 
@@ -1700,7 +1720,7 @@ mod tests {
         let user = Address::generate(&env);
 
         client.set_admin(&admin);
-        let result = client.try_revoke_role(&Role::Pauser, &user);
+        let result = client.try_revoke_role(&admin, &Role::Pauser, &user);
         assert_eq!(result, Err(Ok(AdminError::RoleNotHeld)));
     }
 }
