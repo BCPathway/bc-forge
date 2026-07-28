@@ -1,60 +1,36 @@
-## Summary
+# Define SUPER_ADMIN_ROLE Constant for Access-Control Gating
 
-This PR implements **#463 — Test: SuperAdmin can grant SuperAdmin** and fixes several pre-existing merge conflict artifacts that prevented the workspace from compiling.
+## Description
 
----
+This PR introduces a public `SUPER_ADMIN_ROLE` constant to the admin access-control module, establishing a single source of truth for the SuperAdmin role value. It also fixes a `cargo fmt` error caused by an unclosed delimiter in the test module by ensuring all test functions are properly closed with balanced braces.
 
-## Changes
+### Changes
 
-### ✨ New Test (#463)
+- **Added `SUPER_ADMIN_ROLE` constant** (`pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;`) to the admin storage module, placed immediately after the `Role` enum for convenient importing.
+- **Updated `require_super_admin` guard** to reference the new `SUPER_ADMIN_ROLE` constant instead of the inline `Role::SuperAdmin` variant, improving maintainability and consistency.
+- **Fixed brace balance** in the test module — all test functions now have properly matched opening and closing braces, resolving the `cargo fmt --all -- --check` failure.
 
-**`contracts/admin/src/lib.rs`**
-- Added `test_super_admin_can_grant_super_admin` — verifies the full delegation chain:
-  1. Admin (implicit SuperAdmin) grants `SuperAdmin` role to `super_admin_a`
-  2. `super_admin_a` (newly granted SuperAdmin) grants `SuperAdmin` to `super_admin_b`
-  3. `super_admin_b` exercises SuperAdmin privileges by granting `Minter` to a holder
-  4. Includes a negative assertion: `super_admin_b` does NOT hold `SuperAdmin` before the grant (prevents false positives)
+### Why This Matters
 
-### 🐛 Fix: Pre-existing Test Errors
+- **Single Source of Truth:** The constant eliminates duplication of `Role::SuperAdmin` across the codebase, making refactoring safer and imports cleaner.
+- **Cargo Fmt Compliance:** The unclosed delimiter prevented `cargo fmt` from running, breaking CI. This fix ensures all formatting checks pass.
+- **Consistent Access-Control Patterns:** Aligns with best practices for role-based access control by providing a canonical constant for the highest-privilege role.
 
-**`contracts/admin/src/lib.rs`**
-- Fixed 3 pre-existing test failures where `RoleNotGranted` was expected but `revoke_role` now returns `RoleNotHeld`:
-  - `test_super_admin_revoke_pauser_when_not_held_errors` (was `_not_granted_`)
-  - `test_super_admin_revoke_minter_when_not_held_errors` (was `_not_granted_`)
-  - `test_revoke_role_returns_role_not_held_when_never_granted` (was `_not_granted_`)
+## Files Changed
 
-### 🛠 Fix: Pre-existing Merge Artifacts (Workspace Compilation)
-
-**`contracts/token/src/test.rs`**
-- Fixed unclosed delimiter: missing `}` on `test_batch_transfer_while_paused_returns_error`
-- Fixed duplicate imports (merged duplicate `soroban_sdk` import lines 4-5)
-- Fixed `try_mint` calls to include required `minter` argument (3 instances in `test_mint_beyond_max_supply_fails`)
-- Fixed `try_batch_mint` call to include required `minter` argument
-
-**`contracts/wrapper/src/test.rs`**
-- Fixed `underlying.mint()` calls to include required `minter` argument (2 instances: `setup_and_fund` and `test_decimal_scaling_up`)
-
-**`e2e/integration_test.rs`**
-- Fixed `client.mint()` calls to include required `minter` argument (2 instances: `test_complete_lifecycle` and `test_parallel_execution`)
-
----
-
-## Test Results
-
-All **100 tests pass** across the workspace:
-
-| Crate | Tests | Result |
-|-------|-------|--------|
-| `bc-forge-admin` | 51 | ✅ |
-| `bc-forge-token` | 13 | ✅ |
-| `bc-forge-wrapper` | 22 | ✅ |
-| `bc-forge-lifecycle` | 6 | ✅ |
-| `bc-forge-vesting` | 5 | ✅ |
-| `bc-forge-e2e-tests` | 3 | ✅ |
-| **Total** | **100** | **0 failed** |
-
----
+| File | Change |
+|------|--------|
+| `contracts/admin/src/lib.rs` | Added `SUPER_ADMIN_ROLE` constant, updated `require_super_admin`, fixed test brace balance |
+| `contracts/admin/test_snapshots/tests/test_set_admin_emits_role_revoked_event.1.json` | Added test snapshot for admin replacement event verification |
 
 ## Related Issues
 
-Closes #463
+- Closes #401
+
+## Checklist
+
+- [x] Added `SUPER_ADMIN_ROLE` constant after `Role` enum
+- [x] Updated `require_super_admin` to use the constant
+- [x] Fixed unclosed delimiter causing `cargo fmt` failure
+- [x] All test snapshots remain valid (brace depth: 0)
+- [x] No breaking changes to public API
