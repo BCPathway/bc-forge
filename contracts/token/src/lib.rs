@@ -467,7 +467,11 @@ impl BcForgeToken {
     }
 
     /// Removes a fee exemption from `address`. Admin-only.
-    pub fn remove_fee_exemption(env: Env, caller: Address, address: Address) -> Result<(), TokenError> {
+    pub fn remove_fee_exemption(
+        env: Env,
+        caller: Address,
+        address: Address,
+    ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         admin::require_fee_admin(&env, &caller);
         if !env

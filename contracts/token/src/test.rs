@@ -345,9 +345,7 @@ fn test_admin_can_set_fee_exemption() {
     env.mock_all_auths();
     let (client, admin) = setup(&env);
     let exempt_address = Address::generate(&env);
-    let exemption = crate::FeeExemption {
-        exemption_type: 0,
-    };
+    let exemption = crate::FeeExemption { exemption_type: 0 };
 
     client.set_fee_exemption(&admin, &exempt_address, &exemption);
     client.remove_fee_exemption(&admin, &exempt_address);
@@ -384,9 +382,7 @@ fn test_unauthorized_caller_rejected_for_set_fee_exemption() {
     let (client, _admin) = setup(&env);
     let unauthorized = Address::generate(&env);
     let exempt_address = Address::generate(&env);
-    let exemption = crate::FeeExemption {
-        exemption_type: 1,
-    };
+    let exemption = crate::FeeExemption { exemption_type: 1 };
 
     let result = client.try_set_fee_exemption(&unauthorized, &exempt_address, &exemption);
     assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
