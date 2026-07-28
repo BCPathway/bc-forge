@@ -342,7 +342,7 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
     }
     require_non_zero_address(env, address);
     let admin = get_admin(env);
-    admin.require_auth();
+    require_role(env, Role::Admin, &admin);
 
     _revoke_role(env, role, address)
 }

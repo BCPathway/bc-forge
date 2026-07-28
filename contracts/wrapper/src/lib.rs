@@ -401,7 +401,9 @@ impl WrapperContract {
 
     /// Pause all wrap/unwrap and transfer operations. Admin-only.
     pub fn pause(env: Env) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
         let current_admin = Self::read_admin(&env)?;
+        admin::require_role(&env, admin::Role::Admin, &current_admin);
         bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
         events::emit_paused(&env, &current_admin);
         Ok(())
@@ -409,7 +411,9 @@ impl WrapperContract {
 
     /// Unpause operations. Admin-only.
     pub fn unpause(env: Env) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
         let current_admin = Self::read_admin(&env)?;
+        admin::require_role(&env, admin::Role::Admin, &current_admin);
         bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
         events::emit_unpaused(&env, &current_admin);
         Ok(())
