@@ -33,7 +33,7 @@ fn extend_instance_ttl(env: &Env) {
 /// # Panics
 /// Panics if the contract is already paused.
 pub fn pause(env: Env, admin: Address) {
-    admin.require_auth();
+    bc_forge_admin::require_pauser(&env, &admin);
     if is_paused(&env) {
         panic!("contract is already paused");
     }
@@ -50,7 +50,7 @@ pub fn pause(env: Env, admin: Address) {
 /// # Panics
 /// Panics if the contract is not paused.
 pub fn unpause(env: Env, admin: Address) {
-    admin.require_auth();
+    bc_forge_admin::require_pauser(&env, &admin);
     if !is_paused(&env) {
         panic!("contract is not paused");
     }
@@ -109,6 +109,12 @@ mod tests {
         }
     }
 
+    fn initialize_admin(env: &Env, contract_id: &Address, admin: &Address) {
+        env.as_contract(contract_id, || {
+            bc_forge_admin::set_admin(env, admin);
+        });
+    }
+
     #[test]
     fn test_initial_state_not_paused() {
         let env = Env::default();
@@ -125,6 +131,7 @@ mod tests {
         let contract_id = env.register(LifecycleContract, ());
         let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+        initialize_admin(&env, &contract_id, &admin);
 
         client.pause(&admin);
         assert!(client.is_paused());
@@ -141,6 +148,7 @@ mod tests {
         let contract_id = env.register(LifecycleContract, ());
         let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+        initialize_admin(&env, &contract_id, &admin);
 
         client.pause(&admin);
         client.pause(&admin);
@@ -154,6 +162,7 @@ mod tests {
         let contract_id = env.register(LifecycleContract, ());
         let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+        initialize_admin(&env, &contract_id, &admin);
 
         client.unpause(&admin);
     }
@@ -166,10 +175,48 @@ mod tests {
         let contract_id = env.register(LifecycleContract, ());
         let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+        initialize_admin(&env, &contract_id, &admin);
 
         client.pause(&admin);
         client.require_not();
     }
+
+    #[test]
+    fn test_pauser_role_can_transition_lifecycle_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+        initialize_admin(&env, &contract_id, &admin);
+        env.as_contract(&contract_id, || {
+            bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+        });
+
+        client.pause(&pauser);
+        assert!(client.is_paused());
+
+        client.unpause(&pauser);
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn test_non_pauser_cannot_transition_lifecycle_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+        initialize_admin(&env, &contract_id, &admin);
+
+        assert!(!client.is_paused());
+        let result = client.try_pause(&unauthorized);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.is_paused());
+    }
+
     #[test]
     fn test_pause_extends_instance_ttl_across_ledger_advances() {
         let env = Env::default();
@@ -177,6 +224,7 @@ mod tests {
         let contract_id = env.register(LifecycleContract, ());
         let client = LifecycleContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+        initialize_admin(&env, &contract_id, &admin);
 
         client.pause(&admin);
         let mut ledger_info = env.ledger().get();
