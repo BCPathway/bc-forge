@@ -31,8 +31,8 @@
 //!
 //! | Code | Variant | Triggered by |
 //! |---|---|---|
-//! | `1` | `RoleNotGranted` | `revoke_role` on an ungranted `(Role, Address)` pair |
-//! | `2` | `RoleNotHeld` | `require_role` failure (missing role) |
+//! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
+//! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
 //!
 //! ## Event Emissions
@@ -135,7 +135,7 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 #[contracterror]
 #[repr(u32)]
 pub enum AdminError {
-    /// A role operation was attempted for an (role, address) pair that was never granted.
+    /// Unused; kept for ABI stability. Prefer [`AdminError::RoleNotHeld`].
     RoleNotGranted = 1,
     /// An address does not hold the required role (e.g. revoke_role called on non-holder).
     RoleNotHeld = 2,
@@ -351,7 +351,7 @@ fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminErr
 
     let key = AdminKey::Role(role, address.clone());
     if !env.storage().persistent().has(&key) {
-        return Err(AdminError::RoleNotGranted);
+        return Err(AdminError::RoleNotHeld);
     }
 
     env.storage().persistent().remove(&key);
@@ -1294,7 +1294,7 @@ mod tests {
             _revoke_role(&env, Role::Minter, &role_holder)
         });
 
-        assert_eq!(result, Err(AdminError::RoleNotGranted));
+        assert_eq!(result, Err(AdminError::RoleNotHeld));
         assert!(env.as_contract(&contract_id, || has_role(&env, Role::Admin, &admin)));
     }
 
