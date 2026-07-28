@@ -34,6 +34,7 @@
 //! | `1` | `RoleNotGranted` | `revoke_role` on an ungranted `(Role, Address)` pair |
 //! | `2` | `RoleNotHeld` | `require_role` failure (missing role) |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//! | `7` | `RoleAlreadyGranted` | `grant_role` on an already-held `(Role, Address)` pair |
 //!
 //! ## Event Emissions
 //!
@@ -148,6 +149,8 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
+    /// A role grant was attempted for an address that already holds that role.
+    RoleAlreadyGranted = 7,
 }
 
 /// Storage keys for the access-control layer.
@@ -317,6 +320,13 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
     if !is_valid_role(role) {
         soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
+    if env
+        .storage()
+        .persistent()
+        .has(&AdminKey::Role(role, address.clone()))
+    {
+        soroban_sdk::panic_with_error!(env, AdminError::RoleAlreadyGranted);
     }
     _grant_role(env, caller, role, address);
 }
@@ -748,6 +758,47 @@ mod tests {
         client.grant_role(&admin, &Role::Minter, &role_holder);
 
         assert!(client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_cannot_grant_already_granted_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &role_holder);
+        let role_grants_before = env
+            .events()
+            .all()
+            .iter()
+            .filter(|(_, topics, _)| {
+                let topic0: soroban_sdk::Symbol =
+                    topics.get(0).unwrap().try_into_val(&env).unwrap();
+                topic0 == soroban_sdk::symbol_short!("role_grnt")
+            })
+            .count();
+
+        // Granting the same role to the same address again must be rejected
+        // instead of silently rewriting storage or emitting a duplicate grant.
+        let result = client.try_grant_role(&admin, &Role::Minter, &role_holder);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(7))));
+        assert!(client.has_role(&Role::Minter, &role_holder));
+
+        let role_grants_after = env
+            .events()
+            .all()
+            .iter()
+            .filter(|(_, topics, _)| {
+                let topic0: soroban_sdk::Symbol =
+                    topics.get(0).unwrap().try_into_val(&env).unwrap();
+                topic0 == soroban_sdk::symbol_short!("role_grnt")
+            })
+            .count();
+        assert_eq!(role_grants_after, role_grants_before);
     }
 
     #[test]
