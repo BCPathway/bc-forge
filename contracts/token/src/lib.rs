@@ -43,6 +43,30 @@ pub enum DataKey {
     Symbol,
     Supply,
     MaxSupply,
+    /// Treasury address for collected fees.
+    Treasury,
+    /// Fee configuration.
+    FeeConfig,
+    /// Fee exemptions keyed by address.
+    FeeExemption(Address),
+}
+
+/// Fee configuration for dynamic contract fee charging.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct FeeConfig {
+    pub base_fee: i128,
+    pub complexity_multiplier: u32,
+    pub max_fee: i128,
+    pub enabled: bool,
+}
+
+/// Fee exemption for a specific address.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct FeeExemption {
+    /// 0 = all operations, 1 = transfers only, 2 = mint only.
+    pub exemption_type: u8,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -209,6 +233,30 @@ impl BcForgeToken {
         Self::write_supply(env, new_supply);
         events::emit_mint(env, admin_address, to, amount, new_balance, new_supply);
         Ok(())
+    }
+
+    fn write_fee_config(env: &Env, config: &FeeConfig) {
+        env.storage().instance().set(&DataKey::FeeConfig, config);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn write_treasury(env: &Env, treasury: &Address) {
+        env.storage().instance().set(&DataKey::Treasury, treasury);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn write_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeExemption(address.clone()), exemption);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn remove_fee_exemption(env: &Env, address: &Address) {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FeeExemption(address.clone()));
+        ttl::extend_instance_ttl(env);
     }
 }
 
@@ -381,6 +429,73 @@ impl BcForgeToken {
         events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
+    }
+
+    /// Updates the contract fee configuration. Admin-only.
+    pub fn set_fee_config(env: Env, caller: Address, config: FeeConfig) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_fee_admin(&env, &caller);
+        if config.base_fee < 0 || config.max_fee < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        Self::write_fee_config(&env, &config);
+        events::emit_fee_config_set(&env, &caller, &config);
+        Ok(())
+    }
+
+    /// Sets the treasury address that receives collected fees. Admin-only.
+    pub fn set_treasury(env: Env, caller: Address, treasury: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_fee_admin(&env, &caller);
+        Self::write_treasury(&env, &treasury);
+        events::emit_treasury_set(&env, &caller, &treasury);
+        Ok(())
+    }
+
+    /// Grants a fee exemption to `address`. Admin-only.
+    pub fn set_fee_exemption(
+        env: Env,
+        caller: Address,
+        address: Address,
+        exemption: FeeExemption,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_fee_admin(&env, &caller);
+        Self::write_fee_exemption(&env, &address, &exemption);
+        events::emit_fee_exemption_set(&env, &caller, &address, &exemption);
+        Ok(())
+    }
+
+    /// Removes a fee exemption from `address`. Admin-only.
+    pub fn remove_fee_exemption(env: Env, caller: Address, address: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_fee_admin(&env, &caller);
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::FeeExemption(address.clone()))
+        {
+            return Err(TokenError::FeeExemptionNotFound);
+        }
+        Self::remove_fee_exemption(&env, &address);
+        events::emit_fee_exemption_removed(&env, &caller, &address);
+        Ok(())
+    }
+
+    pub fn get_fee_config(env: Env) -> Result<FeeConfig, TokenError> {
+        Self::ensure_initialized(&env)?;
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeConfig)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    pub fn get_treasury(env: Env) -> Result<Address, TokenError> {
+        Self::ensure_initialized(&env)?;
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .ok_or(TokenError::FeeNotConfigured)
     }
 }
 
