@@ -280,7 +280,7 @@ mod tests {
 
     #[contractimpl]
     impl RateLimitContract {
-        pub fn set_admin(env: Env, admin: Address) {
+        pub fn set_admin_rl(env: Env, admin: Address) {
             admin::set_admin(&env, &admin);
         }
 
@@ -340,7 +340,7 @@ mod tests {
 
         let rate_limit_contract_id = env.register(RateLimitContract, ());
         let rl_client = RateLimitContractClient::new(&env, &rate_limit_contract_id);
-        rl_client.set_admin(&admin_addr);
+        rl_client.set_admin_rl(&admin_addr);
         (env, admin_addr, rate_limit_contract_id)
     }
 
