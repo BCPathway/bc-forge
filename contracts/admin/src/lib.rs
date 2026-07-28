@@ -371,17 +371,12 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
         return false;
     }
 
-    if role != Role::Admin && role != Role::SuperAdmin {
+    // Admin role implicitly grants all other roles.
+    // Check the Admin mapping first unless the caller already asks for Admin.
+    if role != Role::Admin {
         let admin_key = AdminKey::Role(Role::Admin, address.clone());
         if env.storage().persistent().has(&admin_key) {
             extend_storage_ttl_for_key(env, &admin_key);
-            events::emit_role_checked(env, address, role, true);
-            return true;
-        }
-
-        let super_admin_key = AdminKey::Role(Role::SuperAdmin, address.clone());
-        if env.storage().persistent().has(&super_admin_key) {
-            extend_storage_ttl_for_key(env, &super_admin_key);
             events::emit_role_checked(env, address, role, true);
             return true;
         }
