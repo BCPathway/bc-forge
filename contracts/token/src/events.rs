@@ -92,3 +92,42 @@ pub fn emit_max_supply_changed(env: &Env, caller: &Address, new_max_supply: i128
         (caller.clone(), new_max_supply),
     );
 }
+
+pub fn emit_fee_config_set(env: &Env, caller: &Address, config: &crate::FeeConfig) {
+    env.events().publish(
+        (symbol_short!("fee_cfg"),),
+        (
+            caller.clone(),
+            config.base_fee,
+            config.complexity_multiplier,
+            config.max_fee,
+            config.enabled,
+        ),
+    );
+}
+
+pub fn emit_treasury_set(env: &Env, caller: &Address, treasury: &Address) {
+    env.events().publish(
+        (symbol_short!("fee_tres"),),
+        (caller.clone(), treasury.clone()),
+    );
+}
+
+pub fn emit_fee_exemption_set(
+    env: &Env,
+    caller: &Address,
+    address: &Address,
+    exemption: &crate::FeeExemption,
+) {
+    env.events().publish(
+        (symbol_short!("fee_exm"),),
+        (caller.clone(), address.clone(), exemption.exemption_type),
+    );
+}
+
+pub fn emit_fee_exemption_removed(env: &Env, caller: &Address, address: &Address) {
+    env.events().publish(
+        (symbol_short!("fee_rmv"),),
+        (caller.clone(), address.clone()),
+    );
+}

@@ -31,8 +31,8 @@
 //!
 //! | Code | Variant | Triggered by |
 //! |---|---|---|
-//! | `1` | `RoleNotGranted` | `revoke_role` on an ungranted `(Role, Address)` pair |
-//! | `2` | `RoleNotHeld` | `require_role` failure (missing role) |
+//! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
+//! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
 //!
 //! ## Event Emissions
@@ -89,8 +89,9 @@
 //!   self-revocation (an admin revoking their own admin role).
 //!
 //! ### Guard Failure Modes
-//! - [`require_role`] panics with [`AdminError::RoleNotHeld`] when the role check
-//!   fails, and then enforces `address.require_auth()` on success.
+//! - [`require_role`] panics with [`AdminError::InvalidRole`] when an unrecognized
+//!   role discriminant is supplied, then with [`AdminError::RoleNotHeld`] when the
+//!   role check fails, and finally enforces `address.require_auth()` on success.
 //! - [`require_role_guard`] panics with [`AdminError::UnauthorizedRole`] on failure,
 //!   and similarly enforces `address.require_auth()` on success. The `guard`
 //!   variant is the right choice when only authorization is being checked, not
@@ -135,7 +136,7 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 #[contracterror]
 #[repr(u32)]
 pub enum AdminError {
-    /// A role operation was attempted for an (role, address) pair that was never granted.
+    /// Unused; kept for ABI stability. Prefer [`AdminError::RoleNotHeld`].
     RoleNotGranted = 1,
     /// An address does not hold the required role (e.g. revoke_role called on non-holder).
     RoleNotHeld = 2,
@@ -195,6 +196,10 @@ pub enum Role {
     /// Role allowing emergency pause and unpause operations.
     Pauser,
 }
+
+/// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
+/// use in access-control gating without qualifying the full `Role` enum.
+pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
 
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
@@ -339,12 +344,23 @@ pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), Admin
     let admin = get_admin(env);
     admin.require_auth();
 
+    _revoke_role(env, role, address)
+}
+
+/// Removes a role assignment without performing authorization.
+///
+/// This helper is intentionally private. Callers exposed by a contract must
+/// perform their authorization checks before delegating the state change here.
+fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+    require_non_zero_address(env, address);
+
     let key = AdminKey::Role(role, address.clone());
     if !env.storage().persistent().has(&key) {
         return Err(AdminError::RoleNotHeld);
     }
 
     env.storage().persistent().remove(&key);
+    let admin = get_admin(env);
     events::emit_role_revoked(env, &admin, role, address);
     Ok(())
 }
@@ -377,6 +393,9 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 
 #[inline(always)]
 pub fn require_role(env: &Env, role: Role, address: &Address) {
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
@@ -414,7 +433,11 @@ pub fn require_minter(env: &Env, address: &Address) {
 
 #[inline(always)]
 pub fn require_super_admin(env: &Env, address: &Address) {
-    require_role_guard(env, Role::SuperAdmin, address);
+    require_role_guard(env, SUPER_ADMIN_ROLE, address);
+}
+
+pub fn require_fee_admin(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Admin, address);
 }
 
 #[inline(always)]
@@ -627,6 +650,10 @@ mod tests {
 
         pub fn require_super_admin(env: Env, address: Address) {
             super::require_super_admin(&env, &address);
+        }
+
+        pub fn require_fee_admin(env: Env, address: Address) {
+            super::require_fee_admin(&env, &address);
         }
 
         pub fn require_pauser(env: Env, address: Address) {
@@ -1218,6 +1245,43 @@ mod tests {
     }
 
     #[test]
+    fn test_internal_revoke_role_removes_assignment() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &role_holder);
+
+        let result = env.as_contract(&contract_id, || {
+            _revoke_role(&env, Role::Minter, &role_holder)
+        });
+
+        assert_eq!(result, Ok(()));
+        assert!(!client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_internal_revoke_role_rejects_unassigned_role_without_modifying_state() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let admin = Address::generate(&env);
+        let role_holder = Address::generate(&env);
+
+        env.as_contract(&contract_id, || set_admin(&env, &admin));
+
+        let result = env.as_contract(&contract_id, || {
+            _revoke_role(&env, Role::Minter, &role_holder)
+        });
+
+        assert_eq!(result, Err(AdminError::RoleNotHeld));
+        assert!(env.as_contract(&contract_id, || has_role(&env, Role::Admin, &admin)));
+    }
+
+    #[test]
     fn test_require_role_succeeds_when_role_held() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1229,6 +1293,25 @@ mod tests {
         client.set_admin(&admin);
         client.grant_role(&admin, &Role::Minter, &role_holder);
         client.require_role(&Role::Minter, &role_holder);
+    }
+
+    #[test]
+    fn test_require_role_accepts_every_valid_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // The admin implicitly holds every role, so `require_role` must pass the
+        // `is_valid_role` gate and succeed for each recognized variant rather
+        // than reverting with `InvalidRole`.
+        client.require_role(&Role::Admin, &admin);
+        client.require_role(&Role::Minter, &admin);
+        client.require_role(&Role::SuperAdmin, &admin);
+        client.require_role(&Role::Pauser, &admin);
     }
 
     #[test]
