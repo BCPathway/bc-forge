@@ -938,16 +938,45 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_set_admin_pool_requires_admin_auth() {
+    fn test_non_super_admin_cannot_grant_pauser() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let pool_member = Address::generate(&env);
+        let caller = Address::generate(&env);
+        let target = Address::generate(&env);
 
         client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, pool_member], &1);
+
+        // A non-privileged caller cannot grant the Pauser role — the call is
+        // rejected with AdminError::UnauthorizedRole (error code 3).
+        let result = client.try_grant_role(&caller, &Role::Pauser, &target);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        // The target address must not hold Pauser.
+        assert!(!client.has_role(&Role::Pauser, &target));
+
+        // Edge case: even an address that holds a different role (Minter) but
+        // not SuperAdmin also cannot grant Pauser.
+        let minter = Address::generate(&env);
+        let another_target = Address::generate(&env);
+        client.grant_role(&admin, &Role::Minter, &minter);
+        assert!(client.has_role(&Role::Minter, &minter));
+
+        let result = client.try_grant_role(&minter, &Role::Pauser, &another_target);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Pauser, &another_target));
+
+        // Edge case: an address that itself holds Pauser (but not SuperAdmin)
+        // cannot grant Pauser to a different address.
+        let pauser_holder = Address::generate(&env);
+        let yet_another = Address::generate(&env);
+        client.grant_role(&admin, &Role::Pauser, &pauser_holder);
+        assert!(client.has_role(&Role::Pauser, &pauser_holder));
+
+        let result = client.try_grant_role(&pauser_holder, &Role::Pauser, &yet_another);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Pauser, &yet_another));
     }
 
     #[test]
