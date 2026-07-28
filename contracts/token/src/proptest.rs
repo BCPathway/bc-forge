@@ -11,29 +11,28 @@ use soroban_sdk::{Address, Env, String};
 use crate::{BcForgeToken, BcForgeTokenClient};
 
 /// Helper: setup a fresh environment and initialized client.
-fn setup_test_env() -> (Env, BcForgeTokenClient<'static>, Address) {
-    let env = Env::default();
+fn setup_test_env(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     env.mock_all_auths();
     let contract_id = env.register(BcForgeToken, ());
-    let client = BcForgeTokenClient::new(&env, &contract_id);
+    let client = BcForgeTokenClient::new(env, &contract_id);
     
-    let admin = Address::generate(&env);
-    let name = String::from_str(&env, "PropTest Token");
-    let symbol = String::from_str(&env, "PTT");
+    let admin = Address::generate(env);
+    let name = String::from_str(env, "PropTest Token");
+    let symbol = String::from_str(env, "PTT");
     client.initialize(&admin, &7, &name, &symbol);
     
-    (env, client, admin)
+    (client, admin)
 }
 
 /// Helper: setup a fresh environment with rate limiting enabled.
-fn setup_test_env_with_rate_limiting() -> (Env, BcForgeTokenClient<'static>, Address) {
-    let (env, client, admin) = setup_test_env();
+fn setup_test_env_with_rate_limiting(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
+    let (client, admin) = setup_test_env(env);
     
     // Set up rate limiting for mint operations
     // Note: This requires the bc-forge-rate-limit contract to be deployed
     // For testing purposes, we'll use the client's internal methods
     
-    (env, client, admin)
+    (client, admin)
 }
 
 proptest! {
@@ -45,11 +44,12 @@ proptest! {
         initial_mint in 1..i128::MAX / 4,
         transfer_amount in 1..i128::MAX / 4
     ) {
-        let (env, client, _) = setup_test_env();
+        let env = Env::default();
+        let (client, admin) = setup_test_env(&env);
         let user_a = Address::generate(&env);
         let user_b = Address::generate(&env);
 
-        client.mint(&user_a, &initial_mint);
+        client.mint(&admin, &user_a, &initial_mint);
         let initial_supply = client.supply();
 
         // If transfer_amount > initial_mint, it should panic (insufficient balance)
@@ -72,11 +72,12 @@ proptest! {
         mint2 in 1..i128::MAX / 4,
         burn_amount in 1..i128::MAX / 4
     ) {
-        let (env, client, _) = setup_test_env();
+        let env = Env::default();
+        let (client, admin) = setup_test_env(&env);
         let user = Address::generate(&env);
 
-        client.mint(&user, &mint1);
-        client.mint(&user, &mint2);
+        client.mint(&admin, &user, &mint1);
+        client.mint(&admin, &user, &mint2);
         
         let expected_supply = mint1 + mint2;
         assert_eq!(client.supply(), expected_supply);
@@ -100,12 +101,13 @@ proptest! {
         t2 in 1..i128::MAX / 8,
         t3 in 1..i128::MAX / 8
     ) {
-        let (env, client, _) = setup_test_env();
+        let env = Env::default();
+        let (client, admin) = setup_test_env(&env);
         let user_a = Address::generate(&env);
         let user_b = Address::generate(&env);
         let user_c = Address::generate(&env);
 
-        client.mint(&user_a, &initial_balance);
+        client.mint(&admin, &user_a, &initial_balance);
 
         // Simple sequence of transfers
         let amounts = [t1, t2, t3];
@@ -140,11 +142,12 @@ proptest! {
         initial_mint in 1..i128::MAX / 4,
         transfer_amount in 1..i128::MAX / 4
     ) {
-        let (env, client, _) = setup_test_env();
+        let env = Env::default();
+        let (client, admin) = setup_test_env(&env);
         let user_a = Address::generate(&env);
         let user_b = Address::generate(&env);
 
-        client.mint(&user_a, &initial_mint);
+        client.mint(&admin, &user_a, &initial_mint);
 
         // Test that reentrant calls are blocked
         // This is a basic test - in real scenarios we'd need to simulate cross-contract calls
@@ -155,10 +158,10 @@ proptest! {
         // This is a simplified test since true reentrancy requires cross-contract calls
         
         // First mint should succeed
-        client.mint(&user_b, &100);
+        client.mint(&admin, &user_b, &100);
         
         // Second mint should also succeed (not reentrant)
-        client.mint(&user_b, &200);
+        client.mint(&admin, &user_b, &200);
         
         // The key is that the guard prevents the same function from being called recursively
         // during execution, which this test verifies indirectly
@@ -171,11 +174,12 @@ proptest! {
         initial_mint in 1..i128::MAX / 4,
         transfer_amount in 1..i128::MAX / 4
     ) {
-        let (env, client, _) = setup_test_env();
+        let env = Env::default();
+        let (client, admin) = setup_test_env(&env);
         let user_a = Address::generate(&env);
         let user_b = Address::generate(&env);
 
-        client.mint(&user_a, &initial_mint);
+        client.mint(&admin, &user_a, &initial_mint);
 
         // In a real test, we would configure rate limits and then test
         // that exceeding them causes failures
@@ -193,12 +197,13 @@ proptest! {
         transfer_amount in 1..i128::MAX / 4,
         burn_amount in 1..i128::MAX / 4
     ) {
-        let (env, client, _) = setup_test_env();
+        let env = Env::default();
+        let (client, admin) = setup_test_env(&env);
         let user_a = Address::generate(&env);
         let user_b = Address::generate(&env);
 
         // Initial mint
-        client.mint(&user_a, &initial_mint);
+        client.mint(&admin, &user_a, &initial_mint);
         
         // Verify supply invariant
         let initial_supply = client.supply();
@@ -207,23 +212,28 @@ proptest! {
         assert_eq!(client.supply(), initial_mint);
 
         // Mint more
-        client.mint(&user_b, &mint_amount);
+        client.mint(&admin, &user_b, &mint_amount);
         let new_supply = client.supply();
         assert_eq!(new_supply, initial_supply + mint_amount);
         assert_eq!(client.balance(&user_b), mint_amount);
 
+        // Track user_a balance as it changes
+        let mut balance_a = initial_mint;
+
         // Transfer
-        if transfer_amount <= initial_mint {
+        if transfer_amount <= balance_a {
             client.transfer(&user_a, &user_b, &transfer_amount);
-            assert_eq!(client.balance(&user_a), initial_mint - transfer_amount);
+            balance_a -= transfer_amount;
+            assert_eq!(client.balance(&user_a), balance_a);
             assert_eq!(client.balance(&user_b), mint_amount + transfer_amount);
             assert_eq!(client.supply(), new_supply);
         }
 
         // Burn
-        if burn_amount <= initial_mint {
+        if burn_amount <= balance_a {
             client.burn(&user_a, &burn_amount);
-            assert_eq!(client.balance(&user_a), initial_mint - transfer_amount - burn_amount);
+            balance_a -= burn_amount;
+            assert_eq!(client.balance(&user_a), balance_a);
             assert_eq!(client.supply(), new_supply - burn_amount);
         }
     }

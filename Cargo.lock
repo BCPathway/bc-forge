@@ -215,6 +215,7 @@ dependencies = [
 name = "bc-forge-rate-limit"
 version = "0.1.0"
 dependencies = [
+ "bc-forge-admin",
  "soroban-sdk",
 ]
 

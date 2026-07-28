@@ -1,3 +1,4 @@
+//! Structured event emission for the admin/access-control contract.
 //! Structured event emission for the admin access-control module.
 
 use soroban_sdk::{symbol_short, Address, Env};
