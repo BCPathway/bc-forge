@@ -196,6 +196,10 @@ pub enum Role {
     Pauser,
 }
 
+/// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
+/// use in access-control gating without qualifying the full `Role` enum.
+pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
+
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
@@ -413,7 +417,7 @@ pub fn require_minter(env: &Env, address: &Address) {
 }
 
 pub fn require_super_admin(env: &Env, address: &Address) {
-    require_role_guard(env, Role::SuperAdmin, address);
+    require_role_guard(env, SUPER_ADMIN_ROLE, address);
 }
 
 pub fn require_pauser(env: &Env, address: &Address) {
