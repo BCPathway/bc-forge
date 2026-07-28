@@ -144,6 +144,33 @@ export function scValToNative(scVal: xdr.ScVal): unknown {
 }
 
 /**
+ * Formats a raw atomic token amount using the token's decimal precision.
+ *
+ * Returns a fixed-scale decimal string so callers can display balances without
+ * accidentally dropping precision from the contract's smallest unit.
+ */
+export function formatAtomicAmount(amount: bigint, decimals: number): string {
+  if (!Number.isInteger(decimals) || decimals < 0) {
+    throw new Error('Decimals must be a non-negative integer');
+  }
+
+  const negative = amount < 0n;
+  const absolute = negative ? -amount : amount;
+  const raw = absolute.toString();
+
+  if (decimals === 0) {
+    return negative ? `-${raw}` : raw;
+  }
+
+  const padded = raw.padStart(decimals + 1, '0');
+  const whole = padded.slice(0, -decimals);
+  const fraction = padded.slice(-decimals);
+  const sign = negative ? '-' : '';
+
+  return `${sign}${whole}.${fraction}`;
+}
+
+/**
  * Builds an unsigned transaction XDR for offline signing.
  *
  * @param rpcUrl           - The Soroban RPC endpoint URL.
