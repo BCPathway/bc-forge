@@ -550,6 +550,74 @@ mod tests {
     }
 
     #[test]
+    fn test_super_admin_can_grant_pauser() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.grant_role(&super_admin, &Role::Pauser, &pauser);
+
+        assert!(client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
+    fn test_admin_can_grant_pauser() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Pauser, &pauser);
+
+        assert!(client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
+    fn test_non_privileged_caller_cannot_grant_pauser() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let caller = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_grant_role(&caller, &Role::Pauser, &pauser);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
+    fn test_revoked_super_admin_cannot_grant_pauser() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let pauser = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.revoke_role(&Role::SuperAdmin, &super_admin);
+
+        let result = client.try_grant_role(&super_admin, &Role::Pauser, &pauser);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::Pauser, &pauser));
+    }
+
+    #[test]
     fn test_admin_can_grant_role() {
         let env = Env::default();
         env.mock_all_auths();
