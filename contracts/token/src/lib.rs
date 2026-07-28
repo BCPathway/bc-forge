@@ -345,7 +345,7 @@ impl BcForgeToken {
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
-        admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
+        admin::require_admin(&env, &current_admin);
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())

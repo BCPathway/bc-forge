@@ -375,15 +375,7 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     has
 }
 
-// /// Requires that the stored admin has authorized the current invocation.
-// ///
-// /// # Panics
-// /// Panics if the caller is not the admin or if no admin is set.
-// pub fn require_admin(env: &Env) {
-//     let admin = get_admin(env);
-//     admin.require_auth();
-// }
-
+#[inline(always)]
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
@@ -400,6 +392,7 @@ pub fn get_role_admin(env: &Env, role: Role) -> Address {
     admin
 }
 
+#[inline(always)]
 pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::UnauthorizedRole);
@@ -407,15 +400,24 @@ pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
+/// Requires that the caller has the Admin role and has authorized the invocation.
+#[inline(always)]
+pub fn require_admin(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Admin, address);
+}
+
 /// Requires that the caller has the Minter role and has authorized the invocation.
+#[inline(always)]
 pub fn require_minter(env: &Env, address: &Address) {
     require_role_guard(env, Role::Minter, address);
 }
 
+#[inline(always)]
 pub fn require_super_admin(env: &Env, address: &Address) {
     require_role_guard(env, Role::SuperAdmin, address);
 }
 
+#[inline(always)]
 pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
 }
@@ -597,6 +599,10 @@ mod tests {
 
         pub fn require_role_guard(env: Env, role: Role, address: Address) {
             super::require_role_guard(&env, role, &address);
+        }
+
+        pub fn require_admin(env: Env, address: Address) {
+            super::require_admin(&env, &address);
         }
 
         pub fn require_minter(env: Env, address: Address) {
@@ -1702,5 +1708,58 @@ mod tests {
         client.set_admin(&admin);
         let result = client.try_revoke_role(&Role::Pauser, &user);
         assert_eq!(result, Err(Ok(AdminError::RoleNotHeld)));
+    }
+
+    // ── require_admin ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_require_admin_succeeds_for_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.require_admin(&admin);
+    }
+
+    #[test]
+    fn test_require_admin_succeeds_when_role_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Admin, &holder);
+        client.require_admin(&holder);
+    }
+
+    #[test]
+    fn test_require_admin_fails_when_role_not_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let result = client.try_require_admin(&unauthorized);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    fn test_require_admin_fails_for_zero_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let result = client.try_require_admin(&zero_address(&env));
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
     }
 }
