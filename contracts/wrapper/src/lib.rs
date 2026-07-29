@@ -415,6 +415,22 @@ impl WrapperContract {
         Ok(())
     }
 
+    /// Pause operations using a specific caller address (must have Pauser role).
+    pub fn pause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::pause(env.clone(), caller.clone());
+        events::emit_paused(&env, &caller);
+        Ok(())
+    }
+
+    /// Unpause operations using a specific caller address (must have Pauser role).
+    pub fn unpause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::unpause(env.clone(), caller.clone());
+        events::emit_unpaused(&env, &caller);
+        Ok(())
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, "1.0.0")

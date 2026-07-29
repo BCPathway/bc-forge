@@ -207,6 +207,7 @@ dependencies = [
 name = "bc-forge-lifecycle"
 version = "0.1.0"
 dependencies = [
+ "bc-forge-admin",
  "bc-forge-ttl",
  "soroban-sdk",
 ]

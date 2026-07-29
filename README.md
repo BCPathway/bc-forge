@@ -294,9 +294,8 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 
 ## 🏗️ Smart Contract Architecture
 
-The [architecture specification](docs/ARCHITECTURE.md) documents the current
-workspace modules, runtime call paths, storage ownership, wrapper invariants,
-and upgrade boundaries.
+See the [access-control diagrams](docs/ACCESS_CONTROL.md) for the current role
+hierarchy, authorization sequence, protected operations, and governance flow.
 
 ```
 ┌─────────────────────────────────────────────────┐
