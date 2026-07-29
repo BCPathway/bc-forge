@@ -541,7 +541,6 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         .instance()
         .set(&AdminKey::Proposal(id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(id));
     id
 }
 
@@ -577,7 +576,6 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
 /// Returns `true` when a proposal has gathered enough approvals to be
@@ -593,7 +591,6 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
         .get(&AdminKey::Proposal(proposal_id))
         .expect("proposal not found");
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
     proposal.approvals.len() >= get_threshold(env)
 }
 
@@ -625,7 +622,6 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
 #[cfg(test)]
@@ -1994,5 +1990,117 @@ mod tests {
 
         let result = client.try_require_admin(&zero_address(&env));
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid threshold for admin pool")]
+    fn test_set_admin_pool_rejects_zero_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &0u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid threshold for admin pool")]
+    fn test_set_admin_pool_rejects_threshold_exceeding_pool() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &2u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "only admins can create proposals")]
+    fn test_create_proposal_rejects_non_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.create_proposal(&stranger, &String::from_str(&env, "test"));
+    }
+
+    #[test]
+    #[should_panic(expected = "admin already approved this proposal")]
+    fn test_approve_proposal_rejects_duplicate_approval() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "test"));
+        client.approve_proposal(&admin, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "proposal already executed")]
+    fn test_approve_proposal_rejects_already_executed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "test"));
+        client.mark_executed(&id);
+        client.approve_proposal(&admin, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "proposal already executed")]
+    fn test_mark_executed_rejects_already_executed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "test"));
+        client.mark_executed(&id);
+        client.mark_executed(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "threshold not met")]
+    fn test_mark_executed_rejects_when_threshold_not_met() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let other_admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), other_admin.clone()], &2u32);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "test"));
+        client.mark_executed(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract not initialized: admin not set")]
+    fn test_get_admin_panics_when_not_initialized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin_pool(&vec![&env, admin.clone()], &1u32);
     }
 }
