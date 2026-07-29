@@ -317,6 +317,15 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
+/// Grants a role to an address.
+///
+/// Requires the caller to hold the SuperAdmin role. Rejects the zero address
+/// and unrecognized role variants. Emits a `role_grnt` event on success.
+///
+/// # Panics
+/// * [`AdminError::UnauthorizedRole`] if caller is not a SuperAdmin.
+/// * [`AdminError::InvalidAddress`] if address is the zero-address sentinel.
+/// * [`AdminError::InvalidRole`] if role is not a recognized variant.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
