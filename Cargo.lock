@@ -221,6 +221,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bc-forge-split"
+version = "0.1.0"
+dependencies = [
+ "bc-forge-admin",
+ "bc-forge-token",
+ "bc-forge-ttl",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "bc-forge-token"
 version = "0.1.0"
 dependencies = [
