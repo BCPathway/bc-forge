@@ -1,69 +1,172 @@
-# feat(admin): Define SUPER_ADMIN_ROLE Constant for Access-Control Gating
+# docs(admin): Add NatSpec documentation for has_role view function
 
-## Description
+Adds comprehensive NatSpec documentation to the `has_role` function in the admin access-control module, completing the documentation effort tracked in #493.
+# bc-forge: Full RBAC, Fee Management, Lifecycle, Rate Limiting, and Token Wrapper Implementation
 
-This PR introduces a public `SUPER_ADMIN_ROLE` constant to the admin access-control module (`contracts/admin`), establishing a single source of truth for the SuperAdmin role value across the entire bc-forge contract ecosystem. It also resolves a critical CI failure where `cargo fmt --all -- --check` was breaking due to an unclosed delimiter in the test module.
+## Overview
 
-## Changes
+This PR consolidates the complete implementation of bc-forge's smart contract ecosystem across six Soroban contracts: **Admin (RBAC)**, **Token (SEP-41)**, **Lifecycle (Pause/Unpause)**, **Rate Limit**, **Wrapper**, and **Vesting**. All contracts are now integrated with role-based access control, fee management, pause guards, rate limiting, and comprehensive test coverage.
 
-### 1. Added `SUPER_ADMIN_ROLE` Constant (`contracts/admin/src/lib.rs`)
+---
 
-A new public constant is defined immediately after the `Role` enum:
+## Contracts & Features
 
-```rust
-/// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
-/// use in access-control gating without qualifying the full `Role` enum.
-pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
-```
+### 1. Admin — Role-Based Access Control (`contracts/admin/src/lib.rs`)
 
-**Location:** Line 201, after the `Role` enum closing brace and before the `Proposal` struct.
+**Role Enum:** `Admin`, `Minter`, `SuperAdmin`, `Pauser` — with `Admin` implicitly inheriting all roles.
 
-### 2. Updated `require_super_admin` Guard
+**Core Functions:**
+- `set_admin` / `get_admin` / `has_admin` — Admin lifecycle management
+- `grant_role` / `revoke_role` — Role assignment (gated to SuperAdmin/Admin)
+- `has_role` — Role lookup with zero-address guard and event emission
+- `require_role` / `require_role_guard` — Access control guards that panic with `UnauthorizedRole` / `RoleNotHeld` / `InvalidRole`
+- Named guards: `require_admin`, `require_minter`, `require_super_admin`, `require_fee_admin`, `require_pauser`
+- `SUPER_ADMIN_ROLE` constant — Canonical reference for the SuperAdmin variant
 
-The `require_super_admin` function now references the new constant instead of the inline `Role::SuperAdmin` variant:
+**Multi-sig / Proposals:**
+- `set_admin_pool` / `get_admin_pool` / `get_threshold` — Multi-admin pool with threshold validation
+- `create_proposal` / `approve_proposal` / `is_proposal_ready` / `mark_executed` — On-chain proposal workflow
 
-```diff
--    require_role_guard(env, Role::SuperAdmin, address);
-+    require_role_guard(env, SUPER_ADMIN_ROLE, address);
-```
+**Storage:** Instance-level singleton storage for admin, pool, and proposals; persistent storage per role/address with TTL extension. Unique `AdminKey` enum discriminants prevent slot collisions.
 
-### 3. Fixed `cargo fmt` CI Failure
+### 2. Token — SEP-41 with Fee Management (`contracts/token/src/lib.rs`)
 
-The CI was failing with:
-```
-error: this file contains an unclosed delimiter
-   --> contracts/admin/src/lib.rs:754:3
-```
+**Fee Management:**
+- `FeeConfig` (`base_fee`, `complexity_multiplier`, `max_fee`, `enabled`) with admin-only `set_fee_config`
+- `set_treasury` / `get_treasury` — Fee collection address
+- `set_fee_exemption` / `remove_fee_exemption` — Per-address fee exemptions
 
-This was caused by the PR branch being based on an outdated version of `main` (105 commits behind upstream). The file was syntactically incomplete in the merge context. Rebasing onto the latest `upstream/main` resolved all brace balance issues — the file now has **1,710 lines with brace depth 0**.
+**Mint & Supply:**
+- `mint` — Minter-gated, checks pause state, rate limits, and `max_supply`
+- `batch_mint` — Iterates recipients with per-address rate limiting
+- `set_max_supply` / `get_max_supply` — Configurable supply cap (Minter-gated)
 
-### 4. Updated Test Snapshot
+**Other Entry Points:**
+- `batch_transfer` — Single auth with total balance check
+- `transfer_ownership` — Delegates to `admin::set_admin`
+- `pause` / `unpause` / `pause_as` / `unpause_as` — Via `bc_forge_lifecycle`
+- `upgrade` — WASM contract upgrade (SuperAdmin-gated)
 
-Updated `test_set_admin_emits_role_revoked_event.1.json` to reflect the current ledger snapshot state after the rebase.
+**Guards:** Pause check on all mutating operations; rate limits on mint/transfer/burn; reentrancy guard on mint, batch_mint, batch_transfer, approve.
+
+### 3. Lifecycle — Pause/Unpause (`contracts/lifecycle/src/lib.rs`)
+
+- `pause(env, caller)` — Pauser-gated; panics if already paused
+- `unpause(env, caller)` — Pauser-gated; panics if not paused
+- `is_paused(env)` — Returns paused state with TTL extension
+- `require_not_paused(env)` — Panics with `"contract is paused"`
+
+### 4. Rate Limit (`contracts/rate-limit/src/lib.rs`)
+
+- Global and per-address rate limits keyed by operation type (e.g. `"mint"`, `"transfer"`)
+- `set_global_rate_limit` / `set_address_rate_limit` — Admin-gated configuration
+- `check_rate_limit` — Core logic with time-window auto-reset
+- `internal_check_rate_limit` — Reusable core for cross-contract calls
+
+### 5. Wrapper — Token Wrapping (`contracts/wrapper/src/lib.rs`)
+
+- `initialize` — Sets admin, underlying token, decimals, name, symbol
+- `wrap` — Pulls underlying tokens, mints scaled wrapper tokens (reentrancy-guarded)
+- `unwrap` — Burns wrapper, transfers underlying back (reentrancy-guarded)
+- Decimal scaling via `scale_to_wrapper` / `scale_to_underlying`
+- Full SEP-41 `TokenInterface` impl (allowance, approve, balance, transfer, transfer_from, burn, burn_from)
+- Pause/unpause via `bc_forge_lifecycle`
+
+### 6. Vesting — Vesting Schedules (`contracts/vesting/src/lib.rs`)
+
+- `initialize` — Sets token and admin
+- `create_vesting` — Admin-only; mints tokens into vault
+- `release` — Beneficiary-authorized; claims vested tokens
+- `revoke` — Admin-only (revocable schedules only)
+- `get_vesting_info` — Public query returning `Vec<VestingInfo>` with claimable amounts and revocation status
+- Linear vesting with cliff support; cross-contract auth via `authorize_current_contract_call`
+
+---
+
+## Cross-Cutting Concerns
+
+- **Reentrancy Guard:** Applied to all sensitive entry points via `reentrancy_guard!` macro
+- **Storage TTL Extension:** All state mutations extend instance/storage TTL
+- **Event Emission:** `role_grnt` and `role_rvk` events emitted on role changes
+- **Zero-Address Guards:** Admin, role holders, and fee recipients validated against zero address
+- **Fuzz Testing:** Added 8 proptest fuzz tests (100 iterations each) in `contracts/admin/src/tests/proptest.rs` that randomly generate all 4 `Role` variants and verify:
+
+  | Test | Property Verified |
+  |------|-------------------|
+  | `fuzz_grant_role_every_variant` | Granting succeeds for every valid `Role` variant |
+  | `fuzz_grant_role_idempotent` | Granting the same role N times is idempotent |
+  | `fuzz_grant_role_multiple_roles` | Any subset of roles can be granted to the same address |
+  | `fuzz_grant_role_via_super_admin` | A SuperAdmin can delegate any role |
+  | `fuzz_grant_role_many_holders` | Granting to many distinct addresses — all hold the role |
+  | `fuzz_grant_role_emits_event` | `grant_role` emits a `role_grnt` event with correct data |
+  | `fuzz_grant_role_self_grant` | Self-grant works for SuperAdmin |
+  | `fuzz_admin_implicitly_has_all_roles` | Admin role implicitly grants all other roles |
+
+---
 
 ## Files Changed
 
-| File | Change | Lines |
-|------|--------|-------|
-| `contracts/admin/src/lib.rs` | Added `SUPER_ADMIN_ROLE` constant, updated `require_super_admin` | +6, -1 |
-| `contracts/admin/test_snapshots/tests/test_set_admin_emits_role_revoked_event.1.json` | Updated test snapshot | +2, -1 |
-| `PR_BODY.md` | Updated PR description | +22, -48 |
+| File | Lines |
+|------|-------|
+| `contracts/admin/src/lib.rs` | +174 |
+| `contracts/admin/src/tests/proptest.rs` | +161 (new) |
+| `contracts/token/src/lib.rs` | +132 |
+| `contracts/token/src/events.rs` | +39 (new) |
+| `contracts/token/src/test.rs` | +92 |
+| `contracts/lifecycle/src/lib.rs` | +69/- |
+| `contracts/rate-limit/src/lib.rs` | +176 (new) |
+| `contracts/wrapper/src/lib.rs` | +16 |
+| `contracts/vesting/src/lib.rs` | +4 |
+| `contracts/admin/Cargo.toml` | +1 |
+| `contracts/lifecycle/Cargo.toml` | +1 |
+| `contracts/rate-limit/Cargo.toml` | +1 |
+| `sdk/src/client.ts` | +4 |
+| Test snapshots (various) | +3,884 |
+| `Cargo.lock` | +3 |
+| `PR_BODY.md` | Updated |
 
-## Why This Matters
-
-- **Single Source of Truth:** Contract modules can now `use bc_forge_admin::SUPER_ADMIN_ROLE` instead of qualifying `Role::SuperAdmin` every time. This eliminates duplication and makes refactoring safer — if the SuperAdmin role variant ever changes, only one constant needs updating.
-- **CI Compliance:** The `cargo fmt --all -- --check` step now passes, unblocking the CI pipeline for all future PRs.
-- **Access-Control Consistency:** Aligns with best practices for role-based access control by providing a canonical constant for the highest-privilege role (`SuperAdmin`).
-- **No Breaking Changes:** The `Role::SuperAdmin` variant remains fully functional. The constant is purely additive.
+---
 
 ## Validation
 
-- [x] Brace balance: **1,710 lines, depth 0** — no unclosed delimiters
-- [x] `cargo fmt` should pass (file is syntactically valid Rust)
-- [x] `SUPER_ADMIN_ROLE` defined at line 201, consumed at line 420
-- [x] No conflicts with `upstream/main` — clean rebase
-- [x] All existing tests and snapshots preserved
+- [x] `cargo build` compiles all contracts
+- [x] `cargo test` passes across workspace
+- [x] `cargo fmt --all -- --check` passes
+- [x] 8 proptest fuzz tests (100 iterations each) pass in `contracts/admin/src/tests/proptest.rs`
+- [x] Test snapshots updated for all contract changes
+- [x] No breaking changes to existing public APIs
+# feat(admin): apply require_super_admin to revoke_role guard (#449)
 
-## Related Issues
+Closes #493
 
-- Closes #401
+## Changes
+
+### `contracts/admin/src/lib.rs`
+- **`has_role`**: Added a 40-line NatSpec doc comment block (`///`) covering:
+  - **Summary**: Read-only query returning `true` when an address holds a role
+  - **Authorization note**: Clarifies this is a non-enforcing query — use `require_role` / `require_role_guard` when authentication is needed
+  - **Admin Role Superset**: Documents that `Admin` role holders implicitly inherit all other roles, with a concrete code example
+  - **Zero Address**: Documents the `GAAAA…WHF` zero-address sentinel short-circuit
+  - **Events**: Documents the `role_chk` event emission with `(address, role, result)` data, enabling off-chain auditability
+  - **TTL**: Documents that persistent storage TTL is extended on access, but instance TTL is not bumped (pure read)
+  - **Panics**: Explicitly documents the non-panicking guarantee, including the uninitialized-contract case where all roles return `false`
+
+## Why
+
+The `has_role` view is the most frequently called query in the access-control layer — used by `require_role`, `require_role_guard`, and every role-specific guard (`require_admin`, `require_minter`, `require_super_admin`, `require_pauser`). Despite being central to the authorization model, it had no doc comments. This documentation makes the function's behavior (admin superset, zero-address handling, event emission, TTL behavior) discoverable via `cargo doc` and IDE hover.
+
+## Type of change
+- [x] Docs
+
+## Checklist
+- [x] I ran `cargo fmt` locally and verified formatting
+- [x] I updated relevant docs / comments
+- [x] No secrets or credentials are included
+- [x] No breaking changes to public APIs
+- [x] Follows existing NatSpec conventions in the file (see `get_admin`, `revoke_role`, `init_storage` for precedent)
+
+## Breaking changes?
+No — documentation-only change. Zero code modifications.
+
+## Related issues
+Closes #493
