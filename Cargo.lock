@@ -191,6 +191,7 @@ name = "bc-forge-admin"
 version = "0.1.0"
 dependencies = [
  "bc-forge-ttl",
+ "proptest",
  "soroban-sdk",
 ]
 

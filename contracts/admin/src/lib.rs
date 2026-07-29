@@ -399,7 +399,45 @@ fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminErr
     Ok(())
 }
 
-/// Returns `true` if the address has the specified role.
+/// Returns `true` when `address` holds the given `role`.
+///
+/// This is a read-only query that does **not** enforce authorization —
+/// use [`require_role`] or [`require_role_guard`] when the caller must
+/// both hold the role and authenticate the invocation.
+///
+/// # Admin Role Superset
+///
+/// Any address holding [`Role::Admin`] is considered to hold **every**
+/// role.  When `role` is not [`Role::Admin`], the function first checks
+/// whether `address` has the `Admin` role; if so, it returns `true`
+/// immediately without consulting the specific role key.  This means
+/// `has_role(env, Role::Minter, &admin)` returns `true` even when no
+/// explicit `Minter` grant was made.
+///
+/// # Zero Address
+///
+/// The Stellar zero-address sentinel (`GAAAA…WHF`) can never sign and
+/// must never hold a role, so this function short-circuits to `false`
+/// for that address without touching storage.
+///
+/// # Events
+///
+/// Every invocation emits a `role_chk` event with topics `(role_chk,)`
+/// and data `(address, role, result)` regardless of the outcome, so
+/// off-chain observers can audit every permission check.
+///
+/// # TTL
+///
+/// When a role assignment is found in persistent storage, the
+/// corresponding ledger entry's TTL is extended via
+/// `extend_storage_ttl_for_key`.  Instance TTL is **not** bumped by
+/// this function (it is a pure read of instance storage).
+///
+/// # Panics
+///
+/// This function does **not** panic.  It always returns a `bool`,
+/// including when the contract is uninitialized (in which case all
+/// roles return `false` because no admin exists).
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     // Zero address never holds any role.
     if is_zero_address(env, address) {
@@ -671,6 +709,8 @@ mod tests {
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
+
+    mod proptest;
 
     #[contract]
     struct AdminContract;
