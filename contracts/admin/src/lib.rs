@@ -152,6 +152,8 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
+    /// An operation was attempted to grant a role that the address already holds.
+    RoleAlreadyGranted = 7,
 }
 
 
@@ -279,6 +281,9 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
+    if has_role(env, role, address) {
+        soroban_sdk::panic_with_error!(env, AdminError::RoleAlreadyGranted);
+    }
     env.storage()
         .persistent()
         .set(&AdminKey::Role(role, address.clone()), &true);
