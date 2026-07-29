@@ -294,6 +294,9 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 
 ## 🏗️ Smart Contract Architecture
 
+See the [access-control diagrams](docs/ACCESS_CONTROL.md) for the current role
+hierarchy, authorization sequence, protected operations, and governance flow.
+
 ```
 ┌─────────────────────────────────────────────────┐
 │                  BcForgeToken                   │
