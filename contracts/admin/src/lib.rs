@@ -587,6 +587,8 @@ mod tests {
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
+    mod proptest;
+
     #[contract]
     struct AdminContract;
 
