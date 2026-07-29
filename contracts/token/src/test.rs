@@ -310,7 +310,7 @@ fn test_revoked_minter_cannot_mint() {
 
     // Revoke Minter role
     env.as_contract(&contract_id, || {
-        bc_forge_admin::revoke_role(&env, bc_forge_admin::Role::Minter, &minter).unwrap();
+        bc_forge_admin::revoke_role(&env, &admin, bc_forge_admin::Role::Minter, &minter).unwrap();
     });
 
     // Assert that the revoked minter is rejected when trying to mint
