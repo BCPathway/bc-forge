@@ -11,6 +11,9 @@ mod reentrancy_guard;
 #[cfg(test)]
 mod test;
 
+#[cfg(test)]
+mod fuzz_mint;
+
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
@@ -43,6 +46,30 @@ pub enum DataKey {
     Symbol,
     Supply,
     MaxSupply,
+    /// Treasury address for collected fees.
+    Treasury,
+    /// Fee configuration.
+    FeeConfig,
+    /// Fee exemptions keyed by address.
+    FeeExemption(Address),
+}
+
+/// Fee configuration for dynamic contract fee charging.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct FeeConfig {
+    pub base_fee: i128,
+    pub complexity_multiplier: u32,
+    pub max_fee: i128,
+    pub enabled: bool,
+}
+
+/// Fee exemption for a specific address.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct FeeExemption {
+    /// 0 = all operations, 1 = transfers only, 2 = mint only.
+    pub exemption_type: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,6 +237,44 @@ impl BcForgeToken {
         events::emit_mint(env, admin_address, to, amount, new_balance, new_supply);
         Ok(())
     }
+
+    fn read_fee_config(env: &Env) -> Result<FeeConfig, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeConfig)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    fn read_treasury(env: &Env) -> Result<Address, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    fn write_fee_config(env: &Env, config: &FeeConfig) {
+        env.storage().instance().set(&DataKey::FeeConfig, config);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn write_treasury(env: &Env, treasury: &Address) {
+        env.storage().instance().set(&DataKey::Treasury, treasury);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn write_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeExemption(address.clone()), exemption);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn delete_fee_exemption(env: &Env, address: &Address) {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FeeExemption(address.clone()));
+        ttl::extend_instance_ttl(env);
+    }
 }
 
 #[contractimpl]
@@ -345,7 +410,7 @@ impl BcForgeToken {
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
-        admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
+        admin::require_admin(&env, &current_admin);
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
@@ -380,6 +445,74 @@ impl BcForgeToken {
         admin::require_super_admin(&env, &upgrader);
         events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
+    pub fn pause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::pause(env.clone(), caller.clone());
+        events::emit_paused(&env, &caller);
+        Ok(())
+    }
+
+    pub fn unpause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::unpause(env.clone(), caller.clone());
+        events::emit_unpaused(&env, &caller);
+        Ok(())
+    }
+
+    pub fn set_fee_config(env: Env, caller: Address, config: FeeConfig) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        if config.base_fee < 0 || config.max_fee < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        Self::write_fee_config(&env, &config);
+        events::emit_fee_config_set(&env, &caller, &config);
+        Ok(())
+    }
+
+    pub fn get_fee_config(env: Env) -> Result<FeeConfig, TokenError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_fee_config(&env)
+    }
+
+    pub fn set_treasury(env: Env, caller: Address, treasury: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        Self::write_treasury(&env, &treasury);
+        events::emit_treasury_set(&env, &caller, &treasury);
+        Ok(())
+    }
+
+    pub fn get_treasury(env: Env) -> Result<Address, TokenError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_treasury(&env)
+    }
+
+    pub fn set_fee_exemption(
+        env: Env,
+        caller: Address,
+        address: Address,
+        exemption: FeeExemption,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        Self::write_fee_exemption(&env, &address, &exemption);
+        events::emit_fee_exemption_set(&env, &caller, &address, &exemption);
+        Ok(())
+    }
+
+    pub fn remove_fee_exemption(
+        env: Env,
+        caller: Address,
+        address: Address,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        Self::delete_fee_exemption(&env, &address);
+        events::emit_fee_exemption_removed(&env, &caller, &address);
         Ok(())
     }
 }

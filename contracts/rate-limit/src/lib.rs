@@ -5,6 +5,7 @@
 
 #![no_std]
 
+use bc_forge_admin as admin;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
 
 #[derive(Clone)]
@@ -220,10 +221,12 @@ impl BcForgeRateLimit {
     /// Set global rate limit for an operation type
     pub fn set_global_rate_limit(
         env: Env,
+        caller: Address,
         operation_type: soroban_sdk::String,
         limit: u64,
         window_seconds: u64,
     ) {
+        admin::require_role_guard(&env, admin::Role::Admin, &caller);
         BcForgeRateLimit::internal_set_global_rate_limit(
             &env,
             &operation_type,
@@ -235,11 +238,13 @@ impl BcForgeRateLimit {
     /// Set per-address rate limit for an operation type
     pub fn set_address_rate_limit(
         env: Env,
+        caller: Address,
         address: Address,
         operation_type: soroban_sdk::String,
         limit: u64,
         window_seconds: u64,
     ) {
+        admin::require_role_guard(&env, admin::Role::Admin, &caller);
         BcForgeRateLimit::internal_set_address_rate_limit(
             &env,
             &address,
@@ -247,5 +252,176 @@ impl BcForgeRateLimit {
             limit,
             window_seconds,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    struct AdminContract;
+
+    #[contractimpl]
+    impl AdminContract {
+        pub fn set_admin(env: Env, admin: Address) {
+            admin::set_admin(&env, &admin);
+        }
+
+        pub fn grant_role(env: Env, caller: Address, role: admin::Role, address: Address) {
+            admin::grant_role(&env, &caller, role, &address);
+        }
+    }
+
+    #[contract]
+    struct RateLimitContract;
+
+    #[contractimpl]
+    impl RateLimitContract {
+        pub fn set_admin_rl(env: Env, admin: Address) {
+            admin::set_admin(&env, &admin);
+        }
+
+        pub fn set_global_rate_limit(
+            env: Env,
+            caller: Address,
+            operation_type: soroban_sdk::String,
+            limit: u64,
+            window_seconds: u64,
+        ) {
+            super::BcForgeRateLimit::set_global_rate_limit(
+                env,
+                caller,
+                operation_type,
+                limit,
+                window_seconds,
+            );
+        }
+
+        pub fn set_address_rate_limit(
+            env: Env,
+            caller: Address,
+            address: Address,
+            operation_type: soroban_sdk::String,
+            limit: u64,
+            window_seconds: u64,
+        ) {
+            super::BcForgeRateLimit::set_address_rate_limit(
+                env,
+                caller,
+                address,
+                operation_type,
+                limit,
+                window_seconds,
+            );
+        }
+
+        pub fn check_rate_limit(
+            env: Env,
+            address: Option<Address>,
+            operation_type: soroban_sdk::String,
+            amount: u64,
+        ) -> bool {
+            super::BcForgeRateLimit::check_rate_limit(env, address, operation_type, amount)
+        }
+    }
+
+    fn setup() -> (Env, soroban_sdk::Address, soroban_sdk::Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin_contract_id = env.register(AdminContract, ());
+        let admin_client = AdminContractClient::new(&env, &admin_contract_id);
+
+        let admin_addr = Address::generate(&env);
+        admin_client.set_admin(&admin_addr);
+
+        let rate_limit_contract_id = env.register(RateLimitContract, ());
+        let rl_client = RateLimitContractClient::new(&env, &rate_limit_contract_id);
+        rl_client.set_admin_rl(&admin_addr);
+        (env, admin_addr, rate_limit_contract_id)
+    }
+
+    #[test]
+    fn test_admin_can_set_global_rate_limit() {
+        let (env, admin_addr, rate_limit_contract_id) = setup();
+        let client = RateLimitContractClient::new(&env, &rate_limit_contract_id);
+
+        let op = soroban_sdk::String::from_str(&env, "mint");
+        client.set_global_rate_limit(&admin_addr, &op, &100, &60);
+
+        let result = client.check_rate_limit(&None, &op, &1);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_admin_can_set_address_rate_limit() {
+        let (env, admin_addr, rate_limit_contract_id) = setup();
+        let client = RateLimitContractClient::new(&env, &rate_limit_contract_id);
+
+        let addr = Address::generate(&env);
+        let op = soroban_sdk::String::from_str(&env, "transfer");
+        client.set_address_rate_limit(&admin_addr, &addr, &op, &50, &120);
+
+        let result = client.check_rate_limit(&Some(addr), &op, &1);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_unauthorized_caller_rejected_for_global_rate_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin_contract_id = env.register(AdminContract, ());
+        let admin_client = AdminContractClient::new(&env, &admin_contract_id);
+
+        let admin_addr = Address::generate(&env);
+        admin_client.set_admin(&admin_addr);
+
+        let rate_limit_contract_id = env.register(RateLimitContract, ());
+        let client = RateLimitContractClient::new(&env, &rate_limit_contract_id);
+
+        let unauthorized = Address::generate(&env);
+        let op = soroban_sdk::String::from_str(&env, "mint");
+
+        let result = client.try_set_global_rate_limit(&unauthorized, &op, &100, &60);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    fn test_unauthorized_caller_rejected_for_address_rate_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin_contract_id = env.register(AdminContract, ());
+        let admin_client = AdminContractClient::new(&env, &admin_contract_id);
+
+        let admin_addr = Address::generate(&env);
+        admin_client.set_admin(&admin_addr);
+
+        let rate_limit_contract_id = env.register(RateLimitContract, ());
+        let client = RateLimitContractClient::new(&env, &rate_limit_contract_id);
+
+        let unauthorized = Address::generate(&env);
+        let addr = Address::generate(&env);
+        let op = soroban_sdk::String::from_str(&env, "transfer");
+
+        let result = client.try_set_address_rate_limit(&unauthorized, &addr, &op, &50, &120);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    fn test_existing_rate_limit_behavior_unchanged() {
+        let (env, admin_addr, rate_limit_contract_id) = setup();
+        let client = RateLimitContractClient::new(&env, &rate_limit_contract_id);
+
+        let op = soroban_sdk::String::from_str(&env, "mint");
+        client.set_global_rate_limit(&admin_addr, &op, &2, &60);
+
+        assert!(client.check_rate_limit(&None, &op, &1));
+        assert!(client.check_rate_limit(&None, &op, &1));
+        assert!(!client.check_rate_limit(&None, &op, &1));
     }
 }
