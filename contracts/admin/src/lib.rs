@@ -179,21 +179,63 @@ pub enum AdminKey {
     SuperAdmin(Address),
 }
 
-/// Roles recognized by the access-control layer.
+/// Roles recognized by the admin access-control layer.
 ///
-/// New variants must be appended, never inserted, so that previously
-/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
-/// same variant they were written with.
+/// Each variant represents a distinct permission set that can be granted to an
+/// address via [`grant_role`] and checked via [`has_role`] or [`require_role`].
+/// The contract admin (set via [`set_admin`]) implicitly holds **all** roles
+/// without explicit grants.
+///
+/// # Variants
+///
+/// | Role | Privilege | Typical Use |
+/// |------|-----------|-------------|
+/// | [`Role::Admin`] | Full administrative control | Contract owner / deployer |
+/// | [`Role::SuperAdmin`] | Highest-privilege operations | Migration, upgrades |
+/// | [`Role::Minter`] | Token minting | Treasury / distribution contracts |
+/// | [`Role::Pauser`] | Emergency pause/unpause | Incident response bots |
+///
+/// # Storage Invariant
+///
+/// New variants **must** be appended (never inserted or reordered) so that
+/// previously persisted `AdminKey::Role(Role, Address)` entries keep decoding
+/// to the same variant they were written with. Inserting a variant in the
+/// middle would cause existing on-chain entries to silently map to the wrong
+/// role.
+///
+/// [`set_admin`]: crate::set_admin
+/// [`grant_role`]: crate::grant_role
+/// [`has_role`]: crate::has_role
+/// [`require_role`]: crate::require_role
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
-    /// Full administrative control granted via `set_admin`.
+    /// Full administrative control granted via [`set_admin`].
+    ///
+    /// The admin implicitly holds every role and is the only address authorized
+    /// to grant or revoke roles via [`grant_role`] and [`revoke_role`].
+    ///
+    /// [`set_admin`]: crate::set_admin
+    /// [`grant_role`]: crate::grant_role
+    /// [`revoke_role`]: crate::revoke_role
     Admin,
     /// Permission to mint new tokens.
+    ///
+    /// Required by token contracts for any operation that increases total
+    /// supply. Does **not** imply transfer or burn privileges.
     Minter,
     /// Highest-privilege role, reserved for owner-level operations.
+    ///
+    /// Intended for privileged tasks such as contract migration, upgrade
+    /// authorization, or treasury sweeps. Should be granted sparingly and
+    /// only to trusted multisig wallets or cold-storage addresses.
     SuperAdmin,
     /// Role allowing emergency pause and unpause operations.
+    ///
+    /// Grants the ability to halt contract activity in response to incidents.
+    /// Pausing typically restricts transfers and minting while leaving reads
+    /// and burns unaffected (exact semantics depend on the implementing
+    /// contract).
     Pauser,
 }
 
@@ -335,6 +377,39 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
+/// Revokes a previously granted role from an address.
+///
+/// # Authorization
+///
+/// The caller **must** be the contract admin (set via [`set_admin`]).
+/// Soroban enforces this via `require_auth()`, so the transaction will fail
+/// if the admin has not signed it.
+///
+/// # Arguments
+///
+/// * `env`   – Soroban environment handle.
+/// * `role`  – The [`Role`] variant to revoke (e.g. `Role::Minter`).
+/// * `address` – The address whose role is being revoked. Must **not** be the
+///   zero address (Stellar `GAAAAAAAAAA…` sentinel); passing it panics.
+///
+/// # Errors
+///
+/// Returns [`AdminError::RoleNotGranted`] if the address does not currently
+/// hold the specified role. This is a *recoverable* error (the contract does
+/// **not** panic).
+///
+/// # Events
+///
+/// On success a `role_rvk` event is emitted with data
+/// `(admin, role, address)`.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Admin revokes the Minter role from `user`.
+/// revoke_role(&env, Role::Minter, &user)?;
+/// assert!(!has_role(&env, Role::Minter, &user));
+/// ```
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     // #426 – parameter validation: reject unknown role variants and the zero address.
     if !is_valid_role(role) {
