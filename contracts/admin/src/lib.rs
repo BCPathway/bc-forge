@@ -138,7 +138,7 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 pub enum AdminError {
     /// Unused; kept for ABI stability. Prefer [`AdminError::RoleNotHeld`].
     RoleNotGranted = 1,
-    /// An address does not hold the required role (e.g. revoke_role called on non-holder).
+    /// An address does not hold the required role (e.g. `revoke_role` called on non-holder).
     RoleNotHeld = 2,
     /// `require_role_guard` failed: the caller is not authorized for this role.
     UnauthorizedRole = 3,
@@ -299,6 +299,11 @@ pub fn migrate_admin(env: &Env) {
     }
 }
 
+/// Returns the currently configured admin address.
+///
+/// # Panics
+///
+/// Panics if the contract has not been initialized (no admin has been set).
 pub fn get_admin(env: &Env) -> Address {
     let admin = env
         .storage()
@@ -335,6 +340,16 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
+/// # Errors
+///
+/// Returns [`AdminError::RoleNotHeld`] if the target address does not
+/// currently hold the requested role.
+///
+/// # Panics
+///
+/// Panics with [`AdminError::InvalidRole`] when an unrecognized role
+/// discriminant is supplied, and with [`AdminError::InvalidAddress`]
+/// when the zero-address sentinel is passed as `address`.
 pub fn revoke_role(
     env: &Env,
     caller: &Address,
@@ -369,6 +384,45 @@ fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminErr
     Ok(())
 }
 
+/// Returns `true` when `address` holds the given `role`.
+///
+/// This is a read-only query that does **not** enforce authorization —
+/// use [`require_role`] or [`require_role_guard`] when the caller must
+/// both hold the role and authenticate the invocation.
+///
+/// # Admin Role Superset
+///
+/// Any address holding [`Role::Admin`] is considered to hold **every**
+/// role.  When `role` is not [`Role::Admin`], the function first checks
+/// whether `address` has the `Admin` role; if so, it returns `true`
+/// immediately without consulting the specific role key.  This means
+/// `has_role(env, Role::Minter, &admin)` returns `true` even when no
+/// explicit `Minter` grant was made.
+///
+/// # Zero Address
+///
+/// The Stellar zero-address sentinel (`GAAAA…WHF`) can never sign and
+/// must never hold a role, so this function short-circuits to `false`
+/// for that address without touching storage.
+///
+/// # Events
+///
+/// Every invocation emits a `role_chk` event with topics `(role_chk,)`
+/// and data `(address, role, result)` regardless of the outcome, so
+/// off-chain observers can audit every permission check.
+///
+/// # TTL
+///
+/// When a role assignment is found in persistent storage, the
+/// corresponding ledger entry's TTL is extended via
+/// `extend_storage_ttl_for_key`.  Instance TTL is **not** bumped by
+/// this function (it is a pure read of instance storage).
+///
+/// # Panics
+///
+/// This function does **not** panic.  It always returns a `bool`,
+/// including when the contract is uninitialized (in which case all
+/// roles return `false` because no admin exists).
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     // Zero address never holds any role.
     if is_zero_address(env, address) {
@@ -449,6 +503,12 @@ pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
 }
 
+/// Configures a multi-signature admin pool and approval threshold.
+///
+/// # Panics
+///
+/// Panics if `threshold` is zero or if `threshold` exceeds the number of
+/// pool members, preventing unusable governance configurations.
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     let admin = get_admin(env);
     admin.require_auth();
@@ -489,6 +549,11 @@ pub fn get_threshold(env: &Env) -> u32 {
         .unwrap_or(1)
 }
 
+/// Creates a new governance proposal and returns the assigned proposal ID.
+///
+/// # Panics
+///
+/// Panics if `creator` is not a member of the current admin pool.
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
     creator.require_auth();
     let pool = get_admin_pool(env);
@@ -519,6 +584,13 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
     id
 }
 
+/// Approves an existing governance proposal.
+///
+/// # Panics
+///
+/// Panics if no proposal exists for `proposal_id`, if `admin` is not in the
+/// admin pool, if the proposal has already been executed, or if the admin
+/// has already approved the proposal.
 pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
     admin.require_auth();
     let pool = get_admin_pool(env);
@@ -547,6 +619,12 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
     extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
+/// Returns `true` when a proposal has gathered enough approvals to be
+/// executed.
+///
+/// # Panics
+///
+/// Panics if no proposal exists for `proposal_id`.
 pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
     let proposal: Proposal = env
         .storage()
@@ -558,6 +636,12 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
     proposal.approvals.len() >= get_threshold(env)
 }
 
+/// Marks a governance proposal as executed after all approvals are met.
+///
+/// # Panics
+///
+/// Panics if no proposal exists for `proposal_id`, if the proposal has
+/// already been executed, or if the approval threshold has not been met.
 pub fn mark_executed(env: &Env, proposal_id: u64) {
     let admin = get_admin(env);
     admin.require_auth();
@@ -590,6 +674,8 @@ mod tests {
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
+
+    mod proptest;
 
     #[contract]
     struct AdminContract;

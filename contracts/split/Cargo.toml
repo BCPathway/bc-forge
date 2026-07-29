@@ -1,0 +1,26 @@
+[package]
+name = "bc-forge-split"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Batch payout contract with per-recipient failure isolation for bc-forge"
+repository = "https://github.com/BCPathway/bc-forge"
+license = "MIT"
+keywords = ["soroban", "stellar", "smart-contract", "split", "batch", "payout", "isolation"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "22.0.11"
+bc-forge-admin = { path = "../admin" }
+bc-forge-token = { path = "../token" }
+bc-forge-ttl = { path = "../ttl" }
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.11", features = ["testutils"] }
+bc-forge-token = { path = "../token", features = ["testutils"] }
+
+[features]
+testutils = ["soroban-sdk/testutils"]
