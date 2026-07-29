@@ -93,6 +93,8 @@ pub enum TokenError {
     InsufficientFeeBalance = 8,
     FeeExemptionNotFound = 9,
     MaxSupplyExceeded = 10,
+    AlreadyPaused = 11,
+    NotPaused = 12,
 }
 
 #[contract]
@@ -419,6 +421,9 @@ impl BcForgeToken {
     pub fn pause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), admin_address.clone());
         events::emit_paused(&env, &admin_address);
         Ok(())
@@ -427,6 +432,9 @@ impl BcForgeToken {
     pub fn unpause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
         Ok(())
@@ -450,6 +458,9 @@ impl BcForgeToken {
 
     pub fn pause_as(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), caller.clone());
         events::emit_paused(&env, &caller);
         Ok(())
@@ -457,6 +468,9 @@ impl BcForgeToken {
 
     pub fn unpause_as(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), caller.clone());
         events::emit_unpaused(&env, &caller);
         Ok(())
