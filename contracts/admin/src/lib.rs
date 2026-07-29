@@ -34,6 +34,10 @@
 //! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
 //! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//! | `4` | `InvalidAddress` | operation attempted with the canonical zero address |
+//! | `5` | `InvalidRole` | unrecognized role discriminant supplied |
+//! | `6` | `AlreadyInitialized` | `init_storage` called on an already-initialized contract |
+//! | `7` | `RoleAlreadyGranted` | role has already been granted to the target address |
 //!
 //! ## Event Emissions
 //!
@@ -149,6 +153,9 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
+    /// The role has already been granted to the target address.
+    #[allow(dead_code)]
+    RoleAlreadyGranted = 7,
 }
 
 /// Storage keys for the access-control layer.
