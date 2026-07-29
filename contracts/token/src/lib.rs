@@ -367,6 +367,12 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        bc_forge_lifecycle::is_paused(&env)
+    }
+
     /// Upgrades the contract's executable to `new_wasm_hash`.
     ///
     /// Gated to `Role::SuperAdmin` (or `Role::Admin`, which is a superset of
