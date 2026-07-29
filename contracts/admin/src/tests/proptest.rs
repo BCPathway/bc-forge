@@ -8,6 +8,7 @@ use soroban_sdk::{Address, Env, TryIntoVal, Vec};
 use super::{AdminContract, AdminContractClient, Role};
 
 const ALL_ROLES: [Role; 4] = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+const GRANTABLE_ROLES: [Role; 3] = [Role::Minter, Role::SuperAdmin, Role::Pauser];
 
 fn setup(env: &Env) -> (AdminContractClient<'_>, Address) {
     env.mock_all_auths();
@@ -54,19 +55,20 @@ proptest! {
     }
 
     /// Fuzz: any subset of roles can be granted to the same address.
+    /// Note: Admin is excluded because it implicitly grants all other roles.
     #[test]
-    fn fuzz_grant_role_multiple_roles(mask in 0u16..16) {
+    fn fuzz_grant_role_multiple_roles(mask in 0u16..8) {
         let env = Env::default();
         let (client, admin) = setup(&env);
         let holder = Address::generate(&env);
 
-        for (i, role) in ALL_ROLES.iter().enumerate() {
+        for (i, role) in GRANTABLE_ROLES.iter().enumerate() {
             if (mask >> i) & 1 == 1 {
                 client.grant_role(&admin, role, &holder);
             }
         }
 
-        for (i, role) in ALL_ROLES.iter().enumerate() {
+        for (i, role) in GRANTABLE_ROLES.iter().enumerate() {
             prop_assert_eq!(client.has_role(role, &holder), (mask >> i) & 1 == 1);
         }
     }
