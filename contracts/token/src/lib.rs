@@ -124,6 +124,8 @@ pub enum TokenError {
     FeeExemptionNotFound = 9,
     /// Minting would exceed the configured maximum supply.
     MaxSupplyExceeded = 10,
+    AlreadyPaused = 11,
+    NotPaused = 12,
 }
 
 #[contract]
@@ -364,6 +366,9 @@ impl BcForgeToken {
     /// @param amount The amount of tokens to mint.
     /// @return `Ok(())` on success, or an error if the minter is unauthorized, the contract is paused, or the amount is invalid.
     pub fn mint(env: Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
@@ -393,13 +398,19 @@ impl BcForgeToken {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            admin::require_minter(&env, &minter);
 
+            // Check for any invalid amounts before requiring minter role
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
+            }
+
+            admin::require_minter(&env, &minter);
+
+            for i in 0..recipients.len() {
+                let recipient = recipients.get(i).expect("recipient should exist");
                 if !crate::rate_limit::check_mint_rate_limit(&env, &minter, recipient.amount) {
                     return Err(TokenError::InvalidAmount);
                 }
@@ -521,6 +532,9 @@ impl BcForgeToken {
     pub fn pause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), admin_address.clone());
         events::emit_paused(&env, &admin_address);
         Ok(())
@@ -534,6 +548,9 @@ impl BcForgeToken {
     pub fn unpause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
         Ok(())
@@ -567,6 +584,9 @@ impl BcForgeToken {
     /// @return `Ok(())` on success.
     pub fn pause_as(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), caller.clone());
         events::emit_paused(&env, &caller);
         Ok(())
@@ -580,6 +600,9 @@ impl BcForgeToken {
     /// @return `Ok(())` on success.
     pub fn unpause_as(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), caller.clone());
         events::emit_unpaused(&env, &caller);
         Ok(())

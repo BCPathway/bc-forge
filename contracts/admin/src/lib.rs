@@ -145,7 +145,7 @@ use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 pub enum AdminError {
     /// Unused; kept for ABI stability. Prefer [`AdminError::RoleNotHeld`].
     RoleNotGranted = 1,
-    /// An address does not hold the required role (e.g. revoke_role called on non-holder).
+    /// An address does not hold the required role (e.g. `revoke_role` called on non-holder).
     RoleNotHeld = 2,
     /// `require_role_guard` failed: the caller is not authorized for this role.
     UnauthorizedRole = 3,
@@ -178,6 +178,9 @@ pub enum AdminKey {
     /// pair occupies its own ledger entry so grants/revokes for one address
     /// never touch another's.
     Role(Role, Address),
+    /// Maps an `(Address, Role)` pair to `true` when `address` holds `role`.
+    /// This is the Address-to-Role mapping storage structure.
+    AddressRole(Address, Role),
     /// Multi-sig admin pool addresses, set via `set_admin_pool`.
     AdminPool,
     /// Multi-sig approval threshold, set alongside the pool.
@@ -215,6 +218,10 @@ pub enum Role {
 /// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
 pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
+
+/// The Minter role constant — can be imported as `MINTER_ROLE` for
+/// use in access-control gating without qualifying the full `Role` enum.
+pub const MINTER_ROLE: Role = Role::Minter;
 
 /// A multi-sig governance proposal.
 ///
@@ -275,6 +282,12 @@ fn is_valid_role(role: Role) -> bool {
         role,
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
     )
+}
+
+fn require_valid_role(env: &Env, role: Role) {
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
 }
 /// One-time storage initialization.
 ///
@@ -380,9 +393,7 @@ pub fn has_admin(env: &Env) -> bool {
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     _grant_role(env, caller, role, address);
 }
 
@@ -420,9 +431,7 @@ pub fn revoke_role(
 ) -> Result<(), AdminError> {
     require_super_admin(env, caller);
     // #426 – parameter validation: reject unknown role variants and the zero address.
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     require_non_zero_address(env, address);
 
     _revoke_role(env, role, address)
@@ -496,9 +505,7 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 /// @param address The address to check and require authorization from.
 #[inline(always)]
 pub fn require_role(env: &Env, role: Role, address: &Address) {
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
@@ -513,9 +520,7 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
 /// @param role The role whose administering address is requested.
 /// @return The contract admin address.
 pub fn get_role_admin(env: &Env, role: Role) -> Address {
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     let admin = get_admin(env);
     extend_instance_ttl(env);
     admin
@@ -778,6 +783,8 @@ mod tests {
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
+
+    mod proptest;
 
     #[contract]
     struct AdminContract;
