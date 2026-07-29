@@ -42,21 +42,63 @@ pub enum AdminKey {
     SuperAdmin(Address),
 }
 
-/// Roles recognized by the access-control layer.
+/// Roles recognized by the admin access-control layer.
 ///
-/// New variants must be appended, never inserted, so that previously
-/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
-/// same variant they were written with.
+/// Each variant represents a distinct permission set that can be granted to an
+/// address via [`grant_role`] and checked via [`has_role`] or [`require_role`].
+/// The contract admin (set via [`set_admin`]) implicitly holds **all** roles
+/// without explicit grants.
+///
+/// # Variants
+///
+/// | Role | Privilege | Typical Use |
+/// |------|-----------|-------------|
+/// | [`Role::Admin`] | Full administrative control | Contract owner / deployer |
+/// | [`Role::SuperAdmin`] | Highest-privilege operations | Migration, upgrades |
+/// | [`Role::Minter`] | Token minting | Treasury / distribution contracts |
+/// | [`Role::Pauser`] | Emergency pause/unpause | Incident response bots |
+///
+/// # Storage Invariant
+///
+/// New variants **must** be appended (never inserted or reordered) so that
+/// previously persisted `AdminKey::Role(Role, Address)` entries keep decoding
+/// to the same variant they were written with. Inserting a variant in the
+/// middle would cause existing on-chain entries to silently map to the wrong
+/// role.
+///
+/// [`set_admin`]: crate::set_admin
+/// [`grant_role`]: crate::grant_role
+/// [`has_role`]: crate::has_role
+/// [`require_role`]: crate::require_role
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
-    /// Full administrative control granted via `set_admin`.
+    /// Full administrative control granted via [`set_admin`].
+    ///
+    /// The admin implicitly holds every role and is the only address authorized
+    /// to grant or revoke roles via [`grant_role`] and [`revoke_role`].
+    ///
+    /// [`set_admin`]: crate::set_admin
+    /// [`grant_role`]: crate::grant_role
+    /// [`revoke_role`]: crate::revoke_role
     Admin,
     /// Permission to mint new tokens.
+    ///
+    /// Required by token contracts for any operation that increases total
+    /// supply. Does **not** imply transfer or burn privileges.
     Minter,
     /// Highest-privilege role, reserved for owner-level operations.
+    ///
+    /// Intended for privileged tasks such as contract migration, upgrade
+    /// authorization, or treasury sweeps. Should be granted sparingly and
+    /// only to trusted multisig wallets or cold-storage addresses.
     SuperAdmin,
     /// Role allowing emergency pause and unpause operations.
+    ///
+    /// Grants the ability to halt contract activity in response to incidents.
+    /// Pausing typically restricts transfers and minting while leaving reads
+    /// and burns unaffected (exact semantics depend on the implementing
+    /// contract).
     Pauser,
 }
 
