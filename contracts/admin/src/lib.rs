@@ -1982,7 +1982,10 @@ mod tests {
 
         // After migration, the admin address must be stored in the SuperAdmin mapping.
         env.as_contract(&contract_id, || {
-            assert!(env.storage().persistent().has(&AdminKey::SuperAdmin(admin.clone())));
+            assert!(env
+                .storage()
+                .persistent()
+                .has(&AdminKey::SuperAdmin(admin.clone())));
         });
     }
 
@@ -2142,10 +2145,7 @@ mod tests {
         let member = Address::generate(&env);
 
         client.set_admin(&admin);
-        let result = client.try_set_admin_pool(
-            &vec![&env, member, zero_address(&env)],
-            &2,
-        );
+        let result = client.try_set_admin_pool(&vec![&env, member, zero_address(&env)], &2);
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(4))));
     }
 
