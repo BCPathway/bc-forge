@@ -239,6 +239,27 @@ fn test_set_max_supply() {
 }
 
 #[test]
+fn test_minter_can_mint_successfully() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let minter = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &minter);
+    });
+
+    // A non-admin address with Role::Minter can mint and the token accounting
+    // updates exactly once for the recipient and total supply.
+    assert!(client.try_mint(&minter, &recipient, &250).is_ok());
+    assert_eq!(client.balance(&recipient), 250);
+    assert_eq!(client.supply(), 250);
+    assert_eq!(client.balance(&minter), 0);
+}
+
+#[test]
 fn test_mint_beyond_max_supply_fails() {
     let env = Env::default();
     env.mock_all_auths();
