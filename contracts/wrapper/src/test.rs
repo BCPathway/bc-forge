@@ -49,7 +49,7 @@ fn setup_and_fund(
     let user = Address::generate(env);
 
     // Mint underlying tokens directly (admin is the admin of the underlying token)
-    underlying.mint(&user, &10_000_000);
+    underlying.mint(&admin, &user, &10_000_000);
 
     // Approve wrapper to spend underlying tokens on behalf of user
     underlying.approve(&user, &wrapper_id, &10_000_000, &u32::MAX);
@@ -365,7 +365,7 @@ fn test_decimal_scaling_up() {
     assert_eq!(wrapper.decimals(), 7);
 
     // Mint underlying tokens to user
-    underlying.mint(&user, &10_000);
+    underlying.mint(&admin, &user, &10_000);
 
     // Approve wrapper to spend on behalf of user
     underlying.approve(&user, &wrapper_id, &10_000, &u32::MAX);

@@ -11,6 +11,9 @@ mod reentrancy_guard;
 #[cfg(test)]
 mod test;
 
+#[cfg(test)]
+mod fuzz_mint;
+
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
@@ -27,11 +30,14 @@ pub struct Recipient {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// The contract admin address (singular).
+    /// Admin address — stored here for caller convenience; delegates to AdminKey::Admin.
     Admin,
+    /// Legacy pending admin — unused; retained to preserve storage discriminant order.
+    /// The transfer-ownership flow uses `admin::set_admin` directly.
     PendingAdmin,
-    /// Spending allowance: (owner, spender) -> amount and expiration.
+    /// Spending allowance: (owner, spender) -> amount and expiration ledger.
     Allowance(Address, Address),
+    /// Legacy allowance expiration — stored per-key; prefer AllowanceData struct.
     AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),
@@ -40,6 +46,30 @@ pub enum DataKey {
     Symbol,
     Supply,
     MaxSupply,
+    /// Treasury address for collected fees.
+    Treasury,
+    /// Fee configuration.
+    FeeConfig,
+    /// Fee exemptions keyed by address.
+    FeeExemption(Address),
+}
+
+/// Fee configuration for dynamic contract fee charging.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct FeeConfig {
+    pub base_fee: i128,
+    pub complexity_multiplier: u32,
+    pub max_fee: i128,
+    pub enabled: bool,
+}
+
+/// Fee exemption for a specific address.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct FeeExemption {
+    /// 0 = all operations, 1 = transfers only, 2 = mint only.
+    pub exemption_type: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,6 +93,8 @@ pub enum TokenError {
     InsufficientFeeBalance = 8,
     FeeExemptionNotFound = 9,
     MaxSupplyExceeded = 10,
+    AlreadyPaused = 11,
+    NotPaused = 12,
 }
 
 #[contract]
@@ -207,6 +239,44 @@ impl BcForgeToken {
         events::emit_mint(env, admin_address, to, amount, new_balance, new_supply);
         Ok(())
     }
+
+    fn read_fee_config(env: &Env) -> Result<FeeConfig, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeConfig)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    fn read_treasury(env: &Env) -> Result<Address, TokenError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .ok_or(TokenError::FeeNotConfigured)
+    }
+
+    fn write_fee_config(env: &Env, config: &FeeConfig) {
+        env.storage().instance().set(&DataKey::FeeConfig, config);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn write_treasury(env: &Env, treasury: &Address) {
+        env.storage().instance().set(&DataKey::Treasury, treasury);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn write_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeExemption(address.clone()), exemption);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn delete_fee_exemption(env: &Env, address: &Address) {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FeeExemption(address.clone()));
+        ttl::extend_instance_ttl(env);
+    }
 }
 
 #[contractimpl]
@@ -237,40 +307,90 @@ impl BcForgeToken {
         admin::get_admin(&env)
     }
 
-    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+    pub fn mint(env: Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            let current_admin = admin::get_admin(&env);
-            admin::require_minter(&env, &current_admin);
+            admin::require_minter(&env, &minter);
 
-            // Check rate limits for mint operation
-            if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, amount) {
+            if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
                 return Err(TokenError::InvalidAmount);
             }
 
-            Self::internal_mint(&env, &current_admin, &to, amount)
+            Self::internal_mint(&env, &minter, &to, amount)
         })
     }
 
-    pub fn batch_mint(env: Env, recipients: Vec<Recipient>) -> Result<(), TokenError> {
+    pub fn batch_mint(
+        env: Env,
+        minter: Address,
+        recipients: Vec<Recipient>,
+    ) -> Result<(), TokenError> {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            let current_admin = admin::get_admin(&env);
-            admin::require_minter(&env, &current_admin);
 
+            // Check for any invalid amounts before requiring minter role
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
-                if !crate::rate_limit::check_mint_rate_limit(&env, &current_admin, recipient.amount)
-                {
+            }
+
+            admin::require_minter(&env, &minter);
+
+            for i in 0..recipients.len() {
+                let recipient = recipients.get(i).expect("recipient should exist");
+                if !crate::rate_limit::check_mint_rate_limit(&env, &minter, recipient.amount) {
                     return Err(TokenError::InvalidAmount);
                 }
-                Self::internal_mint(&env, &current_admin, &recipient.to, recipient.amount)?;
+                Self::internal_mint(&env, &minter, &recipient.to, recipient.amount)?;
             }
+
+            Ok(())
+        })
+    }
+
+    pub fn batch_transfer(
+        env: Env,
+        from: Address,
+        recipients: Vec<(Address, i128)>,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        reentrancy_guard!(&env, "batch_transfer_guard", {
+            Self::ensure_initialized(&env)?;
+            Self::ensure_not_paused(&env)?;
+            from.require_auth();
+
+            let mut total: i128 = 0;
+            for i in 0..recipients.len() {
+                let (_, amount) = recipients.get(i).expect("recipient should exist");
+                if amount <= 0 {
+                    return Err(TokenError::InvalidAmount);
+                }
+                total = match total.checked_add(amount) {
+                    Some(total) => total,
+                    None => return Err(TokenError::InvalidAmount),
+                };
+            }
+
+            if Self::read_balance(&env, &from) < total {
+                return Err(TokenError::InsufficientBalance);
+            }
+
+            for i in 0..recipients.len() {
+                let (to, amount) = recipients.get(i).expect("recipient should exist");
+                if !crate::rate_limit::check_transfer_rate_limit(&env, &from, amount) {
+                    return Err(TokenError::InvalidAmount);
+                }
+                Self::move_balance(&env, &from, &to, amount)?;
+                events::emit_transfer(&env, &from, &to, amount);
+            }
+
             Ok(())
         })
     }
@@ -301,7 +421,7 @@ impl BcForgeToken {
     pub fn transfer_ownership(env: Env, new_admin: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
-        admin::require_role_guard(&env, admin::Role::Admin, &current_admin);
+        admin::require_admin(&env, &current_admin);
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
@@ -310,6 +430,9 @@ impl BcForgeToken {
     pub fn pause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), admin_address.clone());
         events::emit_paused(&env, &admin_address);
         Ok(())
@@ -318,6 +441,9 @@ impl BcForgeToken {
     pub fn unpause(env: Env) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
         events::emit_unpaused(&env, &admin_address);
         Ok(())
@@ -336,6 +462,80 @@ impl BcForgeToken {
         admin::require_super_admin(&env, &upgrader);
         events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
+    pub fn pause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::AlreadyPaused);
+        }
+        bc_forge_lifecycle::pause(env.clone(), caller.clone());
+        events::emit_paused(&env, &caller);
+        Ok(())
+    }
+
+    pub fn unpause_as(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(TokenError::NotPaused);
+        }
+        bc_forge_lifecycle::unpause(env.clone(), caller.clone());
+        events::emit_unpaused(&env, &caller);
+        Ok(())
+    }
+
+    pub fn set_fee_config(env: Env, caller: Address, config: FeeConfig) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        if config.base_fee < 0 || config.max_fee < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        Self::write_fee_config(&env, &config);
+        events::emit_fee_config_set(&env, &caller, &config);
+        Ok(())
+    }
+
+    pub fn get_fee_config(env: Env) -> Result<FeeConfig, TokenError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_fee_config(&env)
+    }
+
+    pub fn set_treasury(env: Env, caller: Address, treasury: Address) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        Self::write_treasury(&env, &treasury);
+        events::emit_treasury_set(&env, &caller, &treasury);
+        Ok(())
+    }
+
+    pub fn get_treasury(env: Env) -> Result<Address, TokenError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_treasury(&env)
+    }
+
+    pub fn set_fee_exemption(
+        env: Env,
+        caller: Address,
+        address: Address,
+        exemption: FeeExemption,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        Self::write_fee_exemption(&env, &address, &exemption);
+        events::emit_fee_exemption_set(&env, &caller, &address, &exemption);
+        Ok(())
+    }
+
+    pub fn remove_fee_exemption(
+        env: Env,
+        caller: Address,
+        address: Address,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        Self::delete_fee_exemption(&env, &address);
+        events::emit_fee_exemption_removed(&env, &caller, &address);
         Ok(())
     }
 }

@@ -2,9 +2,10 @@
 //!
 //! Emergency pause/unpause functionality for Soroban contracts.
 //! When a contract is paused, guarded functions will panic, preventing
-//! all token transfers and minting until the admin unpauses.
+//! all token transfers and minting until an authorized caller unpauses.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
@@ -24,18 +25,17 @@ fn extend_instance_ttl(env: &Env) {
 
 // ─── State Management ────────────────────────────────────────────────────────
 
-/// Pauses the contract. Only callable by the admin.
+/// Pauses the contract. Callable by any address with the `Pauser` role
+/// (or `Admin` / `SuperAdmin` which inherit all roles).
 ///
 /// # Arguments
-/// * `env`   - The Soroban environment.
-/// * `admin` - The admin address (must authorize).
+/// * `env`    - The Soroban environment.
+/// * `caller` - The address requesting the pause (must have Pauser role).
 ///
 /// # Panics
 /// Panics if the contract is already paused.
 pub fn pause(env: Env, caller: Address) {
-    // Cross-module RBAC check: verify the caller holds the Pauser role
-    // via the bc-forge-admin module before allowing the pause operation.
-    admin::require_role_guard(&env, admin::Role::Pauser, &caller);
+    admin::require_role(&env, admin::Role::Pauser, &caller);
     if is_paused(&env) {
         panic!("contract is already paused");
     }
@@ -43,18 +43,17 @@ pub fn pause(env: Env, caller: Address) {
     extend_instance_ttl(&env);
 }
 
-/// Unpauses the contract. Only callable by the admin.
+/// Unpauses the contract. Callable by any address with the `Pauser` role
+/// (or `Admin` / `SuperAdmin` which inherit all roles).
 ///
 /// # Arguments
-/// * `env`   - The Soroban environment.
-/// * `admin` - The admin address (must authorize).
+/// * `env`    - The Soroban environment.
+/// * `caller` - The address requesting the unpause (must have Pauser role).
 ///
 /// # Panics
 /// Panics if the contract is not paused.
 pub fn unpause(env: Env, caller: Address) {
-    // Cross-module RBAC check: verify the caller holds the Pauser role
-    // via the bc-forge-admin module before allowing the unpause operation.
-    admin::require_role_guard(&env, admin::Role::Pauser, &caller);
+    admin::require_pauser(&env, &caller);
     if !is_paused(&env) {
         panic!("contract is not paused");
     }
@@ -99,12 +98,9 @@ mod tests {
 
     #[contractimpl]
     impl LifecycleContract {
-        /// Expose admin::set_admin for test setup so the lifecycle RBAC
-        /// checks (which require the caller to hold Role::Pauser) pass.
-        pub fn set_admin(env: Env, admin: Address) {
+        pub fn initialize(env: Env, admin: Address) {
             admin::set_admin(&env, &admin);
         }
-
         pub fn pause(env: Env, caller: Address) {
             super::pause(env, caller);
         }
@@ -119,22 +115,18 @@ mod tests {
         }
     }
 
-    /// Helper: register the test contract, set up admin storage, and
-    /// return the client and admin address.
-    fn setup_test(env: &Env) -> (LifecycleContractClient<'_>, Address) {
+    fn setup(env: &Env) -> (LifecycleContractClient<'_>, Address) {
+        let admin = Address::generate(env);
         let contract_id = env.register(LifecycleContract, ());
         let client = LifecycleContractClient::new(env, &contract_id);
-        let admin = Address::generate(env);
-        client.set_admin(&admin);
+        client.initialize(&admin);
         (client, admin)
     }
 
     #[test]
     fn test_initial_state_not_paused() {
         let env = Env::default();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-
+        let (client, _admin) = setup(&env);
         assert!(!client.is_paused());
     }
 
@@ -142,7 +134,7 @@ mod tests {
     fn test_pause_and_unpause() {
         let env = Env::default();
         env.mock_all_auths();
-        let (client, admin) = setup_test(&env);
+        let (client, admin) = setup(&env);
 
         // Admin holds Role::Admin which implicitly grants Role::Pauser,
         // so the cross-module RBAC check in lifecycle::pause passes.
@@ -158,7 +150,7 @@ mod tests {
     fn test_double_pause_panics() {
         let env = Env::default();
         env.mock_all_auths();
-        let (client, admin) = setup_test(&env);
+        let (client, admin) = setup(&env);
 
         client.pause(&admin);
         client.pause(&admin);
@@ -169,7 +161,7 @@ mod tests {
     fn test_unpause_when_not_paused_panics() {
         let env = Env::default();
         env.mock_all_auths();
-        let (client, admin) = setup_test(&env);
+        let (client, admin) = setup(&env);
 
         client.unpause(&admin);
     }
@@ -179,7 +171,7 @@ mod tests {
     fn test_require_not_paused_panics_when_paused() {
         let env = Env::default();
         env.mock_all_auths();
-        let (client, admin) = setup_test(&env);
+        let (client, admin) = setup(&env);
 
         client.pause(&admin);
         client.require_not();
@@ -189,7 +181,7 @@ mod tests {
     fn test_pause_extends_instance_ttl_across_ledger_advances() {
         let env = Env::default();
         env.mock_all_auths();
-        let (client, admin) = setup_test(&env);
+        let (client, admin) = setup(&env);
 
         client.pause(&admin);
         let mut ledger_info = env.ledger().get();

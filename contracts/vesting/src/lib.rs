@@ -16,6 +16,10 @@ use soroban_sdk::{
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
+    /// Legacy admin slot — kept for ABI/storage compatibility. The contract
+    /// now reads/writes the admin via `bc_forge_admin::has_admin` /
+    /// `bc_forge_admin::get_admin`, so this variant is intentionally unused.
+    #[allow(dead_code)]
     Admin,
     Token,
     NextScheduleId,
@@ -71,9 +75,7 @@ pub struct VestingContract;
 
 impl VestingContract {
     fn ensure_initialized(env: &Env) -> Result<(), VestingError> {
-        if env.storage().instance().has(&DataKey::Admin)
-            && env.storage().instance().has(&DataKey::Token)
-        {
+        if admin::has_admin(env) && env.storage().instance().has(&DataKey::Token) {
             Ok(())
         } else {
             Err(VestingError::NotInitialized)
@@ -88,10 +90,7 @@ impl VestingContract {
     }
 
     fn read_admin(env: &Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("vesting admin not set")
+        admin::get_admin(env)
     }
 
     fn read_token(env: &Env) -> Address {
@@ -195,9 +194,9 @@ impl VestingContract {
             env,
             &token,
             symbol_short!("mint"),
-            (&current_contract, amount).into_val(env),
+            (&current_contract, &current_contract, amount).into_val(env),
         );
-        Self::token_client(env).mint(&current_contract, &amount);
+        Self::token_client(env).mint(&current_contract, &current_contract, &amount);
     }
 
     fn transfer_from_vault(env: &Env, to: &Address, amount: i128) {
@@ -224,13 +223,10 @@ impl VestingContract {
         admin_address: Address,
         token: Address,
     ) -> Result<(), VestingError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if admin::has_admin(&env) {
             return Err(VestingError::AlreadyInitialized);
         }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Admin, &admin_address);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage()
             .instance()
@@ -249,7 +245,7 @@ impl VestingContract {
     ) -> Result<u64, VestingError> {
         Self::ensure_initialized(&env)?;
         let admin_address = Self::read_admin(&env);
-        admin::require_role_guard(&env, admin::Role::Admin, &admin_address);
+        admin::require_admin(&env, &admin_address);
 
         if amount <= 0 {
             return Err(VestingError::InvalidAmount);
@@ -327,7 +323,7 @@ impl VestingContract {
     pub fn revoke(env: Env, schedule_id: u64) -> Result<i128, VestingError> {
         Self::ensure_initialized(&env)?;
         let admin_address = Self::read_admin(&env);
-        admin::require_role_guard(&env, admin::Role::Admin, &admin_address);
+        admin::require_admin(&env, &admin_address);
 
         let current_ledger = env.ledger().sequence();
         let mut stored = Self::read_schedule(&env, schedule_id)?;

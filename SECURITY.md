@@ -67,4 +67,3 @@ We ask that researchers follow responsible disclosure practices:
 - Respect user privacy and data protection requirements
 
 We appreciate the security community's efforts to help keep bc-forge secure.
-
