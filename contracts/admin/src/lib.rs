@@ -1,3 +1,5 @@
+//! # RBAC Integration Summary
+//!
 //! Reusable access-control primitives for Soroban contracts with multi-sig governance.
 //!
 //! # Storage Layout
@@ -275,6 +277,11 @@ pub fn init_storage(env: &Env, admin: &Address) -> Result<(), AdminError> {
     Ok(())
 }
 
+/// Sets the contract administrator.
+///
+/// # Panics
+///
+/// Panics if the zero-address sentinel is passed as `admin`.
 pub fn set_admin(env: &Env, admin: &Address) {
     require_non_zero_address(env, admin);
     if has_admin(env) {
@@ -290,6 +297,7 @@ pub fn set_admin(env: &Env, admin: &Address) {
     _grant_role(env, admin, Role::Admin, admin);
 }
 
+/// Migrates the legacy admin address to the SuperAdmin role.
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
@@ -314,6 +322,7 @@ pub fn get_admin(env: &Env) -> Address {
     admin
 }
 
+/// Returns `true` if the contract has been initialized with an admin.
 pub fn has_admin(env: &Env) -> bool {
     let has = env.storage().instance().has(&AdminKey::Admin);
     if has {
@@ -322,6 +331,12 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
+/// Grants a role to a given address.
+///
+/// # Panics
+///
+/// Panics if the caller is not a SuperAdmin, if the target address is the
+/// zero-address sentinel, or if the role is unrecognized.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
@@ -384,6 +399,7 @@ fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminErr
     Ok(())
 }
 
+/// Returns `true` if the address has the specified role.
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     // Zero address never holds any role.
     if is_zero_address(env, address) {
@@ -410,6 +426,11 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     has
 }
 
+/// Requires that the caller has the specified role and has authorized the invocation.
+///
+/// # Panics
+///
+/// Panics if the caller does not hold the role or if the role is unrecognized.
 #[inline(always)]
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     if !is_valid_role(role) {
@@ -421,6 +442,11 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
     address.require_auth();
 }
 
+/// Returns the admin address for the given role.
+///
+/// # Panics
+///
+/// Panics if the role is unrecognized.
 pub fn get_role_admin(env: &Env, role: Role) -> Address {
     if !is_valid_role(role) {
         soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
@@ -430,6 +456,11 @@ pub fn get_role_admin(env: &Env, role: Role) -> Address {
     admin
 }
 
+/// Requires that the caller has the specified role and has authorized the invocation.
+///
+/// # Panics
+///
+/// Panics if the caller does not hold the role.
 #[inline(always)]
 pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
@@ -450,15 +481,18 @@ pub fn require_minter(env: &Env, address: &Address) {
     require_role_guard(env, Role::Minter, address);
 }
 
+/// Requires that the caller has the SuperAdmin role and has authorized the invocation.
 #[inline(always)]
 pub fn require_super_admin(env: &Env, address: &Address) {
     require_role_guard(env, SUPER_ADMIN_ROLE, address);
 }
 
+/// Requires that the caller has the Admin role for fee management operations.
 pub fn require_fee_admin(env: &Env, address: &Address) {
     require_role_guard(env, Role::Admin, address);
 }
 
+/// Requires that the caller has the Pauser role and has authorized the invocation.
 #[inline(always)]
 pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
@@ -490,6 +524,7 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     extend_instance_ttl(env);
 }
 
+/// Returns the list of addresses in the admin pool.
 pub fn get_admin_pool(env: &Env) -> Vec<Address> {
     env.storage()
         .instance()
@@ -503,6 +538,7 @@ pub fn get_admin_pool(env: &Env) -> Vec<Address> {
         })
 }
 
+/// Returns the required threshold of approvals for the admin pool.
 pub fn get_threshold(env: &Env) -> u32 {
     env.storage()
         .instance()
