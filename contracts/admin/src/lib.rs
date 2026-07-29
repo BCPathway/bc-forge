@@ -1845,4 +1845,192 @@ mod tests {
         let result = client.try_require_admin(&zero_address(&env));
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
     }
+
+    // ── Gas consumption for has_role lookup ─────────────────────────────────
+
+    /// Returns the CPU and memory consumption of a single `has_role`
+    /// call, along with the boolean result.  The budget resets before
+    /// each top-level invocation, so we can simply read the post-call
+    /// values.
+    /// Returns `(cpu, mem, result)`.
+    #[track_caller]
+    fn measure_has_role_gas(
+        env: &Env,
+        client: &AdminContractClient,
+        role: &Role,
+        address: &Address,
+    ) -> (u64, u64, bool) {
+        let result = client.has_role(role, address);
+        let budget = env.cost_estimate().budget();
+        (budget.cpu_instruction_cost(), budget.memory_bytes_cost(), result)
+    }
+
+    #[test]
+    fn test_has_role_gas_direct_role_lookup() {
+        // Looking up a role that an address *directly* holds (not via
+        // implicit Admin privilege) should perform a single persistent
+        // storage read and be cheap.
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        let (cpu, mem, result) =
+            measure_has_role_gas(&env, &client, &Role::Minter, &minter);
+        assert!(result, "has_role should return true for a held role");
+        assert!(cpu > 0, "has_role should consume some CPU instructions");
+        assert!(mem > 0, "has_role should consume some memory bytes");
+        // A direct persistent-storage lookup with TTL extension should
+        // complete well under 200 000 CPU instructions.
+        assert!(cpu < 200_000, "CPU usage {} exceeds threshold", cpu);
+    }
+
+    #[test]
+    fn test_has_role_gas_admin_implicit_privilege() {
+        // When an admin address queries a non-Admin role, has_role
+        // should first check the Admin mapping, find it, and return
+        // true without touching the specific role key.
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let (cpu, mem, result) =
+            measure_has_role_gas(&env, &client, &Role::Minter, &admin);
+        assert!(result, "Admin should implicitly hold all roles");
+        assert!(cpu > 0, "has_role should consume some CPU instructions");
+        assert!(mem > 0, "has_role should consume some memory bytes");
+        assert!(cpu < 200_000, "CPU usage {} exceeds threshold", cpu);
+    }
+
+    #[test]
+    fn test_has_role_gas_role_not_held() {
+        // When an address holds neither the requested role nor the
+        // Admin role, has_role performs two storage reads (Admin key
+        // miss then role key miss) before returning false.
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let (cpu, mem, result) =
+            measure_has_role_gas(&env, &client, &Role::Minter, &stranger);
+        assert!(!result, "has_role should return false for a non-holder");
+        assert!(cpu > 0, "has_role should consume some CPU instructions");
+        assert!(mem > 0, "has_role should consume some memory bytes");
+        // Two storage reads; still well within a reasonable budget.
+        assert!(cpu < 300_000, "CPU usage {} exceeds threshold", cpu);
+    }
+
+    #[test]
+    fn test_has_role_gas_zero_address_short_circuit() {
+        // The zero-address guard must return immediately without any
+        // storage access, so gas consumption should be minimal.
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let (cpu, mem, result) = measure_has_role_gas(
+            &env,
+            &client,
+            &Role::Admin,
+            &zero_address(&env),
+        );
+        assert!(!result, "zero address should never hold any role");
+        assert!(cpu > 0, "has_role should consume some CPU instructions");
+        // Zero-address short-circuit: no storage at all.
+        assert!(cpu < 50_000, "CPU usage {} exceeds threshold for short-circuit", cpu);
+        // The short-circuit does not perform storage reads but the
+        // contract invocation itself allocates some host memory.
+        assert!(mem < 10_000, "memory bytes {} exceeds threshold for short-circuit", mem);
+    }
+
+    #[test]
+    fn test_has_role_gas_admin_role_direct_lookup() {
+        // Looking up Role::Admin for the admin address skips the
+        // implicit-Admin check path and queries the Admin key directly.
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let (cpu, mem, result) =
+            measure_has_role_gas(&env, &client, &Role::Admin, &admin);
+        assert!(result, "admin should hold Role::Admin");
+        assert!(cpu > 0, "has_role should consume some CPU instructions");
+        assert!(mem > 0, "has_role should consume some memory bytes");
+        assert!(cpu < 200_000, "CPU usage {} exceeds threshold", cpu);
+    }
+
+    #[test]
+    fn test_has_role_gas_deterministic_across_repeated_calls() {
+        // Repeated has_role calls for the same (role, address) must
+        // consume the same amount of gas (deterministic metering).
+        // A warm-up call is issued first to absorb any one-time
+        // overhead (TTL extension, host init).
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        // Warm-up: absorb first-call overhead.
+        let _ = measure_has_role_gas(&env, &client, &Role::Minter, &minter);
+
+        let runs: [(u64, u64, bool); 5] = core::array::from_fn(|_| {
+            measure_has_role_gas(&env, &client, &Role::Minter, &minter)
+        });
+
+        // All calls must return the correct result.
+        for run in &runs {
+            assert!(run.2, "every call should confirm the role is held");
+        }
+
+        // Allow a small tolerance (±10 CPU, ±5 memory) because the
+        // Soroban host may accumulate minor non-deterministic overhead
+        // between calls (e.g., TTL bookkeeping).
+        let first = runs[0];
+        let cpu_tolerance: u64 = 10;
+        let mem_tolerance: u64 = 5;
+        for (i, run) in runs.iter().enumerate().skip(1) {
+            let cpu_diff = if run.0 > first.0 {
+                run.0 - first.0
+            } else {
+                first.0 - run.0
+            };
+            let mem_diff = if run.1 > first.1 {
+                run.1 - first.1
+            } else {
+                first.1 - run.1
+            };
+            assert!(
+                cpu_diff <= cpu_tolerance && mem_diff <= mem_tolerance,
+                "Run {} gas {:?} exceeds tolerance (±{} CPU, ±{} mem) from baseline {:?}",
+                i, run, cpu_tolerance, mem_tolerance, first
+            );
+        }
+    }
 }
