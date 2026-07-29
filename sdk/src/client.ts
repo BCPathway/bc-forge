@@ -419,6 +419,16 @@ export class bcForgeClient {
     return this.invokeContract('unpause', [], source);
   }
 
+  /**
+   * Check if the token contract is currently paused.
+   *
+   * @returns True if the contract is paused, false otherwise.
+   */
+  async isPaused(): Promise<boolean> {
+    const result = await this.queryContract('is_paused', []);
+    return scValToNative(result) as boolean;
+  }
+
   // ─── Offline Transaction Builders ──────────────────────────────────────────
 
   /**
