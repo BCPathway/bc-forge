@@ -335,6 +335,39 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
+/// Revokes a previously granted role from an address.
+///
+/// # Authorization
+///
+/// The caller **must** be the contract admin (set via [`set_admin`]).
+/// Soroban enforces this via `require_auth()`, so the transaction will fail
+/// if the admin has not signed it.
+///
+/// # Arguments
+///
+/// * `env`   – Soroban environment handle.
+/// * `role`  – The [`Role`] variant to revoke (e.g. `Role::Minter`).
+/// * `address` – The address whose role is being revoked. Must **not** be the
+///   zero address (Stellar `GAAAAAAAAAA…` sentinel); passing it panics.
+///
+/// # Errors
+///
+/// Returns [`AdminError::RoleNotGranted`] if the address does not currently
+/// hold the specified role. This is a *recoverable* error (the contract does
+/// **not** panic).
+///
+/// # Events
+///
+/// On success a `role_rvk` event is emitted with data
+/// `(admin, role, address)`.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Admin revokes the Minter role from `user`.
+/// revoke_role(&env, Role::Minter, &user)?;
+/// assert!(!has_role(&env, Role::Minter, &user));
+/// ```
 pub fn revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     // #426 – parameter validation: reject unknown role variants and the zero address.
     if !is_valid_role(role) {
