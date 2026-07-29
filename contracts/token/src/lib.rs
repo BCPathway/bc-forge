@@ -308,6 +308,9 @@ impl BcForgeToken {
     }
 
     pub fn mint(env: Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
@@ -329,13 +332,19 @@ impl BcForgeToken {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            admin::require_minter(&env, &minter);
 
+            // Check for any invalid amounts before requiring minter role
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
+            }
+
+            admin::require_minter(&env, &minter);
+
+            for i in 0..recipients.len() {
+                let recipient = recipients.get(i).expect("recipient should exist");
                 if !crate::rate_limit::check_mint_rate_limit(&env, &minter, recipient.amount) {
                     return Err(TokenError::InvalidAmount);
                 }
