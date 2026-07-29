@@ -823,7 +823,7 @@ export class bcForgeClient {
   async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'revoke_role',
-      [nativeToScVal(Role.Minter), addressToScVal(address)],
+      [addressToScVal(source.publicKey()), nativeToScVal(Role.Minter), addressToScVal(address)],
       source,
     );
   }
