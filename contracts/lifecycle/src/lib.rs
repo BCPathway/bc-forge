@@ -53,7 +53,7 @@ pub fn pause(env: Env, caller: Address) {
 /// # Panics
 /// Panics if the contract is not paused.
 pub fn unpause(env: Env, caller: Address) {
-    admin::require_role(&env, admin::Role::Pauser, &caller);
+    admin::require_pauser(&env, &caller);
     if !is_paused(&env) {
         panic!("contract is not paused");
     }
