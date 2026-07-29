@@ -167,6 +167,9 @@ pub enum AdminKey {
     /// pair occupies its own ledger entry so grants/revokes for one address
     /// never touch another's.
     Role(Role, Address),
+    /// Maps an `(Address, Role)` pair to `true` when `address` holds `role`.
+    /// This is the Address-to-Role mapping storage structure.
+    AddressRole(Address, Role),
     /// Multi-sig admin pool addresses, set via `set_admin_pool`.
     AdminPool,
     /// Multi-sig approval threshold, set alongside the pool.
@@ -200,6 +203,10 @@ pub enum Role {
 /// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
 pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
+
+/// The Minter role constant — can be imported as `MINTER_ROLE` for
+/// use in access-control gating without qualifying the full `Role` enum.
+pub const MINTER_ROLE: Role = Role::Minter;
 
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
