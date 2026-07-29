@@ -1105,6 +1105,66 @@ mod tests {
     }
 
     #[test]
+    fn test_revoke_role_emits_event_with_correct_role_for_each_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+
+        for role in [Role::SuperAdmin, Role::Pauser, Role::Minter] {
+            let holder = Address::generate(&env);
+            client.grant_role(&admin, &role, &holder);
+            client.revoke_role(&admin, &role, &holder);
+
+            let events = env.events().all();
+            let (emitter, topics, data) = events.get(events.len() - 1).unwrap();
+            assert_eq!(emitter, contract_id);
+
+            let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic0, soroban_sdk::symbol_short!("role_rvk"));
+
+            let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+            let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+            let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+            let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(event_admin, admin);
+            assert_eq!(event_role, role);
+            assert_eq!(event_address, holder);
+        }
+    }
+
+    #[test]
+    fn test_revoke_role_event_records_contract_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        // A SuperAdmin who is not the contract admin performs a revoke; the
+        // event must attribute it to the contract admin, not the caller.
+        client.revoke_role(&super_admin, &Role::Minter, &holder);
+
+        let events = env.events().all();
+        let (_emitter, _topics, data) = events.get(events.len() - 1).unwrap();
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_role, Role::Minter);
+        assert_eq!(event_address, holder);
+    }
+
+    #[test]
     fn test_super_admin_can_revoke_minter() {
         let env = Env::default();
         env.mock_all_auths();
