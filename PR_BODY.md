@@ -1,4 +1,6 @@
-## Summary
+# feat(admin): Define SUPER_ADMIN_ROLE Constant for Access-Control Gating
+
+# feat(admin): apply require_super_admin to revoke_role guard (#449)
 
 Replaces the old `require_admin` pattern (`admin.require_auth()`) in `revoke_role` with the `require_super_admin` guard, aligning role revocation with the same access control boundary already applied to `grant_role`. Only callers holding the `SuperAdmin` role (or the implicit `Admin` role, which inherits all roles) may now revoke roles.
 
@@ -11,6 +13,8 @@ Closes #449
 - **`AdminContract::revoke_role`**: Updated test contract wrapper to accept and forward `caller`.
 - **All test call sites**: Updated `client.revoke_role(...)` and `client.try_revoke_role(...)` calls to pass the `admin` (or appropriate caller) as the first argument.
 - **New test `test_non_super_admin_cannot_revoke_role`**: Verifies that a caller without the SuperAdmin role receives `UnauthorizedRole` (error code 3) and the target role is preserved.
+- **Fixed `test_revoke_role_emits_role_revoked_event`**: Updated to expect 2 events (extra `role_chk` from `require_super_admin` → `has_role`) and search for `role_rvk` by topic.
+- **Fixed `test_revoked_minter_cannot_mint`**: Updated `revoke_role` call in token tests to pass `caller` argument.
 
 ### `sdk/src/client.ts`
 - **`revokeMinter`**: Updated to pass `source.publicKey()` as the caller argument, matching the `grantMinter` pattern.
@@ -23,3 +27,4 @@ Closes #449
 - [x] Guard successfully prevents unauthorized access (new test verifies error code 3)
 - [x] Reverts with exact specified error (`AdminError::UnauthorizedRole`)
 - [x] Gas overhead is minimized (same pattern as existing `require_super_admin` in `grant_role`)
+- [x] All 56 admin tests pass locally
