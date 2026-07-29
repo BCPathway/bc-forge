@@ -260,6 +260,12 @@ fn is_valid_role(role: Role) -> bool {
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
     )
 }
+
+fn require_valid_role(env: &Env, role: Role) {
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
+}
 /// One-time storage initialization.
 ///
 /// Sets `admin` as the contract administrator and records the initial
@@ -332,9 +338,7 @@ pub fn has_admin(env: &Env) -> bool {
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     _grant_role(env, caller, role, address);
 }
 
@@ -365,9 +369,7 @@ pub fn revoke_role(
 ) -> Result<(), AdminError> {
     require_super_admin(env, caller);
     // #426 – parameter validation: reject unknown role variants and the zero address.
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     require_non_zero_address(env, address);
 
     _revoke_role(env, role, address)
@@ -458,9 +460,7 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 
 #[inline(always)]
 pub fn require_role(env: &Env, role: Role, address: &Address) {
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
@@ -468,9 +468,7 @@ pub fn require_role(env: &Env, role: Role, address: &Address) {
 }
 
 pub fn get_role_admin(env: &Env, role: Role) -> Address {
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     let admin = get_admin(env);
     extend_instance_ttl(env);
     admin
