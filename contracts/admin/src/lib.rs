@@ -128,6 +128,9 @@
 
 mod events;
 
+#[cfg(test)]
+mod fuzz_revoke_role;
+
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 
@@ -637,7 +640,7 @@ mod tests {
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
     #[contract]
-    struct AdminContract;
+    pub(crate) struct AdminContract;
 
     #[contractimpl]
     impl AdminContract {
