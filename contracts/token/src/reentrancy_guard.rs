@@ -6,7 +6,7 @@
 use soroban_sdk::{contracttype, Env, Symbol};
 
 /// Reentrancy guard state
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
 pub enum ReentrancyGuardState {
     /// Guard is not entered (safe to enter)
@@ -24,7 +24,7 @@ pub struct ReentrancyGuard {
 
 impl ReentrancyGuard {
     /// Creates a new reentrancy guard with the given storage key
-    pub fn new(state_key: Symbol) -> Self {
+    pub const fn new(state_key: Symbol) -> Self {
         Self { state_key }
     }
 
@@ -65,9 +65,10 @@ impl ReentrancyGuard {
 
     /// Requires that the guard is not entered, panics otherwise
     pub fn require_not_entered(&self, env: &Env) {
-        if self.is_entered(env) {
-            panic!("Reentrancy detected: function is being called recursively");
-        }
+        assert!(
+            !self.is_entered(env),
+            "Reentrancy detected: function is being called recursively"
+        );
     }
 }
 

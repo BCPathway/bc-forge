@@ -30,21 +30,26 @@ pub struct Recipient {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// Admin address — stored here for caller convenience; delegates to AdminKey::Admin.
+    /// Admin address — stored here for caller convenience; delegates to `AdminKey::Admin`.
     Admin,
     /// Legacy pending admin — unused; retained to preserve storage discriminant order.
     /// The transfer-ownership flow uses `admin::set_admin` directly.
     PendingAdmin,
     /// Spending allowance: (owner, spender) -> amount and expiration ledger.
     Allowance(Address, Address),
-    /// Legacy allowance expiration — stored per-key; prefer AllowanceData struct.
+    /// Legacy allowance expiration — stored per-key; prefer `AllowanceData` struct.
     AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),
+    /// Number of decimal places.
     Decimals,
+    /// Token name.
     Name,
+    /// Token symbol.
     Symbol,
+    /// Current total token supply.
     Supply,
+    /// Maximum token supply cap.
     MaxSupply,
     /// Treasury address for collected fees.
     Treasury,
@@ -300,6 +305,7 @@ impl BcForgeToken {
         Ok(())
     }
 
+    #[must_use]
     pub fn admin(env: Env) -> Address {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         admin::get_admin(&env)
@@ -384,12 +390,14 @@ impl BcForgeToken {
         })
     }
 
+    #[must_use]
     pub fn supply(env: Env) -> i128 {
         Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_supply(&env)
     }
 
+    #[must_use]
     pub fn get_max_supply(env: Env) -> i128 {
         Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));

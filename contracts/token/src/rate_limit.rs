@@ -27,7 +27,7 @@ pub fn check_transfer_rate_limit(env: &Env, from: &Address, amount: i128) -> boo
     BcForgeRateLimit::internal_check_rate_limit(env, Some(from), &op, amount_u64)
 }
 
-/// Check if transfer_from operation is allowed for the given spender address
+/// Check if `transfer_from` operation is allowed for the given spender address
 pub fn check_transfer_from_rate_limit(env: &Env, spender: &Address, amount: i128) -> bool {
     let amount_u64 = if amount < 0 { 0 } else { amount as u64 };
     let op = String::from_str(env, OPERATION_TRANSFER_FROM);
@@ -41,7 +41,7 @@ pub fn check_burn_rate_limit(env: &Env, from: &Address, amount: i128) -> bool {
     BcForgeRateLimit::internal_check_rate_limit(env, Some(from), &op, amount_u64)
 }
 
-/// Check if burn_from operation is allowed for the given spender address
+/// Check if `burn_from` operation is allowed for the given spender address
 pub fn check_burn_from_rate_limit(env: &Env, spender: &Address, amount: i128) -> bool {
     let amount_u64 = if amount < 0 { 0 } else { amount as u64 };
     let op = String::from_str(env, OPERATION_BURN_FROM);
