@@ -56,17 +56,26 @@ pub struct VestingInfo {
     pub revoked: bool,
 }
 
+/// Errors returned by the vesting contract.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
 #[repr(u32)]
 pub enum VestingError {
+    /// The contract has already been initialized.
     AlreadyInitialized = 1,
+    /// The contract has not been initialized.
     NotInitialized = 2,
+    /// An invalid amount was provided.
     InvalidAmount = 3,
+    /// An invalid vesting duration was specified.
     InvalidDuration = 4,
+    /// The specified cliff occurs after the vesting end.
     CliffAfterEnd = 5,
+    /// The vesting schedule was not found.
     ScheduleNotFound = 6,
+    /// The vesting schedule is not revocable.
     NotRevocable = 7,
+    /// The vesting schedule has already been revoked.
     AlreadyRevoked = 8,
 }
 

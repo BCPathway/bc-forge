@@ -79,19 +79,30 @@ struct AllowanceData {
     expiration_ledger: u32,
 }
 
+/// Errors returned by the token contract.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
 #[repr(u32)]
 pub enum TokenError {
+    /// The contract has already been initialized.
     AlreadyInitialized = 1,
+    /// The contract has not been initialized.
     NotInitialized = 2,
+    /// An invalid amount was provided.
     InvalidAmount = 3,
+    /// Insufficient balance to perform the transfer.
     InsufficientBalance = 4,
+    /// Insufficient allowance to perform the transfer on behalf of another user.
     InsufficientAllowance = 5,
+    /// The contract is currently paused.
     ContractPaused = 6,
+    /// A required fee is not configured.
     FeeNotConfigured = 7,
+    /// Insufficient balance to pay the fee.
     InsufficientFeeBalance = 8,
+    /// A fee exemption could not be found.
     FeeExemptionNotFound = 9,
+    /// The maximum token supply has been exceeded.
     MaxSupplyExceeded = 10,
 }
 

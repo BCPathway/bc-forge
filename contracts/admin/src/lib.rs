@@ -156,8 +156,6 @@ pub enum AdminError {
     RoleAlreadyGranted = 7,
 }
 
-
-
 /// Strkey of the well-known Stellar "null" account: an ed25519 public key
 /// whose 32-byte payload is all zeros. No private key can ever produce a
 /// signature for it, so it is used as the canonical zero-address sentinel
