@@ -1739,6 +1739,67 @@ mod tests {
         assert_eq!(event_address, grantee);
     }
 
+    #[test]
+    fn test_grant_role_emits_event_with_correct_role_for_each_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+
+        // The single existing grant-event test only covers Minter. Grant each of
+        // the other roles and assert every grant emits a role_grnt event carrying
+        // that exact role, granter, and grantee.
+        for role in [Role::SuperAdmin, Role::Pauser, Role::Minter] {
+            let grantee = Address::generate(&env);
+            client.grant_role(&admin, &role, &grantee);
+
+            let events = env.events().all();
+            let (emitter, topics, data) = events.get(events.len() - 1).unwrap();
+            assert_eq!(emitter, contract_id);
+
+            let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic0, soroban_sdk::symbol_short!("role_grnt"));
+
+            let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+            let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+            let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+            let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(event_admin, admin);
+            assert_eq!(event_role, role);
+            assert_eq!(event_address, grantee);
+        }
+    }
+
+    #[test]
+    fn test_grant_role_event_records_the_granting_caller() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let grantee = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+
+        // A SuperAdmin who is not the contract admin performs a grant; the event
+        // must attribute it to that caller, not to the contract admin.
+        client.grant_role(&super_admin, &Role::Minter, &grantee);
+
+        let events = env.events().all();
+        let (_emitter, _topics, data) = events.get(events.len() - 1).unwrap();
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, super_admin);
+        assert_eq!(event_role, Role::Minter);
+        assert_eq!(event_address, grantee);
+    }
+
     // ── #405: init_storage ───────────────────────────────────────────────────
 
     #[test]
