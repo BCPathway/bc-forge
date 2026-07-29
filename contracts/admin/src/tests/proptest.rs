@@ -2,13 +2,14 @@
 
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Env};
+use soroban_sdk::testutils::Events;
+use soroban_sdk::{Address, Env, TryIntoVal, Vec};
 
-use crate::{AdminContract, AdminContractClient, Role};
+use super::{AdminContract, AdminContractClient, Role};
 
 const ALL_ROLES: [Role; 4] = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
 
-fn setup(env: &Env) -> (AdminContractClient, Address) {
+fn setup(env: &Env) -> (AdminContractClient<'_>, Address) {
     env.mock_all_auths();
     let contract_id = env.register(AdminContract, ());
     let client = AdminContractClient::new(env, &contract_id);
@@ -92,16 +93,19 @@ proptest! {
         let role = role_for_idx(role_idx);
         let env = Env::default();
         let (client, admin) = setup(&env);
-        let holders: Vec<Address> = (0..extra + 1).map(|_| Address::generate(&env)).collect();
+        let mut holders = Vec::new(&env);
+        for _ in 0..extra + 1 {
+            holders.push_back(Address::generate(&env));
+        }
 
-        for h in &holders {
-            prop_assert!(!client.has_role(&role, h));
+        for h in holders.iter() {
+            prop_assert!(!client.has_role(&role, &h));
         }
-        for h in &holders {
-            client.grant_role(&admin, &role, h);
+        for h in holders.iter() {
+            client.grant_role(&admin, &role, &h);
         }
-        for h in &holders {
-            prop_assert!(client.has_role(&role, h));
+        for h in holders.iter() {
+            prop_assert!(client.has_role(&role, &h));
         }
     }
 
