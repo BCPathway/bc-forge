@@ -1898,20 +1898,14 @@ mod tests {
         let admin = Address::generate(&env);
 
         // Before init_storage, neither domain has admin data.
-        assert!(!env
-            .as_contract(&contract_id, || has_admin(&env)));
-        assert!(!env.as_contract(&contract_id, || {
-            has_role(&env, Role::Admin, &admin)
-        }));
+        assert!(!env.as_contract(&contract_id, || has_admin(&env)));
+        assert!(!env.as_contract(&contract_id, || { has_role(&env, Role::Admin, &admin) }));
 
         client.init_storage(&admin);
 
         // After init_storage, both domains are correctly populated.
-        assert!(env
-            .as_contract(&contract_id, || has_admin(&env)));
-        assert!(env.as_contract(&contract_id, || {
-            has_role(&env, Role::Admin, &admin)
-        }));
+        assert!(env.as_contract(&contract_id, || has_admin(&env)));
+        assert!(env.as_contract(&contract_id, || { has_role(&env, Role::Admin, &admin) }));
 
         // Verify that the instance-stored admin matches.
         let stored = env.as_contract(&contract_id, || get_admin(&env));
@@ -1948,17 +1942,14 @@ mod tests {
         let client_b = AdminContractClient::new(&env, &contract_b_id);
 
         // Contract B is still uninitialized before init_storage on A.
-        assert!(!env
-            .as_contract(&contract_b_id, || has_admin(&env)));
+        assert!(!env.as_contract(&contract_b_id, || has_admin(&env)));
 
         // Initialize contract A.
         client_a.init_storage(&admin_a);
-        assert!(env
-            .as_contract(&contract_a_id, || has_admin(&env)));
+        assert!(env.as_contract(&contract_a_id, || has_admin(&env)));
 
         // Contract B must still be uninitialized — no cross-contract leakage.
-        assert!(!env
-            .as_contract(&contract_b_id, || has_admin(&env)));
+        assert!(!env.as_contract(&contract_b_id, || has_admin(&env)));
 
         // Initialize contract B with a different admin.
         client_b.init_storage(&admin_b);
@@ -1990,11 +1981,8 @@ mod tests {
 
         // Bypass init_storage — use set_admin directly.
         client.set_admin(&admin);
-        assert!(env
-            .as_contract(&contract_id, || has_admin(&env)));
-        assert!(env.as_contract(&contract_id, || {
-            has_role(&env, Role::Admin, &admin)
-        }));
+        assert!(env.as_contract(&contract_id, || has_admin(&env)));
+        assert!(env.as_contract(&contract_id, || { has_role(&env, Role::Admin, &admin) }));
 
         // init_storage must detect the existing admin and reject.
         let result = client.try_init_storage(&admin);
@@ -2003,9 +1991,7 @@ mod tests {
         // State must remain unchanged after the rejected init_storage.
         let stored = env.as_contract(&contract_id, || get_admin(&env));
         assert_eq!(stored, admin);
-        assert!(env.as_contract(&contract_id, || {
-            has_role(&env, Role::Admin, &admin)
-        }));
+        assert!(env.as_contract(&contract_id, || { has_role(&env, Role::Admin, &admin) }));
     }
 
     /// Verifies that `init_storage` with two different admins on two
@@ -2046,14 +2032,12 @@ mod tests {
         assert!(!client_b.has_role(&Role::Minter, &minter_a));
 
         // The role assignments from one contract must NOT appear in the other.
-        let has_minter_a_in_b = env.as_contract(&contract_b_id, || {
-            has_role(&env, Role::Minter, &minter_a)
-        });
+        let has_minter_a_in_b =
+            env.as_contract(&contract_b_id, || has_role(&env, Role::Minter, &minter_a));
         assert!(!has_minter_a_in_b);
 
-        let has_minter_b_in_a = env.as_contract(&contract_a_id, || {
-            has_role(&env, Role::Minter, &minter_b)
-        });
+        let has_minter_b_in_a =
+            env.as_contract(&contract_a_id, || has_role(&env, Role::Minter, &minter_b));
         assert!(!has_minter_b_in_a);
     }
 
