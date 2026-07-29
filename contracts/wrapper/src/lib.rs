@@ -29,7 +29,10 @@ use soroban_sdk::{
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// The contract admin address.
+    /// Legacy admin slot — kept for ABI/storage compatibility. The contract
+    /// now reads/writes the admin via `bc_forge_admin::has_admin` /
+    /// `bc_forge_admin::get_admin`, so this variant is intentionally unused.
+    #[allow(dead_code)]
     Admin,
     /// The underlying SEP-41 token contract address being wrapped.
     UnderlyingToken,
@@ -78,7 +81,7 @@ impl WrapperContract {
     // ── Guards ───────────────────────────────────────────────────────────────
 
     fn ensure_initialized(env: &Env) -> Result<(), WrapperError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if admin::has_admin(env) {
             Ok(())
         } else {
             Err(WrapperError::NotInitialized)
@@ -122,10 +125,11 @@ impl WrapperContract {
     // ── Storage Helpers ──────────────────────────────────────────────────────
 
     fn read_admin(env: &Env) -> Result<Address, WrapperError> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .ok_or(WrapperError::NotInitialized)
+        if admin::has_admin(env) {
+            Ok(admin::get_admin(env))
+        } else {
+            Err(WrapperError::NotInitialized)
+        }
     }
 
     fn read_underlying(env: &Env) -> Address {
@@ -262,12 +266,11 @@ impl WrapperContract {
         name: String,
         symbol: String,
     ) -> Result<(), WrapperError> {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if admin::has_admin(&env) {
             return Err(WrapperError::AlreadyInitialized);
         }
 
         admin::set_admin(&env, &admin);
-        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
             .set(&DataKey::UnderlyingToken, &token_contract_id);
@@ -409,6 +412,22 @@ impl WrapperContract {
         let current_admin = Self::read_admin(&env)?;
         bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
         events::emit_unpaused(&env, &current_admin);
+        Ok(())
+    }
+
+    /// Pause operations using a specific caller address (must have Pauser role).
+    pub fn pause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::pause(env.clone(), caller.clone());
+        events::emit_paused(&env, &caller);
+        Ok(())
+    }
+
+    /// Unpause operations using a specific caller address (must have Pauser role).
+    pub fn unpause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        bc_forge_lifecycle::unpause(env.clone(), caller.clone());
+        events::emit_unpaused(&env, &caller);
         Ok(())
     }
 

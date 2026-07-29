@@ -14,7 +14,7 @@
  * });
  *
  * const balance = await client.getBalance('GABC...DEF');
- * console.log('Balance:', balance.toString());
+ * console.log('Balance:', balance);
  * ```
  */
 

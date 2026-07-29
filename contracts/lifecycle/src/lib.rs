@@ -2,10 +2,12 @@
 //!
 //! Emergency pause/unpause functionality for Soroban contracts.
 //! When a contract is paused, guarded functions will panic, preventing
-//! all token transfers and minting until the admin unpauses.
+//! all token transfers and minting until an authorized caller unpauses.
 
 #![no_std]
+#![allow(clippy::manual_assert)]
 
+use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracttype, Address, Env};
 
@@ -23,16 +25,17 @@ fn extend_instance_ttl(env: &Env) {
 
 // ─── State Management ────────────────────────────────────────────────────────
 
-/// Pauses the contract. Only callable by the admin.
+/// Pauses the contract. Callable by any address with the `Pauser` role
+/// (or `Admin` / `SuperAdmin` which inherit all roles).
 ///
 /// # Arguments
-/// * `env`   - The Soroban environment.
-/// * `admin` - The admin address (must authorize).
+/// * `env`    - The Soroban environment.
+/// * `caller` - The address requesting the pause (must have Pauser role).
 ///
 /// # Panics
 /// Panics if the contract is already paused.
-pub fn pause(env: Env, admin: Address) {
-    admin.require_auth();
+pub fn pause(env: Env, caller: Address) {
+    admin::require_role(&env, admin::Role::Pauser, &caller);
     if is_paused(&env) {
         panic!("contract is already paused");
     }
@@ -40,16 +43,17 @@ pub fn pause(env: Env, admin: Address) {
     extend_instance_ttl(&env);
 }
 
-/// Unpauses the contract. Only callable by the admin.
+/// Unpauses the contract. Callable by any address with the `Pauser` role
+/// (or `Admin` / `SuperAdmin` which inherit all roles).
 ///
 /// # Arguments
-/// * `env`   - The Soroban environment.
-/// * `admin` - The admin address (must authorize).
+/// * `env`    - The Soroban environment.
+/// * `caller` - The address requesting the unpause (must have Pauser role).
 ///
 /// # Panics
 /// Panics if the contract is not paused.
-pub fn unpause(env: Env, admin: Address) {
-    admin.require_auth();
+pub fn unpause(env: Env, caller: Address) {
+    admin::require_role(&env, admin::Role::Pauser, &caller);
     if !is_paused(&env) {
         panic!("contract is not paused");
     }
@@ -94,11 +98,14 @@ mod tests {
 
     #[contractimpl]
     impl LifecycleContract {
-        pub fn pause(env: Env, admin: Address) {
-            super::pause(env, admin);
+        pub fn initialize(env: Env, admin: Address) {
+            admin::set_admin(&env, &admin);
         }
-        pub fn unpause(env: Env, admin: Address) {
-            super::unpause(env, admin);
+        pub fn pause(env: Env, caller: Address) {
+            super::pause(env, caller);
+        }
+        pub fn unpause(env: Env, caller: Address) {
+            super::unpause(env, caller);
         }
         pub fn is_paused(env: Env) -> bool {
             super::is_paused(&env)
@@ -108,12 +115,18 @@ mod tests {
         }
     }
 
+    fn setup(env: &Env) -> (LifecycleContractClient<'_>, Address) {
+        let admin = Address::generate(env);
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(env, &contract_id);
+        client.initialize(&admin);
+        (client, admin)
+    }
+
     #[test]
     fn test_initial_state_not_paused() {
         let env = Env::default();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-
+        let (client, _admin) = setup(&env);
         assert!(!client.is_paused());
     }
 
@@ -121,9 +134,7 @@ mod tests {
     fn test_pause_and_unpause() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup(&env);
 
         client.pause(&admin);
         assert!(client.is_paused());
@@ -137,9 +148,7 @@ mod tests {
     fn test_double_pause_panics() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup(&env);
 
         client.pause(&admin);
         client.pause(&admin);
@@ -150,9 +159,7 @@ mod tests {
     fn test_unpause_when_not_paused_panics() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup(&env);
 
         client.unpause(&admin);
     }
@@ -162,20 +169,17 @@ mod tests {
     fn test_require_not_paused_panics_when_paused() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup(&env);
 
         client.pause(&admin);
         client.require_not();
     }
+
     #[test]
     fn test_pause_extends_instance_ttl_across_ledger_advances() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(LifecycleContract, ());
-        let client = LifecycleContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let (client, admin) = setup(&env);
 
         client.pause(&admin);
         let mut ledger_info = env.ledger().get();

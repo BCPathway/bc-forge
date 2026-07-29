@@ -1,0 +1,64 @@
+import { jest } from '@jest/globals';
+import { Keypair, rpc as SorobanRpc, xdr } from '@stellar/stellar-sdk';
+
+jest.unstable_mockModule('./utils', () => ({
+  buildInvokeTransaction: jest.fn(),
+  submitTransaction: jest.fn(),
+  addressToScVal: jest.fn((value: string) => value),
+  i128ToScVal: jest.fn((value: bigint) => value),
+  stringToScVal: jest.fn((value: string) => value),
+  u32ToScVal: jest.fn((value: number) => value),
+  scValToNative: jest.fn(() => 42),
+  buildUnsignedTransaction: jest.fn(),
+  signTransaction: jest.fn(),
+  simulateTransaction: jest.fn(),
+  hashToScVal: jest.fn(),
+}));
+
+let utils: typeof import('./utils');
+let bcForgeClient: typeof import('./client').bcForgeClient;
+
+describe('bcForgeClient regression coverage', () => {
+  beforeAll(async () => {
+    utils = await import('./utils');
+    const clientMod = await import('./client');
+    bcForgeClient = clientMod.bcForgeClient;
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('awaits the submitted transaction before unwrapping its response', async () => {
+    const mockedBuildInvokeTransaction = jest.mocked(utils.buildInvokeTransaction);
+    const mockedSubmitTransaction = jest.mocked(utils.submitTransaction);
+    const mockedScValToNative = jest.mocked(utils.scValToNative);
+
+    mockedBuildInvokeTransaction.mockResolvedValueOnce('mock-xdr');
+    mockedSubmitTransaction.mockResolvedValueOnce({
+      status: SorobanRpc.Api.GetTransactionStatus.SUCCESS,
+      hash: 'tx-hash',
+      returnValue: xdr.ScVal.scvU32(7),
+    } as unknown as Awaited<ReturnType<typeof utils.submitTransaction>>);
+
+    const client = new bcForgeClient({
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      networkPassphrase: 'Test SDF Network ; September 2015',
+      contractId: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
+    });
+
+    const result = await client.mint(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      100n,
+      Keypair.random(),
+    );
+
+    expect(result).toEqual({
+      success: true,
+      hash: 'tx-hash',
+      returnValue: 42,
+    });
+    expect(mockedSubmitTransaction).toHaveBeenCalledTimes(1);
+    expect(mockedScValToNative).toHaveBeenCalledWith(expect.anything());
+  });
+});
