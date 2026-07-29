@@ -330,7 +330,7 @@ impl BcForgeToken {
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            
+
             // Check for any invalid amounts before requiring minter role
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
