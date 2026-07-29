@@ -191,6 +191,7 @@ name = "bc-forge-admin"
 version = "0.1.0"
 dependencies = [
  "bc-forge-ttl",
+ "proptest",
  "soroban-sdk",
 ]
 
@@ -217,6 +218,16 @@ name = "bc-forge-rate-limit"
 version = "0.1.0"
 dependencies = [
  "bc-forge-admin",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "bc-forge-split"
+version = "0.1.0"
+dependencies = [
+ "bc-forge-admin",
+ "bc-forge-token",
+ "bc-forge-ttl",
  "soroban-sdk",
 ]
 
