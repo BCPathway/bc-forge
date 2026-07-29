@@ -167,6 +167,9 @@ pub enum AdminKey {
     /// pair occupies its own ledger entry so grants/revokes for one address
     /// never touch another's.
     Role(Role, Address),
+    /// Maps an `(Address, Role)` pair to `true` when `address` holds `role`.
+    /// This is the Address-to-Role mapping storage structure.
+    AddressRole(Address, Role),
     /// Multi-sig admin pool addresses, set via `set_admin_pool`.
     AdminPool,
     /// Multi-sig approval threshold, set alongside the pool.
