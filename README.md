@@ -17,6 +17,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **Modular Architecture** — Separate crates for admin, lifecycle, and token logic
 - **Reentrancy Protection** — Comprehensive reentrancy guards for all state-modifying functions
 - **Rate Limiting** — Configurable global and per-address rate limits for mint and transfer operations
+- **Batch Payout** — Per-recipient failure isolation in batch payments; failed transfers recorded for retry
 - **Property-Based Fuzz Testing** — Enhanced proptest framework for invariant verification
 - **End-to-End Integration Tests** — Complete lifecycle testing on Stellar testnet
 - **Automatic Storage TTL Management** — Shared helper module extends Soroban contract and persistent storage TTL across calls
@@ -33,6 +34,12 @@ bc-forge/
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
 │   ├── rate-limit/             # Rate limiting module
+│   ├── split/                   # Batch payout with per-recipient failure isolation
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs            # Split contract implementation
+│   │       ├── events.rs         # Structured event emissions
+│   │       └── test.rs           # Unit tests
 │   ├── ttl/                      # Shared storage TTL helpers
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs
@@ -294,6 +301,9 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 
 ## 🏗️ Smart Contract Architecture
 
+See the [access-control diagrams](docs/ACCESS_CONTROL.md) for the current role
+hierarchy, authorization sequence, protected operations, and governance flow.
+
 ```
 ┌─────────────────────────────────────────────────┐
 │                  BcForgeToken                   │
@@ -307,6 +317,16 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 │  │   admin() │  │ require_not_ │  │ burn()    ││
 │  │           │  │   paused()   │  │ mint()    ││
 │  └───────────┘  └──────────────┘  └───────────┘│
+│  ┌──────────────────────────────────────────┐   │
+│  │             Split Module                 │   │
+│  │  ┌────────────────────────────────────┐  │   │
+│  │  │ release_payment(invoice_id)        │  │   │
+│  │  │   └─ try_transfer(recipient, amt) │  │   │
+│  │  │ retry_failed_payout(invoice_id,   │  │   │
+│  │  │   recipient)                      │  │   │
+│  │  │ get_failed_payout / get_invoice   │  │   │
+│  │  └────────────────────────────────────┘  │   │
+│  └──────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────┘
 ```
 

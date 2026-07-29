@@ -11,6 +11,9 @@ mod reentrancy_guard;
 #[cfg(test)]
 mod test;
 
+#[cfg(test)]
+mod fuzz_mint;
+
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
