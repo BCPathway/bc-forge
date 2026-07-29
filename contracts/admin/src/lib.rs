@@ -201,6 +201,10 @@ pub enum Role {
 /// use in access-control gating without qualifying the full `Role` enum.
 pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
 
+/// The Minter role constant — can be imported as `MINTER_ROLE` for
+/// use in access-control gating without qualifying the full `Role` enum.
+pub const MINTER_ROLE: Role = Role::Minter;
+
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
