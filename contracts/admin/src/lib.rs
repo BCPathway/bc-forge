@@ -338,11 +338,58 @@ pub fn set_admin(env: &Env, admin: &Address) {
     _grant_role(env, admin, Role::Admin, admin);
 }
 
-/// Migrates the singular admin into the SuperAdmin mapping.
+/// Migrates the singular admin address to the SuperAdmin role mapping.
 ///
-/// @notice Copies the stored admin into the `SuperAdmin` mapping, enabling the super-admin guard for legacy contracts.
-/// @dev One-shot upgrade helper. No-op if no admin is stored. Does not reset any existing state.
-/// @param env The Soroban environment.
+/// This one-shot upgrade helper copies the admin address stored under
+/// [`AdminKey::Admin`] in instance storage to [`AdminKey::SuperAdmin`] in
+/// persistent storage. This enables the [`require_super_admin`] guard for
+/// legacy contracts without resetting existing state or requiring manual
+/// reconfiguration.
+///
+/// # Storage Migration Process
+///
+/// The function performs the following storage migration steps:
+/// 1. Reads the current admin address from instance storage (`AdminKey::Admin`)
+/// 2. If an admin exists, creates a new persistent storage entry mapping
+///    that address to `true` under `AdminKey::SuperAdmin(address)`
+/// 3. Extends the TTL of the new SuperAdmin storage entry to ensure persistence
+///
+/// # Arguments
+///
+/// * `env` - The Soroban environment providing storage access and TTL management
+///
+/// # Behavior
+///
+/// - If no admin is set in instance storage, this function does nothing (no-op)
+/// - If an admin exists, it is copied to the SuperAdmin mapping
+/// - The original admin entry in instance storage remains unchanged
+/// - The migration is idempotent: calling it multiple times has the same effect
+///
+/// # Use Cases
+///
+/// This function is intended for contract upgrades that introduce the SuperAdmin
+/// role system. It allows existing contracts to:
+/// - Preserve their current admin configuration
+/// - Enable SuperAdmin-based authorization guards
+/// - Avoid manual administrative intervention during upgrades
+///
+/// # Storage Layout Changes
+///
+/// Before migration:
+/// - `AdminKey::Admin` (instance) → `Address`
+///
+/// After migration:
+/// - `AdminKey::Admin` (instance) → `Address` (unchanged)
+/// - `AdminKey::SuperAdmin(address)` (persistent) → `true` (new entry)
+///
+/// # Panics
+///
+/// This function does not panic under normal conditions. It gracefully handles
+/// the case where no admin has been set by performing no operation.
+///
+/// # Events
+///
+/// This function does not emit any events.
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
