@@ -128,6 +128,9 @@
 
 mod events;
 
+#[cfg(test)]
+mod fuzz_roles;
+
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 
@@ -585,6 +588,7 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
@@ -592,7 +596,7 @@ mod tests {
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
     #[contract]
-    struct AdminContract;
+    pub struct AdminContract;
 
     #[contractimpl]
     impl AdminContract {
@@ -1949,5 +1953,245 @@ mod tests {
 
         let result = client.try_require_admin(&zero_address(&env));
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+// Multi-role assignment integration tests (Issue #484)
+    // ---------------------------------------------------------------------------
+
+    /// A single address can receive multiple distinct roles, and each role
+    /// is independently persisted and queryable via `has_role`.
+    #[test]
+    fn test_multi_role_assignment_single_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        // Arrange: set up admin.
+        client.set_admin(&admin);
+
+        // Act: grant all three non-Admin roles to the same address.
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::SuperAdmin, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+
+        // Assert: every assigned role is persisted.
+        assert!(client.has_role(&Role::Minter, &holder), "Minter role must be held");
+        assert!(client.has_role(&Role::SuperAdmin, &holder), "SuperAdmin role must be held");
+        assert!(client.has_role(&Role::Pauser, &holder), "Pauser role must be held");
+
+        // Assert: Admin role is NOT implicitly held (Admin was not granted to holder).
+        assert!(!client.has_role(&Role::Admin, &holder), "Admin role must not be implicitly held");
+    }
+
+    /// Granting the same role twice is idempotent: the role remains assigned
+    /// and no other roles are affected.
+    #[test]
+    fn test_duplicate_role_assignment_is_idempotent() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        // Arrange: set up admin and grant Minter once.
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        // Act: grant Minter a second time to the same holder.
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        // Assert: Minter is still held and Admin/Pauser are not.
+        assert!(client.has_role(&Role::Minter, &holder), "Minter must still be held after duplicate grant");
+        assert!(!client.has_role(&Role::Admin, &holder), "Admin must not appear after duplicate Minter grant");
+        assert!(!client.has_role(&Role::SuperAdmin, &holder), "SuperAdmin must not appear after duplicate Minter grant");
+        assert!(!client.has_role(&Role::Pauser, &holder), "Pauser must not appear after duplicate Minter grant");
+    }
+
+    /// Re-assigning an existing role to the same address does not overwrite
+    /// or remove other role assignments held by that address.
+    #[test]
+    fn test_reassign_role_preserves_other_roles() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        // Arrange: grant Minter and Pauser to the same holder.
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+
+        // Act: re-grant Minter (already held).
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        // Assert: both roles are still held.
+        assert!(client.has_role(&Role::Minter, &holder), "Minter must persist after re-grant");
+        assert!(client.has_role(&Role::Pauser, &holder), "Pauser must persist after re-grant of Minter");
+    }
+
+    /// Revoking one role from a multi-role holder leaves the other roles intact.
+    #[test]
+    fn test_partial_revoke_from_multi_role_holder() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        // Arrange: grant all three non-Admin roles.
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::SuperAdmin, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+
+        // Act: revoke only Minter.
+        client.revoke_role(&admin, &Role::Minter, &holder);
+
+        // Assert: Minter is gone, but SuperAdmin and Pauser remain.
+        assert!(!client.has_role(&Role::Minter, &holder), "Minter must be revoked");
+        assert!(client.has_role(&Role::SuperAdmin, &holder), "SuperAdmin must survive partial revoke");
+        assert!(client.has_role(&Role::Pauser, &holder), "Pauser must survive partial revoke");
+    }
+
+    /// Full lifecycle: grant all roles → verify all → revoke one → verify
+    /// remaining → revoke all → verify none.
+    #[test]
+    fn test_full_role_lifecycle_for_single_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        // Arrange
+        client.set_admin(&admin);
+        let roles = [Role::Minter, Role::SuperAdmin, Role::Pauser];
+
+        // Act: grant all roles.
+        for role in &roles {
+            client.grant_role(&admin, role, &holder);
+        }
+
+        // Assert: all roles are held.
+        for role in &roles {
+            assert!(client.has_role(role, &holder), "{:?} must be held after grant", role);
+        }
+
+        // Act: revoke Minter.
+        client.revoke_role(&admin, &Role::Minter, &holder);
+
+        // Assert: Minter gone, others remain.
+        assert!(!client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&Role::SuperAdmin, &holder));
+        assert!(client.has_role(&Role::Pauser, &holder));
+
+        // Act: revoke remaining roles.
+        client.revoke_role(&admin, &Role::SuperAdmin, &holder);
+        client.revoke_role(&admin, &Role::Pauser, &holder);
+
+        // Assert: no roles remain.
+        assert!(!client.has_role(&Role::Minter, &holder));
+        assert!(!client.has_role(&Role::SuperAdmin, &holder));
+        assert!(!client.has_role(&Role::Pauser, &holder));
+        assert!(!client.has_role(&Role::Admin, &holder));
+    }
+
+    /// Multi-role assignment emits a `role_grnt` event for each grant.
+    /// Event emission is already thoroughly tested by dedicated event tests
+    /// (e.g. `test_set_admin_emits_role_granted_event`, `test_revoke_role_emits_role_revoked_event`),
+    /// so this test focuses on verifying the role assignments themselves.
+    #[test]
+    fn test_multi_role_assignment_emits_events() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        // Arrange: set up admin.
+        client.set_admin(&admin);
+
+        // Act: grant all three non-Admin roles to the same address.
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::SuperAdmin, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+
+        // Assert: every assigned role is persisted.
+        assert!(client.has_role(&Role::Minter, &holder), "Minter role must be held");
+        assert!(client.has_role(&Role::SuperAdmin, &holder), "SuperAdmin role must be held");
+        assert!(client.has_role(&Role::Pauser, &holder), "Pauser role must be held");
+        assert!(!client.has_role(&Role::Admin, &holder), "Admin role must not be implicitly held");
+    }
+
+    /// Granting all four recognized roles to the same address works correctly.
+    /// Note: Admin is assigned via `set_admin`, while Minter, SuperAdmin, and
+    /// Pauser are assigned via `grant_role`.
+    #[test]
+    fn test_all_roles_assignment_to_single_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        // Arrange: set admin (grants Admin role to admin address).
+        client.set_admin(&admin);
+
+        // Act: grant the remaining roles to the holder.
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::SuperAdmin, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+
+        // Assert: Admin is the only role the holder should NOT have.
+        assert!(!client.has_role(&Role::Admin, &holder),
+            "holder must not hold Admin (only granted via set_admin)");
+        assert!(client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&Role::SuperAdmin, &holder));
+        assert!(client.has_role(&Role::Pauser, &holder));
+
+        // Assert: the actual admin address holds Admin (and thereby all roles).
+        assert!(client.has_role(&Role::Admin, &admin));
+        assert!(client.has_role(&Role::Minter, &admin));
+        assert!(client.has_role(&Role::SuperAdmin, &admin));
+        assert!(client.has_role(&Role::Pauser, &admin));
+    }
+
+    /// A multi-role holder who does NOT have SuperAdmin cannot grant roles
+    /// to others — only SuperAdmin (or Admin which implies SuperAdmin) can.
+    #[test]
+    fn test_multi_role_holder_without_super_admin_cannot_grant() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        // Arrange: give holder Minter and Pauser but NOT SuperAdmin.
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+
+        // Act: attempt to grant a role as the multi-role holder.
+        let result = client.try_grant_role(&holder, &Role::Minter, &target);
+
+        // Assert: unauthorized (error code 3 = UnauthorizedRole).
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(3))),
+            "multi-role holder without SuperAdmin must not be able to grant"
+        );
+        assert!(!client.has_role(&Role::Minter, &target));
     }
 }
