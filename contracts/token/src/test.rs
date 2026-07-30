@@ -436,3 +436,77 @@ fn test_set_fee_config_rejects_negative_values() {
     let result = client.try_set_fee_config(&admin, &config);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
 }
+
+#[test]
+fn test_pauser_can_pause_successfully() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &user, &1000);
+
+    // Grant Pauser role to a non-admin address within the contract context
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // Confirm the pauser address holds Role::Pauser but not Role::Admin
+    assert!(env.as_contract(&contract_id, || {
+        bc_forge_admin::has_role(&env, bc_forge_admin::Role::Pauser, &pauser)
+    }));
+    assert!(!env.as_contract(&contract_id, || {
+        bc_forge_admin::has_role(&env, bc_forge_admin::Role::Admin, &pauser)
+    }));
+
+    // Pauser can pause the contract successfully
+    assert!(client.try_pause_as(&pauser).is_ok());
+
+    // Transfers are blocked while contract is paused
+    let result = client.try_transfer(&user, &recipient, &100);
+    assert!(
+        result.is_err(),
+        "transfer must fail when contract is paused"
+    );
+
+    // Pauser can unpause the contract successfully
+    assert!(client.try_unpause_as(&pauser).is_ok());
+
+    // Transfers succeed again after unpause
+    assert!(client.try_transfer(&user, &recipient, &100).is_ok());
+    assert_eq!(client.balance(&recipient), 100);
+}
+
+#[test]
+fn test_pauser_cannot_pause_when_already_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // First pause succeeds
+    assert!(client.try_pause_as(&pauser).is_ok());
+
+    // Second pause attempt by the same Pauser is rejected
+    let result = client.try_pause_as(&pauser);
+    assert_eq!(result, Err(Ok(TokenError::AlreadyPaused)));
+}
+
+#[test]
+fn test_non_pauser_cannot_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let stranger = Address::generate(&env);
+
+    let result = client.try_pause_as(&stranger);
+    assert!(result.is_err());
+}
