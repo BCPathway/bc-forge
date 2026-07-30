@@ -1,6 +1,7 @@
 import express from 'express';
 import { runIndexer } from './indexer';
 import apiRouter from './api';
+import { disconnectPrismaClient } from './lib/prisma';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -26,4 +27,18 @@ app.listen(PORT, () => {
     console.error('Fatal indexer error:', err);
     process.exit(1);
   });
+});
+
+async function shutdown(signal: string): Promise<void> {
+  console.log(`Received ${signal}, disconnecting Prisma client...`);
+  await disconnectPrismaClient();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
 });

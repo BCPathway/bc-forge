@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "22.0.11"
+bc-forge-admin = { path = "../admin" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.11", features = ["testutils"] }

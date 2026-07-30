@@ -63,8 +63,8 @@ export interface BatchMintRecipient {
 /** Role for role-based access control */
 export enum Role {
   Admin = 'Admin',
-  Minter = 'Minter',
   SuperAdmin = 'SuperAdmin',
+  Minter = 'Minter',
   Pauser = 'Pauser',
 }
 
@@ -111,7 +111,7 @@ export class bcForgeClient {
    * Get the token balance for an address.
    *
    * @param address - Stellar public key (G... address)
-   * @returns Token balance as bigint
+   * @returns Token balance as a fixed-scale decimal string.
    */
   async getBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('balance', [addressToScVal(address)]);
@@ -178,7 +178,7 @@ export class bcForgeClient {
    *
    * @param addresses - Array of Stellar public keys
    * @param batchSize - Maximum number of concurrent queries (default: 10)
-   * @returns Array of balances as bigints
+   * @returns Array of balances as bigint values.
    */
   async getBalances(addresses: string[], batchSize: number = 10): Promise<bigint[]> {
     return this.executeBatch(addresses, (addr) => this.getBalance(addr), batchSize);
@@ -233,8 +233,12 @@ export class bcForgeClient {
    * @param amount - Number of tokens to mint
    * @param source - Admin keypair
    */
-  async mint(to: string, amount: bigint, source?: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('mint', [addressToScVal(to), i128ToScVal(amount)], source);
+  async mint(to: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'mint',
+      [addressToScVal(source.publicKey()), addressToScVal(to), i128ToScVal(amount)],
+      source,
+    );
   }
 
   /**
@@ -243,11 +247,11 @@ export class bcForgeClient {
    * @param recipients - Array of recipient objects
    * @param source     - Admin keypair
    */
-  async batchMint(recipients: BatchMintRecipient[], source?: Keypair): Promise<TransactionResult> {
+  async batchMint(recipients: BatchMintRecipient[], source: Keypair): Promise<TransactionResult> {
     const recipientScVals = recipients.map(({ to, amount }) =>
       xdr.ScVal.scvMap([
         new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('address'),
+          key: xdr.ScVal.scvSymbol('to'),
           val: addressToScVal(to),
         }),
         new xdr.ScMapEntry({
@@ -257,7 +261,11 @@ export class bcForgeClient {
       ]),
     );
     const recipientsVec = xdr.ScVal.scvVec(recipientScVals);
-    return this.invokeContract('batch_mint', [recipientsVec], source);
+    return this.invokeContract(
+      'batch_mint',
+      [addressToScVal(source.publicKey()), recipientsVec],
+      source,
+    );
   }
 
   /**
@@ -362,6 +370,7 @@ export class bcForgeClient {
   }
 
   /**
+/**
    * Burn tokens from an address using an approved allowance.
    *
    * @param spender - Address authorized to burn tokens
@@ -426,7 +435,7 @@ export class bcForgeClient {
       this.networkPassphrase,
       this.contractId,
       'mint',
-      [addressToScVal(to), i128ToScVal(amount)],
+      [addressToScVal(sourcePublicKey), addressToScVal(to), i128ToScVal(amount)],
       sourcePublicKey,
     );
   }
@@ -593,7 +602,11 @@ export class bcForgeClient {
    * @returns Simulation result
    */
   async simulateMint(to: string, amount: bigint, sourcePublicKey: string): Promise<unknown> {
-    return this.simulate('mint', [addressToScVal(to), i128ToScVal(amount)], sourcePublicKey);
+    return this.simulate(
+      'mint',
+      [addressToScVal(sourcePublicKey), addressToScVal(to), i128ToScVal(amount)],
+      sourcePublicKey,
+    );
   }
 
   /**
@@ -748,8 +761,8 @@ export class bcForgeClient {
     const actionScVal =
       'Mint' in action
         ? nativeToScVal({
-          Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
-        })
+            Mint: [addressToScVal(action.Mint[0]), i128ToScVal(action.Mint[1])],
+          })
         : nativeToScVal(action);
 
     return this.invokeContract(
@@ -796,7 +809,7 @@ export class bcForgeClient {
   async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'grant_role',
-      [nativeToScVal(Role.Minter), addressToScVal(address)],
+      [addressToScVal(source.publicKey()), nativeToScVal(Role.Minter), addressToScVal(address)],
       source,
     );
   }
@@ -810,7 +823,7 @@ export class bcForgeClient {
   async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'revoke_role',
-      [nativeToScVal(Role.Minter), addressToScVal(address)],
+      [addressToScVal(source.publicKey()), nativeToScVal(Role.Minter), addressToScVal(address)],
       source,
     );
   }
@@ -1051,5 +1064,27 @@ export class bcForgeClient {
         throw error;
       }
     });
+  }
+
+  /**
+   * Waits for a submitted transaction response and unwraps the final SDK result.
+   */
+  private async unwrapTransactionResponse(
+    responsePromise: Promise<SorobanRpc.Api.GetTransactionResponse>,
+  ): Promise<TransactionResult> {
+    const response = await responsePromise;
+
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: (response as unknown as { hash: string }).hash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+
+    return {
+      success: false,
+      hash: (response as unknown as { hash: string }).hash,
+    };
   }
 }
