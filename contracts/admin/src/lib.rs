@@ -289,7 +289,7 @@ fn require_valid_role(env: &Env, role: Role) {
         soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
     }
 }
-/// One-time storage initialization.
+/// One-time storage initialization. Resolves issue #405.
 ///
 /// Sets `admin` as the contract administrator and records the initial
 /// `AdminKey::Admin` instance-storage entry.  Panics if the contract has
@@ -300,6 +300,7 @@ fn require_valid_role(env: &Env, role: Role) {
 ///
 /// @notice Initializes the module by setting the contract admin. Can only be called once.
 /// @dev Records the admin under `AdminKey::Admin` and grants it the `Admin` role. Rejects the zero address.
+///      Storage slots: `AdminKey::Admin` (instance) and `AdminKey::Role(Admin, admin)` (persistent) — no overlap.
 /// @param env The Soroban environment.
 /// @param admin The address to set as the contract admin.
 /// @return `Ok(())` on success, or `AdminError::AlreadyInitialized` if storage was already set up.
@@ -414,10 +415,12 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
-/// Revokes a role from an address.
+/// Revokes a role from an address. Resolves issues #416 and #426.
 ///
 /// @notice Removes `role` from `address`. Only a super-admin may call this function.
-/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants and the zero address, then delegates to the internal revoke helper.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants (#426)
+///      and the zero address, then delegates to the internal revoke helper which removes the
+///      persistent storage entry (#416) and emits `role_rvk`.
 /// @param env The Soroban environment.
 /// @param caller The address performing the revoke; must be a super-admin.
 /// @param role The role to revoke.
