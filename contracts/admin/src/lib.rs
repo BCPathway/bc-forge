@@ -338,13 +338,6 @@ pub fn set_admin(env: &Env, admin: &Address) {
     _grant_role(env, admin, Role::Admin, admin);
 }
 
-<<<<<<< Updated upstream
-/// Migrates the singular admin into the SuperAdmin mapping.
-///
-/// @notice Copies the stored admin into the `SuperAdmin` mapping, enabling the super-admin guard for legacy contracts.
-/// @dev One-shot upgrade helper. No-op if no admin is stored. Does not reset any existing state.
-/// @param env The Soroban environment.
-=======
 /// Migrates the singular admin address to the SuperAdmin role mapping.
 ///
 /// This one-shot upgrade helper copies the admin address stored under
@@ -397,7 +390,6 @@ pub fn set_admin(env: &Env, admin: &Address) {
 /// # Events
 ///
 /// This function does not emit any events.
->>>>>>> Stashed changes
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
