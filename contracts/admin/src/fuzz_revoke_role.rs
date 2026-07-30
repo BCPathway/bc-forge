@@ -12,8 +12,8 @@
 
 extern crate std;
 
-use crate::{AdminError, Role};
 use crate::tests::{AdminContract, AdminContractClient};
+use crate::{AdminError, Role};
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
