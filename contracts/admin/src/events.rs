@@ -7,7 +7,7 @@ use soroban_sdk::{symbol_short, Address, Env};
 
 use crate::Role;
 
-/// Emitted when a role is granted to an address.
+/// Emitted when a role is granted to an address. Resolves issue #417.
 ///
 /// @notice Publishes role-grant event data including the granting admin, role, and grantee.
 /// @dev The event topics include the `role_grnt` symbol.
