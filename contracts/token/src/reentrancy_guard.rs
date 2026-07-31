@@ -100,9 +100,10 @@ impl ReentrancyGuard {
     /// @param env The Soroban environment.
     /// @panics If the guard is already entered (reentrancy detected).
     pub fn require_not_entered(&self, env: &Env) {
-        if self.is_entered(env) {
-            panic!("Reentrancy detected: function is being called recursively");
-        }
+        assert!(
+            !self.is_entered(env),
+            "Reentrancy detected: function is being called recursively"
+        );
     }
 }
 

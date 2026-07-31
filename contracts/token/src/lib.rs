@@ -38,14 +38,14 @@ pub struct Recipient {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    /// Admin address — stored here for caller convenience; delegates to AdminKey::Admin.
+    /// Admin address — stored here for caller convenience; delegates to `AdminKey::Admin`.
     Admin,
     /// Legacy pending admin — unused; retained to preserve storage discriminant order.
     /// The transfer-ownership flow uses `admin::set_admin` directly.
     PendingAdmin,
     /// Spending allowance: (owner, spender) -> amount and expiration ledger.
     Allowance(Address, Address),
-    /// Legacy allowance expiration — stored per-key; prefer AllowanceData struct.
+    /// Legacy allowance expiration — stored per-key; prefer `AllowanceData` struct.
     AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),

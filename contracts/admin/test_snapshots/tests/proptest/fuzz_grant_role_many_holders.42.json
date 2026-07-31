@@ -1,9 +1,11 @@
 {
   "generators": {
-    "address": 7,
+    "address": 9,
     "nonce": 0
   },
   "auth": [
+    [],
+    [],
     [],
     [],
     [],
@@ -26,7 +28,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -55,7 +57,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -84,7 +86,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -113,7 +115,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -142,7 +144,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -156,6 +158,66 @@
         }
       ]
     ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "grant_role",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Minter"
+                    }
+                  ]
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "grant_role",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Minter"
+                    }
+                  ]
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [],
+    [],
     [],
     [],
     [],
@@ -243,7 +305,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -270,7 +332,7 @@
                     {
                       "vec": [
                         {
-                          "symbol": "SuperAdmin"
+                          "symbol": "Minter"
                         }
                       ]
                     },
@@ -302,7 +364,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -329,7 +391,7 @@
                     {
                       "vec": [
                         {
-                          "symbol": "SuperAdmin"
+                          "symbol": "Minter"
                         }
                       ]
                     },
@@ -361,7 +423,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -388,7 +450,7 @@
                     {
                       "vec": [
                         {
-                          "symbol": "SuperAdmin"
+                          "symbol": "Minter"
                         }
                       ]
                     },
@@ -420,7 +482,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -447,7 +509,7 @@
                     {
                       "vec": [
                         {
-                          "symbol": "SuperAdmin"
+                          "symbol": "Minter"
                         }
                       ]
                     },
@@ -479,7 +541,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -506,12 +568,130 @@
                     {
                       "vec": [
                         {
-                          "symbol": "SuperAdmin"
+                          "symbol": "Minter"
                         }
                       ]
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "bool": true
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "Role"
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Minter"
+                    }
+                  ]
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Role"
+                    },
+                    {
+                      "vec": [
+                        {
+                          "symbol": "Minter"
+                        }
+                      ]
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "bool": true
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "Role"
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Minter"
+                    }
+                  ]
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Role"
+                    },
+                    {
+                      "vec": [
+                        {
+                          "symbol": "Minter"
+                        }
+                      ]
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
                     }
                   ]
                 },
@@ -676,6 +856,39 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "ledger_key_nonce": {
+                "nonce": 4270020994084947596
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 4270020994084947596
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
                 "nonce": 4837995959683129791
               }
             },
@@ -738,6 +951,39 @@
       ],
       [
         {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 8370022561469687789
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 8370022561469687789
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
           "contract_code": {
             "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
@@ -775,12 +1021,12 @@
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
                 },
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },

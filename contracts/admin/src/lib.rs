@@ -292,7 +292,7 @@ fn require_valid_role(env: &Env, role: Role) {
         soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
     }
 }
-/// One-time storage initialization.
+/// One-time storage initialization. Resolves issue #405.
 ///
 /// Sets `admin` as the contract administrator and records the initial
 /// `AdminKey::Admin` instance-storage entry.  Panics if the contract has
@@ -303,6 +303,7 @@ fn require_valid_role(env: &Env, role: Role) {
 ///
 /// @notice Initializes the module by setting the contract admin. Can only be called once.
 /// @dev Records the admin under `AdminKey::Admin` and grants it the `Admin` role. Rejects the zero address.
+///      Storage slots: `AdminKey::Admin` (instance) and `AdminKey::Role(Admin, admin)` (persistent) — no overlap.
 /// @param env The Soroban environment.
 /// @param admin The address to set as the contract admin.
 /// @return `Ok(())` on success, or `AdminError::AlreadyInitialized` if storage was already set up.
@@ -341,11 +342,58 @@ pub fn set_admin(env: &Env, admin: &Address) {
     _grant_role(env, admin, Role::Admin, admin);
 }
 
-/// Migrates the singular admin into the SuperAdmin mapping.
+/// Migrates the singular admin address to the SuperAdmin role mapping.
 ///
-/// @notice Copies the stored admin into the `SuperAdmin` mapping, enabling the super-admin guard for legacy contracts.
-/// @dev One-shot upgrade helper. No-op if no admin is stored. Does not reset any existing state.
-/// @param env The Soroban environment.
+/// This one-shot upgrade helper copies the admin address stored under
+/// [`AdminKey::Admin`] in instance storage to [`AdminKey::SuperAdmin`] in
+/// persistent storage. This enables the [`require_super_admin`] guard for
+/// legacy contracts without resetting existing state or requiring manual
+/// reconfiguration.
+///
+/// # Storage Migration Process
+///
+/// The function performs the following storage migration steps:
+/// 1. Reads the current admin address from instance storage (`AdminKey::Admin`)
+/// 2. If an admin exists, creates a new persistent storage entry mapping
+///    that address to `true` under `AdminKey::SuperAdmin(address)`
+/// 3. Extends the TTL of the new SuperAdmin storage entry to ensure persistence
+///
+/// # Arguments
+///
+/// * `env` - The Soroban environment providing storage access and TTL management
+///
+/// # Behavior
+///
+/// - If no admin is set in instance storage, this function does nothing (no-op)
+/// - If an admin exists, it is copied to the SuperAdmin mapping
+/// - The original admin entry in instance storage remains unchanged
+/// - The migration is idempotent: calling it multiple times has the same effect
+///
+/// # Use Cases
+///
+/// This function is intended for contract upgrades that introduce the SuperAdmin
+/// role system. It allows existing contracts to:
+/// - Preserve their current admin configuration
+/// - Enable SuperAdmin-based authorization guards
+/// - Avoid manual administrative intervention during upgrades
+///
+/// # Storage Layout Changes
+///
+/// Before migration:
+/// - `AdminKey::Admin` (instance) → `Address`
+///
+/// After migration:
+/// - `AdminKey::Admin` (instance) → `Address` (unchanged)
+/// - `AdminKey::SuperAdmin(address)` (persistent) → `true` (new entry)
+///
+/// # Panics
+///
+/// This function does not panic under normal conditions. It gracefully handles
+/// the case where no admin has been set by performing no operation.
+///
+/// # Events
+///
+/// This function does not emit any events.
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
@@ -417,10 +465,12 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
-/// Revokes a role from an address.
+/// Revokes a role from an address. Resolves issues #416 and #426.
 ///
 /// @notice Removes `role` from `address`. Only a super-admin may call this function.
-/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants and the zero address, then delegates to the internal revoke helper.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants (#426)
+///      and the zero address, then delegates to the internal revoke helper which removes the
+///      persistent storage entry (#416) and emits `role_rvk`.
 /// @param env The Soroban environment.
 /// @param caller The address performing the revoke; must be a super-admin.
 /// @param role The role to revoke.
@@ -1316,6 +1366,66 @@ mod tests {
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
+    }
+
+    #[test]
+    fn test_revoke_role_emits_event_with_correct_role_for_each_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+
+        for role in [Role::SuperAdmin, Role::Pauser, Role::Minter] {
+            let holder = Address::generate(&env);
+            client.grant_role(&admin, &role, &holder);
+            client.revoke_role(&admin, &role, &holder);
+
+            let events = env.events().all();
+            let (emitter, topics, data) = events.get(events.len() - 1).unwrap();
+            assert_eq!(emitter, contract_id);
+
+            let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic0, soroban_sdk::symbol_short!("role_rvk"));
+
+            let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+            let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+            let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+            let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(event_admin, admin);
+            assert_eq!(event_role, role);
+            assert_eq!(event_address, holder);
+        }
+    }
+
+    #[test]
+    fn test_revoke_role_event_records_contract_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        // A SuperAdmin who is not the contract admin performs a revoke; the
+        // event must attribute it to the contract admin, not the caller.
+        client.revoke_role(&super_admin, &Role::Minter, &holder);
+
+        let events = env.events().all();
+        let (_emitter, _topics, data) = events.get(events.len() - 1).unwrap();
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_role, Role::Minter);
+        assert_eq!(event_address, holder);
     }
 
     #[test]
