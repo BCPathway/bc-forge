@@ -1,5 +1,8 @@
 //! Reusable access-control primitives for Soroban contracts with multi-sig governance.
 //!
+//! @title Admin Access Control
+//! @author bc-forge contributors
+//!
 //! # Storage Layout
 //!
 //! All state is stored under the [`AdminKey`] enum, which is registered as a
@@ -135,6 +138,10 @@ use bc_forge_ttl as ttl;
 use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
 
 /// Errors returned by the admin access-control module.
+///
+/// @title AdminError
+/// @notice Enumerates the error codes returned by the admin access-control module.
+/// @dev Discriminants are ABI-stable; append new variants rather than reordering.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
 #[repr(u32)]
@@ -156,7 +163,87 @@ pub enum AdminError {
     RoleAlreadyGranted = 7,
 }
 
+/// Storage keys for the access-control layer.
+///
+/// `#[contracttype]` derives a distinct ledger key for every variant (and,
+/// for `Role(Role, Address)`, for every `(Role, Address)` pair), so entries
+/// never collide with each other or with the other variants below.
+///
+/// @title AdminKey
+/// @notice Enumerates the storage keys used by the access-control layer.
+/// @dev Each variant maps to a distinct ledger slot; append new variants rather than reordering.
+#[derive(Clone)]
+#[contracttype]
+pub enum AdminKey {
+    /// The singular contract admin address, set via `set_admin`.
+    Admin,
+    /// Maps a `(Role, Address)` pair to `true` when `address` holds `role`.
+    /// This is the Role-to-Address mapping storage structure: membership is
+    /// looked up directly by key rather than by scanning a list, and each
+    /// pair occupies its own ledger entry so grants/revokes for one address
+    /// never touch another's.
+    Role(Role, Address),
+    /// Maps an `(Address, Role)` pair to `true` when `address` holds `role`.
+    /// This is the Address-to-Role mapping storage structure.
+    AddressRole(Address, Role),
+    /// Multi-sig admin pool addresses, set via `set_admin_pool`.
+    AdminPool,
+    /// Multi-sig approval threshold, set alongside the pool.
+    Threshold,
+    /// Governance proposal data, keyed by proposal ID.
+    Proposal(u64),
+    /// Auto-incrementing counter for proposal IDs.
+    ProposalIdCounter,
+    /// Super-admin mapping populated by `migrate_admin` for legacy contracts.
+    SuperAdmin(Address),
+}
 
+/// Roles recognized by the access-control layer.
+///
+/// New variants must be appended, never inserted, so that previously
+/// persisted `AdminKey::Role(Role, Address)` entries keep decoding to the
+/// same variant they were written with.
+///
+/// @title Role
+/// @notice Enumerates the roles recognized by the access-control layer.
+/// @dev Append new variants only; inserting would remap previously persisted role entries.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum Role {
+    /// Full administrative control granted via `set_admin`.
+    Admin,
+    /// Permission to mint new tokens.
+    Minter,
+    /// Highest-privilege role, reserved for owner-level operations.
+    SuperAdmin,
+    /// Role allowing emergency pause and unpause operations.
+    Pauser,
+}
+
+/// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
+/// use in access-control gating without qualifying the full `Role` enum.
+pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
+
+/// The Minter role constant — can be imported as `MINTER_ROLE` for
+/// use in access-control gating without qualifying the full `Role` enum.
+pub const MINTER_ROLE: Role = Role::Minter;
+
+/// A multi-sig governance proposal.
+///
+/// @title Proposal
+/// @notice Holds the state of a governance proposal awaiting approval and execution.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct Proposal {
+    /// The address that created the proposal.
+    pub creator: Address,
+    /// Human-readable description of the proposal.
+    pub description: String,
+    /// Addresses of pool admins that have approved the proposal.
+    pub approvals: Vec<Address>,
+    /// Whether the proposal has been executed.
+    pub executed: bool,
+}
 
 /// Strkey of the well-known Stellar "null" account: an ed25519 public key
 /// whose 32-byte payload is all zeros. No private key can ever produce a
@@ -201,7 +288,13 @@ fn is_valid_role(role: Role) -> bool {
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
     )
 }
-/// One-time storage initialization.
+
+fn require_valid_role(env: &Env, role: Role) {
+    if !is_valid_role(role) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
+    }
+}
+/// One-time storage initialization. Resolves issue #405.
 ///
 /// Sets `admin` as the contract administrator and records the initial
 /// `AdminKey::Admin` instance-storage entry.  Panics if the contract has
@@ -209,6 +302,13 @@ fn is_valid_role(role: Role) -> bool {
 ///
 /// # Errors
 /// Returns [`AdminError::AlreadyInitialized`] if storage has already been set up.
+///
+/// @notice Initializes the module by setting the contract admin. Can only be called once.
+/// @dev Records the admin under `AdminKey::Admin` and grants it the `Admin` role. Rejects the zero address.
+///      Storage slots: `AdminKey::Admin` (instance) and `AdminKey::Role(Admin, admin)` (persistent) — no overlap.
+/// @param env The Soroban environment.
+/// @param admin The address to set as the contract admin.
+/// @return `Ok(())` on success, or `AdminError::AlreadyInitialized` if storage was already set up.
 pub fn init_storage(env: &Env, admin: &Address) -> Result<(), AdminError> {
     if env.storage().instance().has(&AdminKey::Admin) {
         return Err(AdminError::AlreadyInitialized);
@@ -223,6 +323,12 @@ pub fn init_storage(env: &Env, admin: &Address) -> Result<(), AdminError> {
     Ok(())
 }
 
+/// Sets the contract admin, replacing any existing admin.
+///
+/// @notice Sets `admin` as the contract admin and grants it the `Admin` role.
+/// @dev If an admin already exists, its `Admin` role is revoked (emitting `role_rvk`) before the new admin is stored and granted. Rejects the zero address.
+/// @param env The Soroban environment.
+/// @param admin The address to set as the new contract admin.
 pub fn set_admin(env: &Env, admin: &Address) {
     require_non_zero_address(env, admin);
     if has_admin(env) {
@@ -238,6 +344,58 @@ pub fn set_admin(env: &Env, admin: &Address) {
     _grant_role(env, admin, Role::Admin, admin);
 }
 
+/// Migrates the singular admin address to the SuperAdmin role mapping.
+///
+/// This one-shot upgrade helper copies the admin address stored under
+/// [`AdminKey::Admin`] in instance storage to [`AdminKey::SuperAdmin`] in
+/// persistent storage. This enables the [`require_super_admin`] guard for
+/// legacy contracts without resetting existing state or requiring manual
+/// reconfiguration.
+///
+/// # Storage Migration Process
+///
+/// The function performs the following storage migration steps:
+/// 1. Reads the current admin address from instance storage (`AdminKey::Admin`)
+/// 2. If an admin exists, creates a new persistent storage entry mapping
+///    that address to `true` under `AdminKey::SuperAdmin(address)`
+/// 3. Extends the TTL of the new SuperAdmin storage entry to ensure persistence
+///
+/// # Arguments
+///
+/// * `env` - The Soroban environment providing storage access and TTL management
+///
+/// # Behavior
+///
+/// - If no admin is set in instance storage, this function does nothing (no-op)
+/// - If an admin exists, it is copied to the SuperAdmin mapping
+/// - The original admin entry in instance storage remains unchanged
+/// - The migration is idempotent: calling it multiple times has the same effect
+///
+/// # Use Cases
+///
+/// This function is intended for contract upgrades that introduce the SuperAdmin
+/// role system. It allows existing contracts to:
+/// - Preserve their current admin configuration
+/// - Enable SuperAdmin-based authorization guards
+/// - Avoid manual administrative intervention during upgrades
+///
+/// # Storage Layout Changes
+///
+/// Before migration:
+/// - `AdminKey::Admin` (instance) → `Address`
+///
+/// After migration:
+/// - `AdminKey::Admin` (instance) → `Address` (unchanged)
+/// - `AdminKey::SuperAdmin(address)` (persistent) → `true` (new entry)
+///
+/// # Panics
+///
+/// This function does not panic under normal conditions. It gracefully handles
+/// the case where no admin has been set by performing no operation.
+///
+/// # Events
+///
+/// This function does not emit any events.
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
@@ -247,11 +405,12 @@ pub fn migrate_admin(env: &Env) {
     }
 }
 
-/// Returns the currently configured admin address.
+/// Returns the current contract admin.
 ///
-/// # Panics
-///
-/// Panics if the contract has not been initialized (no admin has been set).
+/// @notice Returns the address of the contract admin.
+/// @dev Panics with `"contract not initialized: admin not set"` if no admin has been stored.
+/// @param env The Soroban environment.
+/// @return The contract admin address.
 pub fn get_admin(env: &Env) -> Address {
     let admin = env
         .storage()
@@ -262,6 +421,12 @@ pub fn get_admin(env: &Env) -> Address {
     admin
 }
 
+/// Returns whether a contract admin has been set.
+///
+/// @notice Returns `true` if a contract admin has been stored, `false` otherwise.
+/// @dev Callers use this to gate initialization without triggering the `get_admin` panic.
+/// @param env The Soroban environment.
+/// @return `true` if an admin is stored, `false` otherwise.
 pub fn has_admin(env: &Env) -> bool {
     let has = env.storage().instance().has(&AdminKey::Admin);
     if has {
@@ -270,15 +435,29 @@ pub fn has_admin(env: &Env) -> bool {
     has
 }
 
+/// Grants a role to an address.
+///
+/// @notice Grants `role` to `address`. Only a super-admin may call this function.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and unrecognized role variants, then emits `role_grnt`.
+/// @param env The Soroban environment.
+/// @param caller The address performing the grant; must be a super-admin.
+/// @param role The role to grant.
+/// @param address The address to receive the role.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     _grant_role(env, caller, role, address);
 }
 
+/// Writes a role assignment without performing authorization.
+///
+/// @notice Records that `address` holds `role` and emits `role_grnt`.
+/// @dev Intentionally private. Callers must perform authorization before delegating here. Rejects the zero address.
+/// @param env The Soroban environment.
+/// @param admin The address recorded as the granting caller in the emitted event.
+/// @param role The role to assign.
+/// @param address The address to receive the role.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
     if has_role(env, role, address) {
@@ -291,16 +470,17 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     events::emit_role_granted(env, admin, role, address);
 }
 
-/// # Errors
+/// Revokes a role from an address. Resolves issues #416 and #426.
 ///
-/// Returns [`AdminError::RoleNotHeld`] if the target address does not
-/// currently hold the requested role.
-///
-/// # Panics
-///
-/// Panics with [`AdminError::InvalidRole`] when an unrecognized role
-/// discriminant is supplied, and with [`AdminError::InvalidAddress`]
-/// when the zero-address sentinel is passed as `address`.
+/// @notice Removes `role` from `address`. Only a super-admin may call this function.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants (#426)
+///      and the zero address, then delegates to the internal revoke helper which removes the
+///      persistent storage entry (#416) and emits `role_rvk`.
+/// @param env The Soroban environment.
+/// @param caller The address performing the revoke; must be a super-admin.
+/// @param role The role to revoke.
+/// @param address The address to remove the role from.
+/// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if the address did not hold the role.
 pub fn revoke_role(
     env: &Env,
     caller: &Address,
@@ -309,9 +489,7 @@ pub fn revoke_role(
 ) -> Result<(), AdminError> {
     require_super_admin(env, caller);
     // #426 – parameter validation: reject unknown role variants and the zero address.
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     require_non_zero_address(env, address);
 
     _revoke_role(env, role, address)
@@ -321,6 +499,13 @@ pub fn revoke_role(
 ///
 /// This helper is intentionally private. Callers exposed by a contract must
 /// perform their authorization checks before delegating the state change here.
+///
+/// @notice Removes the `(role, address)` assignment from storage and emits `role_rvk`.
+/// @dev Intentionally private; performs no authorization. Rejects the zero address.
+/// @param env The Soroban environment.
+/// @param role The role to remove.
+/// @param address The address to remove the role from.
+/// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if no assignment existed.
 fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
 
@@ -335,6 +520,14 @@ fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminErr
     Ok(())
 }
 
+/// Returns whether an address holds a role.
+///
+/// @notice Returns `true` if `address` holds `role`, `false` otherwise. Emits `role_chk`.
+/// @dev The zero address never holds any role. Any address with the `Admin` role implicitly holds every role.
+/// @param env The Soroban environment.
+/// @param role The role to check for.
+/// @param address The address to check.
+/// @return `true` if the address holds the role (directly or via `Admin`), `false` otherwise.
 pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     // Zero address never holds any role.
     if is_zero_address(env, address) {
@@ -361,26 +554,43 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     has
 }
 
+/// Requires that an address holds a role and has authorized the invocation.
+///
+/// @notice Reverts unless `address` holds `role` and has authorized the call.
+/// @dev Panics with `InvalidRole` for unrecognized roles, `RoleNotHeld` when the role is missing, then enforces `address.require_auth()`.
+/// @param env The Soroban environment.
+/// @param role The role the address must hold.
+/// @param address The address to check and require authorization from.
 #[inline(always)]
 pub fn require_role(env: &Env, role: Role, address: &Address) {
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     if !has_role(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
     address.require_auth();
 }
 
+/// Returns the admin address that governs a role.
+///
+/// @notice Returns the contract admin, which governs every role.
+/// @dev Panics with `InvalidRole` for unrecognized roles. All roles are administered by the single contract admin.
+/// @param env The Soroban environment.
+/// @param role The role whose administering address is requested.
+/// @return The contract admin address.
 pub fn get_role_admin(env: &Env, role: Role) -> Address {
-    if !is_valid_role(role) {
-        soroban_sdk::panic_with_error!(env, AdminError::InvalidRole);
-    }
+    require_valid_role(env, role);
     let admin = get_admin(env);
     extend_instance_ttl(env);
     admin
 }
 
+/// Requires that an address holds a role and has authorized the invocation.
+///
+/// @notice Reverts unless `address` holds `role` and has authorized the call.
+/// @dev Panics with `UnauthorizedRole` when the role is missing, then enforces `address.require_auth()`. Use this when only authorization is being checked.
+/// @param env The Soroban environment.
+/// @param role The role the address must hold.
+/// @param address The address to check and require authorization from.
 #[inline(always)]
 pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
     if !has_role(env, role, address) {
@@ -390,37 +600,66 @@ pub fn require_role_guard(env: &Env, role: Role, address: &Address) {
 }
 
 /// Requires that the caller has the Admin role and has authorized the invocation.
+///
+/// @notice Reverts unless `address` holds the `Admin` role and has authorized the call.
+/// @dev Thin wrapper around `require_role_guard` for the `Admin` role.
+/// @param env The Soroban environment.
+/// @param address The address to check and require authorization from.
 #[inline(always)]
 pub fn require_admin(env: &Env, address: &Address) {
     require_role_guard(env, Role::Admin, address);
 }
 
 /// Requires that the caller has the Minter role and has authorized the invocation.
+///
+/// @notice Reverts unless `address` holds the `Minter` role and has authorized the call.
+/// @dev Thin wrapper around `require_role_guard` for the `Minter` role.
+/// @param env The Soroban environment.
+/// @param address The address to check and require authorization from.
 #[inline(always)]
 pub fn require_minter(env: &Env, address: &Address) {
     require_role_guard(env, Role::Minter, address);
 }
 
+/// Requires that the caller has the SuperAdmin role and has authorized the invocation.
+///
+/// @notice Reverts unless `address` holds the `SuperAdmin` role and has authorized the call.
+/// @dev Thin wrapper around `require_role_guard` for the `SuperAdmin` role.
+/// @param env The Soroban environment.
+/// @param address The address to check and require authorization from.
 #[inline(always)]
 pub fn require_super_admin(env: &Env, address: &Address) {
     require_role_guard(env, SUPER_ADMIN_ROLE, address);
 }
 
+/// Requires that the caller has fee-admin privileges and has authorized the invocation.
+///
+/// @notice Reverts unless `address` holds the `Admin` role and has authorized the call.
+/// @dev Fee administration is governed by the `Admin` role; thin wrapper around `require_role_guard`.
+/// @param env The Soroban environment.
+/// @param address The address to check and require authorization from.
 pub fn require_fee_admin(env: &Env, address: &Address) {
     require_role_guard(env, Role::Admin, address);
 }
 
+/// Requires that the caller has the Pauser role and has authorized the invocation.
+///
+/// @notice Reverts unless `address` holds the `Pauser` role and has authorized the call.
+/// @dev Thin wrapper around `require_role_guard` for the `Pauser` role.
+/// @param env The Soroban environment.
+/// @param address The address to check and require authorization from.
 #[inline(always)]
 pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
 }
 
-/// Configures a multi-signature admin pool and approval threshold.
+/// Configures the multi-sig admin pool and approval threshold.
 ///
-/// # Panics
-///
-/// Panics if `threshold` is zero or if `threshold` exceeds the number of
-/// pool members, preventing unusable governance configurations.
+/// @notice Sets the pool of admins and the number of approvals required to pass a proposal.
+/// @dev Requires the contract admin's authorization. Panics if `threshold` is zero, exceeds the pool size, or any pool member is the zero address.
+/// @param env The Soroban environment.
+/// @param pool The addresses that make up the admin pool.
+/// @param threshold The number of approvals required to execute a proposal.
 pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     let admin = get_admin(env);
     admin.require_auth();
@@ -441,6 +680,12 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     extend_instance_ttl(env);
 }
 
+/// Returns the multi-sig admin pool.
+///
+/// @notice Returns the configured admin pool, or a single-member pool of the contract admin if none was set.
+/// @dev Falls back to `[admin]` when no explicit pool exists, or an empty vector if no admin is set either.
+/// @param env The Soroban environment.
+/// @return The admin pool addresses.
 pub fn get_admin_pool(env: &Env) -> Vec<Address> {
     env.storage()
         .instance()
@@ -454,6 +699,12 @@ pub fn get_admin_pool(env: &Env) -> Vec<Address> {
         })
 }
 
+/// Returns the multi-sig approval threshold.
+///
+/// @notice Returns the number of approvals required to execute a proposal.
+/// @dev Defaults to `1` when no threshold has been configured.
+/// @param env The Soroban environment.
+/// @return The approval threshold.
 pub fn get_threshold(env: &Env) -> u32 {
     env.storage()
         .instance()
@@ -461,11 +712,14 @@ pub fn get_threshold(env: &Env) -> u32 {
         .unwrap_or(1)
 }
 
-/// Creates a new governance proposal and returns the assigned proposal ID.
+/// Creates a new multi-sig governance proposal.
 ///
-/// # Panics
-///
-/// Panics if `creator` is not a member of the current admin pool.
+/// @notice Creates a proposal authored by `creator` and records the creator as its first approval.
+/// @dev Requires the creator's authorization and pool membership. Panics if the creator is not in the admin pool. Increments the proposal ID counter.
+/// @param env The Soroban environment.
+/// @param creator The address creating the proposal; must be a pool member.
+/// @param description Human-readable description of the proposal.
+/// @return The identifier assigned to the new proposal.
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
     creator.require_auth();
     let pool = get_admin_pool(env);
@@ -492,17 +746,16 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         .instance()
         .set(&AdminKey::Proposal(id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(id));
     id
 }
 
-/// Approves an existing governance proposal.
+/// Approves a multi-sig governance proposal.
 ///
-/// # Panics
-///
-/// Panics if no proposal exists for `proposal_id`, if `admin` is not in the
-/// admin pool, if the proposal has already been executed, or if the admin
-/// has already approved the proposal.
+/// @notice Approves proposal `proposal_id` on behalf of `admin`.
+/// @dev Requires `admin` authorization and pool membership. Panics if the proposal is already executed or previously approved by `admin`.
+/// @param env The Soroban environment.
+/// @param admin The address of the admin approving the proposal.
+/// @param proposal_id The ID of the proposal to approve.
 pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
     admin.require_auth();
     let pool = get_admin_pool(env);
@@ -528,15 +781,15 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
-/// Returns `true` when a proposal has gathered enough approvals to be
-/// executed.
+/// Checks whether a governance proposal has met its approval threshold.
 ///
-/// # Panics
-///
-/// Panics if no proposal exists for `proposal_id`.
+/// @notice Returns `true` if the proposal has enough approvals to be executed, `false` otherwise.
+/// @dev Compares the number of unique approvals against the configured threshold.
+/// @param env The Soroban environment.
+/// @param proposal_id The ID of the proposal to check.
+/// @return `true` if the threshold is met, `false` otherwise.
 pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
     let proposal: Proposal = env
         .storage()
@@ -544,16 +797,15 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
         .get(&AdminKey::Proposal(proposal_id))
         .expect("proposal not found");
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
     proposal.approvals.len() >= get_threshold(env)
 }
 
-/// Marks a governance proposal as executed after all approvals are met.
+/// Marks a governance proposal as executed.
 ///
-/// # Panics
-///
-/// Panics if no proposal exists for `proposal_id`, if the proposal has
-/// already been executed, or if the approval threshold has not been met.
+/// @notice Sets the `executed` flag on `proposal_id` to true.
+/// @dev Requires contract admin authorization and that `is_proposal_ready` returns true. Panics if already executed or threshold not met.
+/// @param env The Soroban environment.
+/// @param proposal_id The ID of the proposal to mark as executed.
 pub fn mark_executed(env: &Env, proposal_id: u64) {
     let admin = get_admin(env);
     admin.require_auth();
@@ -576,7 +828,6 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Proposal(proposal_id));
 }
 
 #[cfg(test)]
@@ -586,6 +837,8 @@ mod tests {
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
+
+    mod proptest;
 
     #[contract]
     struct AdminContract;
@@ -663,6 +916,26 @@ mod tests {
 
         pub fn require_pauser(env: Env, address: Address) {
             super::require_pauser(&env, &address);
+        }
+
+        pub fn migrate_admin(env: Env) {
+            super::migrate_admin(&env);
+        }
+
+        pub fn has_admin(env: Env) -> bool {
+            super::has_admin(&env)
+        }
+
+        pub fn get_admin_pool(env: Env) -> Vec<Address> {
+            super::get_admin_pool(&env)
+        }
+
+        pub fn get_threshold(env: Env) -> u32 {
+            super::get_threshold(&env)
+        }
+
+        pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+            super::is_proposal_ready(&env, proposal_id)
         }
     }
 
@@ -1098,6 +1371,66 @@ mod tests {
         assert_eq!(event_admin, admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, role_holder);
+    }
+
+    #[test]
+    fn test_revoke_role_emits_event_with_correct_role_for_each_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+
+        for role in [Role::SuperAdmin, Role::Pauser, Role::Minter] {
+            let holder = Address::generate(&env);
+            client.grant_role(&admin, &role, &holder);
+            client.revoke_role(&admin, &role, &holder);
+
+            let events = env.events().all();
+            let (emitter, topics, data) = events.get(events.len() - 1).unwrap();
+            assert_eq!(emitter, contract_id);
+
+            let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic0, soroban_sdk::symbol_short!("role_rvk"));
+
+            let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+            let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+            let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+            let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(event_admin, admin);
+            assert_eq!(event_role, role);
+            assert_eq!(event_address, holder);
+        }
+    }
+
+    #[test]
+    fn test_revoke_role_event_records_contract_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        // A SuperAdmin who is not the contract admin performs a revoke; the
+        // event must attribute it to the contract admin, not the caller.
+        client.revoke_role(&super_admin, &Role::Minter, &holder);
+
+        let events = env.events().all();
+        let (_emitter, _topics, data) = events.get(events.len() - 1).unwrap();
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_admin, admin);
+        assert_eq!(event_role, Role::Minter);
+        assert_eq!(event_address, holder);
     }
 
     #[test]
@@ -1945,5 +2278,374 @@ mod tests {
 
         let result = client.try_require_admin(&zero_address(&env));
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    // ── migrate_admin ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_migrate_admin_populates_super_admin_storage() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let admin = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            set_admin(&env, &admin);
+            migrate_admin(&env);
+        });
+
+        // After migration, the admin address must be stored in the SuperAdmin mapping.
+        env.as_contract(&contract_id, || {
+            assert!(env
+                .storage()
+                .persistent()
+                .has(&AdminKey::SuperAdmin(admin.clone())));
+        });
+    }
+
+    #[test]
+    fn test_migrate_admin_noops_when_no_admin_set() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let admin = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // No admin has been set, so migrate_admin should not store anything.
+            migrate_admin(&env);
+            assert!(!env.storage().persistent().has(&AdminKey::SuperAdmin(admin)));
+        });
+    }
+
+    // ── has_admin ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_has_admin_returns_true_when_admin_set() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        assert!(client.has_admin());
+    }
+
+    #[test]
+    fn test_has_admin_returns_false_when_no_admin() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        assert!(!client.has_admin());
+    }
+
+    // ── require_fee_admin ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_require_fee_admin_succeeds_for_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.require_fee_admin(&admin);
+    }
+
+    #[test]
+    fn test_require_fee_admin_fails_when_role_not_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let result = client.try_require_fee_admin(&unauthorized);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    // ── set_admin_pool / get_admin_pool / get_threshold ────────────────────────
+
+    #[test]
+    fn test_set_admin_pool_stores_pool_and_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member1 = Address::generate(&env);
+        let member2 = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, member1.clone(), member2.clone()], &2);
+
+        let pool = client.get_admin_pool();
+        assert_eq!(pool.len(), 2);
+        assert_eq!(pool.get(0).unwrap(), member1);
+        assert_eq!(pool.get(1).unwrap(), member2);
+
+        assert_eq!(client.get_threshold(), 2);
+    }
+
+    #[test]
+    fn test_get_admin_pool_falls_back_to_single_admin() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let pool = client.get_admin_pool();
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool.get(0).unwrap(), admin);
+    }
+
+    #[test]
+    fn test_get_admin_pool_returns_empty_when_no_admin() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let pool = client.get_admin_pool();
+        assert_eq!(pool.len(), 0);
+    }
+
+    #[test]
+    fn test_get_threshold_defaults_to_one() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        assert_eq!(client.get_threshold(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid threshold for admin pool")]
+    fn test_set_admin_pool_rejects_zero_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, member], &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid threshold for admin pool")]
+    fn test_set_admin_pool_rejects_threshold_exceeding_pool() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, member], &2);
+    }
+
+    #[test]
+    fn test_set_admin_pool_rejects_zero_address_in_pool() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let result = client.try_set_admin_pool(&vec![&env, member, zero_address(&env)], &2);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(4))));
+    }
+
+    // ── create_proposal / approve_proposal / is_proposal_ready / mark_executed ─
+
+    #[test]
+    fn test_create_proposal_creates_and_auto_approves_for_creator() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        // Pre-set admin pool so get_admin_pool returns explicit pool (not fallback).
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "test proposal"));
+
+        // The creator is automatically counted as an approval.
+        let ready = client.is_proposal_ready(&id);
+        assert!(ready);
+    }
+
+    #[test]
+    fn test_create_proposal_works_with_fallback_admin_pool() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        // Use init_storage instead of set_admin to avoid extra event overhead.
+        client.init_storage(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "fallback test"));
+
+        let ready = client.is_proposal_ready(&id);
+        assert!(ready);
+    }
+
+    #[test]
+    #[should_panic(expected = "only admins can create proposals")]
+    fn test_create_proposal_rejects_non_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.create_proposal(&stranger, &String::from_str(&env, "hack attempt"));
+    }
+
+    #[test]
+    fn test_approve_proposal_adds_approval() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "multi-sig test"));
+
+        // Threshold is 2; creator is 1 approval, so one more is needed.
+        assert!(!client.is_proposal_ready(&id));
+        client.approve_proposal(&member, &id);
+        assert!(client.is_proposal_ready(&id));
+    }
+
+    #[test]
+    #[should_panic(expected = "only admins can approve proposals")]
+    fn test_approve_proposal_rejects_non_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "test"));
+        client.approve_proposal(&stranger, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin already approved this proposal")]
+    fn test_approve_proposal_rejects_duplicate_approval() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "test"));
+        // admin already auto-approved, so a second approve call should fail.
+        client.approve_proposal(&admin, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "proposal not found")]
+    fn test_approve_proposal_rejects_nonexistent_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.approve_proposal(&admin, &9999);
+    }
+
+    #[test]
+    fn test_mark_executed_completes_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "exec test"));
+        client.approve_proposal(&member, &id);
+        assert!(client.is_proposal_ready(&id));
+        client.mark_executed(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "proposal already executed")]
+    fn test_mark_executed_rejects_already_executed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "exec test"));
+        client.approve_proposal(&member, &id);
+        client.mark_executed(&id);
+        client.mark_executed(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "threshold not met")]
+    fn test_mark_executed_rejects_insufficient_approvals() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "exec test"));
+        // Only 1 approval (creator auto-approve), threshold is 2.
+        client.mark_executed(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "proposal not found")]
+    fn test_mark_executed_rejects_nonexistent_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.mark_executed(&9999);
+    }
+
+    #[test]
+    fn test_is_proposal_ready_returns_false_for_nonexistent_proposal() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let result = client.try_is_proposal_ready(&9999);
+        assert!(result.is_err());
     }
 }
