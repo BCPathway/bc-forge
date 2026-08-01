@@ -10,7 +10,8 @@ describe('bcForgeClient balance formatting', () => {
       contractId: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
     });
 
-    const queryContract = jest.fn(async (method: string) => {
+    const queryContract = jest.fn(async (...args: unknown[]) => {
+      const method = args[0] as string;
       if (method === 'balance') {
         return nativeToScVal(12345678n, { type: 'i128' });
       }
