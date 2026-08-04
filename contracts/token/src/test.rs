@@ -26,7 +26,6 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     (client, admin)
 }
 
-
 #[test]
 fn test_initialize_emits_expected_events() {
     let env = Env::default();
