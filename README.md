@@ -356,7 +356,7 @@ test/<issue-number>-<description>        # Test improvements
 
 Security is our top priority. If you discover a security vulnerability in bc-forge, please report it responsibly following our [Security Policy](SECURITY.md).
 
-**Important**: Do not report security vulnerabilities through GitHub issues, discussions, or other public channels. All security reports must be made privately to **security@bc-forge.org**.
+**Important**: Do not report security vulnerabilities through GitHub issues, discussions, or other public channels. All security reports must be made privately to **isaacsamson88@gmail.com**.
 
 For more details about our vulnerability disclosure process, supported versions, scope, and response timeline, please review the [SECURITY.md](SECURITY.md) file.
 
