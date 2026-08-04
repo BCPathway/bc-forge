@@ -278,10 +278,10 @@ where
 /// pass a discriminant that is outside the defined set.  This helper guards
 /// against that by exhaustively matching every known variant.
 fn is_valid_role(role: Role) -> bool {
-    return matches!(
+    matches!(
         role,
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
-    );
+    )
 }
 
 fn require_valid_role(env: &Env, role: Role) {
