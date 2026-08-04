@@ -159,6 +159,22 @@ fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
 }
 
 #[test]
+fn test_batch_transfer_while_paused_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let from = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &from, &100);
+    client.pause(&admin);
+
+    let recipients = vec![&env, (recipient, 10_i128)];
+    let result = client.try_batch_transfer(&from, &recipients);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_stranger_lacks_super_admin_role_required_by_upgrade_guard() {
     // Soroban's test host converts any escaped guest panic into a generic
     // "Error(Contract, #N)" report, discarding the original panic message
@@ -312,6 +328,86 @@ fn test_set_max_supply_rejects_negative() {
 }
 
 #[test]
+fn test_pauser_can_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    client.pause(&pauser);
+    assert!(bc_forge_lifecycle::is_paused(&env));
+}
+
+#[test]
+fn test_pauser_can_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    client.pause(&admin);
+    assert!(bc_forge_lifecycle::is_paused(&env));
+
+    client.unpause(&pauser);
+    assert!(!bc_forge_lifecycle::is_paused(&env));
+}
+
+#[test]
+fn test_non_pauser_cannot_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let stranger = Address::generate(&env);
+
+    let result = client.try_pause(&stranger);
+    assert_eq!(result, Err(Ok(TokenError::ContractPaused)));
+    assert!(!bc_forge_lifecycle::is_paused(&env));
+}
+
+#[test]
+fn test_non_pauser_cannot_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let stranger = Address::generate(&env);
+
+    client.pause(&admin);
+    assert!(bc_forge_lifecycle::is_paused(&env));
+
+    let result = client.try_unpause(&stranger);
+    assert_eq!(result, Err(Ok(TokenError::ContractPaused)));
+    assert!(bc_forge_lifecycle::is_paused(&env));
+}
+
+#[test]
+fn test_revoked_pauser_cannot_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    client.pause(&admin);
+    assert!(bc_forge_lifecycle::is_paused(&env));
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::revoke_role(&env, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    let result = client.try_unpause(&pauser);
+    assert_eq!(result, Err(Ok(TokenError::ContractPaused)));
+    assert!(bc_forge_lifecycle::is_paused(&env));
 fn test_revoked_minter_cannot_mint() {
     let env = Env::default();
     env.mock_all_auths();
