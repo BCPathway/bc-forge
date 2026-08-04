@@ -524,6 +524,12 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Pauses the contract.
+    ///
+    /// @notice Pauses all token operations. Only the admin (or SuperAdmin/Pauser role holder) can call this function.
+    /// @param env The Soroban environment.
+    /// @param caller The address requesting the pause; must be admin or hold the Pauser role.
+    /// @return `Ok(())` on success, or an error if the caller is unauthorized or already paused.
     pub fn pause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
@@ -539,26 +545,20 @@ impl BcForgeToken {
         }
 
         if bc_forge_lifecycle::is_paused(&env) {
-            panic!("contract is already paused");
+            return Err(TokenError::AlreadyPaused);
         }
 
         bc_forge_lifecycle::set_paused(&env, true);
-    /// Pauses the contract.
-    ///
-    /// @notice Pauses all token operations. Only the admin (or SuperAdmin/Pauser role holder) can call this function.
-    /// @param env The Soroban environment.
-    /// @return `Ok(())` on success, or an error if the caller is unauthorized.
-    pub fn pause(env: Env) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin_address = admin::get_admin(&env);
-        if bc_forge_lifecycle::is_paused(&env) {
-            return Err(TokenError::AlreadyPaused);
-        }
-        bc_forge_lifecycle::pause(env.clone(), admin_address.clone());
-        events::emit_paused(&env, &admin_address);
+        events::emit_paused(&env, &caller);
         Ok(())
     }
 
+    /// Unpauses the contract.
+    ///
+    /// @notice Resumes all token operations. Only the admin (or SuperAdmin/Pauser role holder) can call this function.
+    /// @param env The Soroban environment.
+    /// @param caller The address requesting the unpause; must be admin or hold the Pauser role.
+    /// @return `Ok(())` on success, or an error if the caller is unauthorized or not paused.
     pub fn unpause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         let admin_address = admin::get_admin(&env);
@@ -574,23 +574,11 @@ impl BcForgeToken {
         }
 
         if !bc_forge_lifecycle::is_paused(&env) {
-            panic!("contract is not paused");
+            return Err(TokenError::NotPaused);
         }
 
         bc_forge_lifecycle::set_paused(&env, false);
-    /// Unpauses the contract.
-    ///
-    /// @notice Resumes all token operations. Only the admin (or SuperAdmin/Pauser role holder) can call this function.
-    /// @param env The Soroban environment.
-    /// @return `Ok(())` on success, or an error if the caller is unauthorized.
-    pub fn unpause(env: Env) -> Result<(), TokenError> {
-        Self::ensure_initialized(&env)?;
-        let admin_address = admin::get_admin(&env);
-        if !bc_forge_lifecycle::is_paused(&env) {
-            return Err(TokenError::NotPaused);
-        }
-        bc_forge_lifecycle::unpause(env.clone(), admin_address.clone());
-        events::emit_unpaused(&env, &admin_address);
+        events::emit_unpaused(&env, &caller);
         Ok(())
     }
 
