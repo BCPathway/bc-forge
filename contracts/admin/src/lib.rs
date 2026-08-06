@@ -37,6 +37,10 @@
 //! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
 //! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//! | `4` | `InvalidAddress` | operation attempted with the canonical zero address |
+//! | `5` | `InvalidRole` | unrecognized role discriminant supplied |
+//! | `6` | `AlreadyInitialized` | `init_storage` called on an already-initialized contract |
+//! | `7` | `RoleAlreadyGranted` | role has already been granted to the target address |
 //!
 //! ## Event Emissions
 //!
@@ -156,6 +160,9 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
+    /// The role has already been granted to the target address.
+    #[allow(dead_code)]
+    RoleAlreadyGranted = 7,
 }
 
 /// Storage keys for the access-control layer.
@@ -336,7 +343,7 @@ pub fn set_admin(env: &Env, admin: &Address) {
     }
     env.storage().instance().set(&AdminKey::Admin, admin);
     extend_instance_ttl(env);
-    _grant_role(env, admin, Role::Admin, admin);
+    _grant_role(env, admin, Role::Admin, admin).ok();
 }
 
 /// Migrates the singular admin address to the SuperAdmin role mapping.
@@ -455,11 +462,14 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @param address The address to receive the role.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(role, address.clone()), &true);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+    let key = AdminKey::Role(role, address.clone());
+    if env.storage().persistent().has(&key) {
+        return Err(AdminError::RoleAlreadyGranted);
+    }
+    env.storage().persistent().set(&key, &true);
+    extend_storage_ttl_for_key(env, &key);
     events::emit_role_granted(env, admin, role, address);
+    Ok(())
 }
 
 /// Revokes a role from an address. Resolves issues #416 and #426.
