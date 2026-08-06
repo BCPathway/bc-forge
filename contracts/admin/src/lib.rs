@@ -130,6 +130,9 @@
 #![no_std]
 
 mod events;
+pub mod storage;
+
+pub use storage::*;
 
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
