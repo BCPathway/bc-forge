@@ -45,14 +45,20 @@ pub struct Invoice {
     pub created_at: u32,
 }
 
+/// Errors returned by the split contract.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
 #[repr(u32)]
 pub enum SplitError {
+    /// The specified invoice was not found.
     InvoiceNotFound = 1,
+    /// The recipient address is invalid.
     InvalidRecipient = 2,
+    /// Insufficient balance to perform the operation.
     InsufficientBalance = 3,
+    /// The invoice has already been completed.
     InvoiceAlreadyCompleted = 4,
+    /// The specified failed payout was not found.
     FailedPayoutNotFound = 5,
 }
 

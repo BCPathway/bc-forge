@@ -56,15 +56,22 @@ pub enum DataKey {
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
+/// Errors returned by the wrapper contract.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
 #[repr(u32)]
 pub enum WrapperError {
+    /// The contract has already been initialized.
     AlreadyInitialized = 1,
+    /// The contract has not been initialized.
     NotInitialized = 2,
+    /// An invalid amount was provided.
     InvalidAmount = 3,
+    /// Insufficient balance to perform the operation.
     InsufficientBalance = 4,
+    /// Insufficient allowance to perform the operation.
     InsufficientAllowance = 5,
+    /// The contract is currently paused.
     ContractPaused = 6,
     /// Reentrant call detected.
     Reentrant = 7,

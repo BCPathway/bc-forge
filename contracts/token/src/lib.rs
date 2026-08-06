@@ -100,6 +100,7 @@ struct AllowanceData {
     expiration_ledger: u32,
 }
 
+/// Errors returned by the token contract.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[contracterror]
 #[repr(u32)]
