@@ -146,6 +146,8 @@ mod tests {
         env.mock_all_auths();
         let (client, admin) = setup(&env);
 
+        // Admin holds Role::Admin which implicitly grants Role::Pauser,
+        // so the cross-module RBAC check in lifecycle::pause passes.
         client.pause(&admin);
         assert!(client.is_paused());
 
@@ -197,5 +199,41 @@ mod tests {
         env.ledger().set(ledger_info);
 
         assert!(client.is_paused());
+    }
+
+    #[test]
+    fn test_pause_without_pauser_role_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        // No admin storage initialized — the caller holds no role,
+        // so the cross-module RBAC check should reject the call.
+        let stranger = Address::generate(&env);
+
+        let result = client.try_pause(&stranger);
+        // AdminError::UnauthorizedRole has error code 3
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(3)))
+        );
+    }
+
+    #[test]
+    fn test_unpause_without_pauser_role_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(LifecycleContract, ());
+        let client = LifecycleContractClient::new(&env, &contract_id);
+        // No admin storage initialized — the caller holds no role,
+        // so the cross-module RBAC check should reject the call.
+        let stranger = Address::generate(&env);
+
+        let result = client.try_unpause(&stranger);
+        // AdminError::UnauthorizedRole has error code 3
+        assert_eq!(
+            result,
+            Err(Ok(soroban_sdk::Error::from_contract_error(3)))
+        );
     }
 }
