@@ -1,0 +1,62 @@
+# render.yaml — Render Blueprint for bc-forge Indexer
+# Docs: https://render.com/docs/blueprint-spec
+#
+# This file configures:
+#   1. A web service that runs the TypeScript Indexer microservice.
+#   2. A managed PostgreSQL database linked to the service via DATABASE_URL.
+#
+# Usage:
+#   1. Push this file to the repository root.
+#   2. In the Render dashboard, create a new "Blueprint" and point it at this repo.
+#   3. Set the secret env vars (RPC_URL, CONTRACT_ID) in the Render dashboard
+#      for the `bc-forge-indexer` service – they are marked `sync: false` below.
+
+databases:
+  - name: bc-forge-indexer-db
+    databaseName: bc_forge
+    user: bc_forge_user
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: bc-forge-indexer
+    runtime: node
+    region: oregon
+    plan: free
+
+    # Build from the indexer sub-directory
+    rootDir: indexer
+
+    buildCommand: |
+      npm ci
+      npm run prisma:generate
+      npm run build
+
+    # Run Prisma migrations then start the compiled server
+    startCommand: |
+      npx prisma migrate deploy
+      node dist/index.js
+
+    envVars:
+      # Automatically injected from the database declared above
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bc-forge-indexer-db
+          property: connectionString
+
+      - key: PORT
+        value: 3000
+
+      # Set these values once in the Render dashboard; they are not synced
+      # from this file so secrets are never stored in source control.
+      - key: RPC_URL
+        sync: false
+
+      - key: CONTRACT_ID
+        sync: false
+
+      - key: NODE_ENV
+        value: production
+
+    healthCheckPath: /health
