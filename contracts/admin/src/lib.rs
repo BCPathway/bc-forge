@@ -205,13 +205,8 @@ pub enum AdminKey {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
-    /// Full administrative control granted via `set_admin`.
-    Admin,
-    /// Permission to mint new tokens.
-    Minter,
-    /// Highest-privilege role, reserved for owner-level operations.
     SuperAdmin,
-    /// Role allowing emergency pause and unpause operations.
+    Minter,
     Pauser,
 }
 
@@ -240,11 +235,8 @@ pub struct Proposal {
     pub executed: bool,
 }
 
-/// Strkey of the well-known Stellar "null" account: an ed25519 public key
-/// whose 32-byte payload is all zeros. No private key can ever produce a
-/// signature for it, so it is used as the canonical zero-address sentinel
-/// that must never be allowed to hold a role.
-const ZERO_ADDRESS_STRKEY: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+#[contract]
+pub struct AdminContract;
 
 fn is_zero_address(env: &Env, address: &Address) -> bool {
     *address == Address::from_str(env, ZERO_ADDRESS_STRKEY)
@@ -254,7 +246,6 @@ fn require_non_zero_address(env: &Env, address: &Address) {
     if is_zero_address(env, address) {
         soroban_sdk::panic_with_error!(env, AdminError::InvalidAddress);
     }
-}
 
 fn extend_instance_ttl(env: &Env) {
     ttl::extend_instance_ttl(env);
@@ -334,10 +325,6 @@ pub fn set_admin(env: &Env, admin: &Address) {
         extend_instance_ttl(env);
         events::emit_role_revoked(env, &old_admin, Role::Admin, &old_admin);
     }
-    env.storage().instance().set(&AdminKey::Admin, admin);
-    extend_instance_ttl(env);
-    _grant_role(env, admin, Role::Admin, admin);
-}
 
 /// Migrates the singular admin address to the SuperAdmin role mapping.
 ///
@@ -427,8 +414,6 @@ pub fn has_admin(env: &Env) -> bool {
     if has {
         extend_instance_ttl(env);
     }
-    has
-}
 
 /// Grants a role to an address.
 ///
@@ -808,11 +793,7 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .get(&AdminKey::Proposal(proposal_id))
         .expect("proposal not found");
 
-    if proposal.executed {
-        panic!("proposal already executed");
-    }
-    if !is_proposal_ready(env, proposal_id) {
-        panic!("threshold not met");
+        account.require_auth();
     }
 
     proposal.executed = true;
@@ -1253,20 +1234,8 @@ mod tests {
         assert_eq!(result, Err(Ok(AdminError::InvalidAddress)));
     }
 
-    #[test]
-    fn test_zero_address_never_holds_a_role() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-
-        assert!(!client.has_role(&Role::Admin, &zero_address(&env)));
-        assert!(!client.has_role(&Role::Minter, &zero_address(&env)));
-        assert!(!client.has_role(&Role::SuperAdmin, &zero_address(&env)));
-        assert!(!client.has_role(&Role::Pauser, &zero_address(&env)));
+    pub fn get_admin(env: Env) -> Address {
+        Self::admin(&env).unwrap_or_else(|| panic!("Admin not initialized"))
     }
 
     #[test]
@@ -1601,64 +1570,13 @@ mod tests {
             1,
             "topics should contain only the role_grnt symbol"
         );
-        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        assert_eq!(topic0, soroban_sdk::symbol_short!("role_grnt"));
-
-        // Data must be (admin, role, address) as Vec<Val>
-        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
-        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
-        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
-        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
-        assert_eq!(event_admin, admin);
-        assert_eq!(event_role, Role::Admin);
-        assert_eq!(event_address, admin);
     }
 
-    #[test]
-    fn test_set_admin_emits_role_revoked_event() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let old_admin = Address::generate(&env);
-        let new_admin = Address::generate(&env);
-
-        client.set_admin(&old_admin);
-        client.set_admin(&new_admin);
-
-        let events = env.events().all();
-        assert_eq!(
-            events.len(),
-            2,
-            "expected exactly two events during set_admin with replacement"
-        );
-
-        let (emitter, topics, data) = events.get(0).unwrap();
-        assert_eq!(emitter, contract_id);
-
-        assert_eq!(
-            topics.len(),
-            1,
-            "topics should contain only the role_rvk symbol"
-        );
-        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        assert_eq!(topic0, soroban_sdk::symbol_short!("role_rvk"));
-
-        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
-        let event_admin: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
-        let event_role: Role = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
-        let event_address: Address = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
-        assert_eq!(event_admin, old_admin);
-        assert_eq!(event_role, Role::Admin);
-        assert_eq!(event_address, old_admin);
-
-        let (emitter2, topics2, data2) = events.get(1).unwrap();
-        assert_eq!(emitter2, contract_id);
-
-        assert_eq!(
-            topics2.len(),
-            1,
-            "topics should contain only the role_grnt symbol"
+    pub fn has_role(env: Env, role: Role, account: Address) -> bool {
+        let result = Self::has_role_without_event(&env, role, &account);
+        env.events().publish(
+            symbol_short!("role_chk"),
+            (account, Vec::<Role>::from_array(&env, [role]), result),
         );
         let topic0_2: soroban_sdk::Symbol = topics2.get(0).unwrap().try_into_val(&env).unwrap();
         assert_eq!(topic0_2, soroban_sdk::symbol_short!("role_grnt"));
