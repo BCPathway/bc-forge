@@ -1,3 +1,5 @@
+//! # RBAC Integration Summary
+//!
 //! Reusable access-control primitives for Soroban contracts with multi-sig governance.
 //!
 //! @title Admin Access Control
