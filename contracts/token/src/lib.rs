@@ -17,6 +17,9 @@ mod test;
 #[cfg(test)]
 mod fuzz_mint;
 
+#[cfg(test)]
+mod storage_collisions;
+
 use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
