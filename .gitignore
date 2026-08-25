@@ -9,7 +9,7 @@
 
 # Node / SDK
 node_modules/
-sdk/dist/
+dist/
 sdk/*.tgz
 
 # Environment

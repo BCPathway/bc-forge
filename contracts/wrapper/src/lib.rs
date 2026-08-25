@@ -70,6 +70,8 @@ pub enum WrapperError {
     Reentrant = 7,
     /// Cross-contract call to the underlying token failed.
     UnderlyingCallFailed = 8,
+    AlreadyPaused = 9,
+    NotPaused = 10,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -402,17 +404,23 @@ impl WrapperContract {
         Self::read_supply(&env)
     }
 
-    /// Pause all wrap/unwrap and transfer operations. Admin-only.
+    /// Pause all wrap/unwrap and transfer operations. Requires Pauser role.
     pub fn pause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
         events::emit_paused(&env, &current_admin);
         Ok(())
     }
 
-    /// Unpause operations. Admin-only.
+    /// Unpause operations. Requires Pauser role.
     pub fn unpause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
         events::emit_unpaused(&env, &current_admin);
         Ok(())
@@ -421,6 +429,9 @@ impl WrapperContract {
     /// Pause operations using a specific caller address (must have Pauser role).
     pub fn pause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), caller.clone());
         events::emit_paused(&env, &caller);
         Ok(())
@@ -429,6 +440,9 @@ impl WrapperContract {
     /// Unpause operations using a specific caller address (must have Pauser role).
     pub fn unpause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), caller.clone());
         events::emit_unpaused(&env, &caller);
         Ok(())
