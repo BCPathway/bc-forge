@@ -404,3 +404,106 @@ fn test_approve_negative_amount_fails() {
         Err(Ok(WrapperError::InvalidAmount.into()))
     );
 }
+
+// ── initialize deployer check ────────────────────────────────────────────────
+
+#[test]
+fn test_initialize_succeeds_for_deployer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let underlying_id = env.register(BcForgeToken, ());
+    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
+    underlying.initialize(
+        &admin,
+        &7,
+        &String::from_str(&env, "Underlying"),
+        &String::from_str(&env, "UND"),
+    );
+
+    let wrapper_id = env.register(WrapperContract, ());
+    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
+
+    let result = wrapper.try_initialize(
+        &admin,
+        &underlying_id,
+        &7,
+        &String::from_str(&env, "Wrapped"),
+        &String::from_str(&env, "wUND"),
+    );
+    assert_eq!(result, Ok(()));
+}
+
+#[test]
+#[should_panic]
+fn test_initialize_fails_for_non_deployer() {
+    let env = Env::default();
+    // Don't mock_all_auths - only deployer can authorize
+
+    let admin = Address::generate(&env);
+    let underlying_id = env.register(BcForgeToken, ());
+    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
+    underlying.initialize(
+        &admin,
+        &7,
+        &String::from_str(&env, "Underlying"),
+        &String::from_str(&env, "UND"),
+    );
+
+    let wrapper_id = env.register(WrapperContract, ());
+    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
+    let non_deployer = Address::generate(&env);
+
+    env.as_contract(&wrapper_id, || {
+        non_deployer.require_auth();
+        wrapper.initialize(
+            &admin,
+            &underlying_id,
+            &7,
+            &String::from_str(&env, "Wrapped"),
+            &String::from_str(&env, "wUND"),
+        );
+    });
+}
+
+#[test]
+fn test_initialize_fails_on_double_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let underlying_id = env.register(BcForgeToken, ());
+    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
+    underlying.initialize(
+        &admin,
+        &7,
+        &String::from_str(&env, "Underlying"),
+        &String::from_str(&env, "UND"),
+    );
+
+    let wrapper_id = env.register(WrapperContract, ());
+    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
+
+    // First initialize succeeds
+    wrapper.initialize(
+        &admin,
+        &underlying_id,
+        &7,
+        &String::from_str(&env, "Wrapped"),
+        &String::from_str(&env, "wUND"),
+    );
+
+    // Second initialize fails with AlreadyInitialized
+    assert_eq!(
+        wrapper.try_initialize(
+            &admin2,
+            &underlying_id,
+            &7,
+            &String::from_str(&env, "Wrapped 2"),
+            &String::from_str(&env, "wUND2"),
+        ),
+        Err(Ok(WrapperError::AlreadyInitialized))
+    );
+}

@@ -286,6 +286,9 @@ impl BcForgeToken {
         name: String,
         symbol: String,
     ) -> Result<(), TokenError> {
+        // Ensure only the deployer can initialize the contract
+        env.deployer().require_auth();
+
         if admin::has_admin(&env) {
             return Err(TokenError::AlreadyInitialized);
         }

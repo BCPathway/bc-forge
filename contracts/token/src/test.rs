@@ -436,3 +436,53 @@ fn test_set_fee_config_rejects_negative_values() {
     let result = client.try_set_fee_config(&admin, &config);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
 }
+
+// ── initialize deployer check ────────────────────────────────────────────────
+
+#[test]
+fn test_initialize_succeeds_for_deployer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BcForgeToken, ());
+    let client = BcForgeTokenClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    let result = client.try_initialize(&admin, &7, &String::from_str(&env, "Test"), &String::from_str(&env, "TST"));
+    assert_eq!(result, Ok(()));
+}
+
+#[test]
+#[should_panic]
+fn test_initialize_fails_for_non_deployer() {
+    let env = Env::default();
+    // Don't mock_all_auths - only deployer can authorize
+
+    let contract_id = env.register(BcForgeToken, ());
+    let client = BcForgeTokenClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let non_deployer = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        non_deployer.require_auth();
+        client.initialize(&admin, &7, &String::from_str(&env, "Test"), &String::from_str(&env, "TST"));
+    });
+}
+
+#[test]
+fn test_initialize_fails_on_double_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BcForgeToken, ());
+    let client = BcForgeTokenClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+
+    // First initialize succeeds
+    client.initialize(&admin, &7, &String::from_str(&env, "Test"), &String::from_str(&env, "TST"));
+
+    // Second initialize fails with AlreadyInitialized
+    let result = client.try_initialize(&admin2, &7, &String::from_str(&env, "Test2"), &String::from_str(&env, "TST2"));
+    assert_eq!(result, Err(Ok(TokenError::AlreadyInitialized)));
+}

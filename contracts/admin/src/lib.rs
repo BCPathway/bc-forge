@@ -151,6 +151,8 @@ pub enum AdminError {
     AlreadyInitialized = 6,
     /// The role is already granted to the address.
     RoleAlreadyGranted = 7,
+    /// The caller is not the contract deployer.
+    UnauthorizedDeployer = 8,
 }
 
 /// Storage keys for the access-control layer.
@@ -307,6 +309,23 @@ fn is_valid_role(role: Role) -> bool {
         Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
     )
 }
+
+/// Verifies that the caller is the contract deployer.
+///
+/// This function checks if the currently authenticated address matches
+/// the contract's deployer address. The deployer is the address that
+/// originally deployed the contract.
+///
+/// # Arguments
+/// * `env` - The Soroban environment.
+///
+/// # Panics
+/// Panics with [`AdminError::UnauthorizedDeployer`] if the caller is not the deployer.
+pub fn require_deployer(env: &Env) {
+    let deployer = env.deployer();
+    deployer.require_auth();
+}
+
 /// One-time storage initialization.
 ///
 /// Sets `admin` as the contract administrator and records the initial
@@ -315,7 +334,9 @@ fn is_valid_role(role: Role) -> bool {
 ///
 /// # Errors
 /// Returns [`AdminError::AlreadyInitialized`] if storage has already been set up.
+/// Panics with [`AdminError::UnauthorizedDeployer`] if the caller is not the deployer.
 pub fn init_storage(env: &Env, admin: &Address) -> Result<(), AdminError> {
+    require_deployer(env);
     if env.storage().instance().has(&AdminKey::Admin) {
         return Err(AdminError::AlreadyInitialized);
     }
@@ -839,6 +860,14 @@ mod tests {
 
         pub fn require_pauser(env: Env, address: Address) {
             super::require_pauser(&env, &address);
+        }
+
+        pub fn require_deployer(env: Env) {
+            super::require_deployer(&env);
+        }
+
+        pub fn init_storage_with_deployer(env: Env, admin: Address) -> Result<(), AdminError> {
+            super::init_storage(&env, &admin)
         }
     }
 
@@ -2398,5 +2427,68 @@ mod tests {
         assert!(RoleFlags::is_set(mask, Role::SuperAdmin));
         assert!(!RoleFlags::is_set(mask, Role::Admin));
         assert!(!RoleFlags::is_set(mask, Role::Pauser));
+    }
+
+    // ── init_storage deployer check ────────────────────────────────────────────
+
+    #[test]
+    fn test_init_storage_succeeds_for_deployer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        // Deployer (mocked via mock_all_auths) can initialize
+        let result = client.init_storage_with_deployer(&admin);
+        assert_eq!(result, Ok(()));
+        assert!(client.has_role(&Role::Admin, &admin));
+    }
+
+    #[test]
+    #[should_panic(expected = "UnauthorizedDeployer")]
+    fn test_init_storage_fails_for_non_deployer() {
+        let env = Env::default();
+        // Don't mock_all_auths - only the deployer is authorized
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let non_deployer = Address::generate(&env);
+
+        // Try to initialize with a non-deployer caller
+        // This should panic because the non-deployer cannot authorize as deployer
+        env.as_contract(&contract_id, || {
+            non_deployer.require_auth();
+            init_storage(&env, &admin);
+        });
+    }
+
+    #[test]
+    fn test_init_storage_fails_on_double_init() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+
+        // First init succeeds
+        let result = client.init_storage_with_deployer(&admin);
+        assert_eq!(result, Ok(()));
+
+        // Second init fails with AlreadyInitialized
+        let result = client.try_init_storage_with_deployer(&admin2);
+        assert_eq!(result, Err(Ok(AdminError::AlreadyInitialized)));
+    }
+
+    #[test]
+    fn test_require_deployer_succeeds_for_deployer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        // Should not panic for deployer
+        client.require_deployer();
     }
 }
