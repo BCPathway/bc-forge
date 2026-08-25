@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BcForgeConfig",
+  "description": "Deployment configuration schema for bc-forge CLI",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "default": "1.0.0",
+      "description": "Schema version"
+    },
+    "name": {
+      "type": "string",
+      "description": "Token or project name"
+    },
+    "symbol": {
+      "type": "string",
+      "description": "Token symbol"
+    },
+    "decimals": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18,
+      "default": 7,
+      "description": "Decimal precision for token minting"
+    },
+    "admin": {
+      "type": "string",
+      "pattern": "^G[A-Z2-7]{55}$",
+      "description": "Stellar G-address of the contract admin"
+    },
+    "network": {
+      "type": "string",
+      "enum": ["mainnet", "testnet", "futurenet", "standalone", "custom"],
+      "default": "testnet",
+      "description": "Target network deployment environment"
+    },
+    "rpcUrl": {
+      "type": "string",
+      "description": "Soroban RPC endpoint URL"
+    },
+    "networkPassphrase": {
+      "type": "string",
+      "description": "Stellar Network Passphrase"
+    },
+    "secretKey": {
+      "type": "string",
+      "pattern": "^S[A-Z2-7]{55}$",
+      "description": "Stellar secret seed key (optional, prefer ENV variables)"
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "contractId": {
+            "type": "string"
+          },
+          "wasmHash": {
+            "type": "string"
+          },
+          "deployer": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Deployed contract metadata mapped by contract name"
+    }
+  },
+  "required": ["name", "symbol"],
+  "additionalProperties": true
+}

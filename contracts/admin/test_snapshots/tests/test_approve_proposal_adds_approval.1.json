@@ -276,6 +276,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "ProposalTimelock"
+                            },
+                            {
+                              "u64": 0
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 86400
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Threshold"
                             }
                           ]

@@ -55,26 +55,20 @@ pub fn emit_role_checked(env: &Env, address: &Address, role: Role, result: bool)
     );
 }
 
-/// Emitted when a multi-sig WASM upgrade proposal is submitted. Resolves issue #653.
+/// Emitted when a multi-sig-gated WASM upgrade is executed.
 ///
-/// Topics: `upg_prop`
-/// Data:   `(proposal_id, creator, new_wasm_hash)`
+/// Topics: `upgraded`
+/// Data:   `(executor, proposal_id, wasm_hash)`
 ///
-/// @notice Publishes upgrade-proposal submission data including the assigned proposal ID,
-///         the submitting pool member, and the target WASM hash.
-/// @dev The event topics include the `upg_prop` symbol.
+/// @notice Publishes upgrade event data including the executing admin, the proposal ID, and the new WASM hash.
+/// @dev The event topics include the `upgraded` symbol.
 /// @param env The Soroban environment.
-/// @param creator The address that submitted the proposal.
-/// @param proposal_id The unique ID assigned to the proposal.
-/// @param new_wasm_hash The 32-byte hash of the WASM binary the proposal upgrades to.
-pub fn emit_upgrade_proposal_submitted(
-    env: &Env,
-    creator: &Address,
-    proposal_id: u64,
-    new_wasm_hash: &BytesN<32>,
-) {
+/// @param executor The pool member that executed the upgrade.
+/// @param proposal_id The ID of the proposal whose quorum authorized the upgrade.
+/// @param wasm_hash The WASM hash installed via `update_current_contract_wasm`.
+pub fn emit_upgraded(env: &Env, executor: &Address, proposal_id: u64, wasm_hash: &BytesN<32>) {
     env.events().publish(
-        (symbol_short!("upg_prop"),),
-        (proposal_id, creator.clone(), new_wasm_hash.clone()),
+        (symbol_short!("upgraded"),),
+        (executor.clone(), proposal_id, wasm_hash.clone()),
     );
 }
