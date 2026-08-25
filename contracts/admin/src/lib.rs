@@ -830,6 +830,7 @@ mod tests {
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
 
+    mod gas_bench;
     mod proptest;
 
     #[contract]
