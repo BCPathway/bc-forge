@@ -645,6 +645,21 @@ pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
 }
 
+/// Helper macro for role-based access control checking and authorization enforcement.
+///
+/// Variants:
+/// - `has_role!(env, role, caller)` -> Evaluates whether `$caller` holds `$role` (or universal `Admin` access).
+/// - `has_role!(require env, role, caller)` -> Enforces role requirement and authorization via `require_role_guard`.
+#[macro_export]
+macro_rules! has_role {
+    (check, $env:expr, $role:expr, $caller:expr) => {
+        $crate::has_role($env, $role, $caller)
+    };
+    ($env:expr, $role:expr, $caller:expr) => {
+        $crate::require_role_guard($env, $role, $caller)
+    };
+}
+
 /// Configures the multi-sig admin pool and approval threshold.
 ///
 /// @notice Sets the pool of admins and the number of approvals required to pass a proposal.
@@ -1707,6 +1722,59 @@ mod tests {
 
         assert_eq!(result, Err(AdminError::RoleNotHeld));
         assert!(env.as_contract(&contract_id, || has_role(&env, Role::Admin, &admin)));
+    }
+
+    #[test]
+    fn test_has_role_macro_boolean_check() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        env.as_contract(&contract_id, || {
+            assert!(has_role!(check, &env, Role::Minter, &minter));
+            assert!(!has_role!(check, &env, Role::Minter, &stranger));
+        });
+    }
+
+    #[test]
+    fn test_has_role_macro_require_guard() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        env.as_contract(&contract_id, || {
+            has_role!(&env, Role::Minter, &minter);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "HostError")]
+    fn test_has_role_macro_require_guard_panics_on_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        env.as_contract(&contract_id, || {
+            has_role!(&env, Role::Minter, &stranger);
+        });
     }
 
     #[test]
