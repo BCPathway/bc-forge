@@ -18,6 +18,7 @@
 //! | `AdminPool` | `instance()` | `Vec<Address>` | Multi-sig admin pool members | On set |
 //! | `Threshold` | `instance()` | `u32` | Approvals required to pass a proposal | On set |
 //! | `Proposal(u64)` | `instance()` | `Proposal` | Governance proposal data | Every read/write |
+//! | `UpgradeProposal(u64)` | `instance()` | `BytesN<32>` | WASM upgrade payload (target code hash) per proposal ID | On set |
 //! | `ProposalIdCounter` | `instance()` | `u64` | Auto-incrementing proposal ID generator | No |
 //! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
 //!
@@ -37,6 +38,10 @@
 //! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
 //! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//! | `4` | `InvalidAddress` | zero-address sentinel supplied where a real address is required |
+//! | `5` | `InvalidRole` | unrecognized role discriminant supplied |
+//! | `6` | `AlreadyInitialized` | `init_storage` called on an already-initialized contract |
+//! | `7` | `InvalidWasmHash` | `submit_upgrade_proposal` called with the all-zero WASM hash |
 //!
 //! ## Event Emissions
 //!
@@ -45,6 +50,7 @@
 //! | `role_grnt` | Role grant | `set_admin`, `grant_role` | `(admin, role, address)` |
 //! | `role_rvk`  | Role revoke | `revoke_role` | `(admin, role, address)` |
 //! | `role_chk`  | Role check | `has_role` | `(address, role, result)` |
+//! | `upg_prop`  | Upgrade proposal submitted | `submit_upgrade_proposal` | `(proposal_id, submitter, new_wasm_hash)` |
 //!
 //! ## Storage Domain Separation
 //!
@@ -109,6 +115,12 @@
 //!   ensuring single-admin contracts are always compatible.
 //! - [`create_proposal`] automatically records the creator as the first approval,
 //!   preventing self-created proposals from needing a redundant second approval.
+//! - [`submit_upgrade_proposal`] shares the [`AdminKey::ProposalIdCounter`] with
+//!   [`create_proposal`], so proposal IDs are globally unique across both kinds.
+//!   The target WASM hash is persisted under [`AdminKey::UpgradeProposal(id)`]
+//!   next to the regular proposal record; the all-zero hash (which can never
+//!   reference deployable code) is rejected. The submitter is recorded as the
+//!   first approval, and standard approval/quorum/execution primitives apply.
 //! - [`approve_proposal`] rejects duplicate approvals and already-executed
 //!   proposals, preserving idempotent safety.
 //! - [`is_proposal_ready`] compares the count of unique approving admins against
@@ -132,7 +144,7 @@
 mod events;
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, String, Vec};
 
 /// Errors returned by the admin access-control module.
 ///
@@ -156,6 +168,9 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
+    /// A WASM upgrade was proposed with the all-zero (invalid) WASM hash,
+    /// which can never reference a deployable contract code blob.
+    InvalidWasmHash = 7,
 }
 
 /// Storage keys for the access-control layer.
@@ -187,6 +202,9 @@ pub enum AdminKey {
     Threshold,
     /// Governance proposal data, keyed by proposal ID.
     Proposal(u64),
+    /// WASM upgrade payload (target code hash) for a proposal, keyed by the
+    /// same proposal ID as its `Proposal` record.
+    UpgradeProposal(u64),
     /// Auto-incrementing counter for proposal IDs.
     ProposalIdCounter,
     /// Super-admin mapping populated by `migrate_admin` for legacy contracts.
@@ -822,6 +840,76 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
     extend_instance_ttl(env);
 }
 
+/// Returns `true` if `wasm_hash` is not the all-zero sentinel, which can never
+/// reference a real contract code entry.
+fn is_valid_wasm_hash(env: &Env, wasm_hash: &BytesN<32>) -> bool {
+    *wasm_hash != BytesN::<32>::from_array(env, &[0u8; 32])
+}
+
+/// Submits a multi-sig gated WASM upgrade proposal. Resolves issue #653.
+///
+/// Creates a governance proposal exactly as [`create_proposal`] does (creator
+/// recorded as the first approval, ID drawn from the shared
+/// [`AdminKey::ProposalIdCounter`]) and additionally records `new_wasm_hash`
+/// under [`AdminKey::UpgradeProposal(id)`]. Storing the payload alongside a
+/// regular [`Proposal`] lets every existing multi-sig primitive operate on
+/// upgrade proposals unchanged: [`approve_proposal`] accumulates quorum,
+/// [`is_proposal_ready`] reports readiness, and [`mark_executed`] finalizes —
+/// while execution paths read the target code hash by the same ID.
+///
+/// @notice Creates a WASM upgrade proposal authored by `submitter`, recording the submitter as its first approval and persisting the target WASM hash.
+/// @dev Requires the submitter's authorization and admin-pool membership. Returns `AdminError::UnauthorizedRole` if the submitter is not a pool member and `AdminError::InvalidWasmHash` if `new_wasm_hash` is the all-zero hash. Increments the shared proposal ID counter.
+/// @param env The Soroban environment.
+/// @param submitter The address submitting the proposal; must be a pool member.
+/// @param new_wasm_hash Hash of the WASM blob to upgrade to; must not be all zeros.
+/// @param description Human-readable description of the upgrade.
+/// @return The identifier assigned to the new proposal.
+pub fn submit_upgrade_proposal(
+    env: &Env,
+    submitter: Address,
+    new_wasm_hash: BytesN<32>,
+    description: String,
+) -> Result<u64, AdminError> {
+    submitter.require_auth();
+
+    let pool = get_admin_pool(env);
+    if !pool.contains(&submitter) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    if !is_valid_wasm_hash(env, &new_wasm_hash) {
+        return Err(AdminError::InvalidWasmHash);
+    }
+
+    let id = env
+        .storage()
+        .instance()
+        .get(&AdminKey::ProposalIdCounter)
+        .unwrap_or(0u64);
+    env.storage()
+        .instance()
+        .set(&AdminKey::ProposalIdCounter, &(id + 1));
+
+    let proposal = Proposal {
+        creator: submitter.clone(),
+        description,
+        approvals: vec![env, submitter.clone()],
+        executed: false,
+    };
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(id), &proposal);
+
+    // Side-record carrying the executable payload for this proposal ID.
+    env.storage()
+        .instance()
+        .set(&AdminKey::UpgradeProposal(id), &new_wasm_hash);
+    extend_instance_ttl(env);
+
+    events::emit_upgrade_proposal_submitted(env, &submitter, id, &new_wasm_hash);
+    Ok(id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -928,6 +1016,15 @@ mod tests {
 
         pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
             super::is_proposal_ready(&env, proposal_id)
+        }
+
+        pub fn submit_upgrade_proposal(
+            env: Env,
+            submitter: Address,
+            new_wasm_hash: BytesN<32>,
+            description: String,
+        ) -> Result<u64, AdminError> {
+            super::submit_upgrade_proposal(&env, submitter, new_wasm_hash, description)
         }
     }
 
@@ -2723,5 +2820,275 @@ mod tests {
 
         let result = client.try_is_proposal_ready(&9999);
         assert!(result.is_err());
+    }
+
+    // ───────── submit_upgrade_proposal (multi-sig gated WASM upgrades) ───────
+
+    #[test]
+    fn test_submit_upgrade_proposal_stores_correct_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let description = String::from_str(&env, "upgrade to v2");
+        let wasm_hash = BytesN::from_array(&env, &[7u8; 32]);
+        let id = client.submit_upgrade_proposal(&admin, &wasm_hash, &description);
+        assert_eq!(id, 0, "first submitted proposal must get ID 0");
+
+        // The proposal record must reflect the submission.
+        let stored: Proposal = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .expect("submitted proposal must exist in storage")
+        });
+        assert_eq!(stored.creator, admin);
+        assert_eq!(stored.description, description);
+        assert_eq!(
+            stored.approvals,
+            vec![&env, admin.clone()],
+            "submitter must be recorded as the first approval"
+        );
+        assert!(
+            !stored.executed,
+            "fresh proposal must not be marked executed"
+        );
+
+        // The WASM payload must be persisted under the same proposal ID.
+        let stored_hash: BytesN<32> = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::UpgradeProposal(id))
+                .expect("upgrade payload must exist in storage")
+        });
+        assert_eq!(stored_hash, wasm_hash);
+
+        // The shared proposal ID counter must have advanced.
+        let counter: u64 = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::ProposalIdCounter)
+                .expect("proposal ID counter must be set after submission")
+        });
+        assert_eq!(counter, 1);
+    }
+
+    #[test]
+    fn test_submit_upgrade_proposal_assigns_unique_incrementing_ids() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+        let first_hash = BytesN::from_array(&env, &[1u8; 32]);
+        let second_hash = BytesN::from_array(&env, &[2u8; 32]);
+        let first_id = client.submit_upgrade_proposal(
+            &admin,
+            &first_hash,
+            &String::from_str(&env, "first upgrade"),
+        );
+        let second_id = client.submit_upgrade_proposal(
+            &admin,
+            &second_hash,
+            &String::from_str(&env, "second upgrade"),
+        );
+
+        assert_eq!(first_id, 0);
+        assert_eq!(second_id, 1, "each submission must draw a fresh unique ID");
+
+        // Each ID must resolve to its own payload carrying its own WASM hash.
+        let stored_first: BytesN<32> = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::UpgradeProposal(first_id))
+                .expect("first upgrade payload must exist")
+        });
+        let stored_second: BytesN<32> = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::UpgradeProposal(second_id))
+                .expect("second upgrade payload must exist")
+        });
+        assert_eq!(stored_first, first_hash);
+        assert_eq!(stored_second, second_hash);
+
+        let counter: u64 = env
+            .as_contract(&contract_id, || {
+                env.storage().instance().get(&AdminKey::ProposalIdCounter)
+            })
+            .expect("counter must be set");
+        assert_eq!(counter, 2);
+    }
+
+    #[test]
+    fn test_submit_upgrade_proposal_emits_upg_prop_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+        let wasm_hash = BytesN::from_array(&env, &[3u8; 32]);
+        let id = client.submit_upgrade_proposal(
+            &admin,
+            &wasm_hash,
+            &String::from_str(&env, "evented upgrade"),
+        );
+
+        let events = env.events().all();
+        let upg_event = events
+            .iter()
+            .find(|(_, topics, _)| {
+                let topic: soroban_sdk::Symbol = topics
+                    .get(0)
+                    .unwrap_or_else(|| panic!("event must have a topic"))
+                    .try_into_val(&env)
+                    .unwrap_or_else(|_| soroban_sdk::Symbol::new(&env, ""));
+                topic == soroban_sdk::symbol_short!("upg_prop")
+            })
+            .expect("upg_prop event must be present");
+
+        let (emitter, topics, data) = upg_event;
+        assert_eq!(emitter, contract_id);
+        assert_eq!(
+            topics.len(),
+            1,
+            "topics should contain only the upg_prop symbol"
+        );
+        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic0, soroban_sdk::symbol_short!("upg_prop"));
+
+        // Data must be (proposal_id, submitter, new_wasm_hash).
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_id: u64 = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_submitter: Address = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_wasm_hash: BytesN<32> = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_id, id);
+        assert_eq!(event_submitter, admin);
+        assert_eq!(event_wasm_hash, wasm_hash);
+    }
+
+    #[test]
+    fn test_submit_upgrade_proposal_auto_approval_meets_single_member_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        // Fallback pool of [admin] with default threshold 1: the automatic
+        // self-approval must make the proposal executable-ready immediately.
+        client.init_storage(&admin);
+        let id = client.submit_upgrade_proposal(
+            &admin,
+            &BytesN::from_array(&env, &[4u8; 32]),
+            &String::from_str(&env, "fallback pool upgrade"),
+        );
+        assert!(client.is_proposal_ready(&id));
+    }
+
+    #[test]
+    fn test_submit_upgrade_proposal_creator_auto_approve_counts_toward_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let id = client.submit_upgrade_proposal(
+            &member,
+            &BytesN::from_array(&env, &[5u8; 32]),
+            &String::from_str(&env, "member-submitted upgrade"),
+        );
+
+        // Only the creator's auto-approval so far: below threshold of 2...
+        assert!(!client.is_proposal_ready(&id));
+        // ...one more approval satisfies the threshold.
+        client.approve_proposal(&admin, &id);
+        assert!(client.is_proposal_ready(&id));
+    }
+
+    #[test]
+    fn test_submit_upgrade_proposal_rejects_non_pool_member_and_persists_nothing() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+        let result = client.try_submit_upgrade_proposal(
+            &stranger,
+            &BytesN::from_array(&env, &[6u8; 32]),
+            &String::from_str(&env, "hostile upgrade"),
+        );
+        assert_eq!(result, Err(Ok(AdminError::UnauthorizedRole)));
+
+        // Rejection must leave storage untouched: no proposal record, no
+        // payload, and no counter advancement.
+        let has_proposal: bool = env.as_contract(&contract_id, || {
+            env.storage().instance().has(&AdminKey::Proposal(0))
+        });
+        assert!(!has_proposal);
+        let has_payload: bool = env.as_contract(&contract_id, || {
+            env.storage().instance().has(&AdminKey::UpgradeProposal(0))
+        });
+        assert!(!has_payload);
+        let counter: Option<u64> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&AdminKey::ProposalIdCounter)
+        });
+        assert_eq!(counter, None);
+    }
+
+    #[test]
+    fn test_submit_upgrade_proposal_rejects_zero_wasm_hash_and_persists_nothing() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+        let result = client.try_submit_upgrade_proposal(
+            &admin,
+            &BytesN::from_array(&env, &[0u8; 32]),
+            &String::from_str(&env, "invalid upgrade"),
+        );
+        assert_eq!(result, Err(Ok(AdminError::InvalidWasmHash)));
+
+        let has_proposal: bool = env.as_contract(&contract_id, || {
+            env.storage().instance().has(&AdminKey::Proposal(0))
+        });
+        assert!(!has_proposal);
+        let has_payload: bool = env.as_contract(&contract_id, || {
+            env.storage().instance().has(&AdminKey::UpgradeProposal(0))
+        });
+        assert!(!has_payload);
+        let counter: Option<u64> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&AdminKey::ProposalIdCounter)
+        });
+        assert_eq!(counter, None);
     }
 }
