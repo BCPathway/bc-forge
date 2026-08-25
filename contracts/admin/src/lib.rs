@@ -37,6 +37,13 @@
 //! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
 //! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//! | `4` | `InvalidAddress` | operation attempted with the zero address |
+//! | `5` | `InvalidRole` | unrecognized role discriminant supplied |
+//! | `6` | `AlreadyInitialized` | `init_storage` called on an initialized contract |
+//! | `7` | `ProposalNotFound` | `execute_upgrade` for a nonexistent proposal ID |
+//! | `8` | `QuorumNotMet` | `execute_upgrade` before the approval threshold is met |
+//! | `9` | `ProposalAlreadyExecuted` | `execute_upgrade` on an already-executed proposal |
+//! | `10` | `BatchLengthMismatch` | `execute_upgrade_batch` given unequal id/hash vectors |
 //!
 //! ## Event Emissions
 //!
@@ -45,6 +52,7 @@
 //! | `role_grnt` | Role grant | `set_admin`, `grant_role` | `(admin, role, address)` |
 //! | `role_rvk`  | Role revoke | `revoke_role` | `(admin, role, address)` |
 //! | `role_chk`  | Role check | `has_role` | `(address, role, result)` |
+//! | `upgraded`  | WASM upgrade | `execute_upgrade` | `(executor, proposal_id, wasm_hash)` |
 //!
 //! ## Storage Domain Separation
 //!
@@ -116,6 +124,8 @@
 //! - [`mark_executed`] sets the `executed` flag to `true`, making the proposal
 //!   immutable. It panics if the threshold has not been met or if the proposal
 //!   was already executed.
+//! - [`execute_upgrade`] applies a quorum-approved WASM upgrade on the current
+//!   contract. [`execute_upgrade_batch`] runs several such upgrades in sequence.
 //!
 //! ### Migration
 //! - [`migrate_admin`] is a one-shot upgrade helper: it copies the singular admin
@@ -132,7 +142,7 @@
 mod events;
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracterror, contracttype, vec, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, String, Vec};
 
 /// Errors returned by the admin access-control module.
 ///
@@ -156,6 +166,15 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
+    /// A governance proposal with the supplied ID does not exist.
+    ProposalNotFound = 7,
+    /// The proposal has not gathered enough approvals to meet the quorum.
+    QuorumNotMet = 8,
+    /// The proposal has already been executed; upgrades are one-shot.
+    ProposalAlreadyExecuted = 9,
+    /// `execute_upgrade_batch` was called with proposal ID and WASM hash vectors
+    /// of unequal length.
+    BatchLengthMismatch = 10,
 }
 
 /// Storage keys for the access-control layer.
@@ -822,13 +841,106 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
     extend_instance_ttl(env);
 }
 
+/// Executes a quorum-approved governance proposal as a WASM upgrade.
+///
+/// This is the multi-sig gated upgrade entry point: it triggers
+/// `env.deployer().update_current_contract_wasm()` on the currently executing
+/// contract once the referenced proposal has met its approval threshold.
+///
+/// # Errors
+///
+/// Returns [`AdminError::UnauthorizedRole`] if the executor is not an admin-pool member,
+/// [`AdminError::ProposalNotFound`] if no proposal exists under `proposal_id`,
+/// [`AdminError::ProposalAlreadyExecuted`] if the proposal was already executed, or
+/// [`AdminError::QuorumNotMet`] if the approval threshold has not been reached.
+///
+/// @notice Executes proposal `proposal_id` as a WASM upgrade to `wasm_hash`, provided quorum is met.
+/// @dev Requires pool membership and authorization. The executed flag is set before the WASM update
+///      (checks-effects-interactions) so reentrancy cannot double-execute the same proposal.
+/// @param env The Soroban environment.
+/// @param executor The address performing the upgrade; must be an admin-pool member.
+/// @param proposal_id The ID of the quorum-approved proposal authorizing this upgrade.
+/// @param wasm_hash The hash of the new WASM to install on the current contract.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
+pub fn execute_upgrade(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+    wasm_hash: BytesN<32>,
+) -> Result<(), AdminError> {
+    executor.require_auth();
+
+    let pool = get_admin_pool(env);
+    if !pool.contains(&executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+
+    if !is_proposal_ready(env, proposal_id) {
+        return Err(AdminError::QuorumNotMet);
+    }
+
+    // Effect first (checks-effects-interactions): persist the executed flag so
+    // a reentrant invocation cannot execute the same proposal twice.
+    proposal.executed = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
+
+    env.deployer().update_current_contract_wasm(wasm_hash);
+    Ok(())
+}
+
+/// Executes multiple quorum-approved WASM upgrades in sequence on the current contract.
+///
+/// Each `(proposal_ids[i], wasm_hashes[i])` pair is passed to [`execute_upgrade`] in order.
+/// The first failure aborts the remainder of the batch (no partial rollback of earlier
+/// successful upgrades — callers should size batches carefully).
+///
+/// @notice Runs a sequential batch of `execute_upgrade` calls for the current contract.
+/// @dev `proposal_ids` and `wasm_hashes` must have equal length.
+/// @param env The Soroban environment.
+/// @param executor The pool member authorizing every upgrade in the batch.
+/// @param proposal_ids Proposal IDs to execute, in order.
+/// @param wasm_hashes WASM hashes paired 1:1 with `proposal_ids`.
+/// @return `Ok(())` if every item succeeds, or the first [`AdminError`] encountered.
+pub fn execute_upgrade_batch(
+    env: &Env,
+    executor: Address,
+    proposal_ids: Vec<u64>,
+    wasm_hashes: Vec<BytesN<32>>,
+) -> Result<(), AdminError> {
+    if proposal_ids.len() != wasm_hashes.len() {
+        return Err(AdminError::BatchLengthMismatch);
+    }
+
+    for i in 0..proposal_ids.len() {
+        let proposal_id = proposal_ids.get(i).expect("index in range");
+        let wasm_hash = wasm_hashes.get(i).expect("index in range");
+        execute_upgrade(env, executor.clone(), proposal_id, wasm_hash)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
+    use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, TryIntoVal, Val};
 
     mod proptest;
 
@@ -896,6 +1008,24 @@ mod tests {
 
         pub fn mark_executed(env: Env, proposal_id: u64) {
             super::mark_executed(&env, proposal_id);
+        }
+
+        pub fn execute_upgrade(
+            env: Env,
+            executor: Address,
+            proposal_id: u64,
+            wasm_hash: BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+        }
+
+        pub fn execute_upgrade_batch(
+            env: Env,
+            executor: Address,
+            proposal_ids: Vec<u64>,
+            wasm_hashes: Vec<BytesN<32>>,
+        ) -> Result<(), AdminError> {
+            super::execute_upgrade_batch(&env, executor, proposal_ids, wasm_hashes)
         }
 
         pub fn require_super_admin(env: Env, address: Address) {
