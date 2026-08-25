@@ -938,6 +938,7 @@ mod tests {
         contract, contractimpl, Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Val,
     };
 
+    mod gas_bench;
     mod proptest;
 
     #[contract]
