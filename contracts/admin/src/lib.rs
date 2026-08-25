@@ -20,8 +20,8 @@
 //! | `Proposal(u64)` | `instance()` | `Proposal` | Governance proposal data | Every read/write |
 //! | `ProposalIdCounter` | `instance()` | `u64` | Auto-incrementing proposal ID generator | No |
 //! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
-//! | `UpgradeProposal(u64)` | `instance()` | `UpgradeProposal` | WASM upgrade proposal data | Every read/write |
-//! | `UpgradeProposalIdCounter` | `instance()` | `u64` | Auto-incrementing upgrade proposal ID generator | On write |
+//! | `UpgradeProposal(u64)` | `persistent()` | `UpgradeProposal` | Multi-sig WASM upgrade proposal state | Required of #653-#663 (no reader or writer on this branch) |
+//! | `UpgradeProposalIdCounter` | `instance()` | `u64` | Auto-incrementing upgrade proposal ID generator | No |
 //!
 //! ## `Role` Enum
 //!
@@ -59,10 +59,11 @@
 //! ## Storage Domain Separation
 //!
 //! - **`instance()`** — Contract-wide singleton state. Used for admin address, admin
-//!   pool, threshold, proposals, and the proposal ID counter.
+//!   pool, threshold, proposals, and both proposal ID counters.
 //! - **`persistent()`** — Per-key state with independent TTL. Used for role
-//!   assignments and the SuperAdmin mapping, since each `(Role, Address)` or
-//!   `SuperAdmin(Address)` pair has its own lifecycle.
+//!   assignments, the SuperAdmin mapping, and upgrade proposals, since each
+//!   `(Role, Address)`, `SuperAdmin(Address)` or `UpgradeProposal(u64)` entry has
+//!   its own lifecycle.
 //!
 //! ## Invariants & Edge Cases
 //!
@@ -155,7 +156,7 @@
 mod events;
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, Map, String, Vec};
 
 /// Errors returned by the admin access-control module.
 ///
@@ -222,9 +223,14 @@ pub enum AdminKey {
     ProposalIdCounter,
     /// Super-admin mapping populated by `migrate_admin` for legacy contracts.
     SuperAdmin(Address),
-    /// Multi-sig WASM upgrade proposal data, keyed by proposal ID.
+    /// Multi-sig WASM upgrade proposal state, keyed by upgrade proposal ID.
+    /// Lives in `persistent()` (unlike [`AdminKey::Proposal`]) so each proposal
+    /// carries its own TTL instead of riding the shared instance TTL, and so a
+    /// growing set of proposals does not inflate the instance entry that every
+    /// invocation loads and writes back.
     UpgradeProposal(u64),
-    /// Auto-incrementing counter for WASM upgrade proposal IDs.
+    /// Auto-incrementing counter for upgrade proposal IDs. Distinct from
+    /// [`AdminKey::ProposalIdCounter`], so the two flows never share an ID space.
     UpgradeProposalIdCounter,
 }
 
@@ -275,28 +281,97 @@ pub struct Proposal {
     pub executed: bool,
 }
 
-/// A multi-sig gated WASM upgrade proposal.
+/// Lifecycle state of an [`UpgradeProposal`].
+///
+/// A single enum rather than a set of booleans: the upgrade flow needs
+/// executed, cancelled and expired, which as three flags would admit four
+/// nonsensical combinations (`executed && cancelled`, and so on). One field
+/// makes those unrepresentable and every transition a single ledger write.
+///
+/// `Executed`, `Cancelled` and `Expired` are terminal; `Pending` and
+/// `Approved` are not.
+///
+/// @title ProposalStatus
+/// @notice Enumerates the lifecycle states of a multi-sig upgrade proposal.
+/// @dev `#[contracttype]` encodes a unit variant by its NAME symbol, not by a
+///      discriminant, so reordering or inserting variants is safe and renaming
+///      one is the breaking edit: every proposal already persisted keeps the old
+///      symbol and stops decoding. `test_proposal_status_variant_names_are_frozen`
+///      holds the encoded names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+pub enum ProposalStatus {
+    /// Submitted and still collecting votes.
+    Pending,
+    /// The weighted tally reached `quorum`; the proposal awaits execution.
+    Approved,
+    /// The upgrade was applied. Terminal.
+    Executed,
+    /// Withdrawn by the proposer before execution. Terminal.
+    Cancelled,
+    /// The voting window closed before quorum was reached, so the proposal is
+    /// reachable here only from `Pending`. Terminal.
+    ///
+    /// An `Approved` proposal that is never executed is NOT expired by this
+    /// variant: post-quorum staleness needs an execution deadline, which is
+    /// timelock state owned by #660 and deliberately absent from this struct.
+    /// `expire_proposal` (#663) therefore only ever moves `Pending` here.
+    Expired,
+}
+
+/// A multi-sig proposal to upgrade the WASM of one or more contracts.
+///
+/// Deliberately separate from [`Proposal`] rather than an extension of it:
+/// `Proposal` entries are already written to ledger, and adding or retyping
+/// fields on a `#[contracttype]` struct breaks the decode of every existing
+/// entry. This type is purely additive and needs no migration.
+///
+/// Stored under [`AdminKey::UpgradeProposal`] in `persistent()` storage. Every
+/// read and write must extend that entry's TTL past the end of its voting
+/// window, otherwise a proposal that sits idle can be archived before it can be
+/// voted on or expired. The extension has to cover the remaining window, so it
+/// is not the fixed bump this module applies to balance-shaped entries.
+///
+/// The proposal ID is the ledger key, not a field: a keyed read can only return
+/// what was written under that key, so an `id` inside the value would add a
+/// second copy that nothing can validate and that can silently disagree.
 ///
 /// @title UpgradeProposal
-/// @notice Holds the state of a WASM upgrade proposal awaiting approval and execution.
-/// @dev Stored separately from [`Proposal`] under [`AdminKey::UpgradeProposal(u64)`].
-///      A distinct struct (rather than extra fields on `Proposal`) keeps the encoding
-///      of already-persisted generic proposals stable, because `#[contracttype]`
-///      structs serialise field-by-name: adding fields would break decoding of
-///      previously written entries.
+/// @notice Holds the state of a WASM upgrade proposal awaiting votes and execution.
+/// @dev `#[contracttype]` encodes struct fields by NAME symbol, so renaming a
+///      field orphans every persisted proposal while reordering fields is safe.
+///      `test_upgrade_proposal_field_names_are_frozen` holds the encoded names.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct UpgradeProposal {
-    /// The address that created the proposal.
-    pub creator: Address,
-    /// Hash of the new WASM binary this proposal upgrades to.
-    pub new_wasm_hash: BytesN<32>,
-    /// Human-readable description of the upgrade.
-    pub description: String,
-    /// Addresses of pool admins that have approved the proposal.
-    pub approvals: Vec<Address>,
-    /// Whether the proposal has been executed.
-    pub executed: bool,
+    /// The address that submitted the proposal, and the only address permitted
+    /// to withdraw it.
+    pub proposer: Address,
+    /// The contract IDs this proposal upgrades. IDs only, never WASM hashes:
+    /// the hash for each target is resolved from the contract-to-hash map at
+    /// execution time. Ledger keys are not enumerable, so this list is the only
+    /// record of what an execution has to iterate over.
+    pub targets: Vec<Address>,
+    /// Voter address to the vote weight recorded at the moment the vote was
+    /// cast. Keyed by address so one-vote-per-address is structural rather than
+    /// a discipline every call site has to remember, and so a revocation
+    /// subtracts exactly the weight the vote added even if the voter's weight
+    /// has since changed. With no weight configuration every entry is `1` and
+    /// the tally is the approval count.
+    pub votes: Map<Address, u32>,
+    /// Approval threshold snapshotted at submission, so a later pool or
+    /// threshold change cannot retroactively move the bar for an in-flight
+    /// proposal. `u64` rather than `u32` to match the summed weighted tally, so
+    /// the comparison against it can never truncate.
+    pub quorum: u64,
+    /// Current lifecycle state. See [`ProposalStatus`].
+    pub status: ProposalStatus,
+    /// Close of the VOTING window, as an absolute unix timestamp in seconds
+    /// from `env.ledger().timestamp()`. Absolute rather than a creation time
+    /// plus a global window so the policy is snapshotted at submission. This is
+    /// the pre-quorum clock only: it decides `Pending` to `Expired` and nothing
+    /// else. Any post-quorum execution deadline is timelock state owned by #660.
+    pub expires_at: u64,
 }
 
 /// Strkey of the well-known Stellar "null" account: an ed25519 public key
@@ -976,8 +1051,12 @@ mod tests {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
+    use soroban_sdk::xdr::ScVal;
+    use soroban_sdk::{
+        contract, contractimpl, Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Val,
+    };
 
+    mod gas_bench;
     mod proptest;
 
     #[contract]
@@ -2889,273 +2968,211 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── #653: submit_upgrade_proposal ────────────────────────────────────────
+    /// Encoded variant names of [`ProposalStatus`], frozen by hand. Nothing here
+    /// is derived from the enum, so a rename that compiles everywhere else still
+    /// fails this list. Order is irrelevant: both sides are sorted by the SDK.
+    const PROPOSAL_STATUS_VARIANT_NAMES: [&str; 5] =
+        ["Approved", "Cancelled", "Executed", "Expired", "Pending"];
 
-    fn wasm_hash(env: &Env, first_byte: u8) -> BytesN<32> {
-        let mut bytes = [0u8; 32];
-        bytes[0] = first_byte;
-        BytesN::from_array(env, &bytes)
+    /// Encoded field names of [`UpgradeProposal`], frozen the same way.
+    const UPGRADE_PROPOSAL_FIELD_NAMES: [&str; 6] = [
+        "expires_at",
+        "proposer",
+        "quorum",
+        "status",
+        "targets",
+        "votes",
+    ];
+
+    /// Encoded value kind per [`UpgradeProposal`] field. A width change
+    /// (`quorum` from `u64` to `u32`) re-encodes the value and orphans stored
+    /// proposals exactly as a rename does, and no name check would catch it.
+    const UPGRADE_PROPOSAL_FIELD_KINDS: [(&str, &str); 6] = [
+        ("expires_at", "u64"),
+        ("proposer", "address"),
+        ("quorum", "u64"),
+        ("status", "vec"),
+        ("targets", "vec"),
+        ("votes", "map"),
+    ];
+
+    /// Every [`ProposalStatus`] variant. The match has no wildcard, so adding,
+    /// removing or renaming a variant fails to compile here instead of slipping
+    /// past the frozen list, and the length is tied to that list.
+    fn all_proposal_statuses() -> [ProposalStatus; PROPOSAL_STATUS_VARIANT_NAMES.len()] {
+        let all = [
+            ProposalStatus::Pending,
+            ProposalStatus::Approved,
+            ProposalStatus::Executed,
+            ProposalStatus::Cancelled,
+            ProposalStatus::Expired,
+        ];
+        for status in all {
+            match status {
+                ProposalStatus::Pending
+                | ProposalStatus::Approved
+                | ProposalStatus::Executed
+                | ProposalStatus::Cancelled
+                | ProposalStatus::Expired => (),
+            }
+        }
+        all
+    }
+
+    fn upgrade_proposal_fixture(env: &Env) -> UpgradeProposal {
+        let mut votes = Map::new(env);
+        votes.set(Address::generate(env), 1u32);
+        UpgradeProposal {
+            proposer: Address::generate(env),
+            targets: vec![env, Address::generate(env)],
+            votes,
+            quorum: 2,
+            status: ProposalStatus::Pending,
+            expires_at: 1_724_000_000,
+        }
+    }
+
+    /// Sorted set of symbols. Both sides of a frozen-name assertion go through
+    /// this, so the comparison cannot depend on declaration order.
+    fn symbol_set(env: &Env, names: impl IntoIterator<Item = Symbol>) -> Vec<Symbol> {
+        let mut set: Map<Symbol, ()> = Map::new(env);
+        for name in names {
+            set.set(name, ());
+        }
+        set.keys()
+    }
+
+    fn frozen_symbols(env: &Env, names: impl IntoIterator<Item = &'static str>) -> Vec<Symbol> {
+        symbol_set(env, names.into_iter().map(|name| Symbol::new(env, name)))
+    }
+
+    /// The symbol `#[contracttype]` writes to ledger for a unit variant.
+    fn encoded_variant_name(env: &Env, status: ProposalStatus) -> Symbol {
+        let encoded: Val = status.into_val(env);
+        let encoded: Vec<Symbol> = encoded.try_into_val(env).unwrap();
+        encoded.first().unwrap()
+    }
+
+    fn encoded_fields(env: &Env, proposal: UpgradeProposal) -> Map<Symbol, Val> {
+        let encoded: Val = proposal.into_val(env);
+        encoded.try_into_val(env).unwrap()
+    }
+
+    fn encoded_kind(env: &Env, value: Val) -> &'static str {
+        match ScVal::try_from_val(env, &value).unwrap() {
+            ScVal::U32(_) => "u32",
+            ScVal::U64(_) => "u64",
+            ScVal::Address(_) => "address",
+            ScVal::Vec(_) => "vec",
+            ScVal::Map(_) => "map",
+            _ => "unexpected",
+        }
+    }
+
+    fn encoded_key(env: &Env, key: AdminKey) -> ScVal {
+        let encoded: Val = key.into_val(env);
+        ScVal::try_from_val(env, &encoded).unwrap()
     }
 
     #[test]
-    fn test_submit_upgrade_proposal_assigns_unique_incrementing_ids() {
+    fn test_proposal_status_variant_names_are_frozen() {
         let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
 
-        client.set_admin(&admin);
-
-        let id0 = client.submit_upgrade_proposal(
-            &admin,
-            &wasm_hash(&env, 1),
-            &String::from_str(&env, "first upgrade"),
-        );
-        let id1 = client.submit_upgrade_proposal(
-            &admin,
-            &wasm_hash(&env, 2),
-            &String::from_str(&env, "second upgrade"),
+        let encoded = symbol_set(
+            &env,
+            all_proposal_statuses()
+                .into_iter()
+                .map(|status| encoded_variant_name(&env, status)),
         );
 
-        // IDs start at 0 and increment monotonically; they are never reused.
-        assert_eq!(id0, 0);
-        assert_eq!(id1, 1);
-        assert_ne!(id0, id1);
+        assert_eq!(encoded, frozen_symbols(&env, PROPOSAL_STATUS_VARIANT_NAMES));
     }
 
     #[test]
-    fn test_submit_upgrade_proposal_saves_proposal_to_storage() {
+    fn test_upgrade_proposal_field_names_are_frozen() {
         let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let hash = wasm_hash(&env, 7);
-        let description = String::from_str(&env, "upgrade to v2");
+        let proposal = upgrade_proposal_fixture(&env);
 
-        client.set_admin(&admin);
-        let id = client.submit_upgrade_proposal(&admin, &hash.clone(), &description.clone());
+        // No `..` in the pattern: adding, removing or renaming a field fails to
+        // compile here rather than escaping the frozen list.
+        let UpgradeProposal {
+            proposer: _,
+            targets: _,
+            votes: _,
+            quorum: _,
+            status: _,
+            expires_at: _,
+        } = &proposal;
 
-        let stored = client.get_upgrade_proposal(&id);
-        assert_eq!(stored.creator, admin);
-        assert_eq!(stored.new_wasm_hash, hash);
-        assert_eq!(stored.description, description);
-        assert!(!stored.executed);
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_auto_approves_creator() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let member = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
-
-        let id = client.submit_upgrade_proposal(
-            &member,
-            &wasm_hash(&env, 3),
-            &String::from_str(&env, "pool member proposal"),
-        );
-
-        // Mirrors create_proposal: the creator is recorded as the first approval.
-        let stored = client.get_upgrade_proposal(&id);
-        assert_eq!(stored.approvals.len(), 1);
-        assert_eq!(stored.approvals.get(0).unwrap(), member);
-        assert_eq!(stored.creator, member);
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_works_with_fallback_admin_pool() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        // No explicit set_admin_pool: the pool falls back to [admin].
-        client.init_storage(&admin);
-        let id = client.submit_upgrade_proposal(
-            &admin,
-            &wasm_hash(&env, 4),
-            &String::from_str(&env, "fallback pool"),
-        );
-        assert!(client.get_upgrade_proposal(&id).approvals.contains(&admin));
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_extends_ttl_across_ledger_advances() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-        let id = client.submit_upgrade_proposal(
-            &admin,
-            &wasm_hash(&env, 5),
-            &String::from_str(&env, "ttl test"),
-        );
-
-        let mut ledger_info = env.ledger().get();
-        ledger_info.sequence_number += 200;
-        env.ledger().set(ledger_info);
-
-        assert!(client.try_get_upgrade_proposal(&id).is_ok());
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_emits_upg_prop_event() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let hash = wasm_hash(&env, 9);
-
-        // init_storage emits no events, so `upg_prop` is the only event recorded
-        // for the submission call (`env.events().all()` reflects the most recent
-        // invocation).
-        client.init_storage(&admin);
-        let id = client.submit_upgrade_proposal(
-            &admin,
-            &hash.clone(),
-            &String::from_str(&env, "event test"),
-        );
-
-        let events = env.events().all();
-        assert_eq!(
-            events.len(),
-            1,
-            "expected exactly one event: upg_prop from the submission"
-        );
-
-        let (emitter, topics, data) = events.get(0).unwrap();
-        assert_eq!(emitter, contract_id);
-        assert_eq!(
-            topics.len(),
-            1,
-            "topics should contain only the upg_prop symbol"
-        );
-        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        assert_eq!(topic0, soroban_sdk::symbol_short!("upg_prop"));
-
-        // Data must be (proposal_id, creator, new_wasm_hash) as Vec<Val>.
-        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
-        let event_id: u64 = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
-        let event_creator: Address = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
-        let event_wasm_hash: BytesN<32> = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
-        assert_eq!(event_id, id);
-        assert_eq!(event_creator, admin);
-        assert_eq!(event_wasm_hash, hash);
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_rejects_non_pool_member() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let member = Address::generate(&env);
-        let stranger = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
-
-        let result = client.try_submit_upgrade_proposal(
-            &stranger,
-            &wasm_hash(&env, 1),
-            &String::from_str(&env, "unauthorized"),
-        );
-        assert_eq!(result, Err(Ok(AdminError::NotAdminPoolMember)));
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_rejects_zero_address_creator() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-
-        let result = client.try_submit_upgrade_proposal(
-            &zero_address(&env),
-            &wasm_hash(&env, 1),
-            &String::from_str(&env, "zero creator"),
-        );
-        assert_eq!(result, Err(Ok(AdminError::InvalidAddress)));
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_rejects_zero_wasm_hash() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-
-        let result = client.try_submit_upgrade_proposal(
-            &admin,
-            &BytesN::from_array(&env, &[0u8; 32]),
-            &String::from_str(&env, "empty payload"),
-        );
-        assert_eq!(result, Err(Ok(AdminError::InvalidWasmHash)));
-
-        // The rejected proposal must not consume an ID or leave state behind.
-        let id = client.submit_upgrade_proposal(
-            &admin,
-            &wasm_hash(&env, 1),
-            &String::from_str(&env, "valid after rejection"),
-        );
-        assert_eq!(id, 0);
-    }
-
-    #[test]
-    fn test_submit_upgrade_proposal_rejects_empty_description() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-
-        let result = client.try_submit_upgrade_proposal(
-            &admin,
-            &wasm_hash(&env, 1),
-            &String::from_str(&env, ""),
-        );
-        assert_eq!(result, Err(Ok(AdminError::EmptyDescription)));
-    }
-
-    #[test]
-    fn test_get_upgrade_proposal_rejects_nonexistent_proposal() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-        client.submit_upgrade_proposal(
-            &admin,
-            &wasm_hash(&env, 1),
-            &String::from_str(&env, "only one"),
-        );
+        let encoded = encoded_fields(&env, proposal);
 
         assert_eq!(
-            client.try_get_upgrade_proposal(&9999),
-            Err(Ok(AdminError::UpgradeProposalNotFound))
+            encoded.keys(),
+            frozen_symbols(&env, UPGRADE_PROPOSAL_FIELD_NAMES)
+        );
+    }
+
+    #[test]
+    fn test_upgrade_proposal_field_widths_are_frozen() {
+        let env = Env::default();
+        let encoded = encoded_fields(&env, upgrade_proposal_fixture(&env));
+
+        for (field, kind) in UPGRADE_PROPOSAL_FIELD_KINDS {
+            let value = encoded
+                .get(Symbol::new(&env, field))
+                .unwrap_or_else(|| panic!("field {field} is not encoded"));
+            assert_eq!(encoded_kind(&env, value), kind, "field {field}");
+        }
+
+        // The tally width lives in the vote map's values, which the `map` kind
+        // above cannot see. `u32` weights summed into the `u64` quorum is the
+        // whole reason those two types differ.
+        let votes: Map<Address, Val> = encoded
+            .get(Symbol::new(&env, "votes"))
+            .unwrap()
+            .try_into_val(&env)
+            .unwrap();
+        assert_eq!(encoded_kind(&env, votes.values().first().unwrap()), "u32");
+
+        // Element types, which the container kinds above cannot see. `targets`
+        // holding addresses rather than hashes is the #652 boundary: contract
+        // IDs live here, the wasm hash each one upgrades to comes from that
+        // issue's map at execution time.
+        let targets: Vec<Val> = encoded
+            .get(Symbol::new(&env, "targets"))
+            .unwrap()
+            .try_into_val(&env)
+            .unwrap();
+        assert_eq!(encoded_kind(&env, targets.first().unwrap()), "address");
+        assert_eq!(
+            encoded_kind(&env, votes.keys().first().unwrap().to_val()),
+            "address"
+        );
+    }
+
+    #[test]
+    fn test_upgrade_proposal_storage_keys_are_frozen() {
+        let env = Env::default();
+
+        // Expected keys built from literals, never from `AdminKey`: renaming a
+        // variant compiles, changes the real ledger key, and strands every
+        // entry already written under the old name.
+        let expected_proposal: Val = vec![
+            &env,
+            Symbol::new(&env, "UpgradeProposal").to_val(),
+            7u64.into_val(&env),
+        ]
+        .into_val(&env);
+        let expected_counter: Val =
+            vec![&env, Symbol::new(&env, "UpgradeProposalIdCounter").to_val()].into_val(&env);
+
+        assert_eq!(
+            encoded_key(&env, AdminKey::UpgradeProposal(7)),
+            ScVal::try_from_val(&env, &expected_proposal).unwrap()
+        );
+        assert_eq!(
+            encoded_key(&env, AdminKey::UpgradeProposalIdCounter),
+            ScVal::try_from_val(&env, &expected_counter).unwrap()
         );
     }
 }
