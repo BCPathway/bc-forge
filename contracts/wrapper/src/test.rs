@@ -409,7 +409,7 @@ fn test_approve_negative_amount_fails() {
 fn test_pauser_can_unpause_wrapper_as() {
     let env = Env::default();
     env.mock_all_auths();
-    let (wrapper, _underlying, admin, user, _wrapper_id) = setup(&env);
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
     let pauser = Address::generate(&env);
 
     wrapper.wrap(&user, &1_000_000);
