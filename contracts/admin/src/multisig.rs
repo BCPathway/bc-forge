@@ -456,9 +456,10 @@ pub fn create_role_proposal(
         soroban_sdk::panic_with_error!(env, AdminError::RoleAlreadyGranted);
     }
     let id = create_proposal(env, creator, description);
-    env.storage()
-        .instance()
-        .set(&AdminKey::RoleGrantProposal(id), &RoleGrantAction { role, target });
+    env.storage().instance().set(
+        &AdminKey::RoleGrantProposal(id),
+        &RoleGrantAction { role, target },
+    );
     extend_instance_ttl(env);
     id
 }
@@ -603,7 +604,6 @@ pub fn execute_role_proposal(
     proposal_id: u64,
 ) -> Result<(), AdminError> {
     let _reentrancy_guard = reentrancy_guard::enter(env);
-    executor.require_auth();
     if !get_admin_pool(env).contains(&executor) {
         return Err(AdminError::UnauthorizedRole);
     }

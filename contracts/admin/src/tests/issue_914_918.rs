@@ -61,7 +61,9 @@ fn test_role_proposal_requires_quorum_and_executes_the_bound_grant() {
     );
     assert_eq!(
         client.try_mark_executed(&proposal_id),
-        Err(Ok(AdminError::RoleProposalRequiresExecution)),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::RoleProposalRequiresExecution as u32,
+        ))),
     );
 
     client.approve_proposal(&second_admin, &proposal_id);
