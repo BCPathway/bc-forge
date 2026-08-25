@@ -140,6 +140,19 @@
 //!   while `env.ledger().timestamp() < timelock_expires_at`, giving pool members
 //!   a mandatory review window between quorum and code execution.
 //!
+//! ### WASM Upgrade Proposals
+//! - [`submit_upgrade_proposal`] mirrors [`create_proposal`] semantics: the creator
+//!   must authorize and be an admin-pool member, is recorded as the first approval,
+//!   and receives a unique auto-incrementing ID from its own counter, so generic and
+//!   upgrade proposal IDs never collide.
+//! - Upgrade proposals live under a separate `UpgradeProposal` struct (with the target
+//!   WASM hash) rather than extra fields on `Proposal`; `#[contracttype]` structs encode
+//!   fields by name, so extending `Proposal` in place would break decoding of entries
+//!   already persisted on-chain.
+//! - Input validation returns typed errors (`InvalidAddress`, `NotAdminPoolMember`,
+//!   `InvalidWasmHash`, `EmptyDescription`) instead of panicking; the all-zero 32-byte
+//!   WASM hash sentinel is rejected because it can never identify a real binary.
+//!
 //! ### Migration
 //! - [`migrate_admin`] is a one-shot upgrade helper: it copies the singular admin
 //!   stored under [`AdminKey::Admin`] into [`AdminKey::SuperAdmin`], enabling the
@@ -393,8 +406,16 @@ pub struct UpgradeProposal {
 /// that must never be allowed to hold a role.
 const ZERO_ADDRESS_STRKEY: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
+/// The all-zero 32-byte WASM hash sentinel. A proposal targeting it could never
+/// correspond to a real deployed binary, so submissions are rejected up front.
+const ZERO_WASM_HASH: [u8; 32] = [0u8; 32];
+
 fn is_zero_address(env: &Env, address: &Address) -> bool {
     *address == Address::from_str(env, ZERO_ADDRESS_STRKEY)
+}
+
+fn is_zero_wasm_hash(hash: &BytesN<32>) -> bool {
+    hash.to_array() == ZERO_WASM_HASH
 }
 
 fn require_non_zero_address(env: &Env, address: &Address) {
@@ -1266,6 +1287,22 @@ mod tests {
 
         pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
             super::is_proposal_ready(&env, proposal_id)
+        }
+
+        pub fn submit_upgrade_proposal(
+            env: Env,
+            creator: Address,
+            new_wasm_hash: BytesN<32>,
+            description: String,
+        ) -> Result<u64, AdminError> {
+            super::submit_upgrade_proposal(&env, creator, new_wasm_hash, description)
+        }
+
+        pub fn get_upgrade_proposal(
+            env: Env,
+            proposal_id: u64,
+        ) -> Result<UpgradeProposal, AdminError> {
+            super::get_upgrade_proposal(&env, proposal_id)
         }
     }
 

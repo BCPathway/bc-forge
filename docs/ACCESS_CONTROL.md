@@ -256,6 +256,16 @@ The `source` parameter must be a `Keypair` with the appropriate role. For
 - **Idempotent proposals.** Duplicate approvals and double-execution are
   rejected at the contract level.
 
+## WASM upgrade proposals
+
+`submit_upgrade_proposal` starts the multi-sig gated WASM upgrade flow. A
+proposal records the submitting pool member, the target 32-byte WASM hash, and a
+non-empty description; the creator is recorded as the first approval and the
+proposal receives a unique auto-incrementing ID from its own counter (so generic
+and upgrade proposal IDs never collide). Submissions by non-pool members, the
+zero address, the all-zero WASM hash, or with an empty description are rejected
+with typed errors.
+
 ## Source of truth
 
 - Role definitions and guards:
