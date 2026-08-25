@@ -19,6 +19,7 @@
 //! | `Threshold` | `instance()` | `u32` | Approvals required to pass a proposal | On set |
 //! | `Proposal(u64)` | `instance()` | `Proposal` | Governance proposal data | Every read/write |
 //! | `ProposalIdCounter` | `instance()` | `u64` | Auto-incrementing proposal ID generator | No |
+//! | `ProposalTimelock(u64)` | `instance()` | `u64` | Unix timestamp when a quorate proposal's timelock expires | On write/read |
 //! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
 //!
 //! ## `Role` Enum
@@ -37,6 +38,13 @@
 //! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
 //! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//! | `4` | `InvalidAddress` | operation attempted with the zero address |
+//! | `5` | `InvalidRole` | unrecognized role discriminant supplied |
+//! | `6` | `AlreadyInitialized` | `init_storage` called on an initialized contract |
+//! | `7` | `ProposalNotFound` | `execute_upgrade` for a nonexistent proposal ID |
+//! | `8` | `QuorumNotMet` | `execute_upgrade` before the approval threshold is met |
+//! | `9` | `ProposalAlreadyExecuted` | `execute_upgrade` on an already-executed proposal |
+//! | `10` | `TimelockActive` | `execute_upgrade` before the mandatory delay has elapsed |
 //!
 //! ## Event Emissions
 //!
@@ -45,6 +53,7 @@
 //! | `role_grnt` | Role grant | `set_admin`, `grant_role` | `(admin, role, address)` |
 //! | `role_rvk`  | Role revoke | `revoke_role` | `(admin, role, address)` |
 //! | `role_chk`  | Role check | `has_role` | `(address, role, result)` |
+//! | `upgraded`  | WASM upgrade | `execute_upgrade` | `(executor, proposal_id, wasm_hash)` |
 //!
 //! ## Storage Domain Separation
 //!
@@ -116,6 +125,17 @@
 //! - [`mark_executed`] sets the `executed` flag to `true`, making the proposal
 //!   immutable. It panics if the threshold has not been met or if the proposal
 //!   was already executed.
+//! - [`execute_upgrade`] is the WASM-upgrade executor: it verifies the caller
+//!   is an admin-pool member, that the referenced proposal exists, has not been
+//!   executed yet, and meets quorum before flipping the executed flag (checks-
+//!   effects-interactions, so reentrancy cannot double-execute) and finally
+//!   invoking `env.deployer().update_current_contract_wasm()`.
+//! - **Timelock**: the moment a proposal reaches quorum its unlock time is
+//!   recorded as `now + TIMELOCK_DELAY_SECS` under [`AdminKey::ProposalTimelock`]
+//!   and never reset by later votes. [`execute_upgrade`] enforces the guard via
+//!   [`require_timelock_expired`], reverting with [`AdminError::TimelockActive`]
+//!   while `env.ledger().timestamp() < timelock_expires_at`, giving pool members
+//!   a mandatory review window between quorum and code execution.
 //!
 //! ### Migration
 //! - [`migrate_admin`] is a one-shot upgrade helper: it copies the singular admin
@@ -156,6 +176,15 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
+    /// A governance proposal with the supplied ID does not exist.
+    ProposalNotFound = 7,
+    /// The proposal has not gathered enough approvals to meet the quorum.
+    QuorumNotMet = 8,
+    /// The proposal has already been executed; upgrades are one-shot.
+    ProposalAlreadyExecuted = 9,
+    /// The mandatory timelock delay has not elapsed yet: the current ledger
+    /// timestamp is still before the proposal's recorded unlock time.
+    TimelockActive = 10,
 }
 
 /// Storage keys for the access-control layer.
@@ -189,6 +218,11 @@ pub enum AdminKey {
     Proposal(u64),
     /// Auto-incrementing counter for proposal IDs.
     ProposalIdCounter,
+    /// Maps a quorate proposal ID to the unix timestamp (seconds) at which its
+    /// mandatory timelock expires and execution may proceed. Recorded once,
+    /// when the approval threshold is first met; absent while the proposal is
+    /// still short of quorum.
+    ProposalTimelock(u64),
     /// Super-admin mapping populated by `migrate_admin` for legacy contracts.
     SuperAdmin(Address),
 }
@@ -222,6 +256,14 @@ pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
 /// The Minter role constant — can be imported as `MINTER_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
 pub const MINTER_ROLE: Role = Role::Minter;
+
+/// Mandatory delay between the moment a proposal reaches quorum and the moment
+/// [`execute_upgrade`] may act on it, in seconds (24 hours).
+///
+/// The clock starts when quorum is first reached ([`create_proposal`] or
+/// [`approve_proposal`]) and is never reset, so pool members always get a
+/// full review window between approval and executable code changes.
+pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// A multi-sig governance proposal.
 ///
@@ -738,6 +780,9 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         .instance()
         .set(&AdminKey::Proposal(id), &proposal);
     extend_instance_ttl(env);
+    // The creator's auto-approval can satisfy a threshold-1 pool immediately,
+    // so the timelock clock may already be running at creation time.
+    _start_timelock_if_quorate(env, id);
     id
 }
 
@@ -773,6 +818,9 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
+    // If this vote completes the quorum, snapshot the unlock time now; votes
+    // cast while already quorate must never push the clock back.
+    _start_timelock_if_quorate(env, proposal_id);
 }
 
 /// Checks whether a governance proposal has met its approval threshold.
@@ -822,13 +870,181 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
     extend_instance_ttl(env);
 }
 
+/// Records the unlock time for `proposal_id` if it has reached quorum and no
+/// timelock has been recorded yet.
+///
+/// This helper is intentionally private. It is invoked by [`create_proposal`]
+/// (the creator's auto-approval can satisfy a threshold-1 pool immediately) and
+/// by [`approve_proposal`] (when a vote completes the quorum), so the clock
+/// always starts at the exact moment quorum is first reached. The entry is
+/// written once: later votes on an already-quorate proposal never reset or
+/// extend the delay.
+///
+/// @notice Snapshots `now + TIMELOCK_DELAY_SECS` for a proposal that just became quorate.
+/// @dev Idempotent: a no-op when [`AdminKey::ProposalTimelock(id)`] already exists or the
+///      approval threshold is not met.
+/// @param env The Soroban environment.
+/// @param proposal_id The ID of the proposal whose timelock may need to start.
+fn _start_timelock_if_quorate(env: &Env, proposal_id: u64) {
+    let key = AdminKey::ProposalTimelock(proposal_id);
+    if env.storage().instance().has(&key) {
+        return;
+    }
+    if !is_proposal_ready(env, proposal_id) {
+        return;
+    }
+    let unlock_at = env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS);
+    env.storage().instance().set(&key, &unlock_at);
+    extend_instance_ttl(env);
+}
+
+/// Returns the unix timestamp at which `proposal_id`'s timelock expires, if any.
+///
+/// @notice Returns `Some(unlock_time)` once the proposal has reached quorum, `None` before that.
+/// @dev The unlock time is snapshotted when quorum is first reached and is never reset.
+/// @param env The Soroban environment.
+/// @param proposal_id The ID of the proposal to query.
+/// @return The absolute unix timestamp (seconds) when execution becomes permitted, or `None`.
+pub fn get_proposal_unlock_time(env: &Env, proposal_id: u64) -> Option<u64> {
+    let unlock_at = env
+        .storage()
+        .instance()
+        .get::<_, u64>(&AdminKey::ProposalTimelock(proposal_id));
+    if unlock_at.is_some() {
+        extend_instance_ttl(env);
+    }
+    unlock_at
+}
+
+/// Timelock guard — reverts while the mandatory delay is still running.
+///
+/// Use this before any state-changing execution that must respect the
+/// multi-sig review window (e.g. at the top of [`execute_upgrade`]).
+///
+/// # Errors
+///
+/// Returns [`AdminError::QuorumNotMet`] if no timelock has been recorded for
+/// `proposal_id` (which implies quorum was never reached), or
+/// [`AdminError::TimelockActive`] while `env.ledger().timestamp()` is strictly
+/// below the recorded unlock time. Execution is permitted from the unlock time
+/// itself onwards (inclusive boundary).
+///
+/// @notice Reverts unless the timelock for `proposal_id` has expired.
+/// @dev Compares `env.ledger().timestamp()` to the stored `timelock_expires_at`; the
+///      comparison is strict (`<`), so execution succeeds exactly when
+///      `timestamp >= timelock_expires_at`.
+/// @param env The Soroban environment.
+/// @param proposal_id The ID of the proposal being executed.
+/// @return `Ok(())` when the timelock has expired, otherwise an [`AdminError`].
+#[inline(always)]
+pub fn require_timelock_expired(env: &Env, proposal_id: u64) -> Result<(), AdminError> {
+    let timelock_expires_at: u64 = env
+        .storage()
+        .instance()
+        .get(&AdminKey::ProposalTimelock(proposal_id))
+        .ok_or(AdminError::QuorumNotMet)?;
+
+    // Revert if the timelock is still active: current ledger time < unlock time.
+    if env.ledger().timestamp() < timelock_expires_at {
+        return Err(AdminError::TimelockActive);
+    }
+    Ok(())
+}
+
+/// Executes a quorum-approved governance proposal as a WASM upgrade.
+///
+/// This is the multi-sig gated upgrade entry point: it triggers the Soroban
+/// `upgrade_contract` call (`env.deployer().update_current_contract_wasm()`)
+/// on behalf of the currently executing contract once the referenced proposal
+/// has met its approval threshold **and** its mandatory timelock delay
+/// ([`TIMELOCK_DELAY_SECS`], started when quorum was reached) has elapsed.
+///
+/// # Authorization & Guarantees
+///
+/// - The executor must be an admin-pool member and must have authorized the
+///   invocation; execution is not restricted to the singular contract admin.
+/// - The proposal identified by `proposal_id` must exist, must not have been
+///   executed before, and must satisfy [`is_proposal_ready`] (quorum check
+///   against the configured [`get_threshold`]).
+/// - The timelock guard ([`require_timelock_expired`]) reverts with
+///   [`AdminError::TimelockActive`] while `env.ledger().timestamp() <`
+///   `timelock_expires_at`, guaranteeing a review window between quorum and
+///   code execution.
+/// - The `executed` flag is persisted **before** the external WASM update is
+///   performed (checks-effects-interactions), so a reentrant call can never
+///   execute the same proposal twice.
+///
+/// # Errors
+///
+/// Returns [`AdminError::UnauthorizedRole`] if the executor is not an admin-pool member,
+/// [`AdminError::ProposalNotFound`] if no proposal exists under `proposal_id`,
+/// [`AdminError::ProposalAlreadyExecuted`] if the proposal was already executed,
+/// [`AdminError::QuorumNotMet`] if the approval threshold has not been reached, or
+/// [`AdminError::TimelockActive`] if the current ledger time is before the unlock time.
+///
+/// # Events
+///
+/// Emits an `upgraded` event with `(executor, proposal_id, wasm_hash)` on success.
+///
+/// @notice Executes proposal `proposal_id` as a WASM upgrade to `wasm_hash`, provided quorum is met and the timelock has expired.
+/// @dev Requires pool membership and authorization. One-shot per proposal: the executed flag is set before the WASM update to guard against reentrancy. Reverts with `TimelockActive` while the mandatory delay is running.
+/// @param env The Soroban environment.
+/// @param executor The address performing the upgrade; must be an admin-pool member.
+/// @param proposal_id The ID of the quorum-approved proposal authorizing this upgrade.
+/// @param wasm_hash The hash of the new WASM to install on the current contract.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
+pub fn execute_upgrade(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+    wasm_hash: soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
+    executor.require_auth();
+
+    let pool = get_admin_pool(env);
+    if !pool.contains(&executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+
+    // Quorum check: enough unique approvals must have been collected.
+    if !is_proposal_ready(env, proposal_id) {
+        return Err(AdminError::QuorumNotMet);
+    }
+
+    // Timelock check: revert while current ledger time < unlock time (#665).
+    require_timelock_expired(env, proposal_id)?;
+
+    // Effect first (checks-effects-interactions): persist the executed flag so
+    // a reentrant invocation cannot execute the same proposal twice.
+    proposal.executed = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
+
+    env.deployer().update_current_contract_wasm(wasm_hash);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::{contract, contractimpl, Address, Env, TryIntoVal, Val};
+    use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, TryIntoVal, Val};
 
     mod proptest;
 
@@ -896,6 +1112,19 @@ mod tests {
 
         pub fn mark_executed(env: Env, proposal_id: u64) {
             super::mark_executed(&env, proposal_id);
+        }
+
+        pub fn execute_upgrade(
+            env: Env,
+            executor: Address,
+            proposal_id: u64,
+            wasm_hash: soroban_sdk::BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+        }
+
+        pub fn get_proposal_unlock_time(env: Env, proposal_id: u64) -> Option<u64> {
+            super::get_proposal_unlock_time(&env, proposal_id)
         }
 
         pub fn require_super_admin(env: Env, address: Address) {
@@ -2723,5 +2952,344 @@ mod tests {
 
         let result = client.try_is_proposal_ready(&9999);
         assert!(result.is_err());
+    }
+
+    // ─── Timelock / execute_upgrade (issue #665) ─────────────────────────────
+
+    /// Minimal valid Soroban contract WASM: an empty module carrying the
+    /// mandatory `contractenvmetav0` custom section (interface version 22,
+    /// no pre-release), which is the smallest binary the host accepts as
+    /// contract code.
+    const DUMMY_WASM: &[u8] = &[
+        // WASM header: magic "\0asm" + version 1.
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // Custom section (id 0), 30 bytes of content.
+        0x00, 0x1e, // Name length (17) + "contractenvmetav0".
+        0x11, b'c', b'o', b'n', b't', b'r', b'a', b'c', b't', b'e', b'n', b'v', b'm', b'e', b't',
+        b'a', b'v', b'0', // ScEnvMetaEntry XDR: kind = interface version.
+        0x00, 0x00, 0x00, 0x00, // Protocol version 22.
+        0x00, 0x00, 0x00, 0x16, // Pre-release version 0.
+        0x00, 0x00, 0x00, 0x00,
+    ];
+
+    /// Shared multi-sig fixture: admin + member pool with threshold 2, and a
+    /// proposal created by `admin` that needs one more approval to reach quorum.
+    fn setup_quorate_proposal(
+        env: &Env,
+        client: &AdminContractClient<'_>,
+        member: &Address,
+    ) -> u64 {
+        let admin = Address::generate(env);
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![env, admin.clone(), member.clone()], &2);
+        let id = client.create_proposal(&admin, &String::from_str(env, "wasm upgrade"));
+        // Creator auto-approval alone does not meet threshold 2: no timelock yet.
+        assert_eq!(client.get_proposal_unlock_time(&id), None);
+        client.approve_proposal(member, &id);
+        id
+    }
+
+    #[test]
+    fn test_timelock_starts_when_quorum_is_reached() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let member = Address::generate(&env);
+
+        let created_at = env.ledger().timestamp();
+        let id = setup_quorate_proposal(&env, &client, &member);
+
+        // Unlock time is snapshotted at the moment quorum was reached.
+        assert_eq!(
+            client.get_proposal_unlock_time(&id),
+            Some(created_at + TIMELOCK_DELAY_SECS)
+        );
+    }
+
+    #[test]
+    fn test_timelock_starts_at_creation_for_threshold_one_pool() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        // Default fallback pool is [admin] with threshold 1: creating the
+        // proposal reaches quorum instantly.
+        let created_at = env.ledger().timestamp();
+        let id = client.create_proposal(&admin, &String::from_str(&env, "instant quorum"));
+
+        assert_eq!(
+            client.get_proposal_unlock_time(&id),
+            Some(created_at + TIMELOCK_DELAY_SECS)
+        );
+    }
+
+    #[test]
+    fn test_late_votes_do_not_reset_the_timelock() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+        let third = Address::generate(&env);
+
+        // Pool of three, threshold two.
+        client.set_admin(&admin);
+        client.set_admin_pool(
+            &vec![&env, admin.clone(), member.clone(), third.clone()],
+            &2,
+        );
+
+        let created_at = env.ledger().timestamp();
+        let id = client.create_proposal(&admin, &String::from_str(&env, "reset check"));
+        client.approve_proposal(&member, &id);
+        let expected_unlock = created_at + TIMELOCK_DELAY_SECS;
+        assert_eq!(client.get_proposal_unlock_time(&id), Some(expected_unlock));
+
+        // A vote cast long after quorum must not push the unlock time back.
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += 10 * TIMELOCK_DELAY_SECS;
+        env.ledger().set(ledger_info);
+        client.approve_proposal(&third, &id);
+
+        assert_eq!(client.get_proposal_unlock_time(&id), Some(expected_unlock));
+    }
+
+    #[test]
+    fn test_execute_upgrade_executes_after_timelock_expires() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        // Any pool member may execute; use the approving member as executor.
+        let member = Address::generate(&env);
+
+        let id = setup_quorate_proposal(&env, &client, &member);
+        let wasm_hash = env
+            .deployer()
+            .upload_contract_wasm(Bytes::from_slice(&env, DUMMY_WASM));
+
+        // Advance exactly to the unlock time; the boundary itself is inclusive.
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += TIMELOCK_DELAY_SECS;
+        env.ledger().set(ledger_info);
+
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Ok(Ok(()))
+        );
+
+        // The success is announced through the `upgraded` event. Snapshot the
+        // events before any `as_contract` access, which starts a fresh
+        // recording frame.
+        let events = env.events().all();
+        let (_, _, data) = events
+            .iter()
+            .find(|(_, topics, _)| {
+                let topic: soroban_sdk::Symbol = topics
+                    .get(0)
+                    .unwrap_or_else(|| panic!("event must have a topic"))
+                    .try_into_val(&env)
+                    .unwrap_or_else(|_| soroban_sdk::Symbol::new(&env, ""));
+                topic == soroban_sdk::symbol_short!("upgraded")
+            })
+            .unwrap_or_else(|| panic!("no upgraded event among {} recorded events", events.len()));
+        let (event_executor, event_proposal_id, event_wasm_hash): (
+            Address,
+            u64,
+            soroban_sdk::BytesN<32>,
+        ) = data.try_into_val(&env).expect("event data must decode");
+        assert_eq!(event_executor, member);
+        assert_eq!(event_proposal_id, id);
+        assert_eq!(event_wasm_hash, wasm_hash);
+
+        // The executed flag was persisted before the WASM update.
+        let executed = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get::<_, Proposal>(&AdminKey::Proposal(id))
+                .expect("proposal must exist")
+                .executed
+        });
+        assert!(executed);
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_already_executed_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let member = Address::generate(&env);
+
+        let id = setup_quorate_proposal(&env, &client, &member);
+        let wasm_hash = env
+            .deployer()
+            .upload_contract_wasm(Bytes::from_slice(&env, DUMMY_WASM));
+
+        // Flip the executed flag out-of-band (instead of executing for real,
+        // which would swap the contract code away from the test module) to
+        // prove upgrades are one-shot per proposal.
+        env.as_contract(&contract_id, || {
+            let mut proposal = env
+                .storage()
+                .instance()
+                .get::<_, Proposal>(&AdminKey::Proposal(id))
+                .expect("proposal must exist");
+            proposal.executed = true;
+            env.storage()
+                .instance()
+                .set(&AdminKey::Proposal(id), &proposal);
+        });
+
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Err(Ok(AdminError::ProposalAlreadyExecuted))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_non_pool_member() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let member = Address::generate(&env);
+        let outsider = Address::generate(&env);
+
+        let id = setup_quorate_proposal(&env, &client, &member);
+        let wasm_hash = env
+            .deployer()
+            .upload_contract_wasm(Bytes::from_slice(&env, DUMMY_WASM));
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += TIMELOCK_DELAY_SECS;
+        env.ledger().set(ledger_info);
+
+        assert_eq!(
+            client.try_execute_upgrade(&outsider, &id, &wasm_hash),
+            Err(Ok(AdminError::UnauthorizedRole))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_unknown_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let wasm_hash = env
+            .deployer()
+            .upload_contract_wasm(Bytes::from_slice(&env, DUMMY_WASM));
+
+        assert_eq!(
+            client.try_execute_upgrade(&admin, &9999, &wasm_hash),
+            Err(Ok(AdminError::ProposalNotFound))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_before_quorum_even_after_delay() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let member = Address::generate(&env);
+
+        // Only the creator approved: below threshold 2, so no timelock exists
+        // and execution must stay blocked even once plenty of time has passed.
+        let id = {
+            let admin = Address::generate(&env);
+            client.set_admin(&admin);
+            client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+            client.create_proposal(&admin, &String::from_str(&env, "not yet quorate"))
+        };
+        assert_eq!(client.get_proposal_unlock_time(&id), None);
+
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += 100 * TIMELOCK_DELAY_SECS;
+        env.ledger().set(ledger_info);
+        let wasm_hash = env
+            .deployer()
+            .upload_contract_wasm(Bytes::from_slice(&env, DUMMY_WASM));
+
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Err(Ok(AdminError::QuorumNotMet))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_reverts_while_timelock_active() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let member = Address::generate(&env);
+
+        let id = setup_quorate_proposal(&env, &client, &member);
+        let wasm_hash = env
+            .deployer()
+            .upload_contract_wasm(Bytes::from_slice(&env, DUMMY_WASM));
+
+        // Advance past creation but stop one second short of the unlock time:
+        // current ledger time < timelock_expires_at must revert.
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += TIMELOCK_DELAY_SECS - 1;
+        env.ledger().set(ledger_info);
+
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Err(Ok(AdminError::TimelockActive))
+        );
+
+        // The reverted attempt must not have mutated state: after the delay
+        // elapses the same proposal still executes normally.
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += 1;
+        env.ledger().set(ledger_info);
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Ok(Ok(()))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_boundary_is_inclusive() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let member = Address::generate(&env);
+
+        let id = setup_quorate_proposal(&env, &client, &member);
+        let wasm_hash = env
+            .deployer()
+            .upload_contract_wasm(Bytes::from_slice(&env, DUMMY_WASM));
+
+        // timestamp == timelock_expires_at - 1: strictly before, reverts...
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += TIMELOCK_DELAY_SECS - 1;
+        env.ledger().set(ledger_info);
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Err(Ok(AdminError::TimelockActive))
+        );
+
+        // ...and timestamp == timelock_expires_at: permitted.
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += 1;
+        env.ledger().set(ledger_info);
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Ok(Ok(()))
+        );
     }
 }
