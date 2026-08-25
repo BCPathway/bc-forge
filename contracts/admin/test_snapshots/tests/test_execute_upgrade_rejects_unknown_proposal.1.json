@@ -6,28 +6,6 @@
   "auth": [
     [],
     [],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_proposal",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "string": "fallback test"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
     []
   ],
   "ledger": {
@@ -133,85 +111,6 @@
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                         }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "Proposal"
-                            },
-                            {
-                              "u64": 0
-                            }
-                          ]
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "approvals"
-                              },
-                              "val": {
-                                "vec": [
-                                  {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                                  }
-                                ]
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "creator"
-                              },
-                              "val": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "description"
-                              },
-                              "val": {
-                                "string": "fallback test"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "executed"
-                              },
-                              "val": {
-                                "bool": false
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "ProposalIdCounter"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "u64": 1
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "ProposalTimelock"
-                            },
-                            {
-                              "u64": 0
-                            }
-                          ]
-                        },
-                        "val": {
-                          "u64": 86400
-                        }
                       }
                     ]
                   }
@@ -225,35 +124,40 @@
       ],
       [
         {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": 801925984706572462
-              }
-            },
-            "durability": "temporary"
+          "contract_code": {
+            "hash": "bae1fafff2f8e84026e43dbc73e4f832b173bf7cec45d6c2d5493a88025a44e1"
           }
         },
         [
           {
             "last_modified_ledger_seq": 0,
             "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 801925984706572462
+              "contract_code": {
+                "ext": {
+                  "v1": {
+                    "ext": "v0",
+                    "cost_inputs": {
+                      "ext": "v0",
+                      "n_instructions": 0,
+                      "n_functions": 0,
+                      "n_globals": 0,
+                      "n_table_entries": 0,
+                      "n_types": 0,
+                      "n_data_segments": 0,
+                      "n_elem_segments": 0,
+                      "n_imports": 0,
+                      "n_exports": 0,
+                      "n_data_segment_bytes": 0
+                    }
                   }
                 },
-                "durability": "temporary",
-                "val": "void"
+                "hash": "bae1fafff2f8e84026e43dbc73e4f832b173bf7cec45d6c2d5493a88025a44e1",
+                "code": "0061736d01000000001e11636f6e7472616374656e766d6574617630000000000000001600000000"
               }
             },
             "ext": "v0"
           },
-          6311999
+          4095
         ]
       ],
       [

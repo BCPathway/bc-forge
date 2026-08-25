@@ -19,7 +19,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "string": "fallback test"
+                  "string": "instant quorum"
                 }
               ]
             }
@@ -172,7 +172,7 @@
                                 "symbol": "description"
                               },
                               "val": {
-                                "string": "fallback test"
+                                "string": "instant quorum"
                               }
                             },
                             {
