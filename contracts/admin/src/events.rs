@@ -3,7 +3,7 @@
 //! @title Admin Events
 //! @author bc-forge contributors
 
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, BytesN, Env};
 
 use crate::Role;
 
@@ -52,5 +52,29 @@ pub fn emit_role_checked(env: &Env, address: &Address, role: Role, result: bool)
     env.events().publish(
         (symbol_short!("role_chk"),),
         (address.clone(), role, result),
+    );
+}
+
+/// Emitted when a multi-sig WASM upgrade proposal is submitted. Resolves issue #653.
+///
+/// Topics: `upg_prop`
+/// Data:   `(proposal_id, creator, new_wasm_hash)`
+///
+/// @notice Publishes upgrade-proposal submission data including the assigned proposal ID,
+///         the submitting pool member, and the target WASM hash.
+/// @dev The event topics include the `upg_prop` symbol.
+/// @param env The Soroban environment.
+/// @param creator The address that submitted the proposal.
+/// @param proposal_id The unique ID assigned to the proposal.
+/// @param new_wasm_hash The 32-byte hash of the WASM binary the proposal upgrades to.
+pub fn emit_upgrade_proposal_submitted(
+    env: &Env,
+    creator: &Address,
+    proposal_id: u64,
+    new_wasm_hash: &BytesN<32>,
+) {
+    env.events().publish(
+        (symbol_short!("upg_prop"),),
+        (proposal_id, creator.clone(), new_wasm_hash.clone()),
     );
 }

@@ -64,6 +64,8 @@ storage.
 | `revoke_role` | Configured Admin | `admin.require_auth` |
 | `set_admin_pool` | Configured Admin | `admin.require_auth` |
 | proposal approval/execution | Admin-pool member and threshold | membership and approval checks |
+| `submit_upgrade_proposal` | Admin-pool member | membership check (`Address::require_auth`) |
+| `get_upgrade_proposal` | Public read | none |
 
 ## Governance proposals
 
@@ -79,6 +81,16 @@ stateDiagram-v2
 
 Duplicate approvals and execution before the configured threshold are rejected.
 Once marked executed, a proposal cannot be executed again.
+
+## WASM upgrade proposals
+
+`submit_upgrade_proposal` starts the multi-sig gated WASM upgrade flow. A
+proposal records the submitting pool member, the target 32-byte WASM hash, and a
+non-empty description; the creator is recorded as the first approval and the
+proposal receives a unique auto-incrementing ID from its own counter (so generic
+and upgrade proposal IDs never collide). Submissions by non-pool members, the
+zero address, the all-zero WASM hash, or with an empty description are rejected
+with typed errors.
 
 ## Source of truth
 
