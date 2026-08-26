@@ -23,6 +23,7 @@
 //! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
 //! | `UpgradeProposal(u64)` | `persistent()` | `UpgradeProposal` | Multi-sig WASM upgrade proposal state | Required of #653-#663 (no reader or writer on this branch) |
 //! | `UpgradeProposalIdCounter` | `instance()` | `u64` | Auto-incrementing upgrade proposal ID generator | No |
+//! | `ContractUpgradeTarget(Address)` | `persistent()` | `BytesN<32>` | Targeted WASM upgrade hash for contract ID | On set |
 //!
 //! ## `Role` Enum
 //!
@@ -155,7 +156,7 @@
 mod events;
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracterror, contracttype, vec, Address, Env, Map, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, Map, String, Vec};
 
 /// Errors returned by the admin access-control module.
 ///
@@ -237,6 +238,9 @@ pub enum AdminKey {
     /// Auto-incrementing counter for upgrade proposal IDs. Distinct from
     /// [`AdminKey::ProposalIdCounter`], so the two flows never share an ID space.
     UpgradeProposalIdCounter,
+    /// Maps a contract `Address` to its targeted WASM upgrade hash (`BytesN<32>`).
+    /// Stored in `persistent()` so each contract entry carries its own TTL.
+    ContractUpgradeTarget(Address),
 }
 
 /// Roles recognized by the access-control layer.
@@ -1143,6 +1147,45 @@ pub fn execute_upgrade(
     Ok(())
 }
 
+/// Sets the target WASM hash for the given contract ID.
+///
+/// Caller must hold the `SuperAdmin` role.
+///
+/// @notice Sets the target WASM hash for `contract_id`.
+/// @dev Requires caller authorization and the `SuperAdmin` role via `require_super_admin`.
+///      Stored under `AdminKey::ContractUpgradeTarget(contract_id)` in persistent storage.
+/// @param env The Soroban environment.
+/// @param caller The address performing the set; must be a super-admin.
+/// @param contract_id The contract address to map to a WASM hash.
+/// @param wasm_hash The 32-byte WASM hash target.
+pub fn set_upgrade_target(
+    env: &Env,
+    caller: &Address,
+    contract_id: &Address,
+    wasm_hash: BytesN<32>,
+) {
+    require_super_admin(env, caller);
+    let key = AdminKey::ContractUpgradeTarget(contract_id.clone());
+    env.storage().persistent().set(&key, &wasm_hash);
+    extend_storage_ttl_for_key(env, &key);
+}
+
+/// Returns the target WASM hash for the given contract ID, or `None` if unset.
+///
+/// @notice Returns the target WASM hash for `contract_id`, or `None` if not set.
+/// @dev Reads from persistent storage under `AdminKey::ContractUpgradeTarget(contract_id)`.
+/// @param env The Soroban environment.
+/// @param contract_id The contract address to look up.
+/// @return The 32-byte WASM hash target if set, or `None`.
+pub fn get_upgrade_target(env: &Env, contract_id: &Address) -> Option<BytesN<32>> {
+    let key = AdminKey::ContractUpgradeTarget(contract_id.clone());
+    let target = env.storage().persistent().get(&key);
+    if target.is_some() {
+        extend_storage_ttl_for_key(env, &key);
+    }
+    target
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1151,7 +1194,7 @@ mod tests {
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::xdr::ScVal;
     use soroban_sdk::{
-        contract, contractimpl, Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Val,
+        contract, contractimpl, Address, BytesN, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Val,
     };
 
     mod gas_bench;
@@ -1266,6 +1309,19 @@ mod tests {
 
         pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
             super::is_proposal_ready(&env, proposal_id)
+        }
+
+        pub fn set_upgrade_target(
+            env: Env,
+            caller: Address,
+            contract_id: Address,
+            wasm_hash: BytesN<32>,
+        ) {
+            super::set_upgrade_target(&env, &caller, &contract_id, wasm_hash);
+        }
+
+        pub fn get_upgrade_target(env: Env, contract_id: Address) -> Option<BytesN<32>> {
+            super::get_upgrade_target(&env, &contract_id)
         }
     }
 
@@ -3268,6 +3324,88 @@ mod tests {
         assert_eq!(
             encoded_key(&env, AdminKey::UpgradeProposalIdCounter),
             ScVal::try_from_val(&env, &expected_counter).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_set_and_get_upgrade_target_happy_path() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let target_contract = Address::generate(&env);
+        let wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0xab; 32]);
+
+        client.set_admin(&admin);
+        client.set_upgrade_target(&admin, &target_contract, &wasm_hash);
+
+        let retrieved = client.get_upgrade_target(&target_contract);
+        assert_eq!(retrieved, Some(wasm_hash));
+    }
+
+    #[test]
+    fn test_set_upgrade_target_overwrite() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let target_contract = Address::generate(&env);
+        let hash_1 = soroban_sdk::BytesN::from_array(&env, &[0x01; 32]);
+        let hash_2 = soroban_sdk::BytesN::from_array(&env, &[0x02; 32]);
+
+        client.set_admin(&admin);
+        client.set_upgrade_target(&admin, &target_contract, &hash_1);
+        assert_eq!(client.get_upgrade_target(&target_contract), Some(hash_1));
+
+        client.set_upgrade_target(&admin, &target_contract, &hash_2);
+        assert_eq!(client.get_upgrade_target(&target_contract), Some(hash_2));
+    }
+
+    #[test]
+    fn test_set_upgrade_target_non_super_admin_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let target_contract = Address::generate(&env);
+        let wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0xcd; 32]);
+
+        client.set_admin(&admin);
+
+        let result = client.try_set_upgrade_target(&non_admin, &target_contract, &wasm_hash);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert_eq!(client.get_upgrade_target(&target_contract), None);
+    }
+
+    #[test]
+    fn test_get_upgrade_target_unset() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let target_contract = Address::generate(&env);
+
+        assert_eq!(client.get_upgrade_target(&target_contract), None);
+    }
+
+    #[test]
+    fn test_contract_upgrade_target_storage_key_is_frozen() {
+        let env = Env::default();
+        let dummy_addr = Address::generate(&env);
+        let expected_target: Val = vec![
+            &env,
+            Symbol::new(&env, "ContractUpgradeTarget").to_val(),
+            dummy_addr.to_val(),
+        ]
+        .into_val(&env);
+
+        assert_eq!(
+            encoded_key(&env, AdminKey::ContractUpgradeTarget(dummy_addr)),
+            ScVal::try_from_val(&env, &expected_target).unwrap()
         );
     }
 }
