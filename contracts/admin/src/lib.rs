@@ -3345,6 +3345,39 @@ mod tests {
     }
 
     #[test]
+    fn test_approve_upgrade() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let signer1 = Address::generate(&env);
+        let signer2 = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), signer1.clone(), signer2.clone()], &3);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "upgrade proposal"));
+
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&AdminKey::Proposal(id)).unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 1);
+
+        client.approve_proposal(&signer1, &id);
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&AdminKey::Proposal(id)).unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 2);
+
+        client.approve_proposal(&signer2, &id);
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&AdminKey::Proposal(id)).unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 3);
+        assert!(client.is_proposal_ready(&id));
+    }
+
+    #[test]
     #[should_panic(expected = "only admins can approve proposals")]
     fn test_approve_proposal_rejects_non_admin() {
         let env = Env::default();
