@@ -426,8 +426,7 @@ fn test_distribute_rewards_increases_assets_without_increasing_shares() {
     assert_eq!(initial_assets, 2_000_000);
 
     // Rewarder distributes 1,000,000 underlying tokens as capital reward
-    let res = wrapper.distribute_rewards(&rewarder, &1_000_000);
-    assert!(res.is_ok());
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
 
     // Verify token balance (assets) increased by 1,000,000 while share supply is unchanged
     assert_eq!(wrapper.supply(), initial_supply);
@@ -468,7 +467,7 @@ fn test_distribute_rewards_uninitialized_fails() {
 fn test_distribute_rewards_when_paused_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
     let wrapper_id = wrapper.address.clone();
     let rewarder = Address::generate(&env);
 
