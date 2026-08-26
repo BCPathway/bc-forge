@@ -28,7 +28,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 13] = [
+const DATA_KEY_SLOT_NAMES: [&str; 14] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -36,6 +36,7 @@ const DATA_KEY_SLOT_NAMES: [&str; 13] = [
     "Decimals",
     "FeeConfig",
     "FeeExemption",
+    "Lockup",
     "MaxSupply",
     "Name",
     "PendingAdmin",
@@ -84,6 +85,7 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::Allowance(_, _) => "Allowance",
         DataKey::AllowanceExp(_, _) => "AllowanceExp",
         DataKey::Balance(_) => "Balance",
+        DataKey::Lockup(_) => "Lockup",
         DataKey::Decimals => "Decimals",
         DataKey::Name => "Name",
         DataKey::Symbol => "Symbol",
@@ -95,7 +97,7 @@ fn data_key_name(key: &DataKey) -> &'static str {
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 13] {
+fn all_data_keys(env: &Env) -> [DataKey; 14] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -104,6 +106,7 @@ fn all_data_keys(env: &Env) -> [DataKey; 13] {
         DataKey::Allowance(owner.clone(), spender.clone()),
         DataKey::AllowanceExp(owner.clone(), spender),
         DataKey::Balance(owner.clone()),
+        DataKey::Lockup(owner.clone()),
         DataKey::Decimals,
         DataKey::Name,
         DataKey::Symbol,
@@ -115,7 +118,7 @@ fn all_data_keys(env: &Env) -> [DataKey; 13] {
     ]
 }
 
-fn all_admin_keys(env: &Env) -> [AdminKey; 8] {
+fn all_admin_keys(env: &Env) -> [AdminKey; 9] {
     let address = Address::generate(env);
     [
         AdminKey::Admin,
@@ -125,7 +128,8 @@ fn all_admin_keys(env: &Env) -> [AdminKey; 8] {
         AdminKey::Threshold,
         AdminKey::Proposal(1),
         AdminKey::ProposalIdCounter,
-        AdminKey::SuperAdmin(address),
+        AdminKey::SuperAdmin(address.clone()),
+        AdminKey::RoleMask(address),
     ]
 }
 
@@ -175,7 +179,7 @@ fn test_initialize_writes_only_its_documented_slots() {
         // writes a bare `Symbol` slot into this same namespace. Enumerating
         // every family below is what makes "only" a tested claim rather than
         // a spot check on the slots someone thought to name.
-        let role = AdminKey::Role(Role::Admin, admin.clone());
+        let role = AdminKey::RoleMask(admin.clone());
         assert!(
             env.storage().persistent().has(&role),
             "set_admin should grant the Admin role in persistent storage"
@@ -194,6 +198,9 @@ fn test_initialize_writes_only_its_documented_slots() {
             );
         }
         for key in all_admin_keys(&env).iter() {
+            if *key == role {
+                continue;
+            }
             assert!(
                 !env.storage().persistent().has(key),
                 "initialize should write no persistent admin slot"
@@ -293,13 +300,13 @@ fn test_reinitialize_is_rejected_and_leaves_every_slot_intact() {
         assert!(
             env.storage()
                 .persistent()
-                .has(&AdminKey::Role(Role::Admin, admin.clone())),
+                .has(&AdminKey::RoleMask(admin.clone())),
             "the original admin keeps its role"
         );
         assert!(
             !env.storage()
                 .persistent()
-                .has(&AdminKey::Role(Role::Admin, stranger.clone())),
+                .has(&AdminKey::RoleMask(stranger.clone())),
             "the rejected caller must not be granted the Admin role"
         );
         let stored: Option<Address> = env.storage().instance().get(&DataKey::Admin);
@@ -393,13 +400,13 @@ fn test_writing_the_token_admin_key_redirects_the_admin_module_lookup() {
         assert!(
             env.storage()
                 .persistent()
-                .has(&AdminKey::Role(Role::Admin, admin.clone())),
+                .has(&AdminKey::RoleMask(admin.clone())),
             "the role entry sits in its own slot and survives"
         );
         assert!(
             !env.storage()
                 .persistent()
-                .has(&AdminKey::Role(Role::Admin, stranger.clone())),
+                .has(&AdminKey::RoleMask(stranger.clone())),
             "overwriting the admin slot grants no role"
         );
     });
@@ -578,7 +585,7 @@ fn test_guard_slot_shares_persistent_storage_with_no_collision() {
         assert!(
             env.storage()
                 .persistent()
-                .has(&AdminKey::Role(Role::Admin, admin.clone())),
+                .has(&AdminKey::RoleMask(admin.clone())),
             "the guard write leaves the role entry in place"
         );
         let balance: Option<i128> = env
