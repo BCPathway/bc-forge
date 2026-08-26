@@ -74,6 +74,8 @@ pub enum WrapperError {
     UnderlyingCallFailed = 8,
     AlreadyPaused = 9,
     NotPaused = 10,
+    /// Share price cannot be computed: there are no outstanding vault shares.
+    ZeroShares = 11,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -154,6 +156,15 @@ impl WrapperContract {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(id.clone()), &balance);
+    }
+
+    /// Reads the total underlying token assets currently held by the vault.
+    ///
+    /// @notice Queries the underlying SEP-41 token balance of this contract.
+    fn read_total_assets(env: &Env) -> i128 {
+        let underlying_id = Self::read_underlying(env);
+        let underlying_client = TokenClient::new(env, &underlying_id);
+        underlying_client.balance(&env.current_contract_address())
     }
 
     /// Reads the total vault share supply from instance storage.
@@ -508,9 +519,42 @@ impl WrapperContract {
     /// Returns the total underlying token assets held by the vault contract.
     pub fn total_assets(env: Env) -> i128 {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        let underlying_id = Self::read_underlying(&env);
-        let underlying_client = TokenClient::new(&env, &underlying_id);
-        underlying_client.balance(&env.current_contract_address())
+        Self::read_total_assets(&env)
+    }
+
+    /// Calculates the current vault share price: `total_assets / total_shares`.
+    ///
+    /// The share price is the amount of underlying tokens each outstanding
+    /// vault share is entitled to. It rises when rewards are distributed
+    /// (`distribute_rewards`) and stays flat on wrap/unwrap at a 1:1 rate.
+    ///
+    /// # Math safety
+    /// The division uses [`i128::checked_div`], and the zero-share case is
+    /// rejected up front with [`WrapperError::ZeroShares`], so this function
+    /// can never panic on a divide-by-zero.
+    ///
+    /// # Errors
+    /// * [`WrapperError::NotInitialized`] if the contract is uninitialized.
+    /// * [`WrapperError::ZeroShares`] if there are no outstanding vault shares.
+    ///
+    /// @param env The Soroban environment.
+    /// @return `Ok(share_price)` where `share_price = total_assets / total_shares`
+    ///         (integer division, rounded down), or an error as documented above.
+    pub fn calculate_share_price(env: Env) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+
+        let total_shares = Self::read_supply(&env);
+        if total_shares == 0 {
+            return Err(WrapperError::ZeroShares);
+        }
+
+        let total_tokens = Self::read_total_assets(&env);
+        // total_shares > 0 here, so checked_div cannot fail: it only returns
+        // None for a zero divisor (excluded above) or i128::MIN / -1 (impossible
+        // with a positive divisor). The guard keeps the math panic-free.
+        total_tokens
+            .checked_div(total_shares)
+            .ok_or(WrapperError::ZeroShares)
     }
 
     /// Withdraw `shares` of wrapped tokens and receive a proportional share of

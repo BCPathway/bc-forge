@@ -87,6 +87,20 @@ export class WrapperClient {
   }
 
   /**
+   * Calculate the current vault share price (total assets / total shares).
+   *
+   * The share price is the amount of underlying tokens each outstanding vault
+   * share is entitled to. Throws when the contract reports an error, e.g. when
+   * there are no outstanding shares yet (divide-by-zero protection).
+   *
+   * @returns Share price as bigint (integer division, rounded down)
+   */
+  async calculateSharePrice(): Promise<bigint> {
+    const result = await this.queryContract('calculate_share_price', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Get the underlying SEP-41 token contract address being wrapped.
    */
   async getUnderlyingToken(): Promise<string> {
