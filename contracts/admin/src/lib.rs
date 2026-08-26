@@ -723,6 +723,22 @@ mod tests {
             super::require_super_admin(&env, &address);
         }
 
+        pub fn has_admin(env: Env) -> bool {
+            super::has_admin(&env)
+        }
+
+        pub fn migrate_admin(env: Env) {
+            super::migrate_admin(&env);
+        }
+
+        pub fn get_admin_pool(env: Env) -> Vec<Address> {
+            super::get_admin_pool(&env)
+        }
+
+        pub fn get_threshold(env: Env) -> u32 {
+            super::get_threshold(&env)
+        }
+
         pub fn require_fee_admin(env: Env, address: Address) {
             super::require_fee_admin(&env, &address);
         }
@@ -2011,6 +2027,135 @@ mod tests {
 
         let result = client.try_require_admin(&zero_address(&env));
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    fn test_migrate_admin_populates_super_admin_storage() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let admin = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            set_admin(&env, &admin);
+            migrate_admin(&env);
+        });
+
+        env.as_contract(&contract_id, || {
+            assert!(env
+                .storage()
+                .persistent()
+                .has(&AdminKey::SuperAdmin(admin.clone())));
+        });
+    }
+
+    #[test]
+    fn test_migrate_admin_noops_when_no_admin_set() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let admin = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            migrate_admin(&env);
+            assert!(!env.storage().persistent().has(&AdminKey::SuperAdmin(admin)));
+        });
+    }
+
+    #[test]
+    fn test_has_admin_returns_true_when_admin_set() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        assert!(client.has_admin());
+    }
+
+    #[test]
+    fn test_has_admin_returns_false_when_no_admin() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        assert!(!client.has_admin());
+    }
+
+    #[test]
+    fn test_require_fee_admin_succeeds_for_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.require_fee_admin(&admin);
+    }
+
+    #[test]
+    fn test_require_fee_admin_fails_when_role_not_held() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let result = client.try_require_fee_admin(&unauthorized);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+    }
+
+    #[test]
+    fn test_set_admin_pool_stores_pool_and_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member1 = Address::generate(&env);
+        let member2 = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, member1.clone(), member2.clone()], &2);
+
+        let pool = client.get_admin_pool();
+        assert_eq!(pool.len(), 2);
+        assert_eq!(pool.get(0).unwrap(), member1);
+        assert_eq!(pool.get(1).unwrap(), member2);
+        assert_eq!(client.get_threshold(), 2);
+    }
+
+    #[test]
+    fn test_get_admin_pool_falls_back_to_single_admin() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let pool = client.get_admin_pool();
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool.get(0).unwrap(), admin);
+    }
+
+    #[test]
+    fn test_get_admin_pool_returns_empty_when_no_admin() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let pool = client.get_admin_pool();
+        assert_eq!(pool.len(), 0);
+    }
+
+    #[test]
+    fn test_get_threshold_defaults_to_one() {
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        assert_eq!(client.get_threshold(), 1);
     }
 
     #[test]
