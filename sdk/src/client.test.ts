@@ -155,4 +155,94 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(client.simulateBurnFrom.length).toBe(4); // 4 parameters
     });
   });
+
+  describe('RBAC and Contract Connection Methods', () => {
+    it('should invoke grantRole with correct parameters', async () => {
+      const targetUser = Keypair.random().publicKey();
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-grant',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.grantRole(
+        'SuperAdmin' as any,
+        targetUser,
+        adminKeypair,
+      );
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('grant_role');
+      expect(source).toBe(adminKeypair);
+    });
+
+    it('should invoke revokeRole with correct parameters', async () => {
+      const targetUser = Keypair.random().publicKey();
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-revoke',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.revokeRole(
+        'Minter' as any,
+        targetUser,
+        adminKeypair,
+      );
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('revoke_role');
+      expect(source).toBe(adminKeypair);
+    });
+
+    it('should invoke setAdminContract with correct parameters', async () => {
+      const adminContractId = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-link',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.setAdminContract(adminContractId, adminKeypair);
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('set_admin_contract');
+      expect(source).toBe(adminKeypair);
+    });
+
+    it('should invoke setDependentToken with correct parameters', async () => {
+      const tokenContractId = 'CTOKENAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-token-link',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.setDependentToken(tokenContractId, adminKeypair);
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('set_token');
+      expect(source).toBe(adminKeypair);
+    });
+  });
 });

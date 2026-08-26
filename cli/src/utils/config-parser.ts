@@ -12,6 +12,9 @@ export interface ContractDeploymentConfig {
   contractId?: string;
   wasmHash?: string;
   deployer?: string;
+  adminContractId?: string;
+  tokenContractId?: string;
+  linkedContracts?: Record<string, string>;
   [key: string]: unknown;
 }
 
