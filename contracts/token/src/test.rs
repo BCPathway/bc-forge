@@ -223,6 +223,22 @@ fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
 }
 
 #[test]
+fn test_upgrade_preserves_minted_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &recipient, &1_000);
+    let wasm_hash = env.deployer().upload_contract_wasm(BcForgeToken);
+
+    client.upgrade(&admin, &wasm_hash);
+
+    assert_eq!(client.balance(&recipient), 1_000);
+    assert_eq!(client.supply(), 1_000);
+}
+
+#[test]
 fn test_default_max_supply_is_unlimited() {
     let env = Env::default();
     env.mock_all_auths();
