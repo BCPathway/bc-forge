@@ -19,7 +19,12 @@
  */
 
 export { bcForgeClient, Role } from './client';
-export type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
+export type {
+  BatchMintRecipient,
+  bcForgeClientConfig,
+  RbacInitResult,
+  TransactionResult,
+} from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
