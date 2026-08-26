@@ -318,10 +318,12 @@ impl BcForgeToken {
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
+    /// Configures default rate limits for mint, transfer, transfer_from, burn, and burn_from operations.
     /// Emits the `init` event. Can only be called once.
     ///
     /// @notice Initializes the token contract with the given admin, decimals, name, and symbol.
     /// @dev This function can only be called once. Subsequent calls will revert with `AlreadyInitialized`.
+    ///      Default rate limits are set to 1000 operations per 60-second window for each operation type.
     /// @param env The Soroban environment.
     /// @param admin_address The address to set as the contract admin.
     /// @param decimal The number of decimal places for the token.
@@ -345,8 +347,53 @@ impl BcForgeToken {
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
         Self::write_max_supply(&env, i128::MAX);
+
+        Self::set_default_rate_limits(&env);
+
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
+    }
+
+    /// Sets default rate limits for all operation types during initialization.
+    ///
+    /// Configures global rate limits with sensible defaults:
+    /// - 1000 operations per 60-second window for each operation type.
+    ///
+    /// @param env The Soroban environment.
+    fn set_default_rate_limits(env: &Env) {
+        let default_limit: u64 = 1000;
+        let default_window: u64 = 60;
+
+        bc_forge_rate_limit::BcForgeRateLimit::internal_set_global_rate_limit(
+            env,
+            &soroban_sdk::String::from_str(env, crate::rate_limit::OPERATION_MINT),
+            default_limit,
+            default_window,
+        );
+        bc_forge_rate_limit::BcForgeRateLimit::internal_set_global_rate_limit(
+            env,
+            &soroban_sdk::String::from_str(env, crate::rate_limit::OPERATION_TRANSFER),
+            default_limit,
+            default_window,
+        );
+        bc_forge_rate_limit::BcForgeRateLimit::internal_set_global_rate_limit(
+            env,
+            &soroban_sdk::String::from_str(env, crate::rate_limit::OPERATION_TRANSFER_FROM),
+            default_limit,
+            default_window,
+        );
+        bc_forge_rate_limit::BcForgeRateLimit::internal_set_global_rate_limit(
+            env,
+            &soroban_sdk::String::from_str(env, crate::rate_limit::OPERATION_BURN),
+            default_limit,
+            default_window,
+        );
+        bc_forge_rate_limit::BcForgeRateLimit::internal_set_global_rate_limit(
+            env,
+            &soroban_sdk::String::from_str(env, crate::rate_limit::OPERATION_BURN_FROM),
+            default_limit,
+            default_window,
+        );
     }
 
     /// Returns the admin address.

@@ -29,6 +29,11 @@
       "pattern": "^G[A-Z2-7]{55}$",
       "description": "Stellar G-address of the contract admin"
     },
+    "pauser": {
+      "type": "string",
+      "pattern": "^G[A-Z2-7]{55}$",
+      "description": "Stellar G-address to receive the Pauser role (multisig)"
+    },
     "network": {
       "type": "string",
       "enum": ["mainnet", "testnet", "futurenet", "standalone", "custom"],

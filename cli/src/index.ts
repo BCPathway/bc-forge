@@ -66,12 +66,14 @@ configCmd
   .option('--name <string>', 'Token name', 'MyToken')
   .option('--symbol <string>', 'Token symbol', 'MTK')
   .option('--decimals <number>', 'Token decimals', '7')
+  .option('--admin <string>', 'Admin Stellar G-address')
   .action((options) => {
     const templateConfig: BcForgeConfig = {
       version: '1.0.0',
       name: options.name,
       symbol: options.symbol,
       decimals: parseInt(options.decimals, 10),
+      admin: options.admin,
       network: 'testnet',
       rpcUrl: 'https://soroban-testnet.stellar.org',
       networkPassphrase: 'Test SDF Network ; September 2015'
@@ -113,6 +115,8 @@ program
   .option('--decimals <number>', 'Decimal places')
   .option('--name <string>', 'Token name')
   .option('--symbol <string>', 'Token symbol')
+  .option('--pauser <address>', 'Multisig address to grant Pauser role to')
+  .option('--verify', 'Verify on-chain state after initialization', false)
   .action(async (options) => {
     try {
       const fileConfig = loadConfigFile().config;
@@ -120,6 +124,8 @@ program
       const decimals = options.decimals ? parseInt(options.decimals, 10) : fileConfig?.decimals || 7;
       const name = options.name || fileConfig?.name;
       const symbol = options.symbol || fileConfig?.symbol;
+      const pauser = options.pauser || fileConfig?.pauser;
+      const verify = options.verify || false;
 
       if (!admin || !name || !symbol) {
         throw new Error('Missing required options: admin, name, symbol must be specified or present in .bc-forge.json');
@@ -133,14 +139,47 @@ program
 
       logger.warn('Initializing contract...');
       logger.debug(`Init params: name=${name}, symbol=${symbol}, decimals=${decimals}, admin=${admin}`);
-      
+
       const result = await client.initialize(admin, decimals, name, symbol, source);
 
-      if (result.success) {
-        logger.success(`Contract initialized. TX: ${result.hash}`);
-      } else {
+      if (!result.success) {
         logger.error(`Initialization failed. TX: ${result.hash}`);
         process.exitCode = 1;
+        return;
+      }
+      logger.success(`Contract initialized. TX: ${result.hash}`);
+
+      if (pauser) {
+        logger.warn(`Granting Pauser role to ${pauser}...`);
+        logger.debug(`Pauser grant: admin=${admin}, pauser=${pauser}`);
+        const pauserResult = await client.grantPauser(pauser, source);
+        if (pauserResult.success) {
+          logger.success(`Pauser role granted. TX: ${pauserResult.hash}`);
+        } else {
+          logger.error(`Failed to grant Pauser role. TX: ${pauserResult.hash}`);
+          process.exitCode = 1;
+          return;
+        }
+      }
+
+      if (verify) {
+        logger.warn('Verifying on-chain state...');
+        const state = await client.verifyInitializedState(admin, name, symbol, decimals);
+        if (state.valid) {
+          logger.success('On-chain state verification passed');
+          logger.info(`  Admin: ${state.admin}`);
+          logger.info(`  Name: ${state.name}`);
+          logger.info(`  Symbol: ${state.symbol}`);
+          logger.info(`  Decimals: ${state.decimals}`);
+          logger.info(`  Total Supply: ${state.totalSupply}`);
+          if (pauser) {
+            logger.info(`  Pauser role granted: ${state.pauserGranted}`);
+          }
+        } else {
+          logger.error('On-chain state verification failed:');
+          state.errors.forEach(err => logger.error(`  - ${err}`));
+          process.exitCode = 1;
+        }
       }
     } catch (err: any) {
       logger.error(`Error: ${err.message}`);

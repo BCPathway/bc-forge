@@ -21,6 +21,7 @@ export interface BcForgeConfig {
   symbol: string;
   decimals?: number;
   admin?: string;
+  pauser?: string;
   network?: 'mainnet' | 'testnet' | 'futurenet' | 'standalone' | 'custom' | string;
   rpcUrl?: string;
   networkPassphrase?: string;

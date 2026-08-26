@@ -60,6 +60,26 @@ export interface BatchMintRecipient {
   amount: bigint;
 }
 
+/** Result of on-chain state verification after initialization */
+export interface InitVerificationResult {
+  /** Whether all checks passed */
+  valid: boolean;
+  /** Admin address from contract */
+  admin?: string;
+  /** Token name from contract */
+  name?: string;
+  /** Token symbol from contract */
+  symbol?: string;
+  /** Token decimals from contract */
+  decimals?: number;
+  /** Total token supply */
+  totalSupply?: bigint;
+  /** Whether the Pauser role was granted to the expected address */
+  pauserGranted?: boolean;
+  /** List of verification errors (empty if valid) */
+  errors: string[];
+}
+
 /** Role for role-based access control */
 export enum Role {
   Admin = 'Admin',
@@ -169,6 +189,94 @@ export class bcForgeClient {
   async getVersion(): Promise<string> {
     const result = await this.queryContract('version', []);
     return scValToNative(result) as string;
+  }
+
+  // ─── Initialization Verification ──────────────────────────────────────────
+
+  /**
+   * Verify the on-chain state matches expected values after initialization.
+   *
+   * Queries the contract for its current state and compares against the
+   * expected values provided during initialization.
+   *
+   * @param expectedAdmin - The expected admin address
+   * @param expectedName - The expected token name
+   * @param expectedSymbol - The expected token symbol
+   * @param expectedDecimals - The expected number of decimals
+   * @param expectedPauser - Optional pauser address to verify role grant
+   * @returns Verification result with any mismatches
+   */
+  async verifyInitializedState(
+    expectedAdmin: string,
+    expectedName: string,
+    expectedSymbol: string,
+    expectedDecimals: number,
+    expectedPauser?: string,
+  ): Promise<InitVerificationResult> {
+    const errors: string[] = [];
+    const result: InitVerificationResult = { valid: false, errors };
+
+    try {
+      const onChainAdmin = await this.getAdmin();
+      result.admin = onChainAdmin;
+      if (onChainAdmin !== expectedAdmin) {
+        errors.push(`Admin mismatch: expected ${expectedAdmin}, got ${onChainAdmin}`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query admin: ${err.message}`);
+    }
+
+    try {
+      const onChainName = await this.getName();
+      result.name = onChainName;
+      if (onChainName !== expectedName) {
+        errors.push(`Name mismatch: expected "${expectedName}", got "${onChainName}"`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query name: ${err.message}`);
+    }
+
+    try {
+      const onChainSymbol = await this.getSymbol();
+      result.symbol = onChainSymbol;
+      if (onChainSymbol !== expectedSymbol) {
+        errors.push(`Symbol mismatch: expected "${expectedSymbol}", got "${onChainSymbol}"`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query symbol: ${err.message}`);
+    }
+
+    try {
+      const onChainDecimals = await this.getDecimals();
+      result.decimals = onChainDecimals;
+      if (onChainDecimals !== expectedDecimals) {
+        errors.push(`Decimals mismatch: expected ${expectedDecimals}, got ${onChainDecimals}`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query decimals: ${err.message}`);
+    }
+
+    try {
+      const totalSupply = await this.getTotalSupply();
+      result.totalSupply = totalSupply;
+    } catch (err: any) {
+      errors.push(`Failed to query total supply: ${err.message}`);
+    }
+
+    if (expectedPauser) {
+      try {
+        const hasPauserRole = await this.hasRole(Role.Pauser, expectedPauser);
+        result.pauserGranted = hasPauserRole;
+        if (!hasPauserRole) {
+          errors.push(`Pauser role not granted to ${expectedPauser}`);
+        }
+      } catch (err: any) {
+        errors.push(`Failed to check Pauser role: ${err.message}`);
+      }
+    }
+
+    result.valid = errors.length === 0;
+    return result;
   }
 
   // ─── Batch Queries ───────────────────────────────────────────────────────
@@ -826,6 +934,59 @@ export class bcForgeClient {
       [addressToScVal(source.publicKey()), nativeToScVal(Role.Minter), addressToScVal(address)],
       source,
     );
+  }
+
+  /**
+   * Grant the Pauser role to an address. Admin-only.
+   *
+   * @param address - Address to grant the Pauser role to
+   * @param source  - Admin keypair
+   */
+  async grantPauser(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'grant_role',
+      [addressToScVal(source.publicKey()), nativeToScVal(Role.Pauser), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Revoke the Pauser role from an address. Admin-only.
+   *
+   * @param address - Address to revoke the Pauser role from
+   * @param source  - Admin keypair
+   */
+  async revokePauser(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'revoke_role',
+      [addressToScVal(source.publicKey()), nativeToScVal(Role.Pauser), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Get the contract admin address.
+   *
+   * @returns The admin address
+   */
+  async getAdmin(): Promise<string> {
+    const result = await this.queryContract('admin', []);
+    return scValToNative(result) as string;
+  }
+
+  /**
+   * Check if an address holds a specific role.
+   *
+   * @param role - The role to check for
+   * @param address - The address to check
+   * @returns Whether the address holds the role
+   */
+  async hasRole(role: Role, address: string): Promise<boolean> {
+    const result = await this.queryContract('has_role', [
+      nativeToScVal(role),
+      addressToScVal(address),
+    ]);
+    return scValToNative(result) as boolean;
   }
 
   // ─── Clawback / Regulatory ───────────────────────────────────────────────
