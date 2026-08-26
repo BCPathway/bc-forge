@@ -375,7 +375,7 @@ impl BcForgeToken {
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
-            admin::require_minter(&env, &minter);
+            bc_forge_admin::has_role!(&env, bc_forge_admin::Role::Minter, &minter);
 
             if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
                 return Err(TokenError::InvalidAmount);
@@ -410,7 +410,7 @@ impl BcForgeToken {
                 }
             }
 
-            admin::require_minter(&env, &minter);
+            bc_forge_admin::has_role!(&env, bc_forge_admin::Role::Minter, &minter);
 
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
