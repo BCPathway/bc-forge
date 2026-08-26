@@ -404,3 +404,80 @@ fn test_approve_negative_amount_fails() {
         Err(Ok(WrapperError::InvalidAmount.into()))
     );
 }
+
+#[test]
+fn test_distribute_rewards_increases_assets_without_increasing_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    // Fund rewarder with underlying tokens and approve wrapper
+    underlying.mint(&admin, &rewarder, &5_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &5_000_000, &u32::MAX);
+
+    // User wraps 2,000,000 underlying tokens
+    wrapper.wrap(&user, &2_000_000);
+    let initial_supply = wrapper.supply();
+    let initial_assets = wrapper.total_assets();
+
+    assert_eq!(initial_supply, 2_000_000);
+    assert_eq!(initial_assets, 2_000_000);
+
+    // Rewarder distributes 1,000,000 underlying tokens as capital reward
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // Verify token balance (assets) increased by 1,000,000 while share supply is unchanged
+    assert_eq!(wrapper.supply(), initial_supply);
+    assert_eq!(wrapper.total_assets(), initial_assets + 1_000_000);
+}
+
+#[test]
+fn test_distribute_rewards_invalid_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_distribute_rewards(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_distribute_rewards(&user, &-500),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_distribute_rewards_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    assert_eq!(
+        client.try_distribute_rewards(&user, &1_000),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_distribute_rewards_when_paused_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.pause();
+
+    assert_eq!(
+        wrapper.try_distribute_rewards(&rewarder, &1_000_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+}

@@ -79,6 +79,14 @@ export class WrapperClient {
   }
 
   /**
+   * Get the total underlying token assets held by the vault contract.
+   */
+  async getTotalAssets(): Promise<bigint> {
+    const result = await this.queryContract('total_assets', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Get the underlying SEP-41 token contract address being wrapped.
    */
   async getUnderlyingToken(): Promise<string> {
@@ -192,6 +200,28 @@ export class WrapperClient {
     return this.invokeContract(
       'unwrap',
       [addressToScVal(caller), i128ToScVal(wrappedAmount)],
+      source,
+    );
+  }
+
+  /**
+   * Distribute rewards into the vault/wrapper contract without issuing new shares.
+   *
+   * Transfers `amount` of the underlying token from `caller` into the vault contract,
+   * increasing total underlying assets while keeping share supply constant.
+   *
+   * @param caller - Address providing the reward capital
+   * @param amount - Amount of underlying tokens to distribute
+   * @param source - Caller's keypair
+   */
+  async distributeRewards(
+    caller: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'distribute_rewards',
+      [addressToScVal(caller), i128ToScVal(amount)],
       source,
     );
   }
