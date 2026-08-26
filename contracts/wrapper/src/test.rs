@@ -149,6 +149,155 @@ fn test_wrap_increases_supply_and_balance() {
 }
 
 #[test]
+fn test_supply_accumulates_across_multiple_wraps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // Mint shares three separate times; supply must accumulate each time.
+    wrapper.wrap(&user, &1_000_000);
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.wrap(&user, &3_000_000);
+
+    assert_eq!(wrapper.balance(&user), 6_000_000);
+    assert_eq!(wrapper.supply(), 6_000_000);
+}
+
+#[test]
+fn test_supply_tracks_mixed_wrap_and_burn_cycles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &5_000_000);
+    assert_eq!(wrapper.supply(), 5_000_000);
+
+    wrapper.burn(&user, &2_000_000);
+    assert_eq!(wrapper.supply(), 3_000_000);
+
+    wrapper.wrap(&user, &1_500_000);
+    assert_eq!(wrapper.supply(), 4_500_000);
+
+    wrapper.unwrap(&user, &500_000);
+    assert_eq!(wrapper.supply(), 4_000_000);
+}
+
+#[test]
+fn test_supply_equals_sum_of_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &4_000_000);
+    wrapper.transfer(&user_a, &user_b, &1_000_000);
+    wrapper.burn(&user_b, &250_000);
+
+    // After mint, transfer, and burn the invariant supply == Σ balances holds.
+    assert_eq!(wrapper.balance(&user_a), 3_000_000);
+    assert_eq!(wrapper.balance(&user_b), 750_000);
+    assert_eq!(wrapper.supply(), 3_750_000);
+    assert_eq!(
+        wrapper.balance(&user_a) + wrapper.balance(&user_b),
+        wrapper.supply()
+    );
+}
+
+#[test]
+fn test_share_price_one_to_one_after_wrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // Wrap at a 1:1 rate: 2,000,000 assets / 2,000,000 shares = price 1.
+    wrapper.wrap(&user, &2_000_000);
+
+    assert_eq!(wrapper.total_assets(), 2_000_000);
+    assert_eq!(wrapper.supply(), 2_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 1);
+}
+
+#[test]
+fn test_share_price_increases_with_rewards() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &5_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &5_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 1);
+
+    // Rewards add assets without minting shares, so the price rises to 2.
+    wrapper.distribute_rewards(&rewarder, &2_000_000);
+    assert_eq!(wrapper.total_assets(), 4_000_000);
+    assert_eq!(wrapper.supply(), 2_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 2);
+}
+
+#[test]
+fn test_share_price_rounds_down_on_inexact_division() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &3_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &3_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.distribute_rewards(&rewarder, &3_000_000);
+
+    // 5,000,000 assets / 2,000,000 shares = 2.5 -> integer division floors to 2.
+    assert_eq!(wrapper.calculate_share_price(), 2);
+}
+
+#[test]
+fn test_share_price_after_partial_unwrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &4_000_000);
+    wrapper.unwrap(&user, &1_000_000);
+
+    // Burning shares removes assets 1:1, keeping the price at 1.
+    assert_eq!(wrapper.total_assets(), 3_000_000);
+    assert_eq!(wrapper.supply(), 3_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 1);
+}
+
+#[test]
+fn test_share_price_zero_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    // No shares minted yet -> divide-by-zero is rejected with ZeroShares.
+    assert_eq!(
+        wrapper.try_calculate_share_price(),
+        Err(Ok(WrapperError::ZeroShares))
+    );
+}
+
+#[test]
+fn test_share_price_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.try_calculate_share_price(),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
 fn test_unwrap_decreases_supply_and_balance() {
     let env = Env::default();
     env.mock_all_auths();
@@ -403,6 +552,37 @@ fn test_approve_negative_amount_fails() {
         wrapper.try_approve(&user, &spender, &-1, &u32::MAX),
         Err(Ok(WrapperError::InvalidAmount.into()))
     );
+}
+
+#[test]
+fn test_pauser_can_unpause_wrapper_as() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+    let pauser = Address::generate(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    // Grant Pauser role to a non-admin address
+    env.as_contract(&wrapper.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // Pause system
+    assert!(wrapper.try_pause_as(&pauser).is_ok());
+
+    assert_eq!(
+        wrapper.try_transfer(&user, &Address::generate(&env), &100),
+        Err(Ok(WrapperError::ContractPaused.into()))
+    );
+
+    // Switch context to Pauser address and unpause system
+    assert!(wrapper.try_unpause_as(&pauser).is_ok());
+
+    // Verify state returns to active
+    let recipient = Address::generate(&env);
+    wrapper.transfer(&user, &recipient, &100);
+    assert_eq!(wrapper.balance(&recipient), 100);
 }
 
 #[test]
