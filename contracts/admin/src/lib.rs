@@ -706,11 +706,19 @@ pub fn has_admin(env: &Env) -> bool {
 /// Grants a role to an address.
 ///
 /// @notice Grants `role` to `address`. Only a super-admin may call this function.
-/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and unrecognized role variants, then emits `role_grnt`.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and
+///      unrecognized role variants, then emits `role_grnt`. Granting an already-held role
+///      is idempotent: the bitmask is ORed, so no state change occurs beyond the event.
 /// @param env The Soroban environment.
 /// @param caller The address performing the grant; must be a super-admin.
-/// @param role The role to grant.
+/// @param role The role to grant (one of [`Role::Admin`], [`Role::Minter`], [`Role::SuperAdmin`], [`Role::Pauser`]).
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(caller, role, address)`.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
@@ -724,11 +732,17 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @dev Intentionally private. Callers must perform authorization before delegating here.
 ///      Rejects the zero address. The assignment is a single load / bitwise-OR /
 ///      store on the address's `AdminKey::RoleMask(address)` entry, so a grant
-///      never disturbs the address's other roles.
+///      never disturbs the address's other roles. Granting an already-held role is
+///      idempotent.
 /// @param env The Soroban environment.
 /// @param admin The address recorded as the granting caller in the emitted event.
 /// @param role The role to assign.
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(admin, role, address)`.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
@@ -745,12 +759,20 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
 /// @notice Removes `role` from `address`. Only a super-admin may call this function.
 /// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants (#426)
 ///      and the zero address, then delegates to the internal revoke helper which removes the
-///      persistent storage entry (#416) and emits `role_rvk`.
+///      persistent storage entry (#416) and emits `role_rvk`. Revoking a role that is not held
+///      returns an error rather than panicking.
 /// @param env The Soroban environment.
 /// @param caller The address performing the revoke; must be a super-admin.
 /// @param role The role to revoke.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if the address did not hold the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 pub fn revoke_role(
     env: &Env,
     caller: &Address,
@@ -773,11 +795,18 @@ pub fn revoke_role(
 /// @notice Removes the `role` bit from `address`'s role mask and emits `role_rvk`.
 /// @dev Intentionally private; performs no authorization. Rejects the zero address.
 ///      The other bits of the address's mask are preserved; when no bits remain
-///      the mask entry is removed entirely.
+///      the mask entry is removed entirely. Revoking a role that is not held is
+///      an error and does not modify state.
 /// @param env The Soroban environment.
 /// @param role The role to remove.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if no assignment existed.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
@@ -1302,10 +1331,12 @@ mod tests {
             super::init_storage(&env, &admin)
         }
 
+        /// @inheritdoc bc_forge_admin::grant_role
         pub fn grant_role(env: Env, caller: Address, role: Role, address: Address) {
             super::grant_role(&env, &caller, role, &address);
         }
 
+        /// @inheritdoc bc_forge_admin::revoke_role
         pub fn revoke_role(
             env: Env,
             caller: Address,
