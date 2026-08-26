@@ -530,6 +530,40 @@ fn test_decimal_scaling_up() {
 }
 
 #[test]
+fn test_decimal_scaling_preserves_large_values_with_u128_intermediates() {
+    let amount = i128::MAX / 10;
+
+    assert_eq!(
+        WrapperContract::scale_to_wrapper(0, 1, amount),
+        Some(amount * 10)
+    );
+    assert_eq!(
+        WrapperContract::scale_to_underlying(1, 0, amount),
+        Some(amount * 10)
+    );
+}
+
+#[test]
+fn test_decimal_scaling_reduces_precision_only_at_target_decimals() {
+    assert_eq!(
+        WrapperContract::scale_to_wrapper(7, 3, 12_345_678),
+        Some(1_234)
+    );
+    assert_eq!(
+        WrapperContract::scale_to_underlying(7, 3, 1_234),
+        Some(12_340_000)
+    );
+}
+
+#[test]
+fn test_decimal_scaling_rejects_overflow_and_negative_amounts() {
+    assert_eq!(WrapperContract::scale_to_wrapper(0, 1, i128::MAX), None);
+    assert_eq!(WrapperContract::scale_to_underlying(1, 0, i128::MAX), None);
+    assert_eq!(WrapperContract::scale_to_wrapper(7, 3, -1), None);
+    assert_eq!(WrapperContract::scale_to_underlying(3, 7, -1), None);
+}
+
+#[test]
 fn test_wrap_negative_amount_fails() {
     let env = Env::default();
     env.mock_all_auths();
