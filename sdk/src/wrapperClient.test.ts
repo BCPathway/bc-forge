@@ -15,6 +15,7 @@ describe('WrapperClient surface', () => {
     expect(typeof client.getTotalAssets).toBe('function');
     expect(typeof client.wrap).toBe('function');
     expect(typeof client.unwrap).toBe('function');
+    expect(typeof client.withdraw).toBe('function');
   });
 
   it('builds distributeRewards invoke transaction target', async () => {
