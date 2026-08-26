@@ -1,4 +1,4 @@
-use crate::{WrapperContract, WrapperContractClient, WrapperError};
+use crate::{VaultState, WrapperContract, WrapperContractClient, WrapperError};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
@@ -481,3 +481,259 @@ fn test_distribute_rewards_when_paused_fails() {
         Err(Ok(WrapperError::ContractPaused))
     );
 }
+
+#[test]
+fn test_set_and_get_vault_state_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Initial query before configuration returns VaultStateNotSet
+    assert_eq!(
+        wrapper.try_get_vault_state(),
+        Err(Ok(WrapperError::VaultStateNotSet))
+    );
+
+    let state = VaultState {
+        fee_rate_bps: 250, // 2.5%
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 10_000,
+        max_deposit: 50_000_000,
+        exchange_rate: 10_000_000, // 1.0 (7 decimals)
+        accumulated_fees: 0,
+        last_update_timestamp: 1000,
+    };
+
+    wrapper.set_vault_state(&admin, &state);
+
+    let fetched = wrapper.get_vault_state();
+    assert_eq!(fetched, state);
+    assert_eq!(fetched.fee_rate_bps, 250);
+    assert_eq!(fetched.fee_receiver, fee_receiver);
+    assert_eq!(fetched.min_deposit, 10_000);
+    assert_eq!(fetched.max_deposit, 50_000_000);
+    assert_eq!(fetched.exchange_rate, 10_000_000);
+    assert_eq!(fetched.accumulated_fees, 0);
+    assert_eq!(fetched.last_update_timestamp, 1000);
+}
+
+#[test]
+fn test_set_vault_state_unauthorized_fails() {
+    let env = Env::default();
+    // Do NOT mock all auths so require_admin fails for non-admin caller
+    let (wrapper, _underlying, _admin, user, _wrapper_id) = setup(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let state = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+
+    // Caller is not admin and not authorized
+    let res = wrapper.try_set_vault_state(&user, &state);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_set_vault_state_invalid_fee_rate_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let invalid_state = VaultState {
+        fee_rate_bps: 10_001, // Exceeds 100% (10,000 bps)
+        fee_receiver,
+        min_deposit: 100,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 500,
+    };
+
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &invalid_state),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_set_vault_state_invalid_limits_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Negative min_deposit
+    let negative_min = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: -1,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &negative_min),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+
+    // max_deposit < min_deposit
+    let inverted_limits = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 1000,
+        max_deposit: 500,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &inverted_limits),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_set_vault_state_invalid_exchange_rate_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Zero exchange rate
+    let zero_rate = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 0,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &zero_rate),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+
+    // Negative exchange rate
+    let negative_rate = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: -10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &negative_rate),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_set_vault_state_invalid_accumulated_fees_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let negative_fees = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: -50,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &negative_fees),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_vault_state_uninitialized_contract_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let state = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+
+    assert_eq!(
+        client.try_get_vault_state(),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+    assert_eq!(
+        client.try_set_vault_state(&admin, &state),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_vault_state_storage_isolation_and_updates() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // User wraps 1,000,000 tokens
+    wrapper.wrap(&user, &1_000_000);
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+
+    // Configure VaultState
+    let initial_state = VaultState {
+        fee_rate_bps: 500, // 5%
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 1000,
+        max_deposit: 10_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    wrapper.set_vault_state(&admin, &initial_state);
+
+    // Verify token state is intact
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+    assert_eq!(wrapper.total_assets(), 1_000_000);
+    assert_eq!(wrapper.underlying_token(), underlying.address);
+
+    // Update VaultState with accrued fees and updated exchange rate
+    let updated_state = VaultState {
+        fee_rate_bps: 500,
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 1000,
+        max_deposit: 10_000_000,
+        exchange_rate: 11_500_000, // 1.15
+        accumulated_fees: 50_000,
+        last_update_timestamp: 200,
+    };
+    wrapper.set_vault_state(&admin, &updated_state);
+
+    assert_eq!(wrapper.get_vault_state(), updated_state);
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+}
+

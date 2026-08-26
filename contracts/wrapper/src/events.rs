@@ -85,3 +85,17 @@ pub fn emit_distribute_rewards(env: &Env, caller: &Address, amount: i128) {
     env.events()
         .publish((symbol_short!("dist_rw"),), (caller.clone(), amount));
 }
+
+/// Emitted when vault state parameters are configured or updated.
+///
+/// @notice Publishes vault state configuration event data.
+/// @param env The Soroban environment.
+/// @param caller The admin address setting the vault state.
+/// @param state The updated [`VaultState`].
+pub fn emit_vault_state_set(env: &Env, caller: &Address, state: &crate::VaultState) {
+    env.events().publish(
+        (symbol_short!("v_state"),),
+        (caller.clone(), state.clone()),
+    );
+}
+

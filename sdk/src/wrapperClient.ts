@@ -43,6 +43,26 @@ export interface WrapperClientConfig {
   contractId: string;
 }
 
+/**
+ * Vault configuration parameters, limits, exchange rate, and fee state.
+ */
+export interface VaultState {
+  /** Fee rate in basis points (e.g. 100 = 1%) */
+  feeRateBps: number;
+  /** Address designated to receive collected vault fees */
+  feeReceiver: string;
+  /** Minimum deposit limit per operation */
+  minDeposit: bigint;
+  /** Maximum deposit cap per operation or total vault capacity */
+  maxDeposit: bigint;
+  /** Current exchange rate between shares and underlying asset */
+  exchangeRate: bigint;
+  /** Accumulated undistributed fees */
+  accumulatedFees: bigint;
+  /** Timestamp of the last fee accumulation or rate update */
+  lastUpdateTimestamp: bigint;
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class WrapperClient {
@@ -84,6 +104,31 @@ export class WrapperClient {
   async getTotalAssets(): Promise<bigint> {
     const result = await this.queryContract('total_assets', []);
     return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Get the current vault configuration parameters, limits, exchange rate, and fee state.
+   */
+  async getVaultState(): Promise<VaultState> {
+    const result = await this.queryContract('get_vault_state', []);
+    const native = scValToNative(result) as {
+      accumulated_fees: bigint | number | string;
+      exchange_rate: bigint | number | string;
+      fee_rate_bps: number;
+      fee_receiver: string;
+      last_update_timestamp: bigint | number | string;
+      max_deposit: bigint | number | string;
+      min_deposit: bigint | number | string;
+    };
+    return {
+      feeRateBps: Number(native.fee_rate_bps),
+      feeReceiver: native.fee_receiver,
+      minDeposit: BigInt(native.min_deposit),
+      maxDeposit: BigInt(native.max_deposit),
+      exchangeRate: BigInt(native.exchange_rate),
+      accumulatedFees: BigInt(native.accumulated_fees),
+      lastUpdateTimestamp: BigInt(native.last_update_timestamp),
+    };
   }
 
   /**
@@ -222,6 +267,56 @@ export class WrapperClient {
     return this.invokeContract(
       'distribute_rewards',
       [addressToScVal(caller), i128ToScVal(amount)],
+      source,
+    );
+  }
+
+  /**
+   * Configure vault parameters, limits, exchange rate, and fee state.
+   *
+   * @param caller - Admin caller address
+   * @param state  - The complete VaultState configuration
+   * @param source - Admin's keypair
+   */
+  async setVaultState(
+    caller: string,
+    state: VaultState,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    const stateScVal = xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('accumulated_fees'),
+        val: i128ToScVal(state.accumulatedFees),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('exchange_rate'),
+        val: i128ToScVal(state.exchangeRate),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('fee_rate_bps'),
+        val: u32ToScVal(state.feeRateBps),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('fee_receiver'),
+        val: addressToScVal(state.feeReceiver),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('last_update_timestamp'),
+        val: xdr.ScVal.scvU64(new xdr.Uint64(state.lastUpdateTimestamp)),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('max_deposit'),
+        val: i128ToScVal(state.maxDeposit),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('min_deposit'),
+        val: i128ToScVal(state.minDeposit),
+      }),
+    ]);
+
+    return this.invokeContract(
+      'set_vault_state',
+      [addressToScVal(caller), stateScVal],
       source,
     );
   }

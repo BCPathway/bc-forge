@@ -13,6 +13,8 @@ describe('WrapperClient surface', () => {
 
     expect(typeof client.distributeRewards).toBe('function');
     expect(typeof client.getTotalAssets).toBe('function');
+    expect(typeof client.getVaultState).toBe('function');
+    expect(typeof client.setVaultState).toBe('function');
     expect(typeof client.wrap).toBe('function');
     expect(typeof client.unwrap).toBe('function');
   });
@@ -28,5 +30,8 @@ describe('WrapperClient surface', () => {
     // Simulate/invoke check that function is callable and defined on class prototype
     expect(client.distributeRewards).toBeDefined();
     expect(client.getTotalAssets).toBeDefined();
+    expect(client.getVaultState).toBeDefined();
+    expect(client.setVaultState).toBeDefined();
   });
 });
+

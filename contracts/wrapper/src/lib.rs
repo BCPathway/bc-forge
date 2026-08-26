@@ -24,6 +24,31 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
 };
 
+// ─── Storage Structs ─────────────────────────────────────────────────────────
+
+/// Vault state storing core yield-bearing vault parameters, deposit limits,
+/// exchange rate, and fee accumulation metrics.
+///
+/// @title VaultState
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct VaultState {
+    /// Protocol/management fee rate represented in basis points (e.g. 100 = 1%, max 10000 = 100%).
+    pub fee_rate_bps: u32,
+    /// Address designated to receive collected vault fees.
+    pub fee_receiver: Address,
+    /// Minimum deposit limit per operation.
+    pub min_deposit: i128,
+    /// Maximum deposit cap per operation or total vault capacity.
+    pub max_deposit: i128,
+    /// Current exchange rate between wrapper shares and underlying asset.
+    pub exchange_rate: i128,
+    /// Accumulated undistributed/collected fees pending harvest or distribution.
+    pub accumulated_fees: i128,
+    /// Timestamp (ledger time) of the last fee accumulation or exchange rate update.
+    pub last_update_timestamp: u64,
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -52,6 +77,8 @@ pub enum DataKey {
     AllowanceExp(Address, Address),
     /// Reentrancy lock flag.
     Lock,
+    /// Vault state parameters (fee rate, limits, exchange rate, fee accumulation).
+    VaultState,
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -72,6 +99,10 @@ pub enum WrapperError {
     UnderlyingCallFailed = 8,
     AlreadyPaused = 9,
     NotPaused = 10,
+    /// Vault state has not been configured.
+    VaultStateNotSet = 11,
+    /// Provided vault state parameters are invalid.
+    InvalidVaultState = 12,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -139,6 +170,17 @@ impl WrapperContract {
             .instance()
             .get(&DataKey::UnderlyingToken)
             .expect("underlying token not set")
+    }
+
+    fn read_vault_state(env: &Env) -> Result<VaultState, WrapperError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::VaultState)
+            .ok_or(WrapperError::VaultStateNotSet)
+    }
+
+    fn write_vault_state(env: &Env, state: &VaultState) {
+        env.storage().instance().set(&DataKey::VaultState, state);
     }
 
     fn read_balance(env: &Env, id: &Address) -> i128 {
@@ -494,6 +536,49 @@ impl WrapperContract {
         let underlying_id = Self::read_underlying(&env);
         let underlying_client = TokenClient::new(&env, &underlying_id);
         underlying_client.balance(&env.current_contract_address())
+    }
+
+    /// Sets the vault parameters, deposit limits, exchange rate, and fee accumulation state.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address calling this function; must have Admin authorization.
+    /// * `state`  - The complete [`VaultState`] configuration.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::InvalidVaultState`] if `fee_rate_bps > 10_000`, `min_deposit < 0`,
+    ///   `max_deposit < min_deposit`, `exchange_rate <= 0`, or `accumulated_fees < 0`.
+    pub fn set_vault_state(
+        env: Env,
+        caller: Address,
+        state: VaultState,
+    ) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+
+        if state.fee_rate_bps > 10_000
+            || state.min_deposit < 0
+            || state.max_deposit < state.min_deposit
+            || state.exchange_rate <= 0
+            || state.accumulated_fees < 0
+        {
+            return Err(WrapperError::InvalidVaultState);
+        }
+
+        Self::write_vault_state(&env, &state);
+        events::emit_vault_state_set(&env, &caller, &state);
+        Ok(())
+    }
+
+    /// Returns the current vault parameters and accumulation state.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::VaultStateNotSet`] if the vault state has not been configured.
+    pub fn get_vault_state(env: Env) -> Result<VaultState, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_vault_state(&env)
     }
 
     /// Returns the contract version string.
