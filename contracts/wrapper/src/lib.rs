@@ -460,11 +460,7 @@ impl WrapperContract {
     /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
     /// * Returns [`WrapperError::ContractPaused`] if operations are paused.
     /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive.
-    pub fn distribute_rewards(
-        env: Env,
-        caller: Address,
-        amount: i128,
-    ) -> Result<(), WrapperError> {
+    pub fn distribute_rewards(env: Env, caller: Address, amount: i128) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
         caller.require_auth();
