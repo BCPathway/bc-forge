@@ -3,7 +3,7 @@
 //! @title Admin Events
 //! @author bc-forge contributors
 
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, BytesN, Env};
 
 use crate::Role;
 
@@ -52,5 +52,23 @@ pub fn emit_role_checked(env: &Env, address: &Address, role: Role, result: bool)
     env.events().publish(
         (symbol_short!("role_chk"),),
         (address.clone(), role, result),
+    );
+}
+
+/// Emitted when a multi-sig-gated WASM upgrade is executed.
+///
+/// Topics: `upgraded`
+/// Data:   `(executor, proposal_id, wasm_hash)`
+///
+/// @notice Publishes upgrade event data including the executing admin, the proposal ID, and the new WASM hash.
+/// @dev The event topics include the `upgraded` symbol.
+/// @param env The Soroban environment.
+/// @param executor The pool member that executed the upgrade.
+/// @param proposal_id The ID of the proposal whose quorum authorized the upgrade.
+/// @param wasm_hash The WASM hash installed via `update_current_contract_wasm`.
+pub fn emit_upgraded(env: &Env, executor: &Address, proposal_id: u64, wasm_hash: &BytesN<32>) {
+    env.events().publish(
+        (symbol_short!("upgraded"),),
+        (executor.clone(), proposal_id, wasm_hash.clone()),
     );
 }
