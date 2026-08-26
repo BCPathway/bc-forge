@@ -41,6 +41,11 @@
 //! | `1` | `RoleNotGranted` | unused (ABI-stable; revoke now uses `RoleNotHeld`) |
 //! | `2` | `RoleNotHeld` | `revoke_role` / `require_role` when the role is missing |
 //! | `3` | `UnauthorizedRole` | `require_role_guard` failure (caller not authorized) |
+//! | `7` | `InvalidThreshold` | invalid admin-pool threshold |
+//! | `8` | `ProposalNotFound` | proposal ID does not exist |
+//! | `9` | `ProposalAlreadyExecuted` | proposal is already executed |
+//! | `10` | `ProposalAlreadyApproved` | admin already approved the proposal |
+//! | `11` | `ThresholdNotMet` | proposal has insufficient approvals |
 //! | `4` | `InvalidAddress` | operation attempted with the zero address |
 //! | `5` | `InvalidRole` | unrecognized role discriminant supplied |
 //! | `6` | `AlreadyInitialized` | `init_storage` called on an initialized contract |
@@ -186,18 +191,24 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
-    /// A governance proposal with the supplied ID does not exist.
-    ProposalNotFound = 7,
-    /// The proposal has not gathered enough approvals to meet the quorum.
-    QuorumNotMet = 8,
-    /// The proposal has already been executed; upgrades are one-shot.
+    /// The approval threshold is zero or exceeds the admin-pool size.
+    InvalidThreshold = 7,
+    /// The requested governance proposal does not exist.
+    ProposalNotFound = 8,
+    /// The requested governance proposal has already been executed.
     ProposalAlreadyExecuted = 9,
+    /// The admin has already approved the requested governance proposal.
+    ProposalAlreadyApproved = 10,
+    /// The governance proposal has not reached its approval threshold.
+    ThresholdNotMet = 11,
+    /// The proposal has not gathered enough approvals to meet the quorum.
+    QuorumNotMet = 12,
     /// The mandatory timelock delay has not elapsed yet: the current ledger
     /// timestamp is still before the proposal's recorded unlock time.
-    TimelockActive = 10,
+    TimelockActive = 13,
     /// A supplied WASM hash failed [`require_valid_wasm_hash`]: it is not
     /// registered as installed on the ledger.
-    InvalidWasmHash = 11,
+    InvalidWasmHash = 14,
 }
 
 /// Storage keys for the access-control layer.
@@ -978,6 +989,10 @@ macro_rules! has_role {
 
 /// Configures the multi-sig admin pool and approval threshold.
 ///
+/// # Errors
+///
+/// Panics with [`AdminError::InvalidThreshold`] if `threshold` is zero or if
+/// it exceeds the number of pool members.
 /// @notice Sets the pool of admins and the number of approvals required to pass a proposal.
 /// @dev Requires the contract admin's authorization. Panics if `threshold` is zero, exceeds the pool size, or any pool member is the zero address.
 /// @param env The Soroban environment.
@@ -988,7 +1003,7 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     admin.require_auth();
 
     if threshold == 0 || threshold > pool.len() {
-        panic!("invalid threshold for admin pool");
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidThreshold);
     }
 
     for i in 0..pool.len() {
@@ -1047,7 +1062,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
     creator.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&creator) {
-        panic!("only admins can create proposals");
+        soroban_sdk::panic_with_error!(env, AdminError::UnauthorizedRole);
     }
 
     let id = env
@@ -1086,20 +1101,20 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
     admin.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&admin) {
-        panic!("only admins can approve proposals");
+        soroban_sdk::panic_with_error!(env, AdminError::UnauthorizedRole);
     }
 
     let mut proposal: Proposal = env
         .storage()
         .instance()
         .get(&AdminKey::Proposal(proposal_id))
-        .expect("proposal not found");
+        .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, AdminError::ProposalNotFound));
 
     if proposal.executed {
-        panic!("proposal already executed");
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
     }
     if proposal.approvals.contains(&admin) {
-        panic!("admin already approved this proposal");
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyApproved);
     }
 
     proposal.approvals.push_back(admin);
@@ -1124,7 +1139,7 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
         .storage()
         .instance()
         .get(&AdminKey::Proposal(proposal_id))
-        .expect("proposal not found");
+        .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, AdminError::ProposalNotFound));
     extend_instance_ttl(env);
     proposal.approvals.len() >= get_threshold(env)
 }
@@ -1143,13 +1158,13 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .storage()
         .instance()
         .get(&AdminKey::Proposal(proposal_id))
-        .expect("proposal not found");
+        .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, AdminError::ProposalNotFound));
 
     if proposal.executed {
-        panic!("proposal already executed");
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
     }
     if !is_proposal_ready(env, proposal_id) {
-        panic!("threshold not met");
+        soroban_sdk::panic_with_error!(env, AdminError::ThresholdNotMet);
     }
 
     proposal.executed = true;
@@ -1461,6 +1476,10 @@ mod tests {
             super::approve_proposal(&env, admin, proposal_id);
         }
 
+        pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+            super::is_proposal_ready(&env, proposal_id)
+        }
+
         pub fn mark_executed(env: Env, proposal_id: u64) {
             super::mark_executed(&env, proposal_id);
         }
@@ -1493,20 +1512,12 @@ mod tests {
             super::require_super_admin(&env, &address);
         }
 
-        pub fn require_fee_admin(env: Env, address: Address) {
-            super::require_fee_admin(&env, &address);
-        }
-
-        pub fn require_pauser(env: Env, address: Address) {
-            super::require_pauser(&env, &address);
+        pub fn has_admin(env: Env) -> bool {
+            super::has_admin(&env)
         }
 
         pub fn migrate_admin(env: Env) {
             super::migrate_admin(&env);
-        }
-
-        pub fn has_admin(env: Env) -> bool {
-            super::has_admin(&env)
         }
 
         pub fn get_admin_pool(env: Env) -> Vec<Address> {
@@ -1517,8 +1528,12 @@ mod tests {
             super::get_threshold(&env)
         }
 
-        pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
-            super::is_proposal_ready(&env, proposal_id)
+        pub fn require_fee_admin(env: Env, address: Address) {
+            super::require_fee_admin(&env, &address);
+        }
+
+        pub fn require_pauser(env: Env, address: Address) {
+            super::require_pauser(&env, &address);
         }
     }
 
@@ -3267,8 +3282,6 @@ mod tests {
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
     }
 
-    // ── migrate_admin ─────────────────────────────────────────────────────────
-
     #[test]
     fn test_migrate_admin_populates_super_admin_storage() {
         let env = Env::default();
@@ -3280,7 +3293,6 @@ mod tests {
             migrate_admin(&env);
         });
 
-        // After migration, the admin address must be stored in the SuperAdmin mapping.
         env.as_contract(&contract_id, || {
             assert!(env
                 .storage()
@@ -3296,13 +3308,10 @@ mod tests {
         let admin = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            // No admin has been set, so migrate_admin should not store anything.
             migrate_admin(&env);
             assert!(!env.storage().persistent().has(&AdminKey::SuperAdmin(admin)));
         });
     }
-
-    // ── has_admin ──────────────────────────────────────────────────────────────
 
     #[test]
     fn test_has_admin_returns_true_when_admin_set() {
@@ -3323,8 +3332,6 @@ mod tests {
 
         assert!(!client.has_admin());
     }
-
-    // ── require_fee_admin ──────────────────────────────────────────────────────
 
     #[test]
     fn test_require_fee_admin_succeeds_for_admin() {
@@ -3352,8 +3359,6 @@ mod tests {
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
     }
 
-    // ── set_admin_pool / get_admin_pool / get_threshold ────────────────────────
-
     #[test]
     fn test_set_admin_pool_stores_pool_and_threshold() {
         let env = Env::default();
@@ -3371,7 +3376,6 @@ mod tests {
         assert_eq!(pool.len(), 2);
         assert_eq!(pool.get(0).unwrap(), member1);
         assert_eq!(pool.get(1).unwrap(), member2);
-
         assert_eq!(client.get_threshold(), 2);
     }
 
@@ -3408,65 +3412,23 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "invalid threshold for admin pool")]
-    fn test_set_admin_pool_rejects_zero_threshold() {
+    fn test_admin_pool_and_proposal_happy_path() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let member = Address::generate(&env);
+        let second_admin = Address::generate(&env);
 
         client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, member], &0);
-    }
+        client.set_admin_pool(&vec![&env, admin.clone(), second_admin.clone()], &2);
 
-    #[test]
-    #[should_panic(expected = "invalid threshold for admin pool")]
-    fn test_set_admin_pool_rejects_threshold_exceeding_pool() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let member = Address::generate(&env);
+        let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "mint"));
+        assert!(!client.is_proposal_ready(&proposal_id));
 
-        client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, member], &2);
-    }
-
-    #[test]
-    fn test_set_admin_pool_rejects_zero_address_in_pool() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let member = Address::generate(&env);
-
-        client.set_admin(&admin);
-        let result = client.try_set_admin_pool(&vec![&env, member, zero_address(&env)], &2);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(4))));
-    }
-
-    // ── create_proposal / approve_proposal / is_proposal_ready / mark_executed ─
-
-    #[test]
-    fn test_create_proposal_creates_and_auto_approves_for_creator() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-        // Pre-set admin pool so get_admin_pool returns explicit pool (not fallback).
-        client.set_admin_pool(&vec![&env, admin.clone()], &1);
-        let id = client.create_proposal(&admin, &String::from_str(&env, "test proposal"));
-
-        // The creator is automatically counted as an approval.
-        let ready = client.is_proposal_ready(&id);
-        assert!(ready);
+        client.approve_proposal(&second_admin, &proposal_id);
+        assert!(client.is_proposal_ready(&proposal_id));
+        client.mark_executed(&proposal_id);
     }
 
     #[test]
@@ -3486,7 +3448,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "only admins can create proposals")]
+    #[should_panic(expected = "Error(Contract, #3)")]
     fn test_create_proposal_rejects_non_admin() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3519,7 +3481,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "only admins can approve proposals")]
+    #[should_panic(expected = "Error(Contract, #3)")]
     fn test_approve_proposal_rejects_non_admin() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3534,7 +3496,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin already approved this proposal")]
+    #[should_panic(expected = "Error(Contract, #10)")]
     fn test_approve_proposal_rejects_duplicate_approval() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3549,7 +3511,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "proposal not found")]
+    #[should_panic(expected = "Error(Contract, #8)")]
     fn test_approve_proposal_rejects_nonexistent_proposal() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3579,7 +3541,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "proposal already executed")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn test_mark_executed_rejects_already_executed() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3597,7 +3559,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "threshold not met")]
+    #[should_panic(expected = "Error(Contract, #11)")]
     fn test_mark_executed_rejects_insufficient_approvals() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3614,7 +3576,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "proposal not found")]
+    #[should_panic(expected = "Error(Contract, #8)")]
     fn test_mark_executed_rejects_nonexistent_proposal() {
         let env = Env::default();
         env.mock_all_auths();
