@@ -14,7 +14,8 @@
 //! | Variant | Domain | Value Type | Description | TTL Extended |
 //! |---|---|---|---|---|
 //! | `Admin` | `instance()` | `Address` | Singular contract admin address | Every read/write |
-//! | `Role(Role, Address)` | `persistent()` | `bool` (`true`) | Role membership flag | On grant/admin-set |
+//! | `Role(Role, Address)` | `persistent()` | `bool` (`true`) | Legacy role membership flag; read as fallback only | On legacy read |
+//! | `RoleMask(Address)` | `persistent()` | `u32` | Role bitmask: one bit per role (see [`ROLE_BIT_ADMIN`] and friends) | On grant/revoke/read |
 //! | `AdminPool` | `instance()` | `Vec<Address>` | Multi-sig admin pool members | On set |
 //! | `Threshold` | `instance()` | `u32` | Approvals required to pass a proposal | On set |
 //! | `Proposal(u64)` | `instance()` | `Proposal` | Governance proposal data | Every read/write |
@@ -96,6 +97,12 @@
 //!   address is correct before calling.
 //!
 //! ### Role Management
+//! - Role assignments live in a single per-address bitmask under
+//!   [`AdminKey::RoleMask`]: `grant_role` loads the mask, bitwise-ORs the role's
+//!   bit in, and stores it back; `revoke_role` clears the bit (removing the
+//!   entry when no bits remain). Legacy per-role boolean entries written by
+//!   earlier versions are honored on read and migrated into the mask on the
+//!   address's first write.
 //! - [`has_role`] grants universal role access: any address with the `Admin` role
 //!   is considered to have every role. This simplifies authorization — admins
 //!   implicitly inherit all privileges.
@@ -199,16 +206,15 @@ pub enum AdminError {
 /// @title AdminKey
 /// @notice Enumerates the storage keys used by the access-control layer.
 /// @dev Each variant maps to a distinct ledger slot; append new variants rather than reordering.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 #[contracttype]
 pub enum AdminKey {
     /// The singular contract admin address, set via `set_admin`.
     Admin,
-    /// Maps a `(Role, Address)` pair to `true` when `address` holds `role`.
-    /// This is the Role-to-Address mapping storage structure: membership is
-    /// looked up directly by key rather than by scanning a list, and each
-    /// pair occupies its own ledger entry so grants/revokes for one address
-    /// never touch another's.
+    /// Legacy per-role membership flag: maps a `(Role, Address)` pair to `true`
+    /// when `address` held `role`. Superseded by [`AdminKey::RoleMask`]; kept so
+    /// previously persisted keys keep decoding. New writes go to the mask, and
+    /// legacy entries for an address are removed once its mask is first written.
     Role(Role, Address),
     /// Maps an `(Address, Role)` pair to `true` when `address` holds `role`.
     /// This is the Address-to-Role mapping storage structure.
@@ -237,6 +243,16 @@ pub enum AdminKey {
     /// Auto-incrementing counter for upgrade proposal IDs. Distinct from
     /// [`AdminKey::ProposalIdCounter`], so the two flows never share an ID space.
     UpgradeProposalIdCounter,
+    /// Maps an address to its role bitmask: bit `i` is set when the address
+    /// holds the role whose bit is `1 << i` (see [`ROLE_BIT_ADMIN`] and
+    /// friends). One ledger entry per address; grants and revokes are a
+    /// load / bitwise-OR / store on this entry.
+    ///
+    /// Supersedes [`AdminKey::Role(Role, Address)`], which is retained only so
+    /// previously persisted keys keep decoding; entries under the legacy key
+    /// are migrated into the mask on first write and are still read as a
+    /// fallback until then.
+    RoleMask(Address),
 }
 
 /// Roles recognized by the access-control layer.
@@ -263,11 +279,103 @@ pub enum Role {
 
 /// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
+///
+/// @notice Constant for the SuperAdmin role.
+/// @dev Used for convenient role checks without explicit enum qualification.
 pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
 
 /// The Minter role constant — can be imported as `MINTER_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
+///
+/// @notice Constant for the Minter role.
+/// @dev Used for convenient role checks without explicit enum qualification.
 pub const MINTER_ROLE: Role = Role::Minter;
+
+/// Bitmask bit for the [`Role::Admin`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 0` corresponding to the Admin role.
+pub const ROLE_BIT_ADMIN: u32 = 1 << 0;
+/// Bitmask bit for the [`Role::Minter`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 1` corresponding to the Minter role.
+pub const ROLE_BIT_MINTER: u32 = 1 << 1;
+/// Bitmask bit for the [`Role::SuperAdmin`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 2` corresponding to the SuperAdmin role.
+pub const ROLE_BIT_SUPER_ADMIN: u32 = 1 << 2;
+/// Bitmask bit for the [`Role::Pauser`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 3` corresponding to the Pauser role.
+pub const ROLE_BIT_PAUSER: u32 = 1 << 3;
+
+/// Returns the bitmask bit for `role`, or `None` for an unrecognized variant.
+fn role_bit(role: Role) -> Option<u32> {
+    match role {
+        Role::Admin => Some(ROLE_BIT_ADMIN),
+        Role::Minter => Some(ROLE_BIT_MINTER),
+        Role::SuperAdmin => Some(ROLE_BIT_SUPER_ADMIN),
+        Role::Pauser => Some(ROLE_BIT_PAUSER),
+    }
+}
+
+/// Every `(role, bit)` pair in bit order, used for legacy-entry migration.
+const ALL_ROLE_BITS: [(Role, u32); 4] = [
+    (Role::Admin, ROLE_BIT_ADMIN),
+    (Role::Minter, ROLE_BIT_MINTER),
+    (Role::SuperAdmin, ROLE_BIT_SUPER_ADMIN),
+    (Role::Pauser, ROLE_BIT_PAUSER),
+];
+
+/// Loads the role bitmask for `address`.
+///
+/// Reads the single [`AdminKey::RoleMask(address)`] persistent entry when it
+/// exists. Otherwise falls back to reconstructing the mask from any legacy
+/// per-role boolean entries ([`AdminKey::Role(Role, Address)`]) written by
+/// earlier versions of this module, so grants and revokes issued before the
+/// bitmask layout keep being honored until the address's first write migrates
+/// them.
+///
+/// Extends the TTL of whichever entries were consulted.
+fn load_role_mask(env: &Env, address: &Address) -> u32 {
+    let key = AdminKey::RoleMask(address.clone());
+    if let Some(mask) = env.storage().persistent().get::<_, u32>(&key) {
+        extend_storage_ttl_for_key(env, &key);
+        return mask;
+    }
+    let mut mask = 0u32;
+    for (role, bit) in ALL_ROLE_BITS {
+        let legacy_key = AdminKey::Role(role, address.clone());
+        if env.storage().persistent().has(&legacy_key) {
+            extend_storage_ttl_for_key(env, &legacy_key);
+            mask |= bit;
+        }
+    }
+    mask
+}
+
+/// Writes `mask` as the role bitmask for `address`, completing migration.
+///
+/// Removes every legacy per-role boolean entry for `address` once the mask is
+/// persisted, so the two layouts never disagree about what the address holds.
+fn persist_role_mask(env: &Env, address: &Address, mask: u32) {
+    let key = AdminKey::RoleMask(address.clone());
+    if mask == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &mask);
+        extend_storage_ttl_for_key(env, &key);
+    }
+    for (role, _) in ALL_ROLE_BITS {
+        let legacy_key = AdminKey::Role(role, address.clone());
+        if env.storage().persistent().has(&legacy_key) {
+            env.storage().persistent().remove(&legacy_key);
+        }
+    }
+}
 
 /// Mandatory delay between the moment a proposal reaches quorum and the moment
 /// [`execute_upgrade`] may act on it, in seconds (24 hours).
@@ -275,12 +383,17 @@ pub const MINTER_ROLE: Role = Role::Minter;
 /// The clock starts when quorum is first reached ([`create_proposal`] or
 /// [`approve_proposal`]) and is never reset, so pool members always get a
 /// full review window between approval and executable code changes.
+///
+/// @title TIMELOCK_DELAY_SECS
+/// @notice The duration in seconds (86,400s / 24 hours) for the proposal execution timelock.
+/// @dev Mandatory delay applied once quorum is reached before an upgrade can be executed.
 pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// A multi-sig governance proposal.
 ///
 /// @title Proposal
 /// @notice Holds the state of a governance proposal awaiting approval and execution.
+/// @dev Persisted under `AdminKey::Proposal(proposal_id)` in instance storage.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
@@ -447,7 +560,7 @@ fn require_valid_role(env: &Env, role: Role) {
 ///
 /// @notice Initializes the module by setting the contract admin. Can only be called once.
 /// @dev Records the admin under `AdminKey::Admin` and grants it the `Admin` role. Rejects the zero address.
-///      Storage slots: `AdminKey::Admin` (instance) and `AdminKey::Role(Admin, admin)` (persistent) — no overlap.
+///      Storage slots: `AdminKey::Admin` (instance) and `AdminKey::RoleMask(admin)` (persistent) — no overlap.
 /// @param env The Soroban environment.
 /// @param admin The address to set as the contract admin.
 /// @return `Ok(())` on success, or `AdminError::AlreadyInitialized` if storage was already set up.
@@ -457,11 +570,8 @@ pub fn init_storage(env: &Env, admin: &Address) -> Result<(), AdminError> {
     }
     require_non_zero_address(env, admin);
     env.storage().instance().set(&AdminKey::Admin, admin);
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
+    persist_role_mask(env, admin, ROLE_BIT_ADMIN);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
     Ok(())
 }
 
@@ -475,15 +585,27 @@ pub fn set_admin(env: &Env, admin: &Address) {
     require_non_zero_address(env, admin);
     if has_admin(env) {
         let old_admin = get_admin(env);
-        env.storage()
-            .persistent()
-            .remove(&AdminKey::Role(Role::Admin, old_admin.clone()));
+        clear_role_bit(env, &old_admin, Role::Admin);
         extend_instance_ttl(env);
         events::emit_role_revoked(env, &old_admin, Role::Admin, &old_admin);
     }
     env.storage().instance().set(&AdminKey::Admin, admin);
     extend_instance_ttl(env);
     _grant_role(env, admin, Role::Admin, admin);
+}
+
+/// Clears a single role bit from `address`'s bitmask without authorization or events.
+///
+/// Intentionally private. Used where a role must be withdrawn as a side effect
+/// of another operation (e.g. [`set_admin`] rotating the admin) rather than via
+/// [`revoke_role`].
+fn clear_role_bit(env: &Env, address: &Address, role: Role) {
+    if let Some(bit) = role_bit(role) {
+        let mask = load_role_mask(env, address);
+        if mask & bit != 0 {
+            persist_role_mask(env, address, mask & !bit);
+        }
+    }
 }
 
 /// Migrates the singular admin address to the SuperAdmin role mapping.
@@ -538,6 +660,10 @@ pub fn set_admin(env: &Env, admin: &Address) {
 /// # Events
 ///
 /// This function does not emit any events.
+///
+/// @notice Migrates the singular contract admin address into the persistent SuperAdmin mapping.
+/// @dev Idempotent migration helper; copies `AdminKey::Admin` to `AdminKey::SuperAdmin(admin)`.
+/// @param env The Soroban environment.
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
@@ -595,17 +721,22 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// Writes a role assignment without performing authorization.
 ///
 /// @notice Records that `address` holds `role` and emits `role_grnt`.
-/// @dev Intentionally private. Callers must perform authorization before delegating here. Rejects the zero address.
+/// @dev Intentionally private. Callers must perform authorization before delegating here.
+///      Rejects the zero address. The assignment is a single load / bitwise-OR /
+///      store on the address's `AdminKey::RoleMask(address)` entry, so a grant
+///      never disturbs the address's other roles.
 /// @param env The Soroban environment.
 /// @param admin The address recorded as the granting caller in the emitted event.
 /// @param role The role to assign.
 /// @param address The address to receive the role.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(role, address.clone()), &true);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+    let bit = match role_bit(role) {
+        Some(bit) => bit,
+        None => soroban_sdk::panic_with_error!(env, AdminError::InvalidRole),
+    };
+    let mask = load_role_mask(env, address);
+    persist_role_mask(env, address, mask | bit);
     events::emit_role_granted(env, admin, role, address);
 }
 
@@ -639,21 +770,27 @@ pub fn revoke_role(
 /// This helper is intentionally private. Callers exposed by a contract must
 /// perform their authorization checks before delegating the state change here.
 ///
-/// @notice Removes the `(role, address)` assignment from storage and emits `role_rvk`.
+/// @notice Removes the `role` bit from `address`'s role mask and emits `role_rvk`.
 /// @dev Intentionally private; performs no authorization. Rejects the zero address.
+///      The other bits of the address's mask are preserved; when no bits remain
+///      the mask entry is removed entirely.
 /// @param env The Soroban environment.
 /// @param role The role to remove.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if no assignment existed.
 fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
+    let bit = match role_bit(role) {
+        Some(bit) => bit,
+        None => return Err(AdminError::InvalidRole),
+    };
 
-    let key = AdminKey::Role(role, address.clone());
-    if !env.storage().persistent().has(&key) {
+    let mask = load_role_mask(env, address);
+    if mask & bit == 0 {
         return Err(AdminError::RoleNotHeld);
     }
+    persist_role_mask(env, address, mask & !bit);
 
-    env.storage().persistent().remove(&key);
     let admin = get_admin(env);
     events::emit_role_revoked(env, &admin, role, address);
     Ok(())
@@ -673,22 +810,17 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
         return false;
     }
 
+    // A single mask load answers both the implicit-admin check and the direct
+    // check; `load_role_mask` extends the TTL of whatever entries it read.
+    let mask = load_role_mask(env, address);
+
     // Admin role implicitly grants all other roles.
-    // Check the Admin mapping first unless the caller already asks for Admin.
-    if role != Role::Admin {
-        let admin_key = AdminKey::Role(Role::Admin, address.clone());
-        if env.storage().persistent().has(&admin_key) {
-            extend_storage_ttl_for_key(env, &admin_key);
-            events::emit_role_checked(env, address, role, true);
-            return true;
-        }
+    if role != Role::Admin && mask & ROLE_BIT_ADMIN != 0 {
+        events::emit_role_checked(env, address, role, true);
+        return true;
     }
 
-    let role_key = AdminKey::Role(role, address.clone());
-    let has = env.storage().persistent().has(&role_key);
-    if has {
-        extend_storage_ttl_for_key(env, &role_key);
-    }
+    let has = role_bit(role).is_some_and(|bit| mask & bit != 0);
     events::emit_role_checked(env, address, role, has);
     has
 }
@@ -1929,6 +2061,132 @@ mod tests {
         assert!(client.has_role(&Role::Pauser, &holder));
     }
 
+    /// #765 – SuperAdmin absolute privileges: a dedicated SuperAdmin can revoke any role.
+    ///
+    /// Follows the maintainer guide:
+    /// 1. Grant a role to User A
+    /// 2. Switch to SuperAdmin
+    /// 3. Revoke role from User A
+    /// 4. Verify revocation succeeds
+    #[test]
+    fn test_super_admin_can_revoke_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        // Switch to SuperAdmin: grant SuperAdmin to a dedicated caller (not the contract admin).
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin));
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            // 1. Grant a role to User A.
+            client.grant_role(&admin, &role, &user_a);
+            assert!(client.has_role(&role, &user_a));
+
+            // 2–3. SuperAdmin revokes the role from User A.
+            client.revoke_role(&super_admin, &role, &user_a);
+
+            // 4. Verify revocation succeeds.
+            assert!(!client.has_role(&role, &user_a));
+        }
+    }
+
+    /// #765 – Error path: SuperAdmin receives RoleNotHeld when revoking a role User A never held.
+    #[test]
+    fn test_super_admin_revoke_any_role_when_not_held_errors() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            assert_eq!(
+                client.try_revoke_role(&super_admin, &role, &user_a),
+                Err(Ok(AdminError::RoleNotHeld))
+            );
+        }
+
+        // Double-revoke after a successful revoke is also RoleNotHeld for every role.
+        for role in roles {
+            client.grant_role(&admin, &role, &user_a);
+            client.revoke_role(&super_admin, &role, &user_a);
+            assert_eq!(
+                client.try_revoke_role(&super_admin, &role, &user_a),
+                Err(Ok(AdminError::RoleNotHeld))
+            );
+        }
+    }
+
+    /// #765 – Error path: callers without SuperAdmin cannot revoke any role.
+    #[test]
+    fn test_non_super_admin_cannot_revoke_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            client.grant_role(&admin, &role, &user_a);
+            assert!(client.has_role(&role, &user_a));
+
+            let result = client.try_revoke_role(&minter, &role, &user_a);
+            assert_eq!(result, Err(Ok(AdminError::UnauthorizedRole)));
+            // Role must remain after the failed revoke attempt.
+            assert!(client.has_role(&role, &user_a));
+
+            // Clean up so the next iteration starts from a known state.
+            // Admin still holds SuperAdmin implicitly and can revoke.
+            client.revoke_role(&admin, &role, &user_a);
+        }
+    }
+
+    /// #765 – Error path: a revoked SuperAdmin loses absolute revoke privileges.
+    #[test]
+    fn test_revoked_super_admin_cannot_revoke_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.grant_role(&admin, &Role::Minter, &user_a);
+        client.grant_role(&admin, &Role::Pauser, &user_a);
+
+        // Strip SuperAdmin from the dedicated caller.
+        client.revoke_role(&admin, &Role::SuperAdmin, &super_admin);
+        assert!(!client.has_role(&Role::SuperAdmin, &super_admin));
+
+        for role in [Role::Minter, Role::Pauser] {
+            let result = client.try_revoke_role(&super_admin, &role, &user_a);
+            assert_eq!(result, Err(Ok(AdminError::UnauthorizedRole)));
+            assert!(client.has_role(&role, &user_a));
+        }
+    }
+
     #[test]
     fn test_set_admin_emits_role_granted_event() {
         let env = Env::default();
@@ -2653,6 +2911,147 @@ mod tests {
         assert_eq!(event_admin, super_admin);
         assert_eq!(event_role, Role::Minter);
         assert_eq!(event_address, grantee);
+    }
+
+    // ── Role-mask mapping assignment ─────────────────────────────────────────
+
+    /// Granting a role ORs its bit into the address's single `RoleMask` entry,
+    /// removes any legacy per-role boolean entries, and leaves other roles held
+    /// by the same address untouched.
+    #[test]
+    fn test_grant_role_ors_bit_into_single_mask_entry() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        let key = AdminKey::RoleMask(holder.clone());
+        env.as_contract(&contract_id, || {
+            let mask: u32 = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .expect("mask entry should exist after first grant");
+            assert_eq!(mask, ROLE_BIT_MINTER);
+            // The legacy boolean layout must not be written anymore.
+            assert!(!env
+                .storage()
+                .persistent()
+                .has(&AdminKey::Role(Role::Minter, holder.clone())));
+        });
+
+        // A second grant ORs another bit into the same entry.
+        client.grant_role(&admin, &Role::Pauser, &holder);
+        env.as_contract(&contract_id, || {
+            let mask: u32 = env.storage().persistent().get(&key).unwrap();
+            assert_eq!(mask, ROLE_BIT_MINTER | ROLE_BIT_PAUSER);
+        });
+
+        assert!(client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&Role::Pauser, &holder));
+        assert!(!client.has_role(&Role::SuperAdmin, &holder));
+    }
+
+    /// Revoking a role clears only that role's bit from the mask; when no bits
+    /// remain the entry is removed entirely.
+    #[test]
+    fn test_revoke_role_clears_only_target_bit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+        let key = AdminKey::RoleMask(holder.clone());
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+        client.revoke_role(&admin, &Role::Minter, &holder);
+
+        env.as_contract(&contract_id, || {
+            let mask: u32 = env.storage().persistent().get(&key).unwrap();
+            assert_eq!(
+                mask, ROLE_BIT_PAUSER,
+                "only the revoked role's bit should be cleared"
+            );
+        });
+
+        client.revoke_role(&admin, &Role::Pauser, &holder);
+        env.as_contract(&contract_id, || {
+            assert!(
+                !env.storage().persistent().has(&key),
+                "an empty mask should remove the entry"
+            );
+        });
+    }
+
+    /// Legacy per-role boolean entries written by earlier versions are still
+    /// honored by `has_role`, and the next grant migrates them into the mask.
+    #[test]
+    fn test_legacy_bool_entries_are_honored_and_migrated_on_grant() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&AdminKey::Role(Role::Minter, holder.clone()), &true);
+        });
+
+        // The pre-migration grant is still visible through the public API.
+        assert!(client.has_role(&Role::Minter, &holder));
+
+        // A new grant persists the merged mask and sweeps away the legacy entry.
+        client.grant_role(&admin, &Role::Pauser, &holder);
+        env.as_contract(&contract_id, || {
+            let key = AdminKey::RoleMask(holder.clone());
+            let mask: u32 = env.storage().persistent().get(&key).unwrap();
+            assert_eq!(mask, ROLE_BIT_MINTER | ROLE_BIT_PAUSER);
+            assert!(!env
+                .storage()
+                .persistent()
+                .has(&AdminKey::Role(Role::Minter, holder.clone())));
+        });
+        assert!(client.has_role(&Role::Pauser, &holder));
+
+        // Revocation now works against the migrated mask.
+        client.revoke_role(&admin, &Role::Minter, &holder);
+        assert!(!client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&Role::Pauser, &holder));
+    }
+
+    /// `set_admin` rotating the admin withdraws the old admin's `Admin` bit
+    /// without touching any other roles the old admin may hold.
+    #[test]
+    fn test_set_admin_rotation_clears_only_admin_bit_of_old_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let old_admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.set_admin(&old_admin);
+        client.grant_role(&old_admin, &Role::Pauser, &old_admin);
+        client.set_admin(&new_admin);
+
+        assert!(!client.has_role(&Role::Admin, &old_admin));
+        assert!(
+            client.has_role(&Role::Pauser, &old_admin),
+            "rotating the admin must not strip unrelated roles from the old admin"
+        );
+        assert!(client.has_role(&Role::Admin, &new_admin));
     }
 
     // ── #405: init_storage ───────────────────────────────────────────────────
