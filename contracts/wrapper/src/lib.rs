@@ -244,12 +244,18 @@ impl WrapperContract {
         wrapper_decimals: u32,
         amount: i128,
     ) -> Option<i128> {
+        if amount < 0 {
+            return None;
+        }
+
+        let amount = amount as u128;
         if wrapper_decimals >= underlying_decimals {
-            let factor = 10i128.checked_pow(wrapper_decimals - underlying_decimals)?;
-            amount.checked_mul(factor)
+            let factor = 10u128.checked_pow(wrapper_decimals - underlying_decimals)?;
+            let scaled = amount.checked_mul(factor)?;
+            i128::try_from(scaled).ok()
         } else {
-            let factor = 10i128.checked_pow(underlying_decimals - wrapper_decimals)?;
-            Some(amount / factor)
+            let factor = 10u128.checked_pow(underlying_decimals - wrapper_decimals)?;
+            i128::try_from(amount / factor).ok()
         }
     }
 
@@ -260,12 +266,18 @@ impl WrapperContract {
         wrapper_decimals: u32,
         amount: i128,
     ) -> Option<i128> {
+        if amount < 0 {
+            return None;
+        }
+
+        let amount = amount as u128;
         if underlying_decimals >= wrapper_decimals {
-            let factor = 10i128.checked_pow(underlying_decimals - wrapper_decimals)?;
-            amount.checked_mul(factor)
+            let factor = 10u128.checked_pow(underlying_decimals - wrapper_decimals)?;
+            let scaled = amount.checked_mul(factor)?;
+            i128::try_from(scaled).ok()
         } else {
-            let factor = 10i128.checked_pow(wrapper_decimals - underlying_decimals)?;
-            Some(amount / factor)
+            let factor = 10u128.checked_pow(wrapper_decimals - underlying_decimals)?;
+            i128::try_from(amount / factor).ok()
         }
     }
 }

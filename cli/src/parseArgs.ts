@@ -1,6 +1,9 @@
 import { Command } from "commander";
 import { createUpgradeCommand } from "./commands/upgrade.js";
 import { createSmokeTestCommand } from "./commands/smoke-test.js";
+import { createCheckStatusCommand } from "./commands/check-status.js";
+import { createVerifyHashCommand } from "./commands/verify-hash.js";
+import { createGenerateBindingsCommand } from "./commands/generate-bindings.js";
 
 const VERSION = "0.1.0";
 
@@ -20,7 +23,10 @@ export function buildProgram(): Command {
 
   program
     .addCommand(createUpgradeCommand())
-    .addCommand(createSmokeTestCommand());
+    .addCommand(createSmokeTestCommand())
+    .addCommand(createCheckStatusCommand())
+    .addCommand(createVerifyHashCommand())
+    .addCommand(createGenerateBindingsCommand());
 
   return program;
 }
