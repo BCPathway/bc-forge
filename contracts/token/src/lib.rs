@@ -18,6 +18,9 @@ mod test;
 mod fuzz_mint;
 
 #[cfg(test)]
+mod lockup;
+
+#[cfg(test)]
 mod storage_collisions;
 
 use bc_forge_admin as admin;
@@ -52,6 +55,9 @@ pub enum DataKey {
     AllowanceExp(Address, Address),
     /// Token balance for an address.
     Balance(Address),
+    /// Lockup state for an address: amount currently locked and the timestamp
+    /// at which the locked tokens become withdrawable.
+    Lockup(Address),
     /// Number of decimal places for the token.
     Decimals,
     /// Token name (e.g., "bc-forge Token").
@@ -101,6 +107,20 @@ pub struct FeeExemption {
 struct AllowanceData {
     amount: i128,
     expiration_ledger: u32,
+}
+
+/// Lockup period state for a single user, stored per address under
+/// [`DataKey::Lockup`].
+///
+/// @title LockupState
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct LockupState {
+    /// Total amount of tokens currently locked for the user.
+    pub amount: i128,
+    /// Unix timestamp (seconds since epoch) at which the locked tokens
+    /// become withdrawable.
+    pub unlock_timestamp: u64,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -310,6 +330,62 @@ impl BcForgeToken {
             .instance()
             .remove(&DataKey::FeeExemption(address.clone()));
         ttl::extend_instance_ttl(env);
+    }
+}
+
+/// Lockup period state storage helpers (#719).
+///
+/// These back the upcoming `lock_tokens` / `withdraw_locked` entry points
+/// (see `.kiro/specs/token-locking-vesting`); until those land they are
+/// exercised only by the `lockup` unit-test module, so dead-code analysis is
+/// silenced for library builds.
+#[allow(dead_code)]
+impl BcForgeToken {
+    fn read_lockup(env: &Env, user: &Address) -> Option<LockupState> {
+        let key = DataKey::Lockup(user.clone());
+        let state = env.storage().persistent().get::<_, LockupState>(&key);
+        if state.is_some() {
+            ttl::extend_storage_ttl_for_key(
+                env,
+                &key,
+                ttl::BALANCE_LIFETIME_THRESHOLD,
+                ttl::BALANCE_BUMP_AMOUNT,
+            );
+        }
+        state
+    }
+
+    fn write_lockup(env: &Env, user: &Address, state: &LockupState) {
+        let key = DataKey::Lockup(user.clone());
+        env.storage().persistent().set(&key, state);
+        ttl::extend_storage_ttl_for_key(
+            env,
+            &key,
+            ttl::BALANCE_LIFETIME_THRESHOLD,
+            ttl::BALANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn remove_lockup(env: &Env, user: &Address) {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Lockup(user.clone()));
+    }
+
+    fn get_locked_amount(env: &Env, user: &Address) -> i128 {
+        Self::read_lockup(env, user)
+            .map(|state| state.amount)
+            .unwrap_or(0)
+    }
+
+    /// Returns `true` while the user has a lock whose unlock timestamp is still
+    /// in the future. An expired lock no longer counts as locked, even though
+    /// its tokens stay in storage until explicitly withdrawn.
+    fn is_locked(env: &Env, user: &Address) -> bool {
+        match Self::read_lockup(env, user) {
+            Some(state) => env.ledger().timestamp() < state.unlock_timestamp,
+            None => false,
+        }
     }
 }
 
