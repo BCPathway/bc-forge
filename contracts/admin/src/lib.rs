@@ -1060,6 +1060,50 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
     _start_timelock_if_quorate(env, proposal_id);
 }
 
+/// Revokes approval for a multi-sig governance proposal.
+///
+/// @notice Revokes approval for proposal `proposal_id` on behalf of `admin`.
+/// @dev Requires `admin` authorization and pool membership. Panics if the proposal is already executed or not previously approved.
+/// @param env The Soroban environment.
+/// @param admin The address of the admin revoking their approval.
+/// @param proposal_id The ID of the proposal.
+pub fn revoke_vote(env: &Env, admin: Address, proposal_id: u64) {
+    admin.require_auth();
+    let pool = get_admin_pool(env);
+    if !pool.contains(&admin) {
+        panic!("only admins can revoke votes");
+    }
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .expect("proposal not found");
+
+    if proposal.executed {
+        panic!("proposal already executed");
+    }
+
+    if let Some(index) = proposal.approvals.first_index_of(&admin) {
+        proposal.approvals.remove(index);
+    } else {
+        panic!("admin has not approved this proposal");
+    }
+
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    // If removing the approval brings us below quorum, clear the timelock
+    if !is_proposal_ready(env, proposal_id) {
+        let key = AdminKey::ProposalTimelock(proposal_id);
+        if env.storage().instance().has(&key) {
+            env.storage().instance().remove(&key);
+        }
+    }
+}
+
 /// Checks whether a governance proposal has met its approval threshold.
 ///
 /// @notice Returns `true` if the proposal has enough approvals to be executed, `false` otherwise.
@@ -1349,6 +1393,10 @@ mod tests {
 
         pub fn approve_proposal(env: Env, admin: Address, proposal_id: u64) {
             super::approve_proposal(&env, admin, proposal_id);
+        }
+
+        pub fn revoke_vote(env: Env, admin: Address, proposal_id: u64) {
+            super::revoke_vote(&env, admin, proposal_id);
         }
 
         pub fn mark_executed(env: Env, proposal_id: u64) {

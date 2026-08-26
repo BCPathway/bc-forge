@@ -66,6 +66,10 @@ impl AdminContract {
         bc_forge_admin::approve_proposal(&env, admin, proposal_id);
     }
 
+    pub fn revoke_vote(env: Env, admin: Address, proposal_id: u64) {
+        bc_forge_admin::revoke_vote(&env, admin, proposal_id);
+    }
+
     pub fn execute_upgrade(
         env: Env,
         executor: Address,
@@ -201,8 +205,43 @@ fn test_unauthorized_user_cannot_grant_roles_post_upgrade() {
     client.set_admin(&admin);
     client.migrate_admin();
 
-    // user_a has no roles assigned and must not be able to grant roles to user_b
-    let res = client.try_grant_role(&user_a, &Role::Minter, &user_b);
+    // Attempting role grant post-upgrade using non-admin user must fail
+    let res = client.try_grant_role(&user_a, &Role::SuperAdmin, &user_b);
+    assert_eq!(res.err().unwrap().unwrap(), AdminError::UnauthorizedRole);
+}
+
+#[test]
+fn test_revoke_vote() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let admin3 = Address::generate(&env);
+    let admin4 = Address::generate(&env);
+
+    client.set_admin(&admin1);
+    client.set_admin_pool(&vec![&env, admin1.clone(), admin2.clone(), admin3.clone(), admin4.clone()], &3);
+
+    let proposal_id = client.create_proposal(&admin1, &String::from_str(&env, "Test"));
+    client.approve_proposal(&admin2, &proposal_id);
+    client.approve_proposal(&admin3, &proposal_id);
+
+    // Threshold met (admin1 automatically approved on create, so 3 approvals total)
+    let unlock_time = bc_forge_admin::get_proposal_unlock_time(&env, proposal_id);
+    assert!(unlock_time.is_some());
+
+    // Revoke vote from admin2
+    client.revoke_vote(&admin2, &proposal_id);
+
+    // Threshold no longer met (only admin1 and admin3), timelock should be cleared
+    let unlock_time_after = bc_forge_admin::get_proposal_unlock_time(&env, proposal_id);
+    assert!(unlock_time_after.is_none());
+
+    // Cannot revoke twice
+    let res = client.try_revoke_vote(&admin2, &proposal_id);
     assert!(res.is_err());
-    assert!(!client.has_role(&Role::Minter, &user_b));
 }
