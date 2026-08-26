@@ -506,6 +506,11 @@ pub struct UpgradeProposal {
     /// the pre-quorum clock only: it decides `Pending` to `Expired` and nothing
     /// else. Any post-quorum execution deadline is timelock state owned by #660.
     pub expires_at: u64,
+    /// Unix timestamp (seconds) when the post-quorum execution timelock expires.
+    /// `None` while the proposal has not yet reached quorum; set to
+    /// `env.ledger().timestamp() + TIMELOCK_DELAY_SECS` the moment quorum is
+    /// first reached and never reset by later votes.
+    pub timelock_expires_at: Option<u64>,
 }
 
 /// Strkey of the well-known Stellar "null" account: an ed25519 public key
@@ -1170,6 +1175,18 @@ fn _start_timelock_if_quorate(env: &Env, proposal_id: u64) {
     let unlock_at = env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS);
     env.storage().instance().set(&key, &unlock_at);
     extend_instance_ttl(env);
+}
+
+/// Records the timelock expiration for an [`UpgradeProposal`] when quorum is first reached.
+///
+/// Sets `timelock_expires_at` to `Some(env.ledger().timestamp() + TIMELOCK_DELAY_SECS)`
+/// the moment quorum is reached (`proposal.status == ProposalStatus::Approved`).
+/// Idempotent: if `timelock_expires_at` is already `Some`, it is never reset by later votes.
+fn _start_upgrade_timelock_if_quorate(env: &Env, proposal: &mut UpgradeProposal) {
+    if proposal.status == ProposalStatus::Approved && proposal.timelock_expires_at.is_none() {
+        proposal.timelock_expires_at =
+            Some(env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS));
+    }
 }
 
 /// Returns the unix timestamp at which `proposal_id`'s timelock expires, if any.
@@ -3575,24 +3592,26 @@ mod tests {
         ["Approved", "Cancelled", "Executed", "Expired", "Pending"];
 
     /// Encoded field names of [`UpgradeProposal`], frozen the same way.
-    const UPGRADE_PROPOSAL_FIELD_NAMES: [&str; 6] = [
+    const UPGRADE_PROPOSAL_FIELD_NAMES: [&str; 7] = [
         "expires_at",
         "proposer",
         "quorum",
         "status",
         "targets",
+        "timelock_expires_at",
         "votes",
     ];
 
     /// Encoded value kind per [`UpgradeProposal`] field. A width change
     /// (`quorum` from `u64` to `u32`) re-encodes the value and orphans stored
     /// proposals exactly as a rename does, and no name check would catch it.
-    const UPGRADE_PROPOSAL_FIELD_KINDS: [(&str, &str); 6] = [
+    const UPGRADE_PROPOSAL_FIELD_KINDS: [(&str, &str); 7] = [
         ("expires_at", "u64"),
         ("proposer", "address"),
         ("quorum", "u64"),
         ("status", "vec"),
         ("targets", "vec"),
+        ("timelock_expires_at", "option"),
         ("votes", "map"),
     ];
 
@@ -3629,6 +3648,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: 1_724_000_000,
+            timelock_expires_at: None,
         }
     }
 
@@ -3665,6 +3685,7 @@ mod tests {
             ScVal::Address(_) => "address",
             ScVal::Vec(_) => "vec",
             ScVal::Map(_) => "map",
+            ScVal::Void => "option",
             _ => "unexpected",
         }
     }
@@ -3702,6 +3723,7 @@ mod tests {
             quorum: _,
             status: _,
             expires_at: _,
+            timelock_expires_at: _,
         } = &proposal;
 
         let encoded = encoded_fields(&env, proposal);
@@ -3826,5 +3848,56 @@ mod tests {
 
         let result = client.try_register_wasm_hash(&stranger, &hash);
         assert!(result.is_err());
+    }
+
+    // ── UpgradeProposal timelock state structure (#660) ─────────────────────────
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_none_on_creation() {
+        let env = Env::default();
+        let proposal = upgrade_proposal_fixture(&env);
+        assert_eq!(proposal.timelock_expires_at, None);
+    }
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_set_when_quorum_first_reached() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        assert_eq!(proposal.status, ProposalStatus::Pending);
+        assert_eq!(proposal.timelock_expires_at, None);
+
+        proposal.status = ProposalStatus::Approved;
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+
+        let expected_unlock = env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS);
+        assert_eq!(proposal.timelock_expires_at, Some(expected_unlock));
+    }
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_not_reset_by_later_votes() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        proposal.status = ProposalStatus::Approved;
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+
+        let initial_timelock = proposal.timelock_expires_at;
+        assert!(initial_timelock.is_some());
+
+        // Advance ledger timestamp by 100 seconds
+        env.ledger().set_timestamp(env.ledger().timestamp() + 100);
+
+        // Subsequent votes/calls on already-quorate proposal must not reset timelock_expires_at
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+        assert_eq!(proposal.timelock_expires_at, initial_timelock);
+    }
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_remains_none_below_quorum() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        assert_eq!(proposal.status, ProposalStatus::Pending);
+
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+        assert_eq!(proposal.timelock_expires_at, None);
     }
 }
