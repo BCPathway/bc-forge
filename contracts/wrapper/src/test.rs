@@ -512,4 +512,3 @@ fn test_distribute_rewards_when_paused_fails() {
         Err(Ok(WrapperError::ContractPaused))
     );
 }
-}
