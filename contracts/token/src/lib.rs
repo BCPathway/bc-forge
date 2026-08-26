@@ -781,7 +781,8 @@ impl TokenInterface for BcForgeToken {
     /// Transfers tokens from `from` to `to`.
     ///
     /// @notice Transfers `amount` tokens from `from` to `to`. Requires `from` to authenticate the call.
-    /// @dev Checks rate limits before transferring. Emits a `transfer` event on success.
+    /// @dev Guarded by [`bc_forge_lifecycle::require_not_paused`]. Checks rate limits before
+    ///      transferring. Emits a `transfer` event on success.
     /// @param env The Soroban environment.
     /// @param from The sender address.
     /// @param to The recipient address.
@@ -790,7 +791,8 @@ impl TokenInterface for BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "transfer_guard", {
             Self::panic_on_err(&env, Self::ensure_initialized(&env));
-            Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+            // #762 – tie pause state into token transfers via the lifecycle modifier.
+            bc_forge_lifecycle::require_not_paused(&env);
             from.require_auth();
             if amount <= 0 {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
@@ -806,7 +808,9 @@ impl TokenInterface for BcForgeToken {
     /// Transfers tokens from `from` to `to` on behalf of `spender`.
     ///
     /// @notice Transfers `amount` tokens from `from` to `to` using the allowance mechanism. Requires `spender` to authenticate the call.
-    /// @dev Checks rate limits and sufficient allowance before transferring. Deducts the allowance after a successful transfer. Emits a `transfer_from` event.
+    /// @dev Guarded by [`bc_forge_lifecycle::require_not_paused`]. Checks rate limits and
+    ///      sufficient allowance before transferring. Deducts the allowance after a successful
+    ///      transfer. Emits a `transfer_from` event.
     /// @param env The Soroban environment.
     /// @param spender The address calling the function (must have sufficient allowance).
     /// @param from The address to transfer tokens from.
@@ -815,7 +819,8 @@ impl TokenInterface for BcForgeToken {
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+        // #762 – tie pause state into token transfers via the lifecycle modifier.
+        bc_forge_lifecycle::require_not_paused(&env);
         spender.require_auth();
         if amount <= 0 {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);

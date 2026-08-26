@@ -23,8 +23,8 @@
                 },
                 {
                   "i128": {
-                    "hi": 1538081684127736341,
-                    "lo": 533365449637731656
+                    "hi": 138296832021814612,
+                    "lo": 4864182399896934860
                   }
                 }
               ]
@@ -122,8 +122,8 @@
                 "durability": "persistent",
                 "val": {
                   "i128": {
-                    "hi": 1538081684127736341,
-                    "lo": 533365449637731656
+                    "hi": 138296832021814612,
+                    "lo": 4864182399896934860
                   }
                 }
               }
@@ -140,7 +140,14 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "RoleMask"
+                  "symbol": "Role"
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Admin"
+                    }
+                  ]
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -160,7 +167,14 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "RoleMask"
+                      "symbol": "Role"
+                    },
+                    {
+                      "vec": [
+                        {
+                          "symbol": "Admin"
+                        }
+                      ]
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -169,7 +183,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "bool": true
                 }
               }
             },
@@ -262,8 +276,8 @@
                         },
                         "val": {
                           "i128": {
-                            "hi": 1538081684127736341,
-                            "lo": 533365449637731656
+                            "hi": 138296832021814612,
+                            "lo": 4864182399896934860
                           }
                         }
                       },

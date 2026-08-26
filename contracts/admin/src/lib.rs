@@ -2023,6 +2023,132 @@ mod tests {
         assert!(client.has_role(&Role::Pauser, &holder));
     }
 
+    /// #765 – SuperAdmin absolute privileges: a dedicated SuperAdmin can revoke any role.
+    ///
+    /// Follows the maintainer guide:
+    /// 1. Grant a role to User A
+    /// 2. Switch to SuperAdmin
+    /// 3. Revoke role from User A
+    /// 4. Verify revocation succeeds
+    #[test]
+    fn test_super_admin_can_revoke_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        // Switch to SuperAdmin: grant SuperAdmin to a dedicated caller (not the contract admin).
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        assert!(client.has_role(&Role::SuperAdmin, &super_admin));
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            // 1. Grant a role to User A.
+            client.grant_role(&admin, &role, &user_a);
+            assert!(client.has_role(&role, &user_a));
+
+            // 2–3. SuperAdmin revokes the role from User A.
+            client.revoke_role(&super_admin, &role, &user_a);
+
+            // 4. Verify revocation succeeds.
+            assert!(!client.has_role(&role, &user_a));
+        }
+    }
+
+    /// #765 – Error path: SuperAdmin receives RoleNotHeld when revoking a role User A never held.
+    #[test]
+    fn test_super_admin_revoke_any_role_when_not_held_errors() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            assert_eq!(
+                client.try_revoke_role(&super_admin, &role, &user_a),
+                Err(Ok(AdminError::RoleNotHeld))
+            );
+        }
+
+        // Double-revoke after a successful revoke is also RoleNotHeld for every role.
+        for role in roles {
+            client.grant_role(&admin, &role, &user_a);
+            client.revoke_role(&super_admin, &role, &user_a);
+            assert_eq!(
+                client.try_revoke_role(&super_admin, &role, &user_a),
+                Err(Ok(AdminError::RoleNotHeld))
+            );
+        }
+    }
+
+    /// #765 – Error path: callers without SuperAdmin cannot revoke any role.
+    #[test]
+    fn test_non_super_admin_cannot_revoke_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            client.grant_role(&admin, &role, &user_a);
+            assert!(client.has_role(&role, &user_a));
+
+            let result = client.try_revoke_role(&minter, &role, &user_a);
+            assert_eq!(result, Err(Ok(AdminError::UnauthorizedRole)));
+            // Role must remain after the failed revoke attempt.
+            assert!(client.has_role(&role, &user_a));
+
+            // Clean up so the next iteration starts from a known state.
+            // Admin still holds SuperAdmin implicitly and can revoke.
+            client.revoke_role(&admin, &role, &user_a);
+        }
+    }
+
+    /// #765 – Error path: a revoked SuperAdmin loses absolute revoke privileges.
+    #[test]
+    fn test_revoked_super_admin_cannot_revoke_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let super_admin = Address::generate(&env);
+        let user_a = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+        client.grant_role(&admin, &Role::Minter, &user_a);
+        client.grant_role(&admin, &Role::Pauser, &user_a);
+
+        // Strip SuperAdmin from the dedicated caller.
+        client.revoke_role(&admin, &Role::SuperAdmin, &super_admin);
+        assert!(!client.has_role(&Role::SuperAdmin, &super_admin));
+
+        for role in [Role::Minter, Role::Pauser] {
+            let result = client.try_revoke_role(&super_admin, &role, &user_a);
+            assert_eq!(result, Err(Ok(AdminError::UnauthorizedRole)));
+            assert!(client.has_role(&role, &user_a));
+        }
+    }
+
     #[test]
     fn test_set_admin_emits_role_granted_event() {
         let env = Env::default();
