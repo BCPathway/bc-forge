@@ -406,6 +406,37 @@ fn test_approve_negative_amount_fails() {
 }
 
 #[test]
+fn test_pauser_can_unpause_wrapper_as() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+    let pauser = Address::generate(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    // Grant Pauser role to a non-admin address
+    env.as_contract(&wrapper.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // Pause system
+    assert!(wrapper.try_pause_as(&pauser).is_ok());
+
+    assert_eq!(
+        wrapper.try_transfer(&user, &Address::generate(&env), &100),
+        Err(Ok(WrapperError::ContractPaused.into()))
+    );
+
+    // Switch context to Pauser address and unpause system
+    assert!(wrapper.try_unpause_as(&pauser).is_ok());
+
+    // Verify state returns to active
+    let recipient = Address::generate(&env);
+    wrapper.transfer(&user, &recipient, &100);
+    assert_eq!(wrapper.balance(&recipient), 100);
+}
+
+#[test]
 fn test_distribute_rewards_increases_assets_without_increasing_shares() {
     let env = Env::default();
     env.mock_all_auths();
