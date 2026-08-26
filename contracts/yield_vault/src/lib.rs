@@ -43,3 +43,30 @@ impl YieldVaultContract {
         shares_in
     }
 }
+
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
+#[contract]
+pub struct YieldVaultGuardContract;
+
+#[contractimpl]
+impl YieldVaultGuardContract {
+    pub fn withdraw(env: Env, user: Address, shares_in: i128) {
+        user.require_auth();
+
+        // 1. Query the user's current share balance from contract storage
+        let user_balance = Self::get_share_balance(&env, &user);
+
+        // 2. Revert if requested shares exceed available balance
+        if shares_in > user_balance {
+            panic!("InsufficientShares: requested shares exceed user balance");
+        }
+
+        // Proceed with burning shares and transferring underlying tokens...
+    }
+
+    fn get_share_balance(_env: &Env, _user: &Address) -> i128 {
+        // Mock lookup implementation: return a fixed balance for demonstration
+        1000
+    }
+}
