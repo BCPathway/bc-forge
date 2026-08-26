@@ -82,8 +82,6 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
 /// @param caller The address providing the reward capital.
 /// @param amount The amount of underlying tokens distributed as rewards.
 pub fn emit_distribute_rewards(env: &Env, caller: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("dist_rw"),),
-        (caller.clone(), amount),
-    );
+    env.events()
+        .publish((symbol_short!("dist_rw"),), (caller.clone(), amount));
 }
