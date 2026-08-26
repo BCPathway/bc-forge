@@ -53,7 +53,7 @@ pub fn pause(env: Env, caller: Address) {
 /// # Panics
 /// Panics if the contract is not paused.
 pub fn unpause(env: Env, caller: Address) {
-    admin::require_role(&env, admin::Role::Pauser, &caller);
+    admin::require_pauser(&env, &caller);
     if !is_paused(&env) {
         panic!("contract is not paused");
     }
@@ -82,6 +82,16 @@ pub fn require_not_paused(env: &Env) {
     if is_paused(env) {
         panic!("contract is paused");
     }
+}
+
+/// Sets the paused state directly without performing auth checks.
+///
+/// This helper is intended to be called by a parent contract (e.g., the
+/// token contract) after it has already validated that the caller is
+/// authorized to change the pause state.
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&LifecycleKey::Paused, &paused);
+    extend_instance_ttl(env);
 }
 
 #[cfg(test)]
