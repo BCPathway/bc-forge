@@ -66,11 +66,9 @@ fn test_e2e_role_based_token_lifecycle() {
     assert!(env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
 
     // 3. As a normal User, attempt a transfer while paused — assert it fails with expected ContractPaused error.
+    env.mock_all_auths();
     let transfer_res = client.try_transfer(&user_a, &user_b, &200);
-    assert!(transfer_res.is_err());
-    if let Err(Ok(err)) = transfer_res {
-        assert_eq!(err, TokenError::ContractPaused.into());
-    }
+    assert_eq!(transfer_res, Err(Ok(TokenError::ContractPaused.into())));
 
     // 4. As the Pauser, unpause the contract.
     client.unpause(&pauser);
