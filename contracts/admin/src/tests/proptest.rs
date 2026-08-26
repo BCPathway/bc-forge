@@ -164,4 +164,54 @@ proptest! {
         client.grant_role(&admin, &Role::Admin, &holder);
         prop_assert!(client.has_role(&role, &holder));
     }
+
+    /// Fuzz: Timelock boundary is strictly enforced.
+    /// Varies ledger timestamp around the timelock expiration to ensure:
+    /// - Execution fails before timelock expires
+    /// - Execution succeeds at exact expiration (inclusive boundary)
+    /// - Execution succeeds after timelock expires
+    #[test]
+    fn fuzz_timelock_boundary_enforcement(offset in -10i64..20i64) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+        
+        // Set up multi-sig pool with threshold 2
+        let member = Address::generate(&env);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+        
+        // Create proposal (creator auto-approved, needs 1 more)
+        let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "timelock test"));
+        
+        // Approve to reach quorum and start timelock
+        client.approve_proposal(&member, &proposal_id);
+        
+        // Get the timelock expiration time
+        let unlock_time = client.get_proposal_unlock_time(&proposal_id);
+        prop_assert!(unlock_time.is_some());
+        let unlock_time = unlock_time.unwrap();
+        
+        // Set ledger timestamp based on offset from unlock time
+        let mut ledger_info = env.ledger().get();
+        let base_timestamp = unlock_time as i64;
+        let target_timestamp = base_timestamp.saturating_add(offset);
+        ledger_info.timestamp = if target_timestamp < 0 { 0 } else { target_timestamp as u64 };
+        env.ledger().set(ledger_info);
+        
+        // Prepare dummy WASM hash for upgrade
+        let dummy_wasm_hash = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
+        
+        // Attempt execution
+        let result = client.try_execute_upgrade(&admin, &proposal_id, &dummy_wasm_hash);
+        
+        // Verify boundary enforcement:
+        // - offset < 0: before expiration, should fail with TimelockActive
+        // - offset >= 0: at or after expiration, should succeed
+        if offset < 0 {
+            prop_assert!(result.is_err());
+            let err = result.unwrap_err();
+            prop_assert_eq!(err, Err(Ok(soroban_sdk::Error::from_contract_error(10)))); // TimelockActive = 10
+        } else {
+            prop_assert!(result.is_ok());
+        }
+    }
 }
