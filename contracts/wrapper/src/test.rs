@@ -204,6 +204,100 @@ fn test_supply_equals_sum_of_balances() {
 }
 
 #[test]
+fn test_share_price_one_to_one_after_wrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // Wrap at a 1:1 rate: 2,000,000 assets / 2,000,000 shares = price 1.
+    wrapper.wrap(&user, &2_000_000);
+
+    assert_eq!(wrapper.total_assets(), 2_000_000);
+    assert_eq!(wrapper.supply(), 2_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 1);
+}
+
+#[test]
+fn test_share_price_increases_with_rewards() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &5_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &5_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 1);
+
+    // Rewards add assets without minting shares, so the price rises to 2.
+    wrapper.distribute_rewards(&rewarder, &2_000_000);
+    assert_eq!(wrapper.total_assets(), 4_000_000);
+    assert_eq!(wrapper.supply(), 2_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 2);
+}
+
+#[test]
+fn test_share_price_rounds_down_on_inexact_division() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &3_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &3_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.distribute_rewards(&rewarder, &3_000_000);
+
+    // 5,000,000 assets / 2,000,000 shares = 2.5 -> integer division floors to 2.
+    assert_eq!(wrapper.calculate_share_price(), 2);
+}
+
+#[test]
+fn test_share_price_after_partial_unwrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &4_000_000);
+    wrapper.unwrap(&user, &1_000_000);
+
+    // Burning shares removes assets 1:1, keeping the price at 1.
+    assert_eq!(wrapper.total_assets(), 3_000_000);
+    assert_eq!(wrapper.supply(), 3_000_000);
+    assert_eq!(wrapper.calculate_share_price(), 1);
+}
+
+#[test]
+fn test_share_price_zero_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    // No shares minted yet -> divide-by-zero is rejected with ZeroShares.
+    assert_eq!(
+        wrapper.try_calculate_share_price(),
+        Err(Ok(WrapperError::ZeroShares))
+    );
+}
+
+#[test]
+fn test_share_price_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.try_calculate_share_price(),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
 fn test_unwrap_decreases_supply_and_balance() {
     let env = Env::default();
     env.mock_all_auths();
