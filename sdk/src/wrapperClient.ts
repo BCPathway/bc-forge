@@ -227,6 +227,25 @@ export class WrapperClient {
   }
 
   /**
+   * Withdraw `shares` of wrapped tokens and receive a proportional share of
+   * the vault's underlying assets, including any accrued yield.
+   *
+   * Burns `shares` of wrapped tokens from `caller` and transfers the
+   * proportional amount of underlying tokens back to `caller`.
+   *
+   * @param caller - Address withdrawing the shares
+   * @param shares - Amount of wrapped shares to burn
+   * @param source - Caller's keypair
+   */
+  async withdraw(caller: string, shares: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'withdraw',
+      [addressToScVal(caller), i128ToScVal(shares)],
+      source,
+    );
+  }
+
+  /**
    * Transfer wrapped tokens between addresses.
    *
    * @param from   - Sender address

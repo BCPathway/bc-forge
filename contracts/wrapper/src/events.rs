@@ -85,3 +85,18 @@ pub fn emit_distribute_rewards(env: &Env, caller: &Address, amount: i128) {
     env.events()
         .publish((symbol_short!("dist_rw"),), (caller.clone(), amount));
 }
+
+/// Emitted when wrapped shares are withdrawn for proportional underlying tokens.
+///
+/// @notice Publishes withdrawal event data including the caller, burned shares, and payout.
+/// @dev The event topics include the `withdrw` symbol.
+/// @param env The Soroban environment.
+/// @param caller The address withdrawing shares.
+/// @param shares The amount of wrapped shares burned.
+/// @param underlying_amount The amount of underlying tokens transferred to the caller.
+pub fn emit_withdraw(env: &Env, caller: &Address, shares: i128, underlying_amount: i128) {
+    env.events().publish(
+        (symbol_short!("withdrw"),),
+        (caller.clone(), shares, underlying_amount),
+    );
+}
