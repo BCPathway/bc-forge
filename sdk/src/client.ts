@@ -803,8 +803,18 @@ export class bcForgeClient {
   /**
    * Grant the Minter role to an address. Admin-only.
    *
+   * @remarks
+   * The caller (`source`) must hold the SuperAdmin role. The contract will
+   * revert if the caller is unauthorized, the target address is the zero
+   * address, or the role is not recognized.
+   *
+   * Granting an already-held role is idempotent.
+   *
    * @param address - Address to grant the Minter role to
-   * @param source  - Admin keypair
+   * @param source  - Admin keypair (must hold SuperAdmin role)
+   * @throws {ContractError} If the caller lacks SuperAdmin role (`UnauthorizedRole`)
+   * @throws {ContractError} If the address is the zero address (`InvalidAddress`)
+   * @throws {ContractError} If the role variant is unrecognized (`InvalidRole`)
    */
   async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
@@ -817,8 +827,18 @@ export class bcForgeClient {
   /**
    * Revoke the Minter role from an address. Admin-only.
    *
+   * @remarks
+   * The caller (`source`) must hold the SuperAdmin role. The contract will
+   * revert if the caller is unauthorized, the target address is the zero
+   * address, or the role is not recognized. Returns an error (rather than
+   * panicking) if the address does not hold the Minter role.
+   *
    * @param address - Address to revoke the Minter role from
-   * @param source  - Admin keypair
+   * @param source  - Admin keypair (must hold SuperAdmin role)
+   * @throws {ContractError} If the caller lacks SuperAdmin role (`UnauthorizedRole`)
+   * @throws {ContractError} If the address is the zero address (`InvalidAddress`)
+   * @throws {ContractError} If the role variant is unrecognized (`InvalidRole`)
+   * @throws {ContractError} If the address does not hold the Minter role (`RoleNotHeld`)
    */
   async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
