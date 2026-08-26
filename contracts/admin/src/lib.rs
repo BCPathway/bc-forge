@@ -279,23 +279,37 @@ pub enum Role {
 
 /// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
+///
+/// @notice Constant for the SuperAdmin role.
+/// @dev Used for convenient role checks without explicit enum qualification.
 pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
 
 /// The Minter role constant — can be imported as `MINTER_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
+///
+/// @notice Constant for the Minter role.
+/// @dev Used for convenient role checks without explicit enum qualification.
 pub const MINTER_ROLE: Role = Role::Minter;
 
 /// Bitmask bit for the [`Role::Admin`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 0` corresponding to the Admin role.
 pub const ROLE_BIT_ADMIN: u32 = 1 << 0;
 /// Bitmask bit for the [`Role::Minter`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 1` corresponding to the Minter role.
 pub const ROLE_BIT_MINTER: u32 = 1 << 1;
 /// Bitmask bit for the [`Role::SuperAdmin`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 2` corresponding to the SuperAdmin role.
 pub const ROLE_BIT_SUPER_ADMIN: u32 = 1 << 2;
 /// Bitmask bit for the [`Role::Pauser`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 3` corresponding to the Pauser role.
 pub const ROLE_BIT_PAUSER: u32 = 1 << 3;
 
 /// Returns the bitmask bit for `role`, or `None` for an unrecognized variant.
@@ -369,12 +383,17 @@ fn persist_role_mask(env: &Env, address: &Address, mask: u32) {
 /// The clock starts when quorum is first reached ([`create_proposal`] or
 /// [`approve_proposal`]) and is never reset, so pool members always get a
 /// full review window between approval and executable code changes.
+///
+/// @title TIMELOCK_DELAY_SECS
+/// @notice The duration in seconds (86,400s / 24 hours) for the proposal execution timelock.
+/// @dev Mandatory delay applied once quorum is reached before an upgrade can be executed.
 pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// A multi-sig governance proposal.
 ///
 /// @title Proposal
 /// @notice Holds the state of a governance proposal awaiting approval and execution.
+/// @dev Persisted under `AdminKey::Proposal(proposal_id)` in instance storage.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
@@ -641,6 +660,10 @@ fn clear_role_bit(env: &Env, address: &Address, role: Role) {
 /// # Events
 ///
 /// This function does not emit any events.
+///
+/// @notice Migrates the singular contract admin address into the persistent SuperAdmin mapping.
+/// @dev Idempotent migration helper; copies `AdminKey::Admin` to `AdminKey::SuperAdmin(admin)`.
+/// @param env The Soroban environment.
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
