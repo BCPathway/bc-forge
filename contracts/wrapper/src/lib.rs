@@ -70,6 +70,8 @@ pub enum WrapperError {
     Reentrant = 7,
     /// Cross-contract call to the underlying token failed.
     UnderlyingCallFailed = 8,
+    AlreadyPaused = 9,
+    NotPaused = 10,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -399,17 +401,23 @@ impl WrapperContract {
         Self::read_supply(&env)
     }
 
-    /// Pause all wrap/unwrap and transfer operations. Admin-only.
+    /// Pause all wrap/unwrap and transfer operations. Requires Pauser role.
     pub fn pause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
         events::emit_paused(&env, &current_admin);
         Ok(())
     }
 
-    /// Unpause operations. Admin-only.
+    /// Unpause operations. Requires Pauser role.
     pub fn unpause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
         events::emit_unpaused(&env, &current_admin);
         Ok(())
@@ -418,6 +426,9 @@ impl WrapperContract {
     /// Pause operations using a specific caller address (must have Pauser role).
     pub fn pause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
+        if bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::AlreadyPaused);
+        }
         bc_forge_lifecycle::pause(env.clone(), caller.clone());
         events::emit_paused(&env, &caller);
         Ok(())
@@ -426,9 +437,63 @@ impl WrapperContract {
     /// Unpause operations using a specific caller address (must have Pauser role).
     pub fn unpause_as(env: Env, caller: Address) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
+        if !bc_forge_lifecycle::is_paused(&env) {
+            return Err(WrapperError::NotPaused);
+        }
         bc_forge_lifecycle::unpause(env.clone(), caller.clone());
         events::emit_unpaused(&env, &caller);
         Ok(())
+    }
+
+    /// Distributes rewards into the vault/wrapper contract without issuing new shares.
+    ///
+    /// Transfers `amount` of the underlying token from `caller` into this contract,
+    /// increasing total underlying assets while leaving total share supply unchanged.
+    /// This updates the exchange rate and increases the value of existing shares.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address providing the reward capital.
+    /// * `amount` - Amount of underlying tokens to distribute as rewards.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::ContractPaused`] if operations are paused.
+    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive.
+    pub fn distribute_rewards(env: Env, caller: Address, amount: i128) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if amount <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        Self::acquire_lock(&env)?;
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+
+        // Pull underlying tokens from caller into this contract as capital rewards.
+        // Token balance increases without increasing wrapper share supply.
+        underlying_client.transfer_from(
+            &env.current_contract_address(),
+            &caller,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        Self::release_lock(&env);
+        events::emit_distribute_rewards(&env, &caller, amount);
+        Ok(())
+    }
+
+    /// Returns the total underlying token assets held by the vault contract.
+    pub fn total_assets(env: Env) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+        underlying_client.balance(&env.current_contract_address())
     }
 
     /// Returns the contract version string.
