@@ -646,6 +646,83 @@ impl WrapperContract {
         Ok(tokens_out)
     }
 
+    /// Withdraw `shares` of wrapped tokens and receive a proportional share of
+    /// the vault's underlying assets, including any accrued yield.
+    ///
+    /// Burns `shares` from `caller` and transfers
+    /// `tokens_out = shares * total_assets / total_shares` underlying tokens
+    /// back to `caller`. Because rewards distributed via
+    /// [`WrapperContract::distribute_rewards`] increase `total_assets` without
+    /// increasing `total_shares`, withdrawing after a reward distribution
+    /// returns more underlying tokens than the original deposit.
+    ///
+    /// Rounding favors the protocol: `tokens_out` is rounded down, and the
+    /// withdrawal reverts if the payout would round down to zero.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address whose shares are being withdrawn.
+    /// * `shares` - Amount of wrapped shares to burn.
+    ///
+    /// # Returns
+    /// The amount of underlying tokens transferred to `caller`.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::ContractPaused`] if operations are paused.
+    /// * Returns [`WrapperError::InvalidAmount`] if `shares` is non-positive or
+    ///   if the proportional payout rounds down to zero.
+    /// * Returns [`WrapperError::InsufficientBalance`] if `shares` exceeds the
+    ///   caller's wrapped balance.
+    ///
+    /// # Security
+    /// Protected by a reentrancy guard.
+    pub fn withdraw(env: Env, caller: Address, shares: i128) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if shares <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let balance = Self::read_balance(&env, &caller);
+        if balance < shares {
+            return Err(WrapperError::InsufficientBalance);
+        }
+
+        Self::acquire_lock(&env)?;
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+
+        // Pay out a pro-rata share of the vault's underlying assets so rewards
+        // distributed via `distribute_rewards` accrue to withdrawing users.
+        // Round down to favor the protocol.
+        let total_shares = Self::read_supply(&env);
+        let total_assets = underlying_client.balance(&env.current_contract_address());
+        let tokens_out = shares
+            .checked_mul(total_assets)
+            .and_then(|product| product.checked_div(total_shares))
+            .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount));
+
+        if tokens_out <= 0 {
+            Self::release_lock(&env);
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        // Burn shares
+        Self::write_balance(&env, &caller, balance - shares);
+        Self::write_supply(&env, total_shares - shares);
+
+        // Transfer proportional underlying tokens to caller
+        underlying_client.transfer(&env.current_contract_address(), &caller, &tokens_out);
+
+        Self::release_lock(&env);
+        events::emit_withdraw(&env, &caller, shares, tokens_out);
+        Ok(tokens_out)
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, "1.0.0")
