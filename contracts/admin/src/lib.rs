@@ -195,6 +195,9 @@ pub enum AdminError {
     /// The mandatory timelock delay has not elapsed yet: the current ledger
     /// timestamp is still before the proposal's recorded unlock time.
     TimelockActive = 10,
+    /// A supplied WASM hash failed [`require_valid_wasm_hash`]: it is not
+    /// registered as installed on the ledger.
+    InvalidWasmHash = 11,
 }
 
 /// Storage keys for the access-control layer.
@@ -253,6 +256,11 @@ pub enum AdminKey {
     /// are migrated into the mask on first write and are still read as a
     /// fallback until then.
     RoleMask(Address),
+    /// Marks a WASM hash as installed on the ledger (uploaded via
+    /// `env.deployer().upload_contract_wasm` and registered by an admin),
+    /// making it eligible to be referenced by an upgrade proposal. Checked by
+    /// [`require_valid_wasm_hash`].
+    InstalledWasmHash(soroban_sdk::BytesN<32>),
 }
 
 /// Roles recognized by the access-control layer.
@@ -706,11 +714,19 @@ pub fn has_admin(env: &Env) -> bool {
 /// Grants a role to an address.
 ///
 /// @notice Grants `role` to `address`. Only a super-admin may call this function.
-/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and unrecognized role variants, then emits `role_grnt`.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and
+///      unrecognized role variants, then emits `role_grnt`. Granting an already-held role
+///      is idempotent: the bitmask is ORed, so no state change occurs beyond the event.
 /// @param env The Soroban environment.
 /// @param caller The address performing the grant; must be a super-admin.
-/// @param role The role to grant.
+/// @param role The role to grant (one of [`Role::Admin`], [`Role::Minter`], [`Role::SuperAdmin`], [`Role::Pauser`]).
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(caller, role, address)`.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
@@ -724,11 +740,17 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @dev Intentionally private. Callers must perform authorization before delegating here.
 ///      Rejects the zero address. The assignment is a single load / bitwise-OR /
 ///      store on the address's `AdminKey::RoleMask(address)` entry, so a grant
-///      never disturbs the address's other roles.
+///      never disturbs the address's other roles. Granting an already-held role is
+///      idempotent.
 /// @param env The Soroban environment.
 /// @param admin The address recorded as the granting caller in the emitted event.
 /// @param role The role to assign.
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(admin, role, address)`.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
@@ -745,12 +767,20 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
 /// @notice Removes `role` from `address`. Only a super-admin may call this function.
 /// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants (#426)
 ///      and the zero address, then delegates to the internal revoke helper which removes the
-///      persistent storage entry (#416) and emits `role_rvk`.
+///      persistent storage entry (#416) and emits `role_rvk`. Revoking a role that is not held
+///      returns an error rather than panicking.
 /// @param env The Soroban environment.
 /// @param caller The address performing the revoke; must be a super-admin.
 /// @param role The role to revoke.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if the address did not hold the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 pub fn revoke_role(
     env: &Env,
     caller: &Address,
@@ -773,11 +803,18 @@ pub fn revoke_role(
 /// @notice Removes the `role` bit from `address`'s role mask and emits `role_rvk`.
 /// @dev Intentionally private; performs no authorization. Rejects the zero address.
 ///      The other bits of the address's mask are preserved; when no bits remain
-///      the mask entry is removed entirely.
+///      the mask entry is removed entirely. Revoking a role that is not held is
+///      an error and does not modify state.
 /// @param env The Soroban environment.
 /// @param role The role to remove.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if no assignment existed.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
@@ -1275,6 +1312,62 @@ pub fn execute_upgrade(
     Ok(())
 }
 
+/// Registers `wasm_hash` as installed on the ledger, making it eligible to be
+/// referenced by an upgrade proposal. Resolves issue #657 (companion
+/// registration for [`require_valid_wasm_hash`]).
+///
+/// Soroban does not expose a host function that lets a contract query
+/// whether a given hash was previously uploaded via
+/// `env.deployer().upload_contract_wasm`, so this module keeps its own
+/// allowlist: the contract admin explicitly records a hash here — typically
+/// right after uploading it — before any upgrade proposal is allowed to
+/// target it.
+///
+/// @notice Marks `wasm_hash` as a valid upgrade target.
+/// @dev Requires contract admin authorization.
+/// @param env The Soroban environment.
+/// @param admin The contract admin authorizing the registration.
+/// @param wasm_hash The 32-byte WASM hash to register as installed.
+pub fn register_wasm_hash(env: &Env, admin: &Address, wasm_hash: soroban_sdk::BytesN<32>) {
+    require_admin(env, admin);
+    let key = AdminKey::InstalledWasmHash(wasm_hash);
+    env.storage().persistent().set(&key, &true);
+    extend_storage_ttl_for_key(env, &key);
+}
+
+/// Validates that `wasm_hash` is a legitimate WASM upgrade target. Resolves
+/// issue #657.
+///
+/// # Errors
+///
+/// Returns [`AdminError::InvalidWasmHash`] if `wasm_hash` has not been
+/// registered via [`register_wasm_hash`].
+///
+/// @notice Checks that `wasm_hash` is 32 bytes and was previously registered as installed on the ledger.
+/// @dev `wasm_hash`'s `BytesN<32>` type guarantees the 32-byte length at the type-system level, so this
+///      is purely a ledger-registration check. Callers that accept raw bytes at a contract boundary must
+///      convert to `BytesN<32>` first, which itself rejects any other length.
+/// @param env The Soroban environment.
+/// @param wasm_hash The WASM hash to validate.
+/// @return `Ok(())` if the hash is valid and installed, or `AdminError::InvalidWasmHash` otherwise.
+pub fn require_valid_wasm_hash(
+    env: &Env,
+    wasm_hash: &soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
+    if wasm_hash.len() != 32 {
+        return Err(AdminError::InvalidWasmHash);
+    }
+    let installed = env
+        .storage()
+        .persistent()
+        .get(&AdminKey::InstalledWasmHash(wasm_hash.clone()))
+        .unwrap_or(false);
+    if !installed {
+        return Err(AdminError::InvalidWasmHash);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1302,10 +1395,12 @@ mod tests {
             super::init_storage(&env, &admin)
         }
 
+        /// @inheritdoc bc_forge_admin::grant_role
         pub fn grant_role(env: Env, caller: Address, role: Role, address: Address) {
             super::grant_role(&env, &caller, role, &address);
         }
 
+        /// @inheritdoc bc_forge_admin::revoke_role
         pub fn revoke_role(
             env: Env,
             caller: Address,
@@ -1366,6 +1461,17 @@ mod tests {
 
         pub fn get_proposal_unlock_time(env: Env, proposal_id: u64) -> Option<u64> {
             super::get_proposal_unlock_time(&env, proposal_id)
+        }
+
+        pub fn register_wasm_hash(env: Env, admin: Address, wasm_hash: soroban_sdk::BytesN<32>) {
+            super::register_wasm_hash(&env, &admin, wasm_hash);
+        }
+
+        pub fn require_valid_wasm_hash(
+            env: Env,
+            wasm_hash: soroban_sdk::BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::require_valid_wasm_hash(&env, &wasm_hash)
         }
 
         pub fn require_super_admin(env: Env, address: Address) {
@@ -3668,5 +3774,57 @@ mod tests {
             encoded_key(&env, AdminKey::UpgradeProposalIdCounter),
             ScVal::try_from_val(&env, &expected_counter).unwrap()
         );
+    }
+
+    // ── register_wasm_hash / require_valid_wasm_hash (#657) ────────────────────
+
+    fn sample_wasm_hash(env: &Env) -> soroban_sdk::BytesN<32> {
+        soroban_sdk::BytesN::from_array(env, &[7u8; 32])
+    }
+
+    #[test]
+    fn test_require_valid_wasm_hash_accepts_registered_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+        client.register_wasm_hash(&admin, &hash);
+
+        assert_eq!(client.try_require_valid_wasm_hash(&hash), Ok(Ok(())));
+    }
+
+    #[test]
+    fn test_require_valid_wasm_hash_rejects_unregistered_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_valid_wasm_hash(&hash);
+        assert_eq!(result, Err(Ok(AdminError::InvalidWasmHash)));
+    }
+
+    #[test]
+    fn test_register_wasm_hash_rejects_non_admin_caller() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_register_wasm_hash(&stranger, &hash);
+        assert!(result.is_err());
     }
 }
