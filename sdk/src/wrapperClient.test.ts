@@ -15,6 +15,10 @@ describe('WrapperClient surface', () => {
     expect(typeof client.getTotalAssets).toBe('function');
     expect(typeof client.getVaultState).toBe('function');
     expect(typeof client.setVaultState).toBe('function');
+    expect(typeof client.convertToShares).toBe('function');
+    expect(typeof client.convertToAssets).toBe('function');
+    expect(typeof client.previewDeposit).toBe('function');
+    expect(typeof client.previewWithdraw).toBe('function');
     expect(typeof client.wrap).toBe('function');
     expect(typeof client.unwrap).toBe('function');
   });
@@ -32,6 +36,11 @@ describe('WrapperClient surface', () => {
     expect(client.getTotalAssets).toBeDefined();
     expect(client.getVaultState).toBeDefined();
     expect(client.setVaultState).toBeDefined();
+    expect(client.convertToShares).toBeDefined();
+    expect(client.convertToAssets).toBeDefined();
+    expect(client.previewDeposit).toBeDefined();
+    expect(client.previewWithdraw).toBeDefined();
   });
 });
+
 
