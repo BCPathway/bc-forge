@@ -512,3 +512,242 @@ fn test_distribute_rewards_when_paused_fails() {
         Err(Ok(WrapperError::ContractPaused))
     );
 }
+
+#[test]
+fn test_withdraw_returns_proportional_tokens_plus_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    // Fund the rewarder and approve the wrapper to spend on their behalf
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    // User deposits 2,000,000 underlying tokens
+    wrapper.wrap(&user, &2_000_000);
+    let user_balance_before = underlying.balance(&user);
+
+    // Rewarder distributes 1,000,000 underlying tokens as yield
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+    assert_eq!(wrapper.total_assets(), 3_000_000);
+
+    // Withdraw half the shares -> half of the assets (1,500,000)
+    let tokens_out = wrapper.withdraw(&user, &1_000_000);
+
+    assert_eq!(tokens_out, 1_500_000);
+    assert_eq!(underlying.balance(&user), user_balance_before + 1_500_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.total_assets(), 1_500_000);
+}
+
+#[test]
+fn test_withdraw_after_yield_returns_more_than_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &500_000);
+    underlying.approve(&rewarder, &wrapper_id, &500_000, &u32::MAX);
+
+    // Deposit 1,000,000 underlying tokens
+    wrapper.wrap(&user, &1_000_000);
+    let user_balance_before = underlying.balance(&user);
+
+    // Compound 500,000 underlying tokens as yield
+    wrapper.distribute_rewards(&rewarder, &500_000);
+
+    // Withdraw everything and verify the payout exceeds the initial deposit
+    let tokens_out = wrapper.withdraw(&user, &1_000_000);
+
+    assert_eq!(tokens_out, 1_500_000);
+    assert!(tokens_out > 1_000_000);
+    assert_eq!(underlying.balance(&user), user_balance_before + 1_500_000);
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), 0);
+}
+
+#[test]
+fn test_withdraw_partial_burns_only_requested_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &5_000_000);
+
+    let tokens_out = wrapper.withdraw(&user, &2_000_000);
+
+    assert_eq!(tokens_out, 2_000_000);
+    assert_eq!(wrapper.balance(&user), 3_000_000);
+    assert_eq!(wrapper.supply(), 3_000_000);
+    assert_eq!(wrapper.total_assets(), 3_000_000);
+    assert_eq!(underlying.balance(&user), 7_000_000);
+}
+
+#[test]
+fn test_withdraw_multiple_users_receive_pro_rata_share() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let rewarder = Address::generate(&env);
+
+    // Fund both users
+    underlying.mint(&admin, &user_a, &3_000_000);
+    underlying.mint(&admin, &user_b, &1_000_000);
+    underlying.approve(&user_a, &wrapper_id, &3_000_000, &u32::MAX);
+    underlying.approve(&user_b, &wrapper_id, &1_000_000, &u32::MAX);
+
+    // Rewarder distributes 1,000,000 underlying tokens as yield
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user_a, &3_000_000);
+    wrapper.wrap(&user_b, &1_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000
+    let tokens_a = wrapper.withdraw(&user_a, &3_000_000);
+    assert_eq!(tokens_a, 3_750_000);
+
+    let tokens_b = wrapper.withdraw(&user_b, &1_000_000);
+    assert_eq!(tokens_b, 1_250_000);
+
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), 0);
+}
+
+#[test]
+fn test_withdraw_rounds_down_in_favor_of_protocol() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    // shares: 3,000,000; assets: 4,000,000 after reward distribution
+    wrapper.wrap(&user, &3_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // Exact payout = 2,000,000 * 4,000,000 / 3,000,000 = 2,666,666.66...
+    // Must round down to 2,666,666, never up.
+    let tokens_out = wrapper.withdraw(&user, &2_000_000);
+    assert_eq!(tokens_out, 2_666_666);
+}
+
+#[test]
+fn test_withdraw_zero_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_withdraw_negative_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &-100),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_withdraw_insufficient_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &1_000_001),
+        Err(Ok(WrapperError::InsufficientBalance))
+    );
+}
+
+#[test]
+fn test_withdraw_when_paused_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+    wrapper.pause();
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &100_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+}
+
+#[test]
+fn test_withdraw_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    assert_eq!(
+        client.try_withdraw(&user, &1_000),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_withdraw_dust_payout_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let underlying_id = env.register(BcForgeToken, ());
+    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
+    underlying.initialize(
+        &admin,
+        &3,
+        &String::from_str(&env, "Low Decimals"),
+        &String::from_str(&env, "LOW"),
+    );
+
+    let wrapper_id = env.register(WrapperContract, ());
+    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
+    wrapper.initialize(
+        &admin,
+        &underlying_id,
+        &7,
+        &String::from_str(&env, "Wrapped Low"),
+        &String::from_str(&env, "wLOW"),
+    );
+
+    underlying.mint(&admin, &user, &10_000);
+    underlying.approve(&user, &wrapper_id, &10_000, &u32::MAX);
+
+    // Wrap 1,000 underlying (3 dp) -> 10,000,000 shares (7 dp); assets = 1,000
+    wrapper.wrap(&user, &1_000);
+    assert_eq!(wrapper.balance(&user), 10_000_000);
+
+    // A single share is worth 1,000 / 10,000,000 = 0.0001 underlying, which
+    // rounds down to zero, so the withdrawal must revert.
+    assert_eq!(
+        wrapper.try_withdraw(&user, &1),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
