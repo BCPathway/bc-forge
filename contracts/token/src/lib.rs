@@ -780,8 +780,8 @@ impl TokenInterface for BcForgeToken {
     /// Transfers tokens from `from` to `to`.
     ///
     /// @notice Transfers `amount` tokens from `from` to `to`. Requires `from` to authenticate the call.
-    /// @dev Guarded by [`bc_forge_lifecycle::require_not_paused`]. Checks rate limits before
-    ///      transferring. Emits a `transfer` event on success.
+    /// @dev Rejects with [`TokenError::ContractPaused`] while the lifecycle module reports the
+    ///      contract paused. Checks rate limits before transferring. Emits a `transfer` event on success.
     /// @param env The Soroban environment.
     /// @param from The sender address.
     /// @param to The recipient address.
@@ -791,7 +791,11 @@ impl TokenInterface for BcForgeToken {
         reentrancy_guard!(&env, "transfer_guard", {
             Self::panic_on_err(&env, Self::ensure_initialized(&env));
             // #762 – tie pause state into token transfers via the lifecycle modifier.
-            bc_forge_lifecycle::require_not_paused(&env);
+            // A contract-error panic is required here rather than the lifecycle crate's
+            // plain `require_not_paused` panic: a non-contract panic unwinds through the
+            // reentrancy guard's Drop, which performs storage writes mid-unwind and masks
+            // the failure as Context(InvalidAction) for try_ callers.
+            Self::panic_on_err(&env, Self::ensure_not_paused(&env));
             from.require_auth();
             if amount <= 0 {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
@@ -807,19 +811,20 @@ impl TokenInterface for BcForgeToken {
     /// Transfers tokens from `from` to `to` on behalf of `spender`.
     ///
     /// @notice Transfers `amount` tokens from `from` to `to` using the allowance mechanism. Requires `spender` to authenticate the call.
-    /// @dev Guarded by [`bc_forge_lifecycle::require_not_paused`]. Checks rate limits and
+    /// @dev Rejects with [`TokenError::ContractPaused`] while paused. Checks rate limits and
     ///      sufficient allowance before transferring. Deducts the allowance after a successful
     ///      transfer. Emits a `transfer_from` event.
     /// @param env The Soroban environment.
     /// @param spender The address calling the function (must have sufficient allowance).
     /// @param from The address to transfer tokens from.
-    /// @param to The address to transfer tokens to.
+    /// @param to The recipient address.
     /// @param amount The amount to transfer.
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         Self::extend_instance_ttl_for_call(&env);
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         // #762 – tie pause state into token transfers via the lifecycle modifier.
-        bc_forge_lifecycle::require_not_paused(&env);
+        // See the comment in `transfer` for why this is not `require_not_paused`.
+        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
         spender.require_auth();
         if amount <= 0 {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);

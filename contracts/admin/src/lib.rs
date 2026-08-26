@@ -14,7 +14,8 @@
 //! | Variant | Domain | Value Type | Description | TTL Extended |
 //! |---|---|---|---|---|
 //! | `Admin` | `instance()` | `Address` | Singular contract admin address | Every read/write |
-//! | `Role(Role, Address)` | `persistent()` | `bool` (`true`) | Role membership flag | On grant/admin-set |
+//! | `Role(Role, Address)` | `persistent()` | `bool` (`true`) | Legacy role membership flag; read as fallback only | On legacy read |
+//! | `RoleMask(Address)` | `persistent()` | `u32` | Role bitmask: one bit per role (see [`ROLE_BIT_ADMIN`] and friends) | On grant/revoke/read |
 //! | `AdminPool` | `instance()` | `Vec<Address>` | Multi-sig admin pool members | On set |
 //! | `Threshold` | `instance()` | `u32` | Approvals required to pass a proposal | On set |
 //! | `Proposal(u64)` | `instance()` | `Proposal` | Governance proposal data | Every read/write |
@@ -23,7 +24,6 @@
 //! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
 //! | `UpgradeProposal(u64)` | `persistent()` | `UpgradeProposal` | Multi-sig WASM upgrade proposal state | Required of #653-#663 (no reader or writer on this branch) |
 //! | `UpgradeProposalIdCounter` | `instance()` | `u64` | Auto-incrementing upgrade proposal ID generator | No |
-//! | `ContractUpgradeTarget(Address)` | `persistent()` | `BytesN<32>` | Targeted WASM upgrade hash for contract ID | On set |
 //!
 //! ## `Role` Enum
 //!
@@ -97,6 +97,12 @@
 //!   address is correct before calling.
 //!
 //! ### Role Management
+//! - Role assignments live in a single per-address bitmask under
+//!   [`AdminKey::RoleMask`]: `grant_role` loads the mask, bitwise-ORs the role's
+//!   bit in, and stores it back; `revoke_role` clears the bit (removing the
+//!   entry when no bits remain). Legacy per-role boolean entries written by
+//!   earlier versions are honored on read and migrated into the mask on the
+//!   address's first write.
 //! - [`has_role`] grants universal role access: any address with the `Admin` role
 //!   is considered to have every role. This simplifies authorization — admins
 //!   implicitly inherit all privileges.
@@ -156,7 +162,7 @@
 mod events;
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, Map, String, Vec};
 
 /// Errors returned by the admin access-control module.
 ///
@@ -189,6 +195,9 @@ pub enum AdminError {
     /// The mandatory timelock delay has not elapsed yet: the current ledger
     /// timestamp is still before the proposal's recorded unlock time.
     TimelockActive = 10,
+    /// A supplied WASM hash failed [`require_valid_wasm_hash`]: it is not
+    /// registered as installed on the ledger.
+    InvalidWasmHash = 11,
 }
 
 /// Storage keys for the access-control layer.
@@ -200,16 +209,15 @@ pub enum AdminError {
 /// @title AdminKey
 /// @notice Enumerates the storage keys used by the access-control layer.
 /// @dev Each variant maps to a distinct ledger slot; append new variants rather than reordering.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 #[contracttype]
 pub enum AdminKey {
     /// The singular contract admin address, set via `set_admin`.
     Admin,
-    /// Maps a `(Role, Address)` pair to `true` when `address` holds `role`.
-    /// This is the Role-to-Address mapping storage structure: membership is
-    /// looked up directly by key rather than by scanning a list, and each
-    /// pair occupies its own ledger entry so grants/revokes for one address
-    /// never touch another's.
+    /// Legacy per-role membership flag: maps a `(Role, Address)` pair to `true`
+    /// when `address` held `role`. Superseded by [`AdminKey::RoleMask`]; kept so
+    /// previously persisted keys keep decoding. New writes go to the mask, and
+    /// legacy entries for an address are removed once its mask is first written.
     Role(Role, Address),
     /// Maps an `(Address, Role)` pair to `true` when `address` holds `role`.
     /// This is the Address-to-Role mapping storage structure.
@@ -238,9 +246,21 @@ pub enum AdminKey {
     /// Auto-incrementing counter for upgrade proposal IDs. Distinct from
     /// [`AdminKey::ProposalIdCounter`], so the two flows never share an ID space.
     UpgradeProposalIdCounter,
-    /// Maps a contract `Address` to its targeted WASM upgrade hash (`BytesN<32>`).
-    /// Stored in `persistent()` so each contract entry carries its own TTL.
-    ContractUpgradeTarget(Address),
+    /// Maps an address to its role bitmask: bit `i` is set when the address
+    /// holds the role whose bit is `1 << i` (see [`ROLE_BIT_ADMIN`] and
+    /// friends). One ledger entry per address; grants and revokes are a
+    /// load / bitwise-OR / store on this entry.
+    ///
+    /// Supersedes [`AdminKey::Role(Role, Address)`], which is retained only so
+    /// previously persisted keys keep decoding; entries under the legacy key
+    /// are migrated into the mask on first write and are still read as a
+    /// fallback until then.
+    RoleMask(Address),
+    /// Marks a WASM hash as installed on the ledger (uploaded via
+    /// `env.deployer().upload_contract_wasm` and registered by an admin),
+    /// making it eligible to be referenced by an upgrade proposal. Checked by
+    /// [`require_valid_wasm_hash`].
+    InstalledWasmHash(soroban_sdk::BytesN<32>),
 }
 
 /// Roles recognized by the access-control layer.
@@ -267,11 +287,103 @@ pub enum Role {
 
 /// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
+///
+/// @notice Constant for the SuperAdmin role.
+/// @dev Used for convenient role checks without explicit enum qualification.
 pub const SUPER_ADMIN_ROLE: Role = Role::SuperAdmin;
 
 /// The Minter role constant — can be imported as `MINTER_ROLE` for
 /// use in access-control gating without qualifying the full `Role` enum.
+///
+/// @notice Constant for the Minter role.
+/// @dev Used for convenient role checks without explicit enum qualification.
 pub const MINTER_ROLE: Role = Role::Minter;
+
+/// Bitmask bit for the [`Role::Admin`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 0` corresponding to the Admin role.
+pub const ROLE_BIT_ADMIN: u32 = 1 << 0;
+/// Bitmask bit for the [`Role::Minter`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 1` corresponding to the Minter role.
+pub const ROLE_BIT_MINTER: u32 = 1 << 1;
+/// Bitmask bit for the [`Role::SuperAdmin`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 2` corresponding to the SuperAdmin role.
+pub const ROLE_BIT_SUPER_ADMIN: u32 = 1 << 2;
+/// Bitmask bit for the [`Role::Pauser`] role within a
+/// [`AdminKey::RoleMask(Address)`] entry.
+///
+/// @notice Bitmask value `1 << 3` corresponding to the Pauser role.
+pub const ROLE_BIT_PAUSER: u32 = 1 << 3;
+
+/// Returns the bitmask bit for `role`, or `None` for an unrecognized variant.
+fn role_bit(role: Role) -> Option<u32> {
+    match role {
+        Role::Admin => Some(ROLE_BIT_ADMIN),
+        Role::Minter => Some(ROLE_BIT_MINTER),
+        Role::SuperAdmin => Some(ROLE_BIT_SUPER_ADMIN),
+        Role::Pauser => Some(ROLE_BIT_PAUSER),
+    }
+}
+
+/// Every `(role, bit)` pair in bit order, used for legacy-entry migration.
+const ALL_ROLE_BITS: [(Role, u32); 4] = [
+    (Role::Admin, ROLE_BIT_ADMIN),
+    (Role::Minter, ROLE_BIT_MINTER),
+    (Role::SuperAdmin, ROLE_BIT_SUPER_ADMIN),
+    (Role::Pauser, ROLE_BIT_PAUSER),
+];
+
+/// Loads the role bitmask for `address`.
+///
+/// Reads the single [`AdminKey::RoleMask(address)`] persistent entry when it
+/// exists. Otherwise falls back to reconstructing the mask from any legacy
+/// per-role boolean entries ([`AdminKey::Role(Role, Address)`]) written by
+/// earlier versions of this module, so grants and revokes issued before the
+/// bitmask layout keep being honored until the address's first write migrates
+/// them.
+///
+/// Extends the TTL of whichever entries were consulted.
+fn load_role_mask(env: &Env, address: &Address) -> u32 {
+    let key = AdminKey::RoleMask(address.clone());
+    if let Some(mask) = env.storage().persistent().get::<_, u32>(&key) {
+        extend_storage_ttl_for_key(env, &key);
+        return mask;
+    }
+    let mut mask = 0u32;
+    for (role, bit) in ALL_ROLE_BITS {
+        let legacy_key = AdminKey::Role(role, address.clone());
+        if env.storage().persistent().has(&legacy_key) {
+            extend_storage_ttl_for_key(env, &legacy_key);
+            mask |= bit;
+        }
+    }
+    mask
+}
+
+/// Writes `mask` as the role bitmask for `address`, completing migration.
+///
+/// Removes every legacy per-role boolean entry for `address` once the mask is
+/// persisted, so the two layouts never disagree about what the address holds.
+fn persist_role_mask(env: &Env, address: &Address, mask: u32) {
+    let key = AdminKey::RoleMask(address.clone());
+    if mask == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &mask);
+        extend_storage_ttl_for_key(env, &key);
+    }
+    for (role, _) in ALL_ROLE_BITS {
+        let legacy_key = AdminKey::Role(role, address.clone());
+        if env.storage().persistent().has(&legacy_key) {
+            env.storage().persistent().remove(&legacy_key);
+        }
+    }
+}
 
 /// Mandatory delay between the moment a proposal reaches quorum and the moment
 /// [`execute_upgrade`] may act on it, in seconds (24 hours).
@@ -279,12 +391,17 @@ pub const MINTER_ROLE: Role = Role::Minter;
 /// The clock starts when quorum is first reached ([`create_proposal`] or
 /// [`approve_proposal`]) and is never reset, so pool members always get a
 /// full review window between approval and executable code changes.
+///
+/// @title TIMELOCK_DELAY_SECS
+/// @notice The duration in seconds (86,400s / 24 hours) for the proposal execution timelock.
+/// @dev Mandatory delay applied once quorum is reached before an upgrade can be executed.
 pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// A multi-sig governance proposal.
 ///
 /// @title Proposal
 /// @notice Holds the state of a governance proposal awaiting approval and execution.
+/// @dev Persisted under `AdminKey::Proposal(proposal_id)` in instance storage.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
@@ -451,7 +568,7 @@ fn require_valid_role(env: &Env, role: Role) {
 ///
 /// @notice Initializes the module by setting the contract admin. Can only be called once.
 /// @dev Records the admin under `AdminKey::Admin` and grants it the `Admin` role. Rejects the zero address.
-///      Storage slots: `AdminKey::Admin` (instance) and `AdminKey::Role(Admin, admin)` (persistent) — no overlap.
+///      Storage slots: `AdminKey::Admin` (instance) and `AdminKey::RoleMask(admin)` (persistent) — no overlap.
 /// @param env The Soroban environment.
 /// @param admin The address to set as the contract admin.
 /// @return `Ok(())` on success, or `AdminError::AlreadyInitialized` if storage was already set up.
@@ -461,11 +578,8 @@ pub fn init_storage(env: &Env, admin: &Address) -> Result<(), AdminError> {
     }
     require_non_zero_address(env, admin);
     env.storage().instance().set(&AdminKey::Admin, admin);
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(Role::Admin, admin.clone()), &true);
+    persist_role_mask(env, admin, ROLE_BIT_ADMIN);
     extend_instance_ttl(env);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(Role::Admin, admin.clone()));
     Ok(())
 }
 
@@ -479,15 +593,27 @@ pub fn set_admin(env: &Env, admin: &Address) {
     require_non_zero_address(env, admin);
     if has_admin(env) {
         let old_admin = get_admin(env);
-        env.storage()
-            .persistent()
-            .remove(&AdminKey::Role(Role::Admin, old_admin.clone()));
+        clear_role_bit(env, &old_admin, Role::Admin);
         extend_instance_ttl(env);
         events::emit_role_revoked(env, &old_admin, Role::Admin, &old_admin);
     }
     env.storage().instance().set(&AdminKey::Admin, admin);
     extend_instance_ttl(env);
     _grant_role(env, admin, Role::Admin, admin);
+}
+
+/// Clears a single role bit from `address`'s bitmask without authorization or events.
+///
+/// Intentionally private. Used where a role must be withdrawn as a side effect
+/// of another operation (e.g. [`set_admin`] rotating the admin) rather than via
+/// [`revoke_role`].
+fn clear_role_bit(env: &Env, address: &Address, role: Role) {
+    if let Some(bit) = role_bit(role) {
+        let mask = load_role_mask(env, address);
+        if mask & bit != 0 {
+            persist_role_mask(env, address, mask & !bit);
+        }
+    }
 }
 
 /// Migrates the singular admin address to the SuperAdmin role mapping.
@@ -542,6 +668,10 @@ pub fn set_admin(env: &Env, admin: &Address) {
 /// # Events
 ///
 /// This function does not emit any events.
+///
+/// @notice Migrates the singular contract admin address into the persistent SuperAdmin mapping.
+/// @dev Idempotent migration helper; copies `AdminKey::Admin` to `AdminKey::SuperAdmin(admin)`.
+/// @param env The Soroban environment.
 pub fn migrate_admin(env: &Env) {
     if let Some(admin) = env.storage().instance().get::<_, Address>(&AdminKey::Admin) {
         env.storage()
@@ -584,11 +714,19 @@ pub fn has_admin(env: &Env) -> bool {
 /// Grants a role to an address.
 ///
 /// @notice Grants `role` to `address`. Only a super-admin may call this function.
-/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and unrecognized role variants, then emits `role_grnt`.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and
+///      unrecognized role variants, then emits `role_grnt`. Granting an already-held role
+///      is idempotent: the bitmask is ORed, so no state change occurs beyond the event.
 /// @param env The Soroban environment.
 /// @param caller The address performing the grant; must be a super-admin.
-/// @param role The role to grant.
+/// @param role The role to grant (one of [`Role::Admin`], [`Role::Minter`], [`Role::SuperAdmin`], [`Role::Pauser`]).
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(caller, role, address)`.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
@@ -599,17 +737,28 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// Writes a role assignment without performing authorization.
 ///
 /// @notice Records that `address` holds `role` and emits `role_grnt`.
-/// @dev Intentionally private. Callers must perform authorization before delegating here. Rejects the zero address.
+/// @dev Intentionally private. Callers must perform authorization before delegating here.
+///      Rejects the zero address. The assignment is a single load / bitwise-OR /
+///      store on the address's `AdminKey::RoleMask(address)` entry, so a grant
+///      never disturbs the address's other roles. Granting an already-held role is
+///      idempotent.
 /// @param env The Soroban environment.
 /// @param admin The address recorded as the granting caller in the emitted event.
 /// @param role The role to assign.
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(admin, role, address)`.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
-    env.storage()
-        .persistent()
-        .set(&AdminKey::Role(role, address.clone()), &true);
-    extend_storage_ttl_for_key(env, &AdminKey::Role(role, address.clone()));
+    let bit = match role_bit(role) {
+        Some(bit) => bit,
+        None => soroban_sdk::panic_with_error!(env, AdminError::InvalidRole),
+    };
+    let mask = load_role_mask(env, address);
+    persist_role_mask(env, address, mask | bit);
     events::emit_role_granted(env, admin, role, address);
 }
 
@@ -618,12 +767,20 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
 /// @notice Removes `role` from `address`. Only a super-admin may call this function.
 /// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants (#426)
 ///      and the zero address, then delegates to the internal revoke helper which removes the
-///      persistent storage entry (#416) and emits `role_rvk`.
+///      persistent storage entry (#416) and emits `role_rvk`. Revoking a role that is not held
+///      returns an error rather than panicking.
 /// @param env The Soroban environment.
 /// @param caller The address performing the revoke; must be a super-admin.
 /// @param role The role to revoke.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if the address did not hold the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 pub fn revoke_role(
     env: &Env,
     caller: &Address,
@@ -643,21 +800,34 @@ pub fn revoke_role(
 /// This helper is intentionally private. Callers exposed by a contract must
 /// perform their authorization checks before delegating the state change here.
 ///
-/// @notice Removes the `(role, address)` assignment from storage and emits `role_rvk`.
+/// @notice Removes the `role` bit from `address`'s role mask and emits `role_rvk`.
 /// @dev Intentionally private; performs no authorization. Rejects the zero address.
+///      The other bits of the address's mask are preserved; when no bits remain
+///      the mask entry is removed entirely. Revoking a role that is not held is
+///      an error and does not modify state.
 /// @param env The Soroban environment.
 /// @param role The role to remove.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if no assignment existed.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
+    let bit = match role_bit(role) {
+        Some(bit) => bit,
+        None => return Err(AdminError::InvalidRole),
+    };
 
-    let key = AdminKey::Role(role, address.clone());
-    if !env.storage().persistent().has(&key) {
+    let mask = load_role_mask(env, address);
+    if mask & bit == 0 {
         return Err(AdminError::RoleNotHeld);
     }
+    persist_role_mask(env, address, mask & !bit);
 
-    env.storage().persistent().remove(&key);
     let admin = get_admin(env);
     events::emit_role_revoked(env, &admin, role, address);
     Ok(())
@@ -677,22 +847,17 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
         return false;
     }
 
+    // A single mask load answers both the implicit-admin check and the direct
+    // check; `load_role_mask` extends the TTL of whatever entries it read.
+    let mask = load_role_mask(env, address);
+
     // Admin role implicitly grants all other roles.
-    // Check the Admin mapping first unless the caller already asks for Admin.
-    if role != Role::Admin {
-        let admin_key = AdminKey::Role(Role::Admin, address.clone());
-        if env.storage().persistent().has(&admin_key) {
-            extend_storage_ttl_for_key(env, &admin_key);
-            events::emit_role_checked(env, address, role, true);
-            return true;
-        }
+    if role != Role::Admin && mask & ROLE_BIT_ADMIN != 0 {
+        events::emit_role_checked(env, address, role, true);
+        return true;
     }
 
-    let role_key = AdminKey::Role(role, address.clone());
-    let has = env.storage().persistent().has(&role_key);
-    if has {
-        extend_storage_ttl_for_key(env, &role_key);
-    }
+    let has = role_bit(role).is_some_and(|bit| mask & bit != 0);
     events::emit_role_checked(env, address, role, has);
     has
 }
@@ -1147,43 +1312,60 @@ pub fn execute_upgrade(
     Ok(())
 }
 
-/// Sets the target WASM hash for the given contract ID.
+/// Registers `wasm_hash` as installed on the ledger, making it eligible to be
+/// referenced by an upgrade proposal. Resolves issue #657 (companion
+/// registration for [`require_valid_wasm_hash`]).
 ///
-/// Caller must hold the `SuperAdmin` role.
+/// Soroban does not expose a host function that lets a contract query
+/// whether a given hash was previously uploaded via
+/// `env.deployer().upload_contract_wasm`, so this module keeps its own
+/// allowlist: the contract admin explicitly records a hash here — typically
+/// right after uploading it — before any upgrade proposal is allowed to
+/// target it.
 ///
-/// @notice Sets the target WASM hash for `contract_id`.
-/// @dev Requires caller authorization and the `SuperAdmin` role via `require_super_admin`.
-///      Stored under `AdminKey::ContractUpgradeTarget(contract_id)` in persistent storage.
+/// @notice Marks `wasm_hash` as a valid upgrade target.
+/// @dev Requires contract admin authorization.
 /// @param env The Soroban environment.
-/// @param caller The address performing the set; must be a super-admin.
-/// @param contract_id The contract address to map to a WASM hash.
-/// @param wasm_hash The 32-byte WASM hash target.
-pub fn set_upgrade_target(
-    env: &Env,
-    caller: &Address,
-    contract_id: &Address,
-    wasm_hash: BytesN<32>,
-) {
-    require_super_admin(env, caller);
-    let key = AdminKey::ContractUpgradeTarget(contract_id.clone());
-    env.storage().persistent().set(&key, &wasm_hash);
+/// @param admin The contract admin authorizing the registration.
+/// @param wasm_hash The 32-byte WASM hash to register as installed.
+pub fn register_wasm_hash(env: &Env, admin: &Address, wasm_hash: soroban_sdk::BytesN<32>) {
+    require_admin(env, admin);
+    let key = AdminKey::InstalledWasmHash(wasm_hash);
+    env.storage().persistent().set(&key, &true);
     extend_storage_ttl_for_key(env, &key);
 }
 
-/// Returns the target WASM hash for the given contract ID, or `None` if unset.
+/// Validates that `wasm_hash` is a legitimate WASM upgrade target. Resolves
+/// issue #657.
 ///
-/// @notice Returns the target WASM hash for `contract_id`, or `None` if not set.
-/// @dev Reads from persistent storage under `AdminKey::ContractUpgradeTarget(contract_id)`.
+/// # Errors
+///
+/// Returns [`AdminError::InvalidWasmHash`] if `wasm_hash` has not been
+/// registered via [`register_wasm_hash`].
+///
+/// @notice Checks that `wasm_hash` is 32 bytes and was previously registered as installed on the ledger.
+/// @dev `wasm_hash`'s `BytesN<32>` type guarantees the 32-byte length at the type-system level, so this
+///      is purely a ledger-registration check. Callers that accept raw bytes at a contract boundary must
+///      convert to `BytesN<32>` first, which itself rejects any other length.
 /// @param env The Soroban environment.
-/// @param contract_id The contract address to look up.
-/// @return The 32-byte WASM hash target if set, or `None`.
-pub fn get_upgrade_target(env: &Env, contract_id: &Address) -> Option<BytesN<32>> {
-    let key = AdminKey::ContractUpgradeTarget(contract_id.clone());
-    let target = env.storage().persistent().get(&key);
-    if target.is_some() {
-        extend_storage_ttl_for_key(env, &key);
+/// @param wasm_hash The WASM hash to validate.
+/// @return `Ok(())` if the hash is valid and installed, or `AdminError::InvalidWasmHash` otherwise.
+pub fn require_valid_wasm_hash(
+    env: &Env,
+    wasm_hash: &soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
+    if wasm_hash.len() != 32 {
+        return Err(AdminError::InvalidWasmHash);
     }
-    target
+    let installed = env
+        .storage()
+        .persistent()
+        .get(&AdminKey::InstalledWasmHash(wasm_hash.clone()))
+        .unwrap_or(false);
+    if !installed {
+        return Err(AdminError::InvalidWasmHash);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1194,7 +1376,7 @@ mod tests {
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::xdr::ScVal;
     use soroban_sdk::{
-        contract, contractimpl, Address, BytesN, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Val,
+        contract, contractimpl, Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Val,
     };
 
     mod gas_bench;
@@ -1213,10 +1395,12 @@ mod tests {
             super::init_storage(&env, &admin)
         }
 
+        /// @inheritdoc bc_forge_admin::grant_role
         pub fn grant_role(env: Env, caller: Address, role: Role, address: Address) {
             super::grant_role(&env, &caller, role, &address);
         }
 
+        /// @inheritdoc bc_forge_admin::revoke_role
         pub fn revoke_role(
             env: Env,
             caller: Address,
@@ -1279,6 +1463,17 @@ mod tests {
             super::get_proposal_unlock_time(&env, proposal_id)
         }
 
+        pub fn register_wasm_hash(env: Env, admin: Address, wasm_hash: soroban_sdk::BytesN<32>) {
+            super::register_wasm_hash(&env, &admin, wasm_hash);
+        }
+
+        pub fn require_valid_wasm_hash(
+            env: Env,
+            wasm_hash: soroban_sdk::BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::require_valid_wasm_hash(&env, &wasm_hash)
+        }
+
         pub fn require_super_admin(env: Env, address: Address) {
             super::require_super_admin(&env, &address);
         }
@@ -1309,19 +1504,6 @@ mod tests {
 
         pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
             super::is_proposal_ready(&env, proposal_id)
-        }
-
-        pub fn set_upgrade_target(
-            env: Env,
-            caller: Address,
-            contract_id: Address,
-            wasm_hash: BytesN<32>,
-        ) {
-            super::set_upgrade_target(&env, &caller, &contract_id, wasm_hash);
-        }
-
-        pub fn get_upgrade_target(env: Env, contract_id: Address) -> Option<BytesN<32>> {
-            super::get_upgrade_target(&env, &contract_id)
         }
     }
 
@@ -2769,6 +2951,147 @@ mod tests {
         assert_eq!(event_address, grantee);
     }
 
+    // ── Role-mask mapping assignment ─────────────────────────────────────────
+
+    /// Granting a role ORs its bit into the address's single `RoleMask` entry,
+    /// removes any legacy per-role boolean entries, and leaves other roles held
+    /// by the same address untouched.
+    #[test]
+    fn test_grant_role_ors_bit_into_single_mask_entry() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+
+        let key = AdminKey::RoleMask(holder.clone());
+        env.as_contract(&contract_id, || {
+            let mask: u32 = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .expect("mask entry should exist after first grant");
+            assert_eq!(mask, ROLE_BIT_MINTER);
+            // The legacy boolean layout must not be written anymore.
+            assert!(!env
+                .storage()
+                .persistent()
+                .has(&AdminKey::Role(Role::Minter, holder.clone())));
+        });
+
+        // A second grant ORs another bit into the same entry.
+        client.grant_role(&admin, &Role::Pauser, &holder);
+        env.as_contract(&contract_id, || {
+            let mask: u32 = env.storage().persistent().get(&key).unwrap();
+            assert_eq!(mask, ROLE_BIT_MINTER | ROLE_BIT_PAUSER);
+        });
+
+        assert!(client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&Role::Pauser, &holder));
+        assert!(!client.has_role(&Role::SuperAdmin, &holder));
+    }
+
+    /// Revoking a role clears only that role's bit from the mask; when no bits
+    /// remain the entry is removed entirely.
+    #[test]
+    fn test_revoke_role_clears_only_target_bit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+        let key = AdminKey::RoleMask(holder.clone());
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &holder);
+        client.grant_role(&admin, &Role::Pauser, &holder);
+        client.revoke_role(&admin, &Role::Minter, &holder);
+
+        env.as_contract(&contract_id, || {
+            let mask: u32 = env.storage().persistent().get(&key).unwrap();
+            assert_eq!(
+                mask, ROLE_BIT_PAUSER,
+                "only the revoked role's bit should be cleared"
+            );
+        });
+
+        client.revoke_role(&admin, &Role::Pauser, &holder);
+        env.as_contract(&contract_id, || {
+            assert!(
+                !env.storage().persistent().has(&key),
+                "an empty mask should remove the entry"
+            );
+        });
+    }
+
+    /// Legacy per-role boolean entries written by earlier versions are still
+    /// honored by `has_role`, and the next grant migrates them into the mask.
+    #[test]
+    fn test_legacy_bool_entries_are_honored_and_migrated_on_grant() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let holder = Address::generate(&env);
+
+        client.set_admin(&admin);
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&AdminKey::Role(Role::Minter, holder.clone()), &true);
+        });
+
+        // The pre-migration grant is still visible through the public API.
+        assert!(client.has_role(&Role::Minter, &holder));
+
+        // A new grant persists the merged mask and sweeps away the legacy entry.
+        client.grant_role(&admin, &Role::Pauser, &holder);
+        env.as_contract(&contract_id, || {
+            let key = AdminKey::RoleMask(holder.clone());
+            let mask: u32 = env.storage().persistent().get(&key).unwrap();
+            assert_eq!(mask, ROLE_BIT_MINTER | ROLE_BIT_PAUSER);
+            assert!(!env
+                .storage()
+                .persistent()
+                .has(&AdminKey::Role(Role::Minter, holder.clone())));
+        });
+        assert!(client.has_role(&Role::Pauser, &holder));
+
+        // Revocation now works against the migrated mask.
+        client.revoke_role(&admin, &Role::Minter, &holder);
+        assert!(!client.has_role(&Role::Minter, &holder));
+        assert!(client.has_role(&Role::Pauser, &holder));
+    }
+
+    /// `set_admin` rotating the admin withdraws the old admin's `Admin` bit
+    /// without touching any other roles the old admin may hold.
+    #[test]
+    fn test_set_admin_rotation_clears_only_admin_bit_of_old_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let old_admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.set_admin(&old_admin);
+        client.grant_role(&old_admin, &Role::Pauser, &old_admin);
+        client.set_admin(&new_admin);
+
+        assert!(!client.has_role(&Role::Admin, &old_admin));
+        assert!(
+            client.has_role(&Role::Pauser, &old_admin),
+            "rotating the admin must not strip unrelated roles from the old admin"
+        );
+        assert!(client.has_role(&Role::Admin, &new_admin));
+    }
+
     // ── #405: init_storage ───────────────────────────────────────────────────
 
     #[test]
@@ -3453,85 +3776,55 @@ mod tests {
         );
     }
 
+    // ── register_wasm_hash / require_valid_wasm_hash (#657) ────────────────────
+
+    fn sample_wasm_hash(env: &Env) -> soroban_sdk::BytesN<32> {
+        soroban_sdk::BytesN::from_array(env, &[7u8; 32])
+    }
+
     #[test]
-    fn test_set_and_get_upgrade_target_happy_path() {
+    fn test_require_valid_wasm_hash_accepts_registered_hash() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let target_contract = Address::generate(&env);
-        let wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0xab; 32]);
+        let hash = sample_wasm_hash(&env);
 
         client.set_admin(&admin);
-        client.set_upgrade_target(&admin, &target_contract, &wasm_hash);
+        client.register_wasm_hash(&admin, &hash);
 
-        let retrieved = client.get_upgrade_target(&target_contract);
-        assert_eq!(retrieved, Some(wasm_hash));
+        assert_eq!(client.try_require_valid_wasm_hash(&hash), Ok(Ok(())));
     }
 
     #[test]
-    fn test_set_upgrade_target_overwrite() {
+    fn test_require_valid_wasm_hash_rejects_unregistered_hash() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let target_contract = Address::generate(&env);
-        let hash_1 = soroban_sdk::BytesN::from_array(&env, &[0x01; 32]);
-        let hash_2 = soroban_sdk::BytesN::from_array(&env, &[0x02; 32]);
+        let hash = sample_wasm_hash(&env);
 
         client.set_admin(&admin);
-        client.set_upgrade_target(&admin, &target_contract, &hash_1);
-        assert_eq!(client.get_upgrade_target(&target_contract), Some(hash_1));
 
-        client.set_upgrade_target(&admin, &target_contract, &hash_2);
-        assert_eq!(client.get_upgrade_target(&target_contract), Some(hash_2));
+        let result = client.try_require_valid_wasm_hash(&hash);
+        assert_eq!(result, Err(Ok(AdminError::InvalidWasmHash)));
     }
 
     #[test]
-    fn test_set_upgrade_target_non_super_admin_rejected() {
+    fn test_register_wasm_hash_rejects_non_admin_caller() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let non_admin = Address::generate(&env);
-        let target_contract = Address::generate(&env);
-        let wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0xcd; 32]);
+        let stranger = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
 
         client.set_admin(&admin);
 
-        let result = client.try_set_upgrade_target(&non_admin, &target_contract, &wasm_hash);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
-        assert_eq!(client.get_upgrade_target(&target_contract), None);
-    }
-
-    #[test]
-    fn test_get_upgrade_target_unset() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let target_contract = Address::generate(&env);
-
-        assert_eq!(client.get_upgrade_target(&target_contract), None);
-    }
-
-    #[test]
-    fn test_contract_upgrade_target_storage_key_is_frozen() {
-        let env = Env::default();
-        let dummy_addr = Address::generate(&env);
-        let expected_target: Val = vec![
-            &env,
-            Symbol::new(&env, "ContractUpgradeTarget").to_val(),
-            dummy_addr.to_val(),
-        ]
-        .into_val(&env);
-
-        assert_eq!(
-            encoded_key(&env, AdminKey::ContractUpgradeTarget(dummy_addr)),
-            ScVal::try_from_val(&env, &expected_target).unwrap()
-        );
+        let result = client.try_register_wasm_hash(&stranger, &hash);
+        assert!(result.is_err());
     }
 }

@@ -445,6 +445,57 @@ impl WrapperContract {
         Ok(())
     }
 
+    /// Distributes rewards into the vault/wrapper contract without issuing new shares.
+    ///
+    /// Transfers `amount` of the underlying token from `caller` into this contract,
+    /// increasing total underlying assets while leaving total share supply unchanged.
+    /// This updates the exchange rate and increases the value of existing shares.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address providing the reward capital.
+    /// * `amount` - Amount of underlying tokens to distribute as rewards.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::ContractPaused`] if operations are paused.
+    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive.
+    pub fn distribute_rewards(env: Env, caller: Address, amount: i128) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if amount <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        Self::acquire_lock(&env)?;
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+
+        // Pull underlying tokens from caller into this contract as capital rewards.
+        // Token balance increases without increasing wrapper share supply.
+        underlying_client.transfer_from(
+            &env.current_contract_address(),
+            &caller,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        Self::release_lock(&env);
+        events::emit_distribute_rewards(&env, &caller, amount);
+        Ok(())
+    }
+
+    /// Returns the total underlying token assets held by the vault contract.
+    pub fn total_assets(env: Env) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+        underlying_client.balance(&env.current_contract_address())
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, "1.0.0")
