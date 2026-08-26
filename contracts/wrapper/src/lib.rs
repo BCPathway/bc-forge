@@ -42,7 +42,8 @@ pub enum DataKey {
     Name,
     /// Ticker symbol of the wrapper token.
     Symbol,
-    /// Total wrapped supply.
+    /// Total vault share supply in circulation. Stored in instance storage
+    /// and updated on every mint (`wrap`) and burn (`unwrap`, `burn`, `burn_from`).
     Supply,
     /// Per-account wrapped balance.
     Balance(Address),
@@ -154,10 +155,19 @@ impl WrapperContract {
             .set(&DataKey::Balance(id.clone()), &balance);
     }
 
+    /// Reads the total vault share supply from instance storage.
+    ///
+    /// @notice Returns the total number of shares in circulation; defaults to 0
+    ///         when the supply has never been written (e.g. before initialization).
     fn read_supply(env: &Env) -> i128 {
         env.storage().instance().get(&DataKey::Supply).unwrap_or(0)
     }
 
+    /// Writes the total vault share supply to instance storage.
+    ///
+    /// @notice Persists the updated share supply. Called after every mint
+    ///         (wrap) and burn (unwrap/burn/burn_from) so the recorded supply
+    ///         always mirrors outstanding shares.
     fn write_supply(env: &Env, supply: i128) {
         env.storage().instance().set(&DataKey::Supply, &supply);
     }
@@ -395,7 +405,13 @@ impl WrapperContract {
         Self::read_underlying(&env)
     }
 
-    /// Returns the total wrapped token supply.
+    /// Returns the total vault share supply in circulation.
+    ///
+    /// @notice The tracked share supply is incremented on `wrap` (mint) and
+    ///         decremented on `unwrap`, `burn`, and `burn_from`. Rewards
+    ///         distributed via `distribute_rewards` do not change it.
+    /// @param env The Soroban environment.
+    /// @return The total number of outstanding vault shares.
     pub fn supply(env: Env) -> i128 {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_supply(&env)

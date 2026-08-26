@@ -149,6 +149,61 @@ fn test_wrap_increases_supply_and_balance() {
 }
 
 #[test]
+fn test_supply_accumulates_across_multiple_wraps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // Mint shares three separate times; supply must accumulate each time.
+    wrapper.wrap(&user, &1_000_000);
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.wrap(&user, &3_000_000);
+
+    assert_eq!(wrapper.balance(&user), 6_000_000);
+    assert_eq!(wrapper.supply(), 6_000_000);
+}
+
+#[test]
+fn test_supply_tracks_mixed_wrap_and_burn_cycles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &5_000_000);
+    assert_eq!(wrapper.supply(), 5_000_000);
+
+    wrapper.burn(&user, &2_000_000);
+    assert_eq!(wrapper.supply(), 3_000_000);
+
+    wrapper.wrap(&user, &1_500_000);
+    assert_eq!(wrapper.supply(), 4_500_000);
+
+    wrapper.unwrap(&user, &500_000);
+    assert_eq!(wrapper.supply(), 4_000_000);
+}
+
+#[test]
+fn test_supply_equals_sum_of_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &4_000_000);
+    wrapper.transfer(&user_a, &user_b, &1_000_000);
+    wrapper.burn(&user_b, &250_000);
+
+    // After mint, transfer, and burn the invariant supply == Σ balances holds.
+    assert_eq!(wrapper.balance(&user_a), 3_000_000);
+    assert_eq!(wrapper.balance(&user_b), 750_000);
+    assert_eq!(wrapper.supply(), 3_750_000);
+    assert_eq!(
+        wrapper.balance(&user_a) + wrapper.balance(&user_b),
+        wrapper.supply()
+    );
+}
+
+#[test]
 fn test_unwrap_decreases_supply_and_balance() {
     let env = Env::default();
     env.mock_all_auths();
