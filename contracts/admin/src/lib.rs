@@ -195,6 +195,16 @@ pub enum AdminError {
     /// The mandatory timelock delay has not elapsed yet: the current ledger
     /// timestamp is still before the proposal's recorded unlock time.
     TimelockActive = 10,
+    /// A WASM upgrade proposal with the supplied ID does not exist.
+    UpgradeProposalNotFound = 11,
+    /// The proposal is not in a state that accepts votes (it is `Approved`,
+    /// `Executed`, `Cancelled`, `Expired`, or its voting window has closed).
+    ProposalNotPending = 12,
+    /// The caller already cast a vote on this upgrade proposal.
+    DuplicateVote = 13,
+    /// A supplied WASM hash failed [`require_valid_wasm_hash`]: it is not
+    /// registered as installed on the ledger.
+    InvalidWasmHash = 14,
 }
 
 /// Storage keys for the access-control layer.
@@ -253,6 +263,11 @@ pub enum AdminKey {
     /// are migrated into the mask on first write and are still read as a
     /// fallback until then.
     RoleMask(Address),
+    /// Marks a WASM hash as installed on the ledger (uploaded via
+    /// `env.deployer().upload_contract_wasm` and registered by an admin),
+    /// making it eligible to be referenced by an [`UpgradeProposal`]. Checked
+    /// by [`require_valid_wasm_hash`].
+    InstalledWasmHash(soroban_sdk::BytesN<32>),
 }
 
 /// Roles recognized by the access-control layer.
@@ -1275,6 +1290,159 @@ pub fn execute_upgrade(
     Ok(())
 }
 
+/// Registers `wasm_hash` as installed on the ledger, making it eligible to be
+/// referenced by an [`UpgradeProposal`]. Resolves issue #657 (companion
+/// registration for [`require_valid_wasm_hash`]).
+///
+/// Soroban does not expose a host function that lets a contract query
+/// whether a given hash was previously uploaded via
+/// `env.deployer().upload_contract_wasm`, so this module keeps its own
+/// allowlist: the contract admin explicitly records a hash here — typically
+/// right after uploading it — before any upgrade proposal is allowed to
+/// target it.
+///
+/// @notice Marks `wasm_hash` as a valid upgrade target.
+/// @dev Requires contract admin authorization.
+/// @param env The Soroban environment.
+/// @param admin The contract admin authorizing the registration.
+/// @param wasm_hash The 32-byte WASM hash to register as installed.
+pub fn register_wasm_hash(env: &Env, admin: &Address, wasm_hash: soroban_sdk::BytesN<32>) {
+    require_admin(env, admin);
+    let key = AdminKey::InstalledWasmHash(wasm_hash);
+    env.storage().persistent().set(&key, &true);
+    extend_storage_ttl_for_key(env, &key);
+}
+
+/// Validates that `wasm_hash` is a legitimate WASM upgrade target. Resolves
+/// issue #657.
+///
+/// # Errors
+///
+/// Returns [`AdminError::InvalidWasmHash`] if `wasm_hash` has not been
+/// registered via [`register_wasm_hash`].
+///
+/// @notice Checks that `wasm_hash` is 32 bytes and was previously registered as installed on the ledger.
+/// @dev `wasm_hash`'s `BytesN<32>` type guarantees the 32-byte length at the type-system level, so this
+///      is purely a ledger-registration check. Callers that accept raw bytes at a contract boundary must
+///      convert to `BytesN<32>` first, which itself rejects any other length.
+/// @param env The Soroban environment.
+/// @param wasm_hash The WASM hash to validate.
+/// @return `Ok(())` if the hash is valid and installed, or `AdminError::InvalidWasmHash` otherwise.
+pub fn require_valid_wasm_hash(
+    env: &Env,
+    wasm_hash: &soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
+    if wasm_hash.len() != 32 {
+        return Err(AdminError::InvalidWasmHash);
+    }
+    let installed = env
+        .storage()
+        .persistent()
+        .get(&AdminKey::InstalledWasmHash(wasm_hash.clone()))
+        .unwrap_or(false);
+    if !installed {
+        return Err(AdminError::InvalidWasmHash);
+    }
+    Ok(())
+}
+
+/// Casts `voter`'s approval on a pending [`UpgradeProposal`]. Resolves issue
+/// #654.
+///
+/// Once the weighted tally of unique votes reaches the proposal's snapshotted
+/// [`UpgradeProposal::quorum`], the proposal transitions from `Pending` to
+/// `Approved` in the same call — mirroring the existing [`approve_proposal`]
+/// / [`_start_timelock_if_quorate`] pattern, so quorum is always detected at
+/// the exact vote that completes it rather than lazily on a later read.
+///
+/// # Authorization & Guarantees
+///
+/// - `voter` must authorize the call and be a member of the admin pool
+///   ([`get_admin_pool`]).
+/// - The proposal must exist and currently be [`ProposalStatus::Pending`];
+///   voting on an `Approved`, `Executed`, `Cancelled` or `Expired` proposal
+///   is rejected, as is voting after `expires_at` has passed.
+/// - Each voter may cast at most one vote per proposal (checked-effects: the
+///   duplicate check reads `votes` before it is written).
+///
+/// # Errors
+///
+/// Returns [`AdminError::UnauthorizedRole`] if `voter` is not an admin-pool
+/// member, [`AdminError::UpgradeProposalNotFound`] if no proposal exists
+/// under `proposal_id`, [`AdminError::ProposalNotPending`] if the proposal is
+/// not currently pending votes, or [`AdminError::DuplicateVote`] if `voter`
+/// already voted on this proposal.
+///
+/// @notice Records `voter`'s approval of upgrade proposal `proposal_id`, advancing it to `Approved` once quorum is reached.
+/// @dev Requires pool membership and authorization. Each voter carries weight `1` and may vote at most once per proposal.
+/// @param env The Soroban environment.
+/// @param voter The admin-pool member casting the vote.
+/// @param proposal_id The ID of the upgrade proposal to vote on.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
+pub fn approve_upgrade(env: &Env, voter: Address, proposal_id: u64) -> Result<(), AdminError> {
+    voter.require_auth();
+
+    let pool = get_admin_pool(env);
+    if !pool.contains(&voter) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    let key = AdminKey::UpgradeProposal(proposal_id);
+    let mut proposal: UpgradeProposal = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(AdminError::UpgradeProposalNotFound)?;
+
+    if proposal.status != ProposalStatus::Pending || env.ledger().timestamp() >= proposal.expires_at
+    {
+        return Err(AdminError::ProposalNotPending);
+    }
+    if proposal.votes.contains_key(voter.clone()) {
+        return Err(AdminError::DuplicateVote);
+    }
+
+    proposal.votes.set(voter, 1);
+
+    if require_upgrade_quorum_met(&proposal).is_ok() {
+        proposal.status = ProposalStatus::Approved;
+    }
+
+    env.storage().persistent().set(&key, &proposal);
+    extend_storage_ttl_for_key(env, &key);
+    Ok(())
+}
+
+/// Checks that an [`UpgradeProposal`]'s weighted vote tally has reached its
+/// snapshotted quorum. Resolves issue #656.
+///
+/// The tally is recomputed from `proposal.votes` on every call rather than
+/// trusting `proposal.status`, so this guard stays correct even if it is
+/// ever invoked on a proposal whose cached status has drifted (defense in
+/// depth ahead of the execute path landing in #655).
+///
+/// # Errors
+///
+/// Returns [`AdminError::QuorumNotMet`] if the summed vote weight is below
+/// `proposal.quorum`.
+///
+/// @notice Reverts unless `proposal`'s unique approvals meet or exceed its quorum.
+/// @dev Sums the weights recorded in `proposal.votes`; each entry is keyed by a unique voter address, so the sum can never double-count a signer.
+/// @param proposal The upgrade proposal to check.
+/// @return `Ok(())` if quorum is met, or `AdminError::QuorumNotMet` otherwise.
+pub fn require_upgrade_quorum_met(proposal: &UpgradeProposal) -> Result<(), AdminError> {
+    let tally: u64 = proposal
+        .votes
+        .values()
+        .into_iter()
+        .map(|weight| weight as u64)
+        .sum();
+    if tally < proposal.quorum {
+        return Err(AdminError::QuorumNotMet);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1366,6 +1534,25 @@ mod tests {
 
         pub fn get_proposal_unlock_time(env: Env, proposal_id: u64) -> Option<u64> {
             super::get_proposal_unlock_time(&env, proposal_id)
+        }
+
+        pub fn approve_upgrade(
+            env: Env,
+            voter: Address,
+            proposal_id: u64,
+        ) -> Result<(), AdminError> {
+            super::approve_upgrade(&env, voter, proposal_id)
+        }
+
+        pub fn register_wasm_hash(env: Env, admin: Address, wasm_hash: soroban_sdk::BytesN<32>) {
+            super::register_wasm_hash(&env, &admin, wasm_hash);
+        }
+
+        pub fn require_valid_wasm_hash(
+            env: Env,
+            wasm_hash: soroban_sdk::BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::require_valid_wasm_hash(&env, &wasm_hash)
         }
 
         pub fn require_super_admin(env: Env, address: Address) {
@@ -3667,6 +3854,300 @@ mod tests {
         assert_eq!(
             encoded_key(&env, AdminKey::UpgradeProposalIdCounter),
             ScVal::try_from_val(&env, &expected_counter).unwrap()
+        );
+    }
+
+    // ── register_wasm_hash / require_valid_wasm_hash (#657) ────────────────────
+
+    fn sample_wasm_hash(env: &Env) -> soroban_sdk::BytesN<32> {
+        soroban_sdk::BytesN::from_array(env, &[7u8; 32])
+    }
+
+    #[test]
+    fn test_require_valid_wasm_hash_accepts_registered_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+        client.register_wasm_hash(&admin, &hash);
+
+        assert_eq!(client.try_require_valid_wasm_hash(&hash), Ok(Ok(())));
+    }
+
+    #[test]
+    fn test_require_valid_wasm_hash_rejects_unregistered_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_valid_wasm_hash(&hash);
+        assert_eq!(result, Err(Ok(AdminError::InvalidWasmHash)));
+    }
+
+    #[test]
+    fn test_register_wasm_hash_rejects_non_admin_caller() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_register_wasm_hash(&stranger, &hash);
+        assert!(result.is_err());
+    }
+
+    // ── approve_upgrade / require_upgrade_quorum_met (#654, #656) ──────────────
+
+    fn seed_upgrade_proposal(
+        env: &Env,
+        contract_id: &Address,
+        proposal_id: u64,
+        proposal: &UpgradeProposal,
+    ) {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&AdminKey::UpgradeProposal(proposal_id), proposal);
+        });
+    }
+
+    fn read_upgrade_proposal(
+        env: &Env,
+        contract_id: &Address,
+        proposal_id: u64,
+    ) -> UpgradeProposal {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&AdminKey::UpgradeProposal(proposal_id))
+                .unwrap()
+        })
+    }
+
+    #[test]
+    fn test_approve_upgrade_records_vote_below_quorum() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, voter1.clone(), voter2.clone()], &2);
+
+        let proposal = UpgradeProposal {
+            proposer: voter1.clone(),
+            targets: vec![&env, target],
+            votes: Map::new(&env),
+            quorum: 2,
+            status: ProposalStatus::Pending,
+            expires_at: env.ledger().timestamp() + 1_000,
+        };
+        seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
+
+        client.approve_upgrade(&voter1, &1);
+
+        let stored = read_upgrade_proposal(&env, &contract_id, 1);
+        assert_eq!(stored.status, ProposalStatus::Pending);
+        assert_eq!(stored.votes.len(), 1);
+        assert_eq!(stored.votes.get(voter1).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_approve_upgrade_reaches_quorum_and_flips_to_approved() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, voter1.clone(), voter2.clone()], &2);
+
+        let proposal = UpgradeProposal {
+            proposer: voter1.clone(),
+            targets: vec![&env, target],
+            votes: Map::new(&env),
+            quorum: 2,
+            status: ProposalStatus::Pending,
+            expires_at: env.ledger().timestamp() + 1_000,
+        };
+        seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
+
+        client.approve_upgrade(&voter1, &1);
+        client.approve_upgrade(&voter2, &1);
+
+        let stored = read_upgrade_proposal(&env, &contract_id, 1);
+        assert_eq!(stored.status, ProposalStatus::Approved);
+        assert!(require_upgrade_quorum_met(&stored).is_ok());
+    }
+
+    #[test]
+    fn test_approve_upgrade_rejects_non_pool_member() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, voter1.clone()], &1);
+
+        let proposal = UpgradeProposal {
+            proposer: voter1.clone(),
+            targets: vec![&env, target],
+            votes: Map::new(&env),
+            quorum: 1,
+            status: ProposalStatus::Pending,
+            expires_at: env.ledger().timestamp() + 1_000,
+        };
+        seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
+
+        let result = client.try_approve_upgrade(&stranger, &1);
+        assert_eq!(result, Err(Ok(AdminError::UnauthorizedRole)));
+    }
+
+    #[test]
+    fn test_approve_upgrade_rejects_duplicate_vote() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, voter1.clone(), voter2.clone()], &2);
+
+        let proposal = UpgradeProposal {
+            proposer: voter1.clone(),
+            targets: vec![&env, target],
+            votes: Map::new(&env),
+            quorum: 2,
+            status: ProposalStatus::Pending,
+            expires_at: env.ledger().timestamp() + 1_000,
+        };
+        seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
+
+        client.approve_upgrade(&voter1, &1);
+        let result = client.try_approve_upgrade(&voter1, &1);
+        assert_eq!(result, Err(Ok(AdminError::DuplicateVote)));
+    }
+
+    #[test]
+    fn test_approve_upgrade_rejects_nonexistent_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, voter1.clone()], &1);
+
+        let result = client.try_approve_upgrade(&voter1, &99);
+        assert_eq!(result, Err(Ok(AdminError::UpgradeProposalNotFound)));
+    }
+
+    #[test]
+    fn test_approve_upgrade_rejects_already_approved_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, voter1.clone()], &1);
+
+        let proposal = UpgradeProposal {
+            proposer: voter1.clone(),
+            targets: vec![&env, target],
+            votes: Map::new(&env),
+            quorum: 1,
+            status: ProposalStatus::Approved,
+            expires_at: env.ledger().timestamp() + 1_000,
+        };
+        seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
+
+        let result = client.try_approve_upgrade(&voter1, &1);
+        assert_eq!(result, Err(Ok(AdminError::ProposalNotPending)));
+    }
+
+    #[test]
+    fn test_approve_upgrade_rejects_vote_after_expiry() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, voter1.clone()], &1);
+
+        let proposal = UpgradeProposal {
+            proposer: voter1.clone(),
+            targets: vec![&env, target],
+            votes: Map::new(&env),
+            quorum: 1,
+            status: ProposalStatus::Pending,
+            expires_at: env.ledger().timestamp(),
+        };
+        seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
+
+        env.ledger().with_mut(|li| li.timestamp += 1);
+
+        let result = client.try_approve_upgrade(&voter1, &1);
+        assert_eq!(result, Err(Ok(AdminError::ProposalNotPending)));
+    }
+
+    #[test]
+    fn test_require_upgrade_quorum_met_reports_deficit() {
+        let env = Env::default();
+        let mut votes = Map::new(&env);
+        votes.set(Address::generate(&env), 1u32);
+
+        let proposal = UpgradeProposal {
+            proposer: Address::generate(&env),
+            targets: vec![&env, Address::generate(&env)],
+            votes,
+            quorum: 2,
+            status: ProposalStatus::Pending,
+            expires_at: 1_724_000_000,
+        };
+
+        assert_eq!(
+            require_upgrade_quorum_met(&proposal),
+            Err(AdminError::QuorumNotMet)
         );
     }
 }
