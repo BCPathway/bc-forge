@@ -38,6 +38,9 @@ jobs:
       - name: Run tests
         run: cargo test --all
 
+      - name: Run multi-sig tests
+        if: github.event_name == 'pull_request'
+        run: cargo test -p bc-forge-admin
       - name: Install Tarpaulin
         run: cargo install cargo-tarpaulin --locked
 

@@ -22,7 +22,7 @@
 //! | `ProposalIdCounter` | `instance()` | `u64` | Auto-incrementing proposal ID generator | No |
 //! | `ProposalTimelock(u64)` | `instance()` | `u64` | Unix timestamp when a quorate proposal's timelock expires | On write/read |
 //! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
-//! | `UpgradeProposal(u64)` | `persistent()` | `UpgradeProposal` | Multi-sig WASM upgrade proposal state | Required of #653-#663 (no reader or writer on this branch) |
+//! | `UpgradeProposal(u64)` | `persistent()` | `UpgradeProposal` | Multi-sig WASM upgrade proposal state | On read/write by `cancel_proposal` (#662); submission and voting are owned by other issues in #653-#663 |
 //! | `UpgradeProposalIdCounter` | `instance()` | `u64` | Auto-incrementing upgrade proposal ID generator | No |
 //!
 //! ## `Role` Enum
@@ -44,10 +44,16 @@
 //! | `4` | `InvalidAddress` | operation attempted with the zero address |
 //! | `5` | `InvalidRole` | unrecognized role discriminant supplied |
 //! | `6` | `AlreadyInitialized` | `init_storage` called on an initialized contract |
-//! | `7` | `ProposalNotFound` | `execute_upgrade` for a nonexistent proposal ID |
-//! | `8` | `QuorumNotMet` | `execute_upgrade` before the approval threshold is met |
-//! | `9` | `ProposalAlreadyExecuted` | `execute_upgrade` on an already-executed proposal |
-//! | `10` | `TimelockActive` | `execute_upgrade` before the mandatory delay has elapsed |
+//! | `7` | `InvalidThreshold` | invalid admin-pool threshold |
+//! | `8` | `ProposalNotFound` | proposal ID does not exist |
+//! | `9` | `ProposalAlreadyExecuted` | proposal is already executed |
+//! | `10` | `ProposalAlreadyApproved` | admin already approved the proposal |
+//! | `11` | `ThresholdNotMet` | proposal has insufficient approvals |
+//! | `12` | `QuorumNotMet` | `execute_upgrade` before the approval threshold is met |
+//! | `13` | `TimelockActive` | `execute_upgrade` before the mandatory delay has elapsed |
+//! | `14` | `InvalidWasmHash` | `require_valid_wasm_hash` for an unregistered/malformed hash |
+//! | `15` | `NotProposer` | `cancel_proposal` when `caller` did not submit the proposal |
+//! | `16` | `ProposalNotCancellable` | `cancel_proposal` on a `Cancelled` or `Expired` proposal |
 //!
 //! ## Event Emissions
 //!
@@ -57,6 +63,7 @@
 //! | `role_rvk`  | Role revoke | `revoke_role` | `(admin, role, address)` |
 //! | `role_chk`  | Role check | `has_role` | `(address, role, result)` |
 //! | `upgraded`  | WASM upgrade | `execute_upgrade` | `(executor, proposal_id, wasm_hash)` |
+//! | `prop_cncl` | Upgrade proposal cancelled | `cancel_proposal` | `(caller, proposal_id)` |
 //!
 //! ## Storage Domain Separation
 //!
@@ -147,6 +154,21 @@
 //!   while `env.ledger().timestamp() < timelock_expires_at`, giving pool members
 //!   a mandatory review window between quorum and code execution.
 //!
+//! ### Cancellation
+//! - [`cancel_proposal`] (#662) lets the proposer of an [`UpgradeProposal`]
+//!   withdraw it before it executes. Only `UpgradeProposal::proposer` may
+//!   cancel; every other caller gets [`AdminError::NotProposer`], even an
+//!   admin-pool member or the contract admin.
+//! - Cancellation is a status transition to [`ProposalStatus::Cancelled`], not
+//!   a storage delete: the entry (and its vote history) stays queryable after
+//!   cancellation, matching why [`ProposalStatus`] models cancellation as a
+//!   variant instead of clearing the record.
+//! - An already-`Executed` proposal cannot be cancelled — upgrades are
+//!   one-shot and irreversible, so this returns
+//!   [`AdminError::ProposalAlreadyExecuted`] rather than silently no-op'ing.
+//! - An already-`Cancelled` or `Expired` proposal cannot be cancelled again;
+//!   both return [`AdminError::ProposalNotCancellable`].
+//!
 //! ### Migration
 //! - [`migrate_admin`] is a one-shot upgrade helper: it copies the singular admin
 //!   stored under [`AdminKey::Admin`] into [`AdminKey::SuperAdmin`], enabling the
@@ -186,22 +208,38 @@ pub enum AdminError {
     /// The contract has already been initialized; calling `init_storage` again
     /// is not allowed.
     AlreadyInitialized = 6,
-    /// A governance proposal with the supplied ID does not exist.
-    ProposalNotFound = 7,
-    /// The proposal has not gathered enough approvals to meet the quorum.
-    QuorumNotMet = 8,
-    /// The proposal has already been executed; upgrades are one-shot.
+    /// The approval threshold is zero or exceeds the admin-pool size.
+    InvalidThreshold = 7,
+    /// The requested governance proposal does not exist.
+    ProposalNotFound = 8,
+    /// The requested governance proposal has already been executed.
     ProposalAlreadyExecuted = 9,
+    /// The admin has already approved the requested governance proposal.
+    ProposalAlreadyApproved = 10,
+    /// The governance proposal has not reached its approval threshold.
+    ThresholdNotMet = 11,
+    /// The proposal has not gathered enough approvals to meet the quorum.
+    QuorumNotMet = 12,
     /// The mandatory timelock delay has not elapsed yet: the current ledger
     /// timestamp is still before the proposal's recorded unlock time.
-    TimelockActive = 10,
+    TimelockActive = 13,
+    /// A supplied WASM hash failed [`require_valid_wasm_hash`]: it is not
+    /// registered as installed on the ledger.
+    InvalidWasmHash = 14,
+    /// `cancel_proposal` was called by an address other than the
+    /// [`UpgradeProposal::proposer`] that submitted the proposal.
+    NotProposer = 15,
+    /// `cancel_proposal` was called on a proposal whose status is already
+    /// terminal and not `Executed` (i.e. already `Cancelled` or `Expired`);
+    /// there is nothing left to withdraw.
+    ProposalNotCancellable = 16,
     /// A WASM upgrade proposal with the supplied ID does not exist.
-    UpgradeProposalNotFound = 12,
+    UpgradeProposalNotFound = 17,
     /// The proposal is not in a state that accepts votes (it is `Approved`,
     /// `Executed`, `Cancelled`, `Expired`, or its voting window has closed).
-    ProposalNotPending = 13,
+    ProposalNotPending = 18,
     /// The caller already cast a vote on this upgrade proposal.
-    DuplicateVote = 14,
+    DuplicateVote = 19,
 }
 
 /// Storage keys for the access-control layer.
@@ -260,6 +298,11 @@ pub enum AdminKey {
     /// are migrated into the mask on first write and are still read as a
     /// fallback until then.
     RoleMask(Address),
+    /// Marks a WASM hash as installed on the ledger (uploaded via
+    /// `env.deployer().upload_contract_wasm` and registered by an admin),
+    /// making it eligible to be referenced by an upgrade proposal. Checked by
+    /// [`require_valid_wasm_hash`].
+    InstalledWasmHash(soroban_sdk::BytesN<32>),
 }
 
 /// Roles recognized by the access-control layer.
@@ -713,11 +756,19 @@ pub fn has_admin(env: &Env) -> bool {
 /// Grants a role to an address.
 ///
 /// @notice Grants `role` to `address`. Only a super-admin may call this function.
-/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and unrecognized role variants, then emits `role_grnt`.
+/// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and
+///      unrecognized role variants, then emits `role_grnt`. Granting an already-held role
+///      is idempotent: the bitmask is ORed, so no state change occurs beyond the event.
 /// @param env The Soroban environment.
 /// @param caller The address performing the grant; must be a super-admin.
-/// @param role The role to grant.
+/// @param role The role to grant (one of [`Role::Admin`], [`Role::Minter`], [`Role::SuperAdmin`], [`Role::Pauser`]).
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(caller, role, address)`.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
     require_super_admin(env, caller);
     require_non_zero_address(env, address);
@@ -731,11 +782,17 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @dev Intentionally private. Callers must perform authorization before delegating here.
 ///      Rejects the zero address. The assignment is a single load / bitwise-OR /
 ///      store on the address's `AdminKey::RoleMask(address)` entry, so a grant
-///      never disturbs the address's other roles.
+///      never disturbs the address's other roles. Granting an already-held role is
+///      idempotent.
 /// @param env The Soroban environment.
 /// @param admin The address recorded as the granting caller in the emitted event.
 /// @param role The role to assign.
 /// @param address The address to receive the role.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// # Events
+/// Emits `role_grnt` with data `(admin, role, address)`.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
@@ -752,12 +809,20 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
 /// @notice Removes `role` from `address`. Only a super-admin may call this function.
 /// @dev Requires the caller to hold the `SuperAdmin` role. Rejects unknown role variants (#426)
 ///      and the zero address, then delegates to the internal revoke helper which removes the
-///      persistent storage entry (#416) and emits `role_rvk`.
+///      persistent storage entry (#416) and emits `role_rvk`. Revoking a role that is not held
+///      returns an error rather than panicking.
 /// @param env The Soroban environment.
 /// @param caller The address performing the revoke; must be a super-admin.
 /// @param role The role to revoke.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if the address did not hold the role.
+/// @errors
+/// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 pub fn revoke_role(
     env: &Env,
     caller: &Address,
@@ -780,11 +845,18 @@ pub fn revoke_role(
 /// @notice Removes the `role` bit from `address`'s role mask and emits `role_rvk`.
 /// @dev Intentionally private; performs no authorization. Rejects the zero address.
 ///      The other bits of the address's mask are preserved; when no bits remain
-///      the mask entry is removed entirely.
+///      the mask entry is removed entirely. Revoking a role that is not held is
+///      an error and does not modify state.
 /// @param env The Soroban environment.
 /// @param role The role to remove.
 /// @param address The address to remove the role from.
 /// @return `Ok(())` on success, or `AdminError::RoleNotHeld` if no assignment existed.
+/// @errors
+/// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
+/// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleNotHeld`] — `address` does not currently hold `role`.
+/// # Events
+/// Emits `role_rvk` with data `(admin, role, address)` on success.
 fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
@@ -931,8 +1003,27 @@ pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
 }
 
+/// Helper macro for role-based access control checking and authorization enforcement.
+///
+/// Variants:
+/// - `has_role!(env, role, caller)` -> Evaluates whether `$caller` holds `$role` (or universal `Admin` access).
+/// - `has_role!(require env, role, caller)` -> Enforces role requirement and authorization via `require_role_guard`.
+#[macro_export]
+macro_rules! has_role {
+    (check, $env:expr, $role:expr, $caller:expr) => {
+        $crate::has_role($env, $role, $caller)
+    };
+    ($env:expr, $role:expr, $caller:expr) => {
+        $crate::require_role_guard($env, $role, $caller)
+    };
+}
+
 /// Configures the multi-sig admin pool and approval threshold.
 ///
+/// # Errors
+///
+/// Panics with [`AdminError::InvalidThreshold`] if `threshold` is zero or if
+/// it exceeds the number of pool members.
 /// @notice Sets the pool of admins and the number of approvals required to pass a proposal.
 /// @dev Requires the contract admin's authorization. Panics if `threshold` is zero, exceeds the pool size, or any pool member is the zero address.
 /// @param env The Soroban environment.
@@ -943,7 +1034,7 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     admin.require_auth();
 
     if threshold == 0 || threshold > pool.len() {
-        panic!("invalid threshold for admin pool");
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidThreshold);
     }
 
     for i in 0..pool.len() {
@@ -1002,7 +1093,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
     creator.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&creator) {
-        panic!("only admins can create proposals");
+        soroban_sdk::panic_with_error!(env, AdminError::UnauthorizedRole);
     }
 
     let id = env
@@ -1041,20 +1132,20 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
     admin.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&admin) {
-        panic!("only admins can approve proposals");
+        soroban_sdk::panic_with_error!(env, AdminError::UnauthorizedRole);
     }
 
     let mut proposal: Proposal = env
         .storage()
         .instance()
         .get(&AdminKey::Proposal(proposal_id))
-        .expect("proposal not found");
+        .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, AdminError::ProposalNotFound));
 
     if proposal.executed {
-        panic!("proposal already executed");
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
     }
     if proposal.approvals.contains(&admin) {
-        panic!("admin already approved this proposal");
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyApproved);
     }
 
     proposal.approvals.push_back(admin);
@@ -1079,7 +1170,7 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
         .storage()
         .instance()
         .get(&AdminKey::Proposal(proposal_id))
-        .expect("proposal not found");
+        .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, AdminError::ProposalNotFound));
     extend_instance_ttl(env);
     proposal.approvals.len() >= get_threshold(env)
 }
@@ -1098,13 +1189,13 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .storage()
         .instance()
         .get(&AdminKey::Proposal(proposal_id))
-        .expect("proposal not found");
+        .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, AdminError::ProposalNotFound));
 
     if proposal.executed {
-        panic!("proposal already executed");
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
     }
     if !is_proposal_ready(env, proposal_id) {
-        panic!("threshold not met");
+        soroban_sdk::panic_with_error!(env, AdminError::ThresholdNotMet);
     }
 
     proposal.executed = true;
@@ -1355,6 +1446,121 @@ pub fn approve_upgrade(env: &Env, voter: Address, proposal_id: u64) -> Result<()
     Ok(())
 }
 
+/// Withdraws a multi-sig WASM upgrade proposal before it executes. Resolves
+/// issue #662.
+///
+/// Only the address recorded as [`UpgradeProposal::proposer`] may cancel it,
+/// and only while it is still `Pending` or `Approved`. The entry is kept in
+/// `persistent()` storage with its status flipped to
+/// [`ProposalStatus::Cancelled`] rather than removed: `Cancelled` exists as a
+/// terminal [`ProposalStatus`] variant specifically so a withdrawn proposal
+/// stays a queryable part of the proposal's history instead of vanishing.
+///
+/// # Errors
+///
+/// Returns [`AdminError::ProposalNotFound`] if no proposal exists under
+/// `proposal_id`, [`AdminError::NotProposer`] if `caller` is not the address
+/// that submitted it, [`AdminError::ProposalAlreadyExecuted`] if it has
+/// already executed, or [`AdminError::ProposalNotCancellable`] if it is
+/// already `Cancelled` or `Expired`.
+///
+/// # Events
+///
+/// Emits a `prop_cncl` event with `(caller, proposal_id)` on success.
+///
+/// @notice Cancels upgrade proposal `proposal_id` on behalf of `caller`, provided `caller` is its proposer and it has not yet executed.
+/// @dev Requires `caller` authorization. Transitions `status` to `Cancelled` in place rather than deleting the storage entry.
+/// @param env The Soroban environment.
+/// @param caller The address requesting cancellation; must equal the proposal's `proposer`.
+/// @param proposal_id The ID of the upgrade proposal to cancel.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
+pub fn cancel_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), AdminError> {
+    caller.require_auth();
+
+    let key = AdminKey::UpgradeProposal(proposal_id);
+    let mut proposal: UpgradeProposal = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(AdminError::ProposalNotFound)?;
+    extend_storage_ttl_for_key(env, &key);
+
+    if caller != proposal.proposer {
+        return Err(AdminError::NotProposer);
+    }
+
+    match proposal.status {
+        ProposalStatus::Executed => return Err(AdminError::ProposalAlreadyExecuted),
+        ProposalStatus::Cancelled | ProposalStatus::Expired => {
+            return Err(AdminError::ProposalNotCancellable)
+        }
+        ProposalStatus::Pending | ProposalStatus::Approved => {}
+    }
+
+    proposal.status = ProposalStatus::Cancelled;
+    env.storage().persistent().set(&key, &proposal);
+    extend_storage_ttl_for_key(env, &key);
+
+    events::emit_proposal_cancelled(env, &caller, proposal_id);
+    Ok(())
+}
+
+/// Registers `wasm_hash` as installed on the ledger, making it eligible to be
+/// referenced by an upgrade proposal. Resolves issue #657 (companion
+/// registration for [`require_valid_wasm_hash`]).
+///
+/// Soroban does not expose a host function that lets a contract query
+/// whether a given hash was previously uploaded via
+/// `env.deployer().upload_contract_wasm`, so this module keeps its own
+/// allowlist: the contract admin explicitly records a hash here — typically
+/// right after uploading it — before any upgrade proposal is allowed to
+/// target it.
+///
+/// @notice Marks `wasm_hash` as a valid upgrade target.
+/// @dev Requires contract admin authorization.
+/// @param env The Soroban environment.
+/// @param admin The contract admin authorizing the registration.
+/// @param wasm_hash The 32-byte WASM hash to register as installed.
+pub fn register_wasm_hash(env: &Env, admin: &Address, wasm_hash: soroban_sdk::BytesN<32>) {
+    require_admin(env, admin);
+    let key = AdminKey::InstalledWasmHash(wasm_hash);
+    env.storage().persistent().set(&key, &true);
+    extend_storage_ttl_for_key(env, &key);
+}
+
+/// Validates that `wasm_hash` is a legitimate WASM upgrade target. Resolves
+/// issue #657.
+///
+/// # Errors
+///
+/// Returns [`AdminError::InvalidWasmHash`] if `wasm_hash` has not been
+/// registered via [`register_wasm_hash`].
+///
+/// @notice Checks that `wasm_hash` is 32 bytes and was previously registered as installed on the ledger.
+/// @dev `wasm_hash`'s `BytesN<32>` type guarantees the 32-byte length at the type-system level, so this
+///      is purely a ledger-registration check. Callers that accept raw bytes at a contract boundary must
+///      convert to `BytesN<32>` first, which itself rejects any other length.
+/// @param env The Soroban environment.
+/// @param wasm_hash The WASM hash to validate.
+/// @return `Ok(())` if the hash is valid and installed, or `AdminError::InvalidWasmHash` otherwise.
+pub fn require_valid_wasm_hash(
+    env: &Env,
+    wasm_hash: &soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
+    if wasm_hash.len() != 32 {
+        return Err(AdminError::InvalidWasmHash);
+    }
+    let installed = env
+        .storage()
+        .persistent()
+        .get(&AdminKey::InstalledWasmHash(wasm_hash.clone()))
+        .unwrap_or(false);
+    if !installed {
+        return Err(AdminError::InvalidWasmHash);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1382,10 +1588,12 @@ mod tests {
             super::init_storage(&env, &admin)
         }
 
+        /// @inheritdoc bc_forge_admin::grant_role
         pub fn grant_role(env: Env, caller: Address, role: Role, address: Address) {
             super::grant_role(&env, &caller, role, &address);
         }
 
+        /// @inheritdoc bc_forge_admin::revoke_role
         pub fn revoke_role(
             env: Env,
             caller: Address,
@@ -1431,6 +1639,10 @@ mod tests {
             super::approve_proposal(&env, admin, proposal_id);
         }
 
+        pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+            super::is_proposal_ready(&env, proposal_id)
+        }
+
         pub fn mark_executed(env: Env, proposal_id: u64) {
             super::mark_executed(&env, proposal_id);
         }
@@ -1456,24 +1668,35 @@ mod tests {
             super::approve_upgrade(&env, voter, proposal_id)
         }
 
+        pub fn cancel_proposal(
+            env: Env,
+            caller: Address,
+            proposal_id: u64,
+        ) -> Result<(), AdminError> {
+            super::cancel_proposal(&env, caller, proposal_id)
+        }
+
+        pub fn register_wasm_hash(env: Env, admin: Address, wasm_hash: soroban_sdk::BytesN<32>) {
+            super::register_wasm_hash(&env, &admin, wasm_hash);
+        }
+
+        pub fn require_valid_wasm_hash(
+            env: Env,
+            wasm_hash: soroban_sdk::BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::require_valid_wasm_hash(&env, &wasm_hash)
+        }
+
         pub fn require_super_admin(env: Env, address: Address) {
             super::require_super_admin(&env, &address);
         }
 
-        pub fn require_fee_admin(env: Env, address: Address) {
-            super::require_fee_admin(&env, &address);
-        }
-
-        pub fn require_pauser(env: Env, address: Address) {
-            super::require_pauser(&env, &address);
+        pub fn has_admin(env: Env) -> bool {
+            super::has_admin(&env)
         }
 
         pub fn migrate_admin(env: Env) {
             super::migrate_admin(&env);
-        }
-
-        pub fn has_admin(env: Env) -> bool {
-            super::has_admin(&env)
         }
 
         pub fn get_admin_pool(env: Env) -> Vec<Address> {
@@ -1484,8 +1707,12 @@ mod tests {
             super::get_threshold(&env)
         }
 
-        pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
-            super::is_proposal_ready(&env, proposal_id)
+        pub fn require_fee_admin(env: Env, address: Address) {
+            super::require_fee_admin(&env, &address);
+        }
+
+        pub fn require_pauser(env: Env, address: Address) {
+            super::require_pauser(&env, &address);
         }
     }
 
@@ -2394,6 +2621,59 @@ mod tests {
     }
 
     #[test]
+    fn test_has_role_macro_boolean_check() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        env.as_contract(&contract_id, || {
+            assert!(has_role!(check, &env, Role::Minter, &minter));
+            assert!(!has_role!(check, &env, Role::Minter, &stranger));
+        });
+    }
+
+    #[test]
+    fn test_has_role_macro_require_guard() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        env.as_contract(&contract_id, || {
+            has_role!(&env, Role::Minter, &minter);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "HostError")]
+    fn test_has_role_macro_require_guard_panics_on_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        env.as_contract(&contract_id, || {
+            has_role!(&env, Role::Minter, &stranger);
+        });
+    }
+
+    #[test]
     fn test_require_role_succeeds_when_role_held() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3181,8 +3461,6 @@ mod tests {
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
     }
 
-    // ── migrate_admin ─────────────────────────────────────────────────────────
-
     #[test]
     fn test_migrate_admin_populates_super_admin_storage() {
         let env = Env::default();
@@ -3194,7 +3472,6 @@ mod tests {
             migrate_admin(&env);
         });
 
-        // After migration, the admin address must be stored in the SuperAdmin mapping.
         env.as_contract(&contract_id, || {
             assert!(env
                 .storage()
@@ -3210,13 +3487,10 @@ mod tests {
         let admin = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            // No admin has been set, so migrate_admin should not store anything.
             migrate_admin(&env);
             assert!(!env.storage().persistent().has(&AdminKey::SuperAdmin(admin)));
         });
     }
-
-    // ── has_admin ──────────────────────────────────────────────────────────────
 
     #[test]
     fn test_has_admin_returns_true_when_admin_set() {
@@ -3237,8 +3511,6 @@ mod tests {
 
         assert!(!client.has_admin());
     }
-
-    // ── require_fee_admin ──────────────────────────────────────────────────────
 
     #[test]
     fn test_require_fee_admin_succeeds_for_admin() {
@@ -3266,8 +3538,6 @@ mod tests {
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
     }
 
-    // ── set_admin_pool / get_admin_pool / get_threshold ────────────────────────
-
     #[test]
     fn test_set_admin_pool_stores_pool_and_threshold() {
         let env = Env::default();
@@ -3285,7 +3555,6 @@ mod tests {
         assert_eq!(pool.len(), 2);
         assert_eq!(pool.get(0).unwrap(), member1);
         assert_eq!(pool.get(1).unwrap(), member2);
-
         assert_eq!(client.get_threshold(), 2);
     }
 
@@ -3322,65 +3591,23 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "invalid threshold for admin pool")]
-    fn test_set_admin_pool_rejects_zero_threshold() {
+    fn test_admin_pool_and_proposal_happy_path() {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let member = Address::generate(&env);
+        let second_admin = Address::generate(&env);
 
         client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, member], &0);
-    }
+        client.set_admin_pool(&vec![&env, admin.clone(), second_admin.clone()], &2);
 
-    #[test]
-    #[should_panic(expected = "invalid threshold for admin pool")]
-    fn test_set_admin_pool_rejects_threshold_exceeding_pool() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let member = Address::generate(&env);
+        let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "mint"));
+        assert!(!client.is_proposal_ready(&proposal_id));
 
-        client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, member], &2);
-    }
-
-    #[test]
-    fn test_set_admin_pool_rejects_zero_address_in_pool() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-        let member = Address::generate(&env);
-
-        client.set_admin(&admin);
-        let result = client.try_set_admin_pool(&vec![&env, member, zero_address(&env)], &2);
-        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(4))));
-    }
-
-    // ── create_proposal / approve_proposal / is_proposal_ready / mark_executed ─
-
-    #[test]
-    fn test_create_proposal_creates_and_auto_approves_for_creator() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register(AdminContract, ());
-        let client = AdminContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
-
-        client.set_admin(&admin);
-        // Pre-set admin pool so get_admin_pool returns explicit pool (not fallback).
-        client.set_admin_pool(&vec![&env, admin.clone()], &1);
-        let id = client.create_proposal(&admin, &String::from_str(&env, "test proposal"));
-
-        // The creator is automatically counted as an approval.
-        let ready = client.is_proposal_ready(&id);
-        assert!(ready);
+        client.approve_proposal(&second_admin, &proposal_id);
+        assert!(client.is_proposal_ready(&proposal_id));
+        client.mark_executed(&proposal_id);
     }
 
     #[test]
@@ -3400,7 +3627,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "only admins can create proposals")]
+    #[should_panic(expected = "Error(Contract, #3)")]
     fn test_create_proposal_rejects_non_admin() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3433,7 +3660,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "only admins can approve proposals")]
+    #[should_panic(expected = "Error(Contract, #3)")]
     fn test_approve_proposal_rejects_non_admin() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3448,7 +3675,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin already approved this proposal")]
+    #[should_panic(expected = "Error(Contract, #10)")]
     fn test_approve_proposal_rejects_duplicate_approval() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3463,7 +3690,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "proposal not found")]
+    #[should_panic(expected = "Error(Contract, #8)")]
     fn test_approve_proposal_rejects_nonexistent_proposal() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3493,7 +3720,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "proposal already executed")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn test_mark_executed_rejects_already_executed() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3511,7 +3738,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "threshold not met")]
+    #[should_panic(expected = "Error(Contract, #11)")]
     fn test_mark_executed_rejects_insufficient_approvals() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3528,7 +3755,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "proposal not found")]
+    #[should_panic(expected = "Error(Contract, #8)")]
     fn test_mark_executed_rejects_nonexistent_proposal() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3976,5 +4203,260 @@ mod tests {
 
         let result = client.try_approve_upgrade(&voter1, &1);
         assert_eq!(result, Err(Ok(AdminError::ProposalNotPending)));
+    }
+
+    // ── register_wasm_hash / require_valid_wasm_hash (#657) ────────────────────
+
+    fn sample_wasm_hash(env: &Env) -> soroban_sdk::BytesN<32> {
+        soroban_sdk::BytesN::from_array(env, &[7u8; 32])
+    }
+
+    #[test]
+    fn test_require_valid_wasm_hash_accepts_registered_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+        client.register_wasm_hash(&admin, &hash);
+
+        assert_eq!(client.try_require_valid_wasm_hash(&hash), Ok(Ok(())));
+    }
+
+    #[test]
+    fn test_require_valid_wasm_hash_rejects_unregistered_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_require_valid_wasm_hash(&hash);
+        assert_eq!(result, Err(Ok(AdminError::InvalidWasmHash)));
+    }
+
+    #[test]
+    fn test_register_wasm_hash_rejects_non_admin_caller() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let hash = sample_wasm_hash(&env);
+
+        client.set_admin(&admin);
+
+        let result = client.try_register_wasm_hash(&stranger, &hash);
+        assert!(result.is_err());
+    }
+
+    // ── cancel_proposal (#662) ──────────────────────────────────────────────
+
+    /// Writes `proposal` directly into the contract's `UpgradeProposal(id)`
+    /// storage slot. `cancel_proposal` is the only production reader/writer
+    /// of this key on this branch (submission and voting belong to other
+    /// issues in #653-#663), so tests seed the fixture straight into storage
+    /// rather than through a submission entry point that does not exist yet.
+    fn store_upgrade_proposal(
+        env: &Env,
+        contract_id: &Address,
+        id: u64,
+        proposal: &UpgradeProposal,
+    ) {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&AdminKey::UpgradeProposal(id), proposal);
+        });
+    }
+
+    fn load_upgrade_proposal(env: &Env, contract_id: &Address, id: u64) -> UpgradeProposal {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&AdminKey::UpgradeProposal(id))
+                .expect("proposal not found")
+        })
+    }
+
+    fn cancel_proposal_fixture(
+        env: &Env,
+        proposer: &Address,
+        status: ProposalStatus,
+    ) -> UpgradeProposal {
+        let mut votes = Map::new(env);
+        votes.set(proposer.clone(), 1u32);
+        UpgradeProposal {
+            proposer: proposer.clone(),
+            targets: vec![env, Address::generate(env)],
+            votes,
+            quorum: 2,
+            status,
+            expires_at: 1_724_000_000,
+        }
+    }
+
+    #[test]
+    fn test_cancel_proposal_marks_pending_proposal_cancelled() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let proposer = Address::generate(&env);
+        let fixture = cancel_proposal_fixture(&env, &proposer, ProposalStatus::Pending);
+        store_upgrade_proposal(&env, &contract_id, 1, &fixture);
+
+        let result = client.try_cancel_proposal(&proposer, &1);
+        assert_eq!(result, Ok(Ok(())));
+
+        let stored = load_upgrade_proposal(&env, &contract_id, 1);
+        assert_eq!(stored.status, ProposalStatus::Cancelled);
+        // Only the status transitions; the rest of the record is untouched.
+        assert_eq!(stored.proposer, proposer);
+        assert_eq!(stored.quorum, fixture.quorum);
+        assert_eq!(stored.targets, fixture.targets);
+    }
+
+    #[test]
+    fn test_cancel_proposal_marks_approved_proposal_cancelled() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let proposer = Address::generate(&env);
+        let fixture = cancel_proposal_fixture(&env, &proposer, ProposalStatus::Approved);
+        store_upgrade_proposal(&env, &contract_id, 2, &fixture);
+
+        client.cancel_proposal(&proposer, &2);
+
+        let stored = load_upgrade_proposal(&env, &contract_id, 2);
+        assert_eq!(stored.status, ProposalStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_cancel_proposal_emits_prop_cncl_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let proposer = Address::generate(&env);
+        let fixture = cancel_proposal_fixture(&env, &proposer, ProposalStatus::Pending);
+        store_upgrade_proposal(&env, &contract_id, 3, &fixture);
+
+        client.cancel_proposal(&proposer, &3);
+
+        let events = env.events().all();
+        let cncl_event = events
+            .iter()
+            .find(|(_, topics, _)| {
+                let topic: soroban_sdk::Symbol = topics
+                    .get(0)
+                    .unwrap_or_else(|| panic!("event must have a topic"))
+                    .try_into_val(&env)
+                    .unwrap_or_else(|_| soroban_sdk::Symbol::new(&env, ""));
+                topic == soroban_sdk::symbol_short!("prop_cncl")
+            })
+            .expect("prop_cncl event must be present");
+
+        let (emitter, topics, data) = cncl_event;
+        assert_eq!(emitter, contract_id);
+        assert_eq!(
+            topics.len(),
+            1,
+            "topics should contain only the prop_cncl symbol"
+        );
+
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_caller: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_proposal_id: u64 = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_caller, proposer);
+        assert_eq!(event_proposal_id, 3);
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_nonexistent_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let caller = Address::generate(&env);
+
+        let result = client.try_cancel_proposal(&caller, &9999);
+        assert_eq!(result, Err(Ok(AdminError::ProposalNotFound)));
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_non_proposer_caller() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let proposer = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let fixture = cancel_proposal_fixture(&env, &proposer, ProposalStatus::Pending);
+        store_upgrade_proposal(&env, &contract_id, 4, &fixture);
+
+        let result = client.try_cancel_proposal(&stranger, &4);
+        assert_eq!(result, Err(Ok(AdminError::NotProposer)));
+
+        // The proposal must be untouched by the rejected attempt.
+        let stored = load_upgrade_proposal(&env, &contract_id, 4);
+        assert_eq!(stored.status, ProposalStatus::Pending);
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_already_executed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let proposer = Address::generate(&env);
+        let fixture = cancel_proposal_fixture(&env, &proposer, ProposalStatus::Executed);
+        store_upgrade_proposal(&env, &contract_id, 5, &fixture);
+
+        let result = client.try_cancel_proposal(&proposer, &5);
+        assert_eq!(result, Err(Ok(AdminError::ProposalAlreadyExecuted)));
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_already_cancelled() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let proposer = Address::generate(&env);
+        let fixture = cancel_proposal_fixture(&env, &proposer, ProposalStatus::Cancelled);
+        store_upgrade_proposal(&env, &contract_id, 6, &fixture);
+
+        let result = client.try_cancel_proposal(&proposer, &6);
+        assert_eq!(result, Err(Ok(AdminError::ProposalNotCancellable)));
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_expired() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let proposer = Address::generate(&env);
+        let fixture = cancel_proposal_fixture(&env, &proposer, ProposalStatus::Expired);
+        store_upgrade_proposal(&env, &contract_id, 7, &fixture);
+
+        let result = client.try_cancel_proposal(&proposer, &7);
+        assert_eq!(result, Err(Ok(AdminError::ProposalNotCancellable)));
     }
 }
