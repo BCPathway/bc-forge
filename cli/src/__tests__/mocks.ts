@@ -37,6 +37,7 @@ export interface MockServerOptions {
   balances?: Record<string, bigint>;
   failMethods?: string[];
   latency?: number;
+  simulationError?: string;
 }
 
 export function createMockServer(options: MockServerOptions = {}) {
@@ -52,7 +53,19 @@ export function createMockServer(options: MockServerOptions = {}) {
     }),
     simulateTransaction: vi.fn(async () => {
       if (options.latency) await new Promise((r) => setTimeout(r, options.latency));
-      return { status: "SIMULATION_SUCCESS", result: { retval: undefined } };
+      if (options.simulationError) {
+        return { error: options.simulationError, events: [], id: "0", latestLedger: 1, _parsed: true };
+      }
+      return {
+        status: "SIMULATION_SUCCESS",
+        result: { retval: undefined },
+        minResourceFee: "200000",
+        transactionData: {},
+        events: [],
+        id: "0",
+        latestLedger: 1,
+        _parsed: true,
+      };
     }),
   } as any;
 }

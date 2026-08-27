@@ -264,6 +264,7 @@ describe("CLI Parser (#705)", () => {
       expect(output).toContain("--rpc-url");
       expect(output).toContain("--network");
       expect(output).toContain("--source");
+      expect(output).toContain("--estimate");
     });
 
     it("accepts all required flags with defaults", async () => {
@@ -383,6 +384,61 @@ describe("CLI Parser (#705)", () => {
       );
 
       expect(parsedOpts.dryRun).toBe(true);
+    });
+
+    it("accepts --estimate flag", async () => {
+      const program = buildProgram();
+      let parsedOpts: any = null;
+
+      program.commands
+        .find((c) => c.name() === "upgrade")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
+
+      await program.parseAsync(
+        argv(
+          "upgrade",
+          "--wasm",
+          "./token.wasm",
+          "--contract-id",
+          "CABC123",
+          "--rpc-url",
+          "http://localhost",
+          "--source",
+          "S...",
+          "--estimate"
+        )
+      );
+
+      expect(parsedOpts.estimate).toBe(true);
+    });
+
+    it("defaults --estimate to false", async () => {
+      const program = buildProgram();
+      let parsedOpts: any = null;
+
+      program.commands
+        .find((c) => c.name() === "upgrade")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
+
+      await program.parseAsync(
+        argv(
+          "upgrade",
+          "--wasm",
+          "./token.wasm",
+          "--contract-id",
+          "CABC123",
+          "--rpc-url",
+          "http://localhost",
+          "--source",
+          "S..."
+        )
+      );
+
+      expect(parsedOpts.estimate).toBe(false);
     });
   });
 

@@ -14,6 +14,7 @@ import {
   TransactionBuilder,
   Keypair,
   xdr,
+  nativeToScVal,
 } from '@stellar/stellar-sdk';
 
 import {
@@ -257,6 +258,66 @@ export class WrapperClient {
       [addressToScVal(caller), i128ToScVal(shares)],
       source,
     );
+  }
+
+  /**
+   * Enforce the deposit time lockup for a user.
+   *
+   * Records the timestamp (seconds since epoch) at which `user`'s deposit
+   * becomes withdrawable. While the current ledger timestamp is before the
+   * unlock time, `withdraw` reverts with `TokensLocked`. Admin-only.
+   *
+   * @param caller          - Admin address invoking the call
+   * @param user            - Address whose deposit is being time-locked
+   * @param unlockTimestamp - Unix timestamp (seconds) at which the deposit unlocks
+   * @param source          - Caller's keypair
+   */
+  async setUnlockTime(
+    caller: string,
+    user: string,
+    unlockTimestamp: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'set_unlock_time',
+      [
+        addressToScVal(caller),
+        addressToScVal(user),
+        nativeToScVal(unlockTimestamp, { type: 'u64' }),
+      ],
+      source,
+    );
+  }
+
+  /**
+   * Clear the deposit lockup for a user, immediately permitting withdrawals.
+   * Admin-only.
+   *
+   * @param caller - Admin address invoking the call
+   * @param user   - Address whose deposit lockup is being cleared
+   * @param source - Caller's keypair
+   */
+  async clearUnlockTime(
+    caller: string,
+    user: string,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'clear_unlock_time',
+      [addressToScVal(caller), addressToScVal(user)],
+      source,
+    );
+  }
+
+  /**
+   * Get the timestamp at which a user's deposit becomes withdrawable.
+   *
+   * @param user - Address to query
+   * @returns The unlock timestamp in seconds, or null when no lockup is recorded
+   */
+  async getUnlockTime(user: string): Promise<bigint | null> {
+    const result = await this.queryContract('get_unlock_time', [addressToScVal(user)]);
+    return scValToNative(result) as bigint | null;
   }
 
   /**

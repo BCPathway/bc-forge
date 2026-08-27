@@ -100,3 +100,30 @@ pub fn emit_withdraw(env: &Env, caller: &Address, shares: i128, underlying_amoun
         (caller.clone(), shares, underlying_amount),
     );
 }
+
+/// Emitted when an admin records a deposit lockup (unlock timestamp) for a user.
+///
+/// @notice Publishes lockup data including the admin caller, the locked user, and the unlock timestamp.
+/// @dev The event topics include the `lockup` symbol.
+/// @param env The Soroban environment.
+/// @param caller The admin address enforcing the lockup.
+/// @param user The address whose deposit is time-locked.
+/// @param unlock_timestamp The timestamp (seconds since epoch) at which the deposit unlocks.
+pub fn emit_unlock_time_set(env: &Env, caller: &Address, user: &Address, unlock_timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("lockup"),),
+        (caller.clone(), user.clone(), unlock_timestamp),
+    );
+}
+
+/// Emitted when an admin clears a user's deposit lockup.
+///
+/// @notice Publishes lockup-clearing data including the admin caller and the unlocked user.
+/// @dev The event topics include the `unlock` symbol.
+/// @param env The Soroban environment.
+/// @param caller The admin address clearing the lockup.
+/// @param user The address whose deposit lockup was removed.
+pub fn emit_unlock_time_cleared(env: &Env, caller: &Address, user: &Address) {
+    env.events()
+        .publish((symbol_short!("unlock"),), (caller.clone(), user.clone()));
+}

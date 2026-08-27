@@ -1,6 +1,6 @@
 use crate::{WrapperContract, WrapperContractClient, WrapperError};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
 
 fn setup(
@@ -933,4 +933,144 @@ fn test_withdraw_dust_payout_fails() {
         wrapper.try_withdraw(&user, &1),
         Err(Ok(WrapperError::InvalidAmount))
     );
+}
+
+// ─── Deposit Time Lockup (#730) ──────────────────────────────────────────────
+
+/// Arbitrary unlock timestamp used across the lockup tests.
+const UNLOCK_TIME: u64 = 1_700_100_000;
+
+#[test]
+fn test_withdraw_reverts_while_deposit_is_locked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    // Admin records the deposit lockup: the deposit unlocks at UNLOCK_TIME.
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+
+    // Well before the unlock time the deposit is still locked.
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &100_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+}
+
+#[test]
+fn test_withdraw_succeeds_after_unlock_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user, &1_000_000);
+
+    // Once past the unlock time the deposit may be withdrawn.
+    env.ledger().set_timestamp(UNLOCK_TIME + 100);
+    let tokens_out = wrapper.withdraw(&user, &1_000_000);
+
+    assert_eq!(tokens_out, 1_000_000);
+    assert_eq!(wrapper.balance(&user), 0);
+    assert_eq!(underlying.balance(&user), 10_000_000);
+}
+
+#[test]
+fn test_withdraw_succeeds_at_unlock_time_boundary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    env.ledger().set_timestamp(UNLOCK_TIME);
+    wrapper.wrap(&user, &1_000_000);
+
+    // The boundary is inclusive: timestamp == unlock time is allowed.
+    assert!(wrapper.try_withdraw(&user, &1_000_000).is_ok());
+}
+
+#[test]
+fn test_set_unlock_time_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+    let impostor = Address::generate(&env);
+
+    assert!(wrapper
+        .try_set_unlock_time(&impostor, &user, &UNLOCK_TIME)
+        .is_err());
+}
+
+#[test]
+fn test_get_unlock_time_round_trips() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    assert_eq!(wrapper.get_unlock_time(&user), None);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    assert_eq!(wrapper.get_unlock_time(&user), Some(UNLOCK_TIME));
+}
+
+#[test]
+fn test_clear_unlock_time_removes_lockup() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user, &1_000_000);
+
+    // Admin lifts the lockup before it expires.
+    wrapper.clear_unlock_time(&admin, &user);
+    assert_eq!(wrapper.get_unlock_time(&user), None);
+
+    assert!(wrapper.try_withdraw(&user, &1_000_000).is_ok());
+}
+
+#[test]
+fn test_set_unlock_time_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    assert_eq!(
+        client.try_set_unlock_time(&user, &user, &UNLOCK_TIME),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_lockup_is_enforced_per_user() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    underlying.mint(&admin, &user_a, &2_000_000);
+    underlying.mint(&admin, &user_b, &2_000_000);
+    underlying.approve(&user_a, &wrapper_id, &2_000_000, &u32::MAX);
+    underlying.approve(&user_b, &wrapper_id, &2_000_000, &u32::MAX);
+
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user_a, &1_000_000);
+    wrapper.wrap(&user_b, &1_000_000);
+
+    // Only user_a's deposit is time-locked.
+    wrapper.set_unlock_time(&admin, &user_a, &UNLOCK_TIME);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user_a, &500_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+    assert!(wrapper.try_withdraw(&user_b, &500_000).is_ok());
 }
