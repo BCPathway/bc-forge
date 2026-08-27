@@ -7,6 +7,7 @@ import {
   nativeToScVal,
   rpc as SorobanRpcNs,
 } from "@stellar/stellar-sdk";
+import { addNetworkOptions } from "../network.js";
 
 export interface SmokeTestOptions {
   contractId: string;
@@ -31,17 +32,11 @@ export interface SmokeTestResult {
 }
 
 export function createSmokeTestCommand(): Command {
-  return new Command("smoke-test")
+  const cmd = new Command("smoke-test")
     .description("Run a quick ping test against a live contract (mint/transfer)")
     .requiredOption(
       "--contract-id <id>",
       "Contract ID of the deployed token to test"
-    )
-    .requiredOption("--rpc-url <url>", "Soroban RPC endpoint URL")
-    .option(
-      "--network-passphrase <phrase>",
-      "Stellar network passphrase",
-      "Test SDF Network ; September 2015"
     )
     .requiredOption("--source <secret>", "Admin/source account secret key")
     .option("--recipient <address>", "Recipient address (auto-generated if omitted)")
@@ -50,10 +45,15 @@ export function createSmokeTestCommand(): Command {
       "--timeout <ms>",
       "Timeout in milliseconds for the full sequence",
       "30000"
-    )
-    .action(async (opts) => {
-      await runSmokeTest(opts);
-    });
+    );
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (opts) => {
+    await runSmokeTest(opts);
+  });
+
+  return cmd;
 }
 
 export async function runSmokeTest(
