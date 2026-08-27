@@ -3,7 +3,7 @@
  */
 
 import { jest } from '@jest/globals';
-import { bcForgeClient } from './client';
+import { bcForgeClient, Role } from './client';
 import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
 
 // Mock data for testing
@@ -169,7 +169,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
 
       const result = await client.grantRole(
-        'SuperAdmin' as any,
+        Role.SuperAdmin,
         targetUser,
         adminKeypair,
       );
@@ -193,7 +193,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
 
       const result = await client.revokeRole(
-        'Minter' as any,
+        Role.Minter,
         targetUser,
         adminKeypair,
       );
