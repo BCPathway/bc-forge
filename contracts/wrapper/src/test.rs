@@ -298,6 +298,162 @@ fn test_share_price_uninitialized_fails() {
 }
 
 #[test]
+fn test_calculate_rewards_one_to_one_after_wrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &2_000_000);
+
+    // No yield distributed yet: 1 share is worth 1 underlying token.
+    assert_eq!(wrapper.calculate_rewards(&2_000_000), 2_000_000);
+    assert_eq!(wrapper.calculate_rewards(&500_000), 500_000);
+}
+
+#[test]
+fn test_calculate_rewards_reflects_distributed_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // 3,000,000 total assets / 2,000,000 total shares: each user share is now
+    // worth 1.5 underlying tokens.
+    assert_eq!(wrapper.calculate_rewards(&2_000_000), 3_000_000);
+    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_500_000);
+}
+
+#[test]
+fn test_calculate_rewards_matches_withdraw_payout_exactly() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &3_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // The preview must agree with what withdraw() actually pays out for the
+    // same share amount, including the rounded-down remainder.
+    let previewed = wrapper.calculate_rewards(&2_000_000);
+    let tokens_out = wrapper.withdraw(&user, &2_000_000);
+    assert_eq!(previewed, tokens_out);
+    assert_eq!(previewed, 2_666_666);
+}
+
+#[test]
+fn test_calculate_rewards_more_precise_than_share_price_times_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &2_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &2_000_000, &u32::MAX);
+
+    // 3 total shares, 5 total assets (in whole-token units) after yield.
+    wrapper.wrap(&user, &3);
+    wrapper.distribute_rewards(&rewarder, &2);
+
+    // Per-share price floors 5/3 = 1.66... down to 1, so pricing a 2-share
+    // redemption via `calculate_share_price() * shares` under-reports it as 2.
+    assert_eq!(wrapper.calculate_share_price(), 1);
+    // The direct pro-rata formula floors only once: (2 * 5) / 3 = 3.33... -> 3.
+    assert_eq!(wrapper.calculate_rewards(&2), 3);
+}
+
+#[test]
+fn test_calculate_rewards_multiple_users_pro_rata() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &user_a, &3_000_000);
+    underlying.mint(&admin, &user_b, &1_000_000);
+    underlying.approve(&user_a, &wrapper_id, &3_000_000, &u32::MAX);
+    underlying.approve(&user_b, &wrapper_id, &1_000_000, &u32::MAX);
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user_a, &3_000_000);
+    wrapper.wrap(&user_b, &1_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000 — weighted by share,
+    // not split evenly.
+    assert_eq!(wrapper.calculate_rewards(&3_000_000), 3_750_000);
+    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_250_000);
+}
+
+#[test]
+fn test_calculate_rewards_zero_shares_queried_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    assert_eq!(wrapper.calculate_rewards(&0), 0);
+}
+
+#[test]
+fn test_calculate_rewards_negative_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_calculate_rewards(&-1),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_calculate_rewards_zero_total_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    // No shares minted yet -> divide-by-zero is rejected with ZeroShares,
+    // regardless of what user_shares is queried with.
+    assert_eq!(
+        wrapper.try_calculate_rewards(&1_000_000),
+        Err(Ok(WrapperError::ZeroShares))
+    );
+}
+
+#[test]
+fn test_calculate_rewards_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.try_calculate_rewards(&1_000_000),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
 fn test_unwrap_decreases_supply_and_balance() {
     let env = Env::default();
     env.mock_all_auths();

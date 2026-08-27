@@ -609,6 +609,60 @@ impl WrapperContract {
             .ok_or(WrapperError::ZeroShares)
     }
 
+    /// Calculates the pro-rata reward entitlement for a given amount of shares:
+    /// `rewards = (user_shares * total_tokens) / total_shares`.
+    ///
+    /// This is a read-only preview of what [`WrapperContract::withdraw`] would
+    /// pay out for `user_shares` right now — it does not burn shares or move
+    /// tokens. It is deliberately computed directly from the totals rather than
+    /// via `user_shares * calculate_share_price()`: multiplying by the
+    /// per-share price first floors twice (once computing the price, once
+    /// multiplying it back out), which under-reports the entitlement whenever
+    /// `total_tokens` isn't an exact multiple of `total_shares`. Multiplying
+    /// before dividing floors only once, matching `withdraw`'s payout exactly.
+    ///
+    /// # Math safety
+    /// `user_shares * total_tokens` uses [`i128::checked_mul`], so a value large
+    /// enough to overflow `i128` is rejected as [`WrapperError::InvalidAmount`]
+    /// rather than wrapping. The subsequent division uses
+    /// [`i128::checked_div`]; `total_shares == 0` is rejected up front, so it
+    /// can never panic on a divide-by-zero.
+    ///
+    /// # Arguments
+    /// * `env`         - The Soroban environment.
+    /// * `user_shares` - The hypothetical share amount to price out. Must be
+    ///   non-negative.
+    ///
+    /// # Errors
+    /// * [`WrapperError::NotInitialized`] if the contract is uninitialized.
+    /// * [`WrapperError::InvalidAmount`] if `user_shares` is negative, or if
+    ///   `user_shares * total_tokens` overflows `i128`.
+    /// * [`WrapperError::ZeroShares`] if there are no outstanding vault shares.
+    ///
+    /// @param env The Soroban environment.
+    /// @param user_shares The share amount to price out; must be non-negative.
+    /// @return `Ok(rewards)` where `rewards = (user_shares * total_tokens) / total_shares`
+    ///         (integer division, rounded down), or an error as documented above.
+    pub fn calculate_rewards(env: Env, user_shares: i128) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+
+        if user_shares < 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let total_shares = Self::read_supply(&env);
+        if total_shares == 0 {
+            return Err(WrapperError::ZeroShares);
+        }
+
+        let total_tokens = Self::read_total_assets(&env);
+
+        user_shares
+            .checked_mul(total_tokens)
+            .and_then(|product| product.checked_div(total_shares))
+            .ok_or(WrapperError::InvalidAmount)
+    }
+
     /// Withdraw `shares` of wrapped tokens and receive a proportional share of
     /// the vault's underlying assets, including any accrued yield.
     ///
