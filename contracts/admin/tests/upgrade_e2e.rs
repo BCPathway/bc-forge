@@ -226,7 +226,8 @@ fn test_double_vote_reverts() {
     client.set_admin(&admin);
     client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
 
-    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "WASM upgrade proposal"));
+    let proposal_id =
+        client.create_proposal(&admin, &String::from_str(&env, "WASM upgrade proposal"));
 
     // 1. Signer approves (first vote)
     client.approve_proposal(&member, &proposal_id);
@@ -243,5 +244,3 @@ fn test_double_vote_reverts() {
         )))
     );
 }
-
-
