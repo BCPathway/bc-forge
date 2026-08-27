@@ -206,7 +206,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     });
 
     it('should invoke setAdminContract with correct parameters', async () => {
-      const adminContractId = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const adminContractId = MOCK_CONTRACT_ID;
       const invokeContract = jest.fn(
         async (_method: string, _args: unknown[], _source: Keypair) => ({
           success: true,
@@ -226,7 +226,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     });
 
     it('should invoke setDependentToken with correct parameters', async () => {
-      const tokenContractId = 'CTOKENAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const tokenContractId = MOCK_CONTRACT_ID;
       const invokeContract = jest.fn(
         async (_method: string, _args: unknown[], _source: Keypair) => ({
           success: true,
