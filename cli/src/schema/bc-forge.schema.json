@@ -31,7 +31,7 @@
     },
     "network": {
       "type": "string",
-      "enum": ["mainnet", "testnet", "futurenet", "standalone", "custom"],
+      "enum": ["mainnet", "testnet", "futurenet", "standalone", "local", "custom"],
       "default": "testnet",
       "description": "Target network deployment environment"
     },

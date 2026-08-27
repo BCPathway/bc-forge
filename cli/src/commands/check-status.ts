@@ -3,6 +3,7 @@ import { Contract, rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import { getClientConfig, loadConfigFile } from '../utils/config.js';
 import logger from '../utils/logger.js';
 import type { BcForgeConfig, ContractDeploymentConfig } from '../utils/config-parser.js';
+import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
 
 export type ContractStatus = 'responsive' | 'unreachable' | 'not_deployed' | 'invalid';
 
@@ -127,10 +128,13 @@ export async function checkStatus(
  * Builds the `check-status` command.
  */
 export function createCheckStatusCommand(): Command {
-  return new Command('check-status')
+  const cmd = new Command('check-status')
     .description('Ping all deployed contracts and report latency and status')
-    .option('-c, --config <file>', 'Path to a .bc-forge.json deployment configuration file')
-    .action(async (options) => {
+    .option('-c, --config <file>', 'Path to a .bc-forge.json deployment configuration file');
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (options, command) => {
       try {
         const parsed = loadConfigFile(options.config);
         if (!parsed.success || !parsed.config) {
@@ -138,10 +142,12 @@ export function createCheckStatusCommand(): Command {
           throw new Error('Failed to load deployment configuration');
         }
 
-        const clientConfig = getClientConfig();
+        const clientConfig = getClientConfig(explicitNetworkOverrides(command));
         logger.debug(`Pinging contracts via RPC: ${clientConfig.rpcUrl}`);
 
-        const server = new SorobanRpc.Server(clientConfig.rpcUrl);
+        const server = new SorobanRpc.Server(clientConfig.rpcUrl, {
+          allowHttp: clientConfig.rpcUrl.startsWith('http://'),
+        });
         const status = await checkStatus(server, parsed.config, clientConfig.rpcUrl);
 
         if (status.reports.length === 0) {
@@ -168,4 +174,6 @@ export function createCheckStatusCommand(): Command {
         process.exitCode = 1;
       }
     });
+
+  return cmd;
 }

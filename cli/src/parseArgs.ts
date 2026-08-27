@@ -9,6 +9,7 @@ import {
   createConnectCommand,
   createOrchestrateCommand,
 } from "./commands/orchestrator.js";
+import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 
 const VERSION = "0.1.0";
 
@@ -25,6 +26,9 @@ export function buildProgram(): Command {
       writeErr: (str) => process.stderr.write(str),
       writeOut: (str) => process.stdout.write(str),
     });
+
+  addNetworkOptions(program, { withDefault: true });
+  attachNetworkResolution(program);
 
   program
     .addCommand(createUpgradeCommand())

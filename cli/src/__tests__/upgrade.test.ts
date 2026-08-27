@@ -107,6 +107,56 @@ describe("Upgrade Command (#703, #706)", () => {
     });
   });
 
+  describe("fee estimation", () => {
+    it("returns fee estimate with --estimate flag", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(true);
+      expect(result.wasmHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(result.estimate).toBeDefined();
+      expect(result.estimate!.baseFee).toBe("100");
+      expect(result.estimate!.resourceFee).toBe("200000");
+      expect(result.estimate!.totalFee).toBe("200100");
+      expect(result.message).toContain("Fee estimate");
+      expect(result.message).toContain("200100");
+    });
+
+    it("does not submit transaction when --estimate is set", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(true);
+      expect(result.txHash).toBeUndefined();
+    });
+
+    it("reports simulation failure when --estimate is set", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () =>
+          createMockServer({ simulationError: "budget exceeded" }) as any
+      );
+
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Simulation failed");
+      expect(result.message).toContain("budget exceeded");
+    });
+
+    it("does not submit when --estimate and --dry-run are both set", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+      opts.dryRun = true;
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(true);
+      expect(result.estimate).toBeDefined();
+      expect(result.txHash).toBeUndefined();
+    });
+  });
+
   describe("on-chain submission", () => {
     it("submits upgrade transaction and returns hash", async () => {
       const opts = baseOpts();

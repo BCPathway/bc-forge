@@ -31,7 +31,7 @@ export interface BcForgeConfig {
   symbol: string;
   decimals?: number;
   admin?: string;
-  network?: 'mainnet' | 'testnet' | 'futurenet' | 'standalone' | 'custom' | string;
+  network?: 'mainnet' | 'testnet' | 'futurenet' | 'standalone' | 'local' | 'custom' | string;
   rpcUrl?: string;
   networkPassphrase?: string;
   secretKey?: string;

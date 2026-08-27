@@ -1,6 +1,6 @@
 use crate::{WrapperContract, WrapperContractClient, WrapperError};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
 
 fn setup(
@@ -293,6 +293,162 @@ fn test_share_price_uninitialized_fails() {
 
     assert_eq!(
         client.try_calculate_share_price(),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_calculate_rewards_one_to_one_after_wrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &2_000_000);
+
+    // No yield distributed yet: 1 share is worth 1 underlying token.
+    assert_eq!(wrapper.calculate_rewards(&2_000_000), 2_000_000);
+    assert_eq!(wrapper.calculate_rewards(&500_000), 500_000);
+}
+
+#[test]
+fn test_calculate_rewards_reflects_distributed_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // 3,000,000 total assets / 2,000,000 total shares: each user share is now
+    // worth 1.5 underlying tokens.
+    assert_eq!(wrapper.calculate_rewards(&2_000_000), 3_000_000);
+    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_500_000);
+}
+
+#[test]
+fn test_calculate_rewards_matches_withdraw_payout_exactly() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &3_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // The preview must agree with what withdraw() actually pays out for the
+    // same share amount, including the rounded-down remainder.
+    let previewed = wrapper.calculate_rewards(&2_000_000);
+    let tokens_out = wrapper.withdraw(&user, &2_000_000);
+    assert_eq!(previewed, tokens_out);
+    assert_eq!(previewed, 2_666_666);
+}
+
+#[test]
+fn test_calculate_rewards_more_precise_than_share_price_times_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &2_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &2_000_000, &u32::MAX);
+
+    // 3 total shares, 5 total assets (in whole-token units) after yield.
+    wrapper.wrap(&user, &3);
+    wrapper.distribute_rewards(&rewarder, &2);
+
+    // Per-share price floors 5/3 = 1.66... down to 1, so pricing a 2-share
+    // redemption via `calculate_share_price() * shares` under-reports it as 2.
+    assert_eq!(wrapper.calculate_share_price(), 1);
+    // The direct pro-rata formula floors only once: (2 * 5) / 3 = 3.33... -> 3.
+    assert_eq!(wrapper.calculate_rewards(&2), 3);
+}
+
+#[test]
+fn test_calculate_rewards_multiple_users_pro_rata() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &user_a, &3_000_000);
+    underlying.mint(&admin, &user_b, &1_000_000);
+    underlying.approve(&user_a, &wrapper_id, &3_000_000, &u32::MAX);
+    underlying.approve(&user_b, &wrapper_id, &1_000_000, &u32::MAX);
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user_a, &3_000_000);
+    wrapper.wrap(&user_b, &1_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000 — weighted by share,
+    // not split evenly.
+    assert_eq!(wrapper.calculate_rewards(&3_000_000), 3_750_000);
+    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_250_000);
+}
+
+#[test]
+fn test_calculate_rewards_zero_shares_queried_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    assert_eq!(wrapper.calculate_rewards(&0), 0);
+}
+
+#[test]
+fn test_calculate_rewards_negative_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_calculate_rewards(&-1),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_calculate_rewards_zero_total_shares_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    // No shares minted yet -> divide-by-zero is rejected with ZeroShares,
+    // regardless of what user_shares is queried with.
+    assert_eq!(
+        wrapper.try_calculate_rewards(&1_000_000),
+        Err(Ok(WrapperError::ZeroShares))
+    );
+}
+
+#[test]
+fn test_calculate_rewards_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.try_calculate_rewards(&1_000_000),
         Err(Ok(WrapperError::NotInitialized))
     );
 }
@@ -933,4 +1089,144 @@ fn test_withdraw_dust_payout_fails() {
         wrapper.try_withdraw(&user, &1),
         Err(Ok(WrapperError::InvalidAmount))
     );
+}
+
+// ─── Deposit Time Lockup (#730) ──────────────────────────────────────────────
+
+/// Arbitrary unlock timestamp used across the lockup tests.
+const UNLOCK_TIME: u64 = 1_700_100_000;
+
+#[test]
+fn test_withdraw_reverts_while_deposit_is_locked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    // Admin records the deposit lockup: the deposit unlocks at UNLOCK_TIME.
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+
+    // Well before the unlock time the deposit is still locked.
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &100_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+}
+
+#[test]
+fn test_withdraw_succeeds_after_unlock_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user, &1_000_000);
+
+    // Once past the unlock time the deposit may be withdrawn.
+    env.ledger().set_timestamp(UNLOCK_TIME + 100);
+    let tokens_out = wrapper.withdraw(&user, &1_000_000);
+
+    assert_eq!(tokens_out, 1_000_000);
+    assert_eq!(wrapper.balance(&user), 0);
+    assert_eq!(underlying.balance(&user), 10_000_000);
+}
+
+#[test]
+fn test_withdraw_succeeds_at_unlock_time_boundary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    env.ledger().set_timestamp(UNLOCK_TIME);
+    wrapper.wrap(&user, &1_000_000);
+
+    // The boundary is inclusive: timestamp == unlock time is allowed.
+    assert!(wrapper.try_withdraw(&user, &1_000_000).is_ok());
+}
+
+#[test]
+fn test_set_unlock_time_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+    let impostor = Address::generate(&env);
+
+    assert!(wrapper
+        .try_set_unlock_time(&impostor, &user, &UNLOCK_TIME)
+        .is_err());
+}
+
+#[test]
+fn test_get_unlock_time_round_trips() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    assert_eq!(wrapper.get_unlock_time(&user), None);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    assert_eq!(wrapper.get_unlock_time(&user), Some(UNLOCK_TIME));
+}
+
+#[test]
+fn test_clear_unlock_time_removes_lockup() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user, &1_000_000);
+
+    // Admin lifts the lockup before it expires.
+    wrapper.clear_unlock_time(&admin, &user);
+    assert_eq!(wrapper.get_unlock_time(&user), None);
+
+    assert!(wrapper.try_withdraw(&user, &1_000_000).is_ok());
+}
+
+#[test]
+fn test_set_unlock_time_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    assert_eq!(
+        client.try_set_unlock_time(&user, &user, &UNLOCK_TIME),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_lockup_is_enforced_per_user() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    underlying.mint(&admin, &user_a, &2_000_000);
+    underlying.mint(&admin, &user_b, &2_000_000);
+    underlying.approve(&user_a, &wrapper_id, &2_000_000, &u32::MAX);
+    underlying.approve(&user_b, &wrapper_id, &2_000_000, &u32::MAX);
+
+    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    wrapper.wrap(&user_a, &1_000_000);
+    wrapper.wrap(&user_b, &1_000_000);
+
+    // Only user_a's deposit is time-locked.
+    wrapper.set_unlock_time(&admin, &user_a, &UNLOCK_TIME);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user_a, &500_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+    assert!(wrapper.try_withdraw(&user_b, &500_000).is_ok());
 }

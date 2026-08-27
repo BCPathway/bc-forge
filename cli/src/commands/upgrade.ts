@@ -7,6 +7,22 @@ import {
   hash,
   rpc as SorobanRpcNs,
 } from "@stellar/stellar-sdk";
+import { addNetworkOptions } from "../network.js";
+
+export interface FeeEstimate {
+  baseFee: string;
+  resourceFee: string;
+  totalFee: string;
+}
+
+export interface UpgradeResult {
+  success: boolean;
+  txHash?: string;
+  proposalId?: bigint;
+  wasmHash?: string;
+  message: string;
+  estimate?: FeeEstimate;
+}
 
 export interface UpgradeOptions {
   wasmPath: string;
@@ -16,37 +32,39 @@ export interface UpgradeOptions {
   source: string;
   proposalId?: string;
   dryRun?: boolean;
+  estimate?: boolean;
 }
 
 export function createUpgradeCommand(): Command {
-  return new Command("upgrade")
+  const cmd = new Command("upgrade")
     .description("Submit a multisig upgrade proposal for a deployed contract")
     .requiredOption("--wasm <path>", "Path to the new WASM binary")
     .requiredOption(
       "--contract-id <id>",
       "Contract ID of the deployed contract to upgrade"
     )
-    .requiredOption("--rpc-url <url>", "Soroban RPC endpoint URL")
-    .option(
-      "--network-passphrase <phrase>",
-      "Stellar network passphrase",
-      "Test SDF Network ; September 2015"
-    )
     .requiredOption("--source <secret>", "Source account secret key")
     .option("--proposal-id <id>", "Existing proposal ID to execute")
     .option("--dry-run", "Simulate without submitting on-chain", false)
-    .action(async (opts) => {
-      await runUpgrade(opts);
+    .option(
+      "--estimate",
+      "Dry-run to estimate total fee cost without submitting",
+      false
+    );
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (opts) => {
+    await runUpgrade({
+      ...opts,
+      wasmPath: opts.wasmPath ?? opts.wasm,
     });
+  });
+
+  return cmd;
 }
 
-export async function runUpgrade(opts: UpgradeOptions): Promise<{
-  success: boolean;
-  txHash?: string;
-  proposalId?: bigint;
-  wasmHash?: string;
-  message: string;
-}> {
+export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
   // 1. Validate WASM path exists
   const fs = await import("node:fs");
   if (!fs.existsSync(opts.wasmPath)) {
@@ -90,7 +108,29 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<{
       .setTimeout(30)
       .build();
 
-    // 4. Dry-run: simulate only
+    // 4. --estimate: simulate and return fee breakdown
+    if (opts.estimate) {
+      const simResult = await server.simulateTransaction(tx);
+      if ("error" in simResult) {
+        return {
+          success: false,
+          message: `Simulation failed: ${JSON.stringify((simResult as any).error)}`,
+        };
+      }
+
+      const resourceFee = simResult.minResourceFee ?? "0";
+      const baseFee = "100";
+      const totalFee = String(Number(baseFee) + Number(resourceFee));
+
+      return {
+        success: true,
+        wasmHash,
+        estimate: { baseFee, resourceFee, totalFee },
+        message: `Fee estimate for upgrade: base=${baseFee} resource=${resourceFee} total=${totalFee} stroops (WASM ${wasmBytes.length} bytes)`,
+      };
+    }
+
+    // 5. Dry-run: simulate only
     if (opts.dryRun) {
       const simResult = await server.simulateTransaction(tx);
       if ("error" in simResult) {
@@ -106,7 +146,7 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<{
       };
     }
 
-    // 5. Submit on-chain
+    // 6. Submit on-chain
     const result = await server.sendTransaction(tx);
 
     if (result.status === "ERROR") {
