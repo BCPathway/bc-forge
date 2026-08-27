@@ -45,7 +45,12 @@ export function createUpgradeCommand(): Command {
     )
     .requiredOption("--source <secret>", "Source account secret key")
     .option("--proposal-id <id>", "Existing proposal ID to execute")
-    .option("--dry-run", "Simulate without submitting on-chain", false);
+    .option("--dry-run", "Simulate without submitting on-chain", false)
+    .option(
+      "--estimate",
+      "Dry-run to estimate total fee cost without submitting",
+      false
+    );
 
   addNetworkOptions(cmd);
 
@@ -53,14 +58,6 @@ export function createUpgradeCommand(): Command {
     await runUpgrade({
       ...opts,
       wasmPath: opts.wasmPath ?? opts.wasm,
-    .option("--dry-run", "Simulate without submitting on-chain", false)
-    .option(
-      "--estimate",
-      "Dry-run to estimate total fee cost without submitting",
-      false
-    )
-    .action(async (opts) => {
-      await runUpgrade(opts);
     });
   });
 
