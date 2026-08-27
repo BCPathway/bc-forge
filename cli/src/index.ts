@@ -6,20 +6,11 @@ import { Keypair } from '@stellar/stellar-sdk';
 import config, { getClientConfig, getSecretKey, loadConfigFile, saveConfigFile, validateConfig, BcForgeConfig } from './utils/config.js';
 import logger, { enableDebugMode } from './utils/logger.js';
 import { initializeSuperAdmin, connectContractIds, runDeploymentOrchestrator } from './orchestrator/index.js';
+import { parseArgs } from "./parseArgs.js";
 
-const program = new Command();
-
-program
-  .name('bc-forge')
-  .description('Administrative CLI for bc-forge token contracts')
-  .version('1.0.0')
-  .option('-d, --debug', 'Enable debug logging mode');
-
-program.hook('preAction', (thisCommand) => {
-  const opts = thisCommand.opts();
-  if (opts.debug) {
-    enableDebugMode(true);
-  }
+parseArgs().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
 });
 
 // ─── Config Commands ────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Ajv from 'ajv';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,8 +46,10 @@ export interface ConfigParseResult {
 
 const DEFAULT_CONFIG_FILENAME = '.bc-forge.json';
 
+import { Ajv } from 'ajv';
+
 const ajv = new Ajv({ allErrors: true, useDefaults: true });
-const validateSchema = ajv.compile(bcForgeSchema);
+const validate = ajv.compile(bcForgeSchema);
 
 /**
  * Validates a configuration object against the .bc-forge.json schema.
@@ -61,13 +62,12 @@ export function validateConfig(data: unknown): ConfigValidationResult {
     };
   }
 
-  const valid = validateSchema(data);
-  if (!valid && validateSchema.errors) {
-    const errors = validateSchema.errors.map(err => {
-      const fieldPath = err.instancePath ? err.instancePath : 'root';
-      return `[${fieldPath}] ${err.message}`;
-    });
-    return { valid: false, errors };
+  const valid = validate(data);
+  if (!valid) {
+    return {
+      valid: false,
+      errors: ['Configuration validation failed.']
+    };
   }
 
   const config = data as BcForgeConfig;

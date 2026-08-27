@@ -79,6 +79,28 @@ export class WrapperClient {
   }
 
   /**
+   * Get the total underlying token assets held by the vault contract.
+   */
+  async getTotalAssets(): Promise<bigint> {
+    const result = await this.queryContract('total_assets', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Calculate the current vault share price (total assets / total shares).
+   *
+   * The share price is the amount of underlying tokens each outstanding vault
+   * share is entitled to. Throws when the contract reports an error, e.g. when
+   * there are no outstanding shares yet (divide-by-zero protection).
+   *
+   * @returns Share price as bigint (integer division, rounded down)
+   */
+  async calculateSharePrice(): Promise<bigint> {
+    const result = await this.queryContract('calculate_share_price', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Get the underlying SEP-41 token contract address being wrapped.
    */
   async getUnderlyingToken(): Promise<string> {
@@ -192,6 +214,47 @@ export class WrapperClient {
     return this.invokeContract(
       'unwrap',
       [addressToScVal(caller), i128ToScVal(wrappedAmount)],
+      source,
+    );
+  }
+
+  /**
+   * Distribute rewards into the vault/wrapper contract without issuing new shares.
+   *
+   * Transfers `amount` of the underlying token from `caller` into the vault contract,
+   * increasing total underlying assets while keeping share supply constant.
+   *
+   * @param caller - Address providing the reward capital
+   * @param amount - Amount of underlying tokens to distribute
+   * @param source - Caller's keypair
+   */
+  async distributeRewards(
+    caller: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'distribute_rewards',
+      [addressToScVal(caller), i128ToScVal(amount)],
+      source,
+    );
+  }
+
+  /**
+   * Withdraw `shares` of wrapped tokens and receive a proportional share of
+   * the vault's underlying assets, including any accrued yield.
+   *
+   * Burns `shares` of wrapped tokens from `caller` and transfers the
+   * proportional amount of underlying tokens back to `caller`.
+   *
+   * @param caller - Address withdrawing the shares
+   * @param shares - Amount of wrapped shares to burn
+   * @param source - Caller's keypair
+   */
+  async withdraw(caller: string, shares: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'withdraw',
+      [addressToScVal(caller), i128ToScVal(shares)],
       source,
     );
   }
