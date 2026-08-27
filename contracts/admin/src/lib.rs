@@ -1446,6 +1446,36 @@ pub fn approve_upgrade(env: &Env, voter: Address, proposal_id: u64) -> Result<()
     Ok(())
 }
 
+/// Checks that an [`UpgradeProposal`]'s weighted vote tally has reached its
+/// snapshotted quorum. Resolves issue #656.
+///
+/// The tally is recomputed from `proposal.votes` on every call rather than
+/// trusting `proposal.status`, so this guard stays correct as a building
+/// block for the upgrade-execution path ahead of `execute_upgrade` (#655)
+/// landing for this proposal type.
+///
+/// # Errors
+///
+/// Returns [`AdminError::QuorumNotMet`] if the summed vote weight is below
+/// `proposal.quorum`.
+///
+/// @notice Reverts unless `proposal`'s unique approvals meet or exceed its quorum.
+/// @dev Sums the weights recorded in `proposal.votes`; each entry is keyed by a unique voter address, so the sum can never double-count a signer.
+/// @param proposal The upgrade proposal to check.
+/// @return `Ok(())` if quorum is met, or `AdminError::QuorumNotMet` otherwise.
+pub fn require_upgrade_quorum_met(proposal: &UpgradeProposal) -> Result<(), AdminError> {
+    let tally: u64 = proposal
+        .votes
+        .values()
+        .into_iter()
+        .map(|weight| weight as u64)
+        .sum();
+    if tally < proposal.quorum {
+        return Err(AdminError::QuorumNotMet);
+    }
+    Ok(())
+}
+
 /// Withdraws a multi-sig WASM upgrade proposal before it executes. Resolves
 /// issue #662.
 ///
@@ -3983,6 +4013,39 @@ mod tests {
             encoded_key(&env, AdminKey::UpgradeProposalIdCounter),
             ScVal::try_from_val(&env, &expected_counter).unwrap()
         );
+    }
+
+    // ── require_upgrade_quorum_met (#656) ───────────────────────────────────
+
+    #[test]
+    fn test_require_upgrade_quorum_met_reports_deficit() {
+        let env = Env::default();
+        // `upgrade_proposal_fixture` carries a single vote against `quorum: 2`.
+        let proposal = upgrade_proposal_fixture(&env);
+
+        assert_eq!(
+            require_upgrade_quorum_met(&proposal),
+            Err(AdminError::QuorumNotMet)
+        );
+    }
+
+    #[test]
+    fn test_require_upgrade_quorum_met_succeeds_when_tally_meets_quorum() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        // Add a second unique voter so the tally reaches the fixture's `quorum: 2`.
+        proposal.votes.set(Address::generate(&env), 1u32);
+
+        assert!(require_upgrade_quorum_met(&proposal).is_ok());
+    }
+
+    #[test]
+    fn test_require_upgrade_quorum_met_succeeds_when_tally_exceeds_quorum() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        proposal.quorum = 1;
+
+        assert!(require_upgrade_quorum_met(&proposal).is_ok());
     }
 
     // ── approve_upgrade (#654) ──────────────────────────────────────────────
