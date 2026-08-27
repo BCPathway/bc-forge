@@ -4,8 +4,16 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const schemaPath = path.resolve(__dirname, '../schema/bc-forge.schema.json');
-const bcForgeSchema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+let schemaPath = path.resolve(__dirname, '../schema/bc-forge.schema.json');
+if (!fs.existsSync(schemaPath)) {
+  const srcSchemaPath = path.resolve(__dirname, '../../src/schema/bc-forge.schema.json');
+  if (fs.existsSync(srcSchemaPath)) {
+    schemaPath = srcSchemaPath;
+  }
+}
+const bcForgeSchema = fs.existsSync(schemaPath)
+  ? JSON.parse(fs.readFileSync(schemaPath, 'utf-8'))
+  : {};
 
 export interface ContractDeploymentConfig {
   contractId?: string;

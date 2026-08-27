@@ -1,3 +1,4 @@
+import { describe, it, expect } from '@jest/globals';
 import { WrapperClient } from './wrapperClient';
 import { Keypair } from '@stellar/stellar-sdk';
 
