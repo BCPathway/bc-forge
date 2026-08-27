@@ -3,6 +3,11 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::{symbol_short, vec, Address, BytesN, Env, String, TryIntoVal, Val};
 
+const TOKEN_WASM: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../target/wasm32-unknown-unknown/release/bc_forge_token.wasm"
+));
+
 fn setup_contract(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let contract_id = env.register(BcForgeToken, ());
     let client = BcForgeTokenClient::new(env, &contract_id);
@@ -230,7 +235,7 @@ fn test_upgrade_preserves_minted_balances() {
     let recipient = Address::generate(&env);
 
     client.mint(&admin, &recipient, &1_000);
-    let wasm_hash = env.deployer().upload_contract_wasm(BcForgeToken);
+    let wasm_hash = env.deployer().upload_contract_wasm(TOKEN_WASM);
 
     client.upgrade(&admin, &wasm_hash);
 

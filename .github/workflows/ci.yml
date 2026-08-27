@@ -32,6 +32,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Build WASM
+        env:
+          CARGO_INCREMENTAL: 0
+        run: cargo build --workspace --exclude bc-forge-e2e-tests --target wasm32-unknown-unknown --release
+
       - name: Clippy lints
         run: cargo clippy --all-targets --all-features -- -D warnings
 
@@ -54,10 +59,6 @@ jobs:
           name: coverage-report
           path: ./tarpaulin-report.html
 
-      - name: Build WASM
-        env:
-          CARGO_INCREMENTAL: 0
-        run: cargo build --workspace --exclude bc-forge-e2e-tests --target wasm32-unknown-unknown --release
 
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────
   sdk:
