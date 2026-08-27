@@ -17,6 +17,9 @@ describe('WrapperClient surface', () => {
     expect(typeof client.wrap).toBe('function');
     expect(typeof client.unwrap).toBe('function');
     expect(typeof client.withdraw).toBe('function');
+    expect(typeof client.setUnlockTime).toBe('function');
+    expect(typeof client.clearUnlockTime).toBe('function');
+    expect(typeof client.getUnlockTime).toBe('function');
   });
 
   it('builds distributeRewards invoke transaction target', async () => {
