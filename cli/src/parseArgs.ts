@@ -4,6 +4,7 @@ import { createSmokeTestCommand } from "./commands/smoke-test.js";
 import { createCheckStatusCommand } from "./commands/check-status.js";
 import { createVerifyHashCommand } from "./commands/verify-hash.js";
 import { createGenerateBindingsCommand } from "./commands/generate-bindings.js";
+import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 
 const VERSION = "0.1.0";
 
@@ -20,6 +21,9 @@ export function buildProgram(): Command {
       writeErr: (str) => process.stderr.write(str),
       writeOut: (str) => process.stdout.write(str),
     });
+
+  addNetworkOptions(program, { withDefault: true });
+  attachNetworkResolution(program);
 
   program
     .addCommand(createUpgradeCommand())

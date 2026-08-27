@@ -7,6 +7,7 @@ import {
   hash,
   rpc as SorobanRpcNs,
 } from "@stellar/stellar-sdk";
+import { addNetworkOptions } from "../network.js";
 
 export interface FeeEstimate {
   baseFee: string;
@@ -35,18 +36,12 @@ export interface UpgradeOptions {
 }
 
 export function createUpgradeCommand(): Command {
-  return new Command("upgrade")
+  const cmd = new Command("upgrade")
     .description("Submit a multisig upgrade proposal for a deployed contract")
     .requiredOption("--wasm <path>", "Path to the new WASM binary")
     .requiredOption(
       "--contract-id <id>",
       "Contract ID of the deployed contract to upgrade"
-    )
-    .requiredOption("--rpc-url <url>", "Soroban RPC endpoint URL")
-    .option(
-      "--network-passphrase <phrase>",
-      "Stellar network passphrase",
-      "Test SDF Network ; September 2015"
     )
     .requiredOption("--source <secret>", "Source account secret key")
     .option("--proposal-id <id>", "Existing proposal ID to execute")
@@ -55,10 +50,18 @@ export function createUpgradeCommand(): Command {
       "--estimate",
       "Dry-run to estimate total fee cost without submitting",
       false
-    )
-    .action(async (opts) => {
-      await runUpgrade(opts);
+    );
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (opts) => {
+    await runUpgrade({
+      ...opts,
+      wasmPath: opts.wasmPath ?? opts.wasm,
     });
+  });
+
+  return cmd;
 }
 
 export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {

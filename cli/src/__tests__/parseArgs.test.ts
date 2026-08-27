@@ -39,6 +39,158 @@ describe("CLI Parser (#705)", () => {
       const output = program.helpInformation();
       expect(output).toContain("upgrade");
       expect(output).toContain("smoke-test");
+      expect(output).toContain("--network");
+      expect(output).toContain("--rpc-url");
+    });
+  });
+
+  describe("global --network flags (#684)", () => {
+    it("defaults upgrade to testnet RPC when --rpc-url is omitted", async () => {
+      const program = buildProgram();
+      let parsedOpts: any = null;
+      program.commands
+        .find((c) => c.name() === "upgrade")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
+
+      await program.parseAsync(
+        argv("upgrade", "--wasm", "./token.wasm", "--contract-id", "CABC123", "--source", "S...")
+      );
+
+      expect(parsedOpts.network).toBe("testnet");
+      expect(parsedOpts.rpcUrl).toBe("https://soroban-testnet.stellar.org");
+      expect(parsedOpts.networkPassphrase).toBe("Test SDF Network ; September 2015");
+    });
+
+    it("maps --network mainnet to mainnet RPC and passphrase", async () => {
+      const program = buildProgram();
+      let parsedOpts: any = null;
+      program.commands
+        .find((c) => c.name() === "upgrade")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
+
+      await program.parseAsync(
+        argv(
+          "upgrade",
+          "--network",
+          "mainnet",
+          "--wasm",
+          "./token.wasm",
+          "--contract-id",
+          "CABC123",
+          "--source",
+          "S..."
+        )
+      );
+
+      expect(parsedOpts.network).toBe("mainnet");
+      expect(parsedOpts.rpcUrl).toBe("https://mainnet.sorobanrpc.com");
+      expect(parsedOpts.networkPassphrase).toBe(
+        "Public Global Stellar Network ; September 2015"
+      );
+    });
+
+    it("maps a global --network local flag placed before the subcommand", async () => {
+      const program = buildProgram();
+      let parsedOpts: any = null;
+      program.commands
+        .find((c) => c.name() === "upgrade")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
+
+      await program.parseAsync(
+        argv(
+          "--network",
+          "local",
+          "upgrade",
+          "--wasm",
+          "./token.wasm",
+          "--contract-id",
+          "CABC123",
+          "--source",
+          "S..."
+        )
+      );
+
+      expect(parsedOpts.network).toBe("local");
+      expect(parsedOpts.rpcUrl).toBe("http://localhost:8000/soroban/rpc");
+      expect(parsedOpts.networkPassphrase).toBe("Standalone Network ; February 2017");
+    });
+
+    it("lets --rpc-url override the selected network preset", async () => {
+      const program = buildProgram();
+      let parsedOpts: any = null;
+      program.commands
+        .find((c) => c.name() === "smoke-test")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
+
+      await program.parseAsync(
+        argv(
+          "smoke-test",
+          "--network",
+          "mainnet",
+          "--rpc-url",
+          "https://rpc.example.test",
+          "--contract-id",
+          "CABC123",
+          "--source",
+          "S..."
+        )
+      );
+
+      expect(parsedOpts.network).toBe("mainnet");
+      expect(parsedOpts.rpcUrl).toBe("https://rpc.example.test");
+      expect(parsedOpts.networkPassphrase).toBe(
+        "Public Global Stellar Network ; September 2015"
+      );
+    });
+
+    it("rejects an unsupported --network value", async () => {
+      const program = buildProgram();
+      program.configureOutput({ writeErr: () => {} });
+
+      await expect(
+        program.parseAsync(
+          argv(
+            "upgrade",
+            "--network",
+            "devnet",
+            "--wasm",
+            "./token.wasm",
+            "--contract-id",
+            "CABC123",
+            "--source",
+            "S..."
+          )
+        )
+      ).rejects.toThrow();
+    });
+
+    it("rejects an invalid --rpc-url override", async () => {
+      const program = buildProgram();
+      program.configureOutput({ writeErr: () => {} });
+
+      await expect(
+        program.parseAsync(
+          argv(
+            "upgrade",
+            "--rpc-url",
+            "not-a-url",
+            "--wasm",
+            "./token.wasm",
+            "--contract-id",
+            "CABC123",
+            "--source",
+            "S..."
+          )
+        )
+      ).rejects.toThrow(/Invalid RPC URL/);
     });
   });
 
@@ -71,18 +223,21 @@ describe("CLI Parser (#705)", () => {
       ).rejects.toThrow();
     });
 
-    it("rejects when --rpc-url is missing", async () => {
+    it("does not require --rpc-url when --network can supply it", async () => {
       const program = buildProgram();
-      const stderr: string[] = [];
-      program.configureOutput({
-        writeErr: (str) => stderr.push(str),
-      });
+      let parsedOpts: any = null;
+      program.commands
+        .find((c) => c.name() === "upgrade")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
 
-      await expect(
-        program.parseAsync(
-          argv("upgrade", "--wasm", "./artifacts/token.wasm", "--contract-id", "CX", "--source", "S...")
-        )
-      ).rejects.toThrow();
+      await program.parseAsync(
+        argv("upgrade", "--wasm", "./artifacts/token.wasm", "--contract-id", "CX", "--source", "S...")
+      );
+
+      expect(parsedOpts).not.toBeNull();
+      expect(parsedOpts.rpcUrl).toBe("https://soroban-testnet.stellar.org");
     });
 
     it("rejects when --source is missing", async () => {
@@ -107,6 +262,7 @@ describe("CLI Parser (#705)", () => {
       expect(output).toContain("--wasm");
       expect(output).toContain("--contract-id");
       expect(output).toContain("--rpc-url");
+      expect(output).toContain("--network");
       expect(output).toContain("--source");
       expect(output).toContain("--estimate");
     });
@@ -301,18 +457,21 @@ describe("CLI Parser (#705)", () => {
       ).rejects.toThrow();
     });
 
-    it("rejects when --rpc-url is missing", async () => {
+    it("does not require --rpc-url when --network can supply it", async () => {
       const program = buildProgram();
-      const stderr: string[] = [];
-      program.configureOutput({
-        writeErr: (str) => stderr.push(str),
-      });
+      let parsedOpts: any = null;
+      program.commands
+        .find((c) => c.name() === "smoke-test")!
+        .action(async (opts) => {
+          parsedOpts = opts;
+        });
 
-      await expect(
-        program.parseAsync(
-          argv("smoke-test", "--contract-id", "CX", "--source", "S...")
-        )
-      ).rejects.toThrow();
+      await program.parseAsync(
+        argv("smoke-test", "--contract-id", "CX", "--source", "S...")
+      );
+
+      expect(parsedOpts).not.toBeNull();
+      expect(parsedOpts.rpcUrl).toBe("https://soroban-testnet.stellar.org");
     });
 
     it("rejects when --source is missing", async () => {
@@ -336,6 +495,7 @@ describe("CLI Parser (#705)", () => {
       const output = smokeCmd!.helpInformation();
       expect(output).toContain("--contract-id");
       expect(output).toContain("--rpc-url");
+      expect(output).toContain("--network");
       expect(output).toContain("--source");
       expect(output).toContain("--recipient");
       expect(output).toContain("--amount");

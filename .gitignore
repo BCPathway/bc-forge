@@ -13,6 +13,7 @@
 node_modules/
 dist/
 sdk/*.tgz
+*.tsbuildinfo
 
 # Environment
 .env

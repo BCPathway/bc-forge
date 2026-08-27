@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import { getClientConfig } from '../utils/config.js';
 import logger from '../utils/logger.js';
+import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
 
 export type BindingsLanguage =
   | 'typescript'
@@ -206,17 +207,20 @@ export async function generateBindings(
  * Builds the `generate-bindings` command.
  */
 export function createGenerateBindingsCommand(): Command {
-  return new Command('generate-bindings')
+  const cmd = new Command('generate-bindings')
     .description('Generate contract client bindings via the Stellar CLI code generator')
     .option('-l, --language <lang>', `Target language (${SUPPORTED_LANGUAGES.join(', ')})`, 'typescript')
     .option('--wasm <path>', 'Local .wasm artifact to generate from')
     .option('--wasm-hash <hash>', 'Hash of a WASM blob already uploaded to the network')
     .option('--contract-id <id>', 'Deployed contract to generate from')
     .option('-o, --output-dir <dir>', 'Directory to write the generated package into')
-    .option('--overwrite', 'Overwrite the output directory if it already exists')
-    .action(async (options) => {
+    .option('--overwrite', 'Overwrite the output directory if it already exists');
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (options, command) => {
       try {
-        const clientConfig = getClientConfig();
+        const clientConfig = getClientConfig(explicitNetworkOverrides(command));
         const contractId = options.contractId
           || (!options.wasm && !options.wasmHash ? clientConfig.contractId : undefined);
 
@@ -230,7 +234,8 @@ export function createGenerateBindingsCommand(): Command {
           outputDir: options.outputDir,
           overwrite: options.overwrite,
           rpcUrl: clientConfig.rpcUrl,
-          networkPassphrase: clientConfig.networkPassphrase
+          networkPassphrase: clientConfig.networkPassphrase,
+          network: clientConfig.network
         });
 
         logger.debug(`Running: ${result.command} ${result.args.join(' ')}`);
@@ -251,4 +256,6 @@ export function createGenerateBindingsCommand(): Command {
         process.exitCode = 1;
       }
     });
+
+  return cmd;
 }
