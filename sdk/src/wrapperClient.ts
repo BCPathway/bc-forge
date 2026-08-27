@@ -102,6 +102,24 @@ export class WrapperClient {
   }
 
   /**
+   * Preview the pro-rata reward entitlement for a hypothetical share amount:
+   * `rewards = (userShares * totalAssets) / totalShares`.
+   *
+   * This mirrors what `withdraw()` would pay out for `userShares` right now,
+   * without burning shares or moving tokens. It is computed directly from the
+   * totals rather than via `userShares * calculateSharePrice()`, which floors
+   * twice and can under-report the entitlement — this floors only once, so it
+   * always agrees with `withdraw()`'s actual payout.
+   *
+   * @param userShares - The hypothetical share amount to price out.
+   * @returns The underlying token amount that many shares would be worth.
+   */
+  async calculateRewards(userShares: bigint): Promise<bigint> {
+    const result = await this.queryContract('calculate_rewards', [i128ToScVal(userShares)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Get the underlying SEP-41 token contract address being wrapped.
    */
   async getUnderlyingToken(): Promise<string> {
