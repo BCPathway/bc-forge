@@ -47,6 +47,7 @@
 //! | `8` | `QuorumNotMet` | `execute_upgrade` before the approval threshold is met |
 //! | `9` | `ProposalAlreadyExecuted` | `execute_upgrade` on an already-executed proposal |
 //! | `10` | `TimelockActive` | `execute_upgrade` before the mandatory delay has elapsed |
+//! | `11` | `NotProposalCreator` | `cancel_proposal` called by a non-creator address |
 //!
 //! ## Event Emissions
 //!
@@ -56,6 +57,7 @@
 //! | `role_rvk`  | Role revoke | `revoke_role` | `(admin, role, address)` |
 //! | `role_chk`  | Role check | `has_role` | `(address, role, result)` |
 //! | `upgraded`  | WASM upgrade | `execute_upgrade` | `(executor, proposal_id, wasm_hash)` |
+//! | `prp_cncld`| Proposal cancel | `cancel_proposal` | `(canceller, proposal_id)` |
 //!
 //! ## Storage Domain Separation
 //!
@@ -188,6 +190,8 @@ pub enum AdminError {
     /// The mandatory timelock delay has not elapsed yet: the current ledger
     /// timestamp is still before the proposal's recorded unlock time.
     TimelockActive = 10,
+    /// The caller is not the creator of the proposal and cannot cancel it.
+    NotProposalCreator = 11,
 }
 
 /// Storage keys for the access-control layer.
@@ -975,6 +979,53 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
     extend_instance_ttl(env);
 }
 
+/// Cancels a governance proposal and removes it from state.
+///
+/// @notice Cancels proposal `proposal_id` if `caller` is its creator and the proposal has not been executed.
+/// @dev Requires `caller` authorization and verifies `caller` is the proposal's creator. Removes the proposal and any associated timelock entry from instance storage. Emits a `prp_cncld` event.
+/// @param env The Soroban environment.
+/// @param caller The address attempting to cancel the proposal; must be the original creator.
+/// @param proposal_id The ID of the proposal to cancel.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed below.
+///
+/// # Errors
+///
+/// Returns [`AdminError::ProposalNotFound`] if no proposal exists under `proposal_id`,
+/// [`AdminError::ProposalAlreadyExecuted`] if the proposal was already executed, or
+/// [`AdminError::NotProposalCreator`] if `caller` is not the proposal's creator.
+pub fn cancel_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), AdminError> {
+    caller.require_auth();
+
+    let proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+
+    if caller != proposal.creator {
+        return Err(AdminError::NotProposalCreator);
+    }
+
+    env.storage()
+        .instance()
+        .remove(&AdminKey::Proposal(proposal_id));
+
+    let timelock_key = AdminKey::ProposalTimelock(proposal_id);
+    if env.storage().instance().has(&timelock_key) {
+        env.storage().instance().remove(&timelock_key);
+    }
+
+    extend_instance_ttl(env);
+
+    events::emit_proposal_cancelled(env, &caller, proposal_id);
+
+    Ok(())
+}
+
 /// Records the unlock time for `proposal_id` if it has reached quorum and no
 /// timelock has been recorded yet.
 ///
@@ -1221,6 +1272,14 @@ mod tests {
 
         pub fn mark_executed(env: Env, proposal_id: u64) {
             super::mark_executed(&env, proposal_id);
+        }
+
+        pub fn cancel_proposal(
+            env: Env,
+            caller: Address,
+            proposal_id: u64,
+        ) -> Result<(), AdminError> {
+            super::cancel_proposal(&env, caller, proposal_id)
         }
 
         pub fn execute_upgrade(
@@ -3177,6 +3236,130 @@ mod tests {
 
         client.set_admin(&admin);
         client.mark_executed(&9999);
+    }
+
+    // ── cancel_proposal ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cancel_proposal_removes_from_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "to cancel"));
+
+        // Proposal exists and is ready (threshold 1, creator auto-approves).
+        assert!(client.is_proposal_ready(&id));
+
+        // Cancel it — panics on auth/error, returns () on success.
+        client.cancel_proposal(&admin, &id);
+
+        // Proposal is gone from state — querying it panics with "proposal not found".
+        let res = client.try_is_proposal_ready(&id);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_cancel_proposal_emits_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "event test"));
+
+        client.cancel_proposal(&admin, &id);
+
+        // Verify exactly one prp_cncld event was emitted.
+        let events = env.events().all();
+        let expected_topic = Symbol::new(&env, "prp_cncld");
+        let cancel_count = events
+            .iter()
+            .filter(|e| {
+                let topics = &e.1;
+                topics
+                    .get(0)
+                    .and_then(|v| Symbol::try_from_val(&env, &v).ok())
+                    .is_some_and(|s| s == expected_topic)
+            })
+            .count();
+        assert_eq!(cancel_count, 1);
+    }
+
+    #[test]
+    fn test_cancel_proposal_removes_timelock() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        // Threshold 1 means creator auto-approve satisfies quorum, starting the timelock.
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "timelock test"));
+
+        // Timelock should be set because threshold is 1 and creator auto-approves.
+        assert!(client.get_proposal_unlock_time(&id).is_some());
+
+        client.cancel_proposal(&admin, &id);
+
+        // Timelock entry should also be removed.
+        assert!(client.get_proposal_unlock_time(&id).is_none());
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_non_creator() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), stranger.clone()], &2);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "not yours"));
+
+        // stranger is a pool member but NOT the creator — must fail.
+        let result = client.try_cancel_proposal(&stranger, &id);
+        assert_eq!(result, Err(Ok(AdminError::NotProposalCreator)));
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_already_executed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone()], &1);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "exec then cancel"));
+        client.mark_executed(&id);
+
+        let result = client.try_cancel_proposal(&admin, &id);
+        assert_eq!(result, Err(Ok(AdminError::ProposalAlreadyExecuted)));
+    }
+
+    #[test]
+    fn test_cancel_proposal_rejects_nonexistent_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        let result = client.try_cancel_proposal(&admin, &9999);
+        assert!(result.is_err());
     }
 
     #[test]
