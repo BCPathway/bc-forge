@@ -30,7 +30,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -59,7 +59,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -88,7 +88,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -117,7 +117,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -377,7 +377,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 2
                 }
               }
             },
@@ -422,7 +422,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 2
                 }
               }
             },
@@ -467,7 +467,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 2
                 }
               }
             },
@@ -512,7 +512,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 2
                 }
               }
             },
@@ -1132,7 +1132,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Minter"
                     }
                   ]
                 },

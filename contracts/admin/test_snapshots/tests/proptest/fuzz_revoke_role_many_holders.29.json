@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -50,7 +50,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -79,7 +79,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -108,7 +108,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -137,7 +137,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -166,7 +166,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -195,7 +195,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -224,12 +224,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 }
               ]
             }
@@ -338,7 +338,52 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 8
+                  "u32": 1
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "RoleMask"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "RoleMask"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "u32": 1
                 }
               }
             },
@@ -383,52 +428,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 8
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "RoleMask"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "RoleMask"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "u32": 8
+                  "u32": 1
                 }
               }
             },
@@ -473,7 +473,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 8
+                  "u32": 1
                 }
               }
             },
@@ -518,7 +518,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 8
+                  "u32": 1
                 }
               }
             },
@@ -563,7 +563,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 8
+                  "u32": 1
                 }
               }
             },
@@ -925,7 +925,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "Admin"
                     }
                   ]
                 },

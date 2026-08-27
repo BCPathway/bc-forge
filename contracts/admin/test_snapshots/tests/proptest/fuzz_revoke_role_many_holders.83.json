@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 12,
+    "address": 11,
     "nonce": 0
   },
   "auth": [
@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -50,7 +50,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -79,7 +79,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -108,7 +108,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -137,7 +137,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -166,7 +166,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -195,7 +195,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -224,7 +224,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -253,41 +253,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "grant_role",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Admin"
-                    }
-                  ]
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
                 }
               ]
             }
@@ -311,12 +282,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 }
               ]
             }
@@ -325,7 +296,6 @@
         }
       ]
     ],
-    [],
     [],
     [],
     [],
@@ -428,7 +398,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 4
                 }
               }
             },
@@ -473,7 +443,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 4
                 }
               }
             },
@@ -518,52 +488,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "RoleMask"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "RoleMask"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "u32": 1
+                  "u32": 4
                 }
               }
             },
@@ -608,7 +533,52 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 4
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "RoleMask"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "RoleMask"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "u32": 4
                 }
               }
             },
@@ -653,7 +623,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 4
                 }
               }
             },
@@ -698,7 +668,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 4
                 }
               }
             },
@@ -743,52 +713,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "RoleMask"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "RoleMask"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "u32": 1
+                  "u32": 4
                 }
               }
             },
@@ -840,39 +765,6 @@
             "ext": "v0"
           },
           4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": 115220454072064130
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 115220454072064130
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
         ]
       ],
       [
@@ -1244,12 +1136,12 @@
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
                 },
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
