@@ -44,8 +44,3 @@ describe('WrapperClient surface', () => {
     expect(client.previewWithdraw).toBeDefined();
   });
 });
-
-
-  });
-});
-
