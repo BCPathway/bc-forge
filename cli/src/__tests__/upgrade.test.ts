@@ -107,6 +107,56 @@ describe("Upgrade Command (#703, #706)", () => {
     });
   });
 
+  describe("fee estimation", () => {
+    it("returns fee estimate with --estimate flag", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(true);
+      expect(result.wasmHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(result.estimate).toBeDefined();
+      expect(result.estimate!.baseFee).toBe("100");
+      expect(result.estimate!.resourceFee).toBe("200000");
+      expect(result.estimate!.totalFee).toBe("200100");
+      expect(result.message).toContain("Fee estimate");
+      expect(result.message).toContain("200100");
+    });
+
+    it("does not submit transaction when --estimate is set", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(true);
+      expect(result.txHash).toBeUndefined();
+    });
+
+    it("reports simulation failure when --estimate is set", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () =>
+          createMockServer({ simulationError: "budget exceeded" }) as any
+      );
+
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Simulation failed");
+      expect(result.message).toContain("budget exceeded");
+    });
+
+    it("does not submit when --estimate and --dry-run are both set", async () => {
+      const opts = baseOpts();
+      opts.estimate = true;
+      opts.dryRun = true;
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(true);
+      expect(result.estimate).toBeDefined();
+      expect(result.txHash).toBeUndefined();
+    });
+  });
+
   describe("on-chain submission", () => {
     it("submits upgrade transaction and returns hash", async () => {
       const opts = baseOpts();
@@ -116,6 +166,62 @@ describe("Upgrade Command (#703, #706)", () => {
       expect(result.txHash).toBeDefined();
       expect(result.wasmHash).toMatch(/^[0-9a-f]{64}$/);
       expect(result.message).toContain("Upgrade transaction submitted");
+    });
+
+    it("signs the assembled transaction before submitting it (#708)", async () => {
+      const opts = baseOpts();
+      opts.dryRun = false;
+      const result = await runUpgrade(opts);
+      const { TransactionBuilder } = await import("@stellar/stellar-sdk");
+      // mocks aren't cleared between tests, so take only this call's (last) TransactionBuilder instance.
+      const results = vi.mocked(TransactionBuilder).mock.results;
+      const builtTx = results[results.length - 1].value.build();
+      expect(result.success).toBe(true);
+      expect(builtTx.sign).toHaveBeenCalled();
+    });
+
+    it("fails without submitting when simulation/fee assembly fails (#708)", async () => {
+      const opts = baseOpts();
+      opts.dryRun = false;
+
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () => createMockServer({ simulationError: "resource limit exceeded" }) as any
+      );
+
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Simulation failed");
+      expect(result.message).toContain("resource limit exceeded");
+    });
+
+    it("tolerates real confirmation latency by polling past transient NOT_FOUND status (#708)", async () => {
+      const opts = baseOpts();
+      opts.dryRun = false;
+
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () => createMockServer({ pendingPollsBeforeSuccess: 2 }) as any
+      );
+
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(true);
+      expect(result.txHash).toBeDefined();
+    });
+
+    it("reports a timeout instead of hanging when confirmation never arrives within the budget (#708)", async () => {
+      const opts = baseOpts();
+      opts.dryRun = false;
+      opts.timeout = "5";
+
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () => createMockServer({ pendingPollsBeforeSuccess: 1000 }) as any
+      );
+
+      const result = await runUpgrade(opts);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Timed out");
     });
   });
 
