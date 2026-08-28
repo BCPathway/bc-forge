@@ -116,6 +116,8 @@ fn test_uninitialized_access_panics() {
     assert!(client.try_symbol().is_err());
     assert!(client.try_decimals().is_err());
     assert!(client.try_supply().is_err());
+    assert!(client.try_share_balance(&Address::generate(&env)).is_err());
+    assert!(client.try_pending_rewards().is_err());
 }
 
 #[test]
@@ -201,6 +203,62 @@ fn test_supply_equals_sum_of_balances() {
         wrapper.balance(&user_a) + wrapper.balance(&user_b),
         wrapper.supply()
     );
+}
+
+#[test]
+fn test_share_balance_zero_for_address_that_never_wrapped() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user) = setup_and_fund(&env);
+    let stranger = Address::generate(&env);
+
+    assert_eq!(wrapper.share_balance(&stranger), 0);
+}
+
+#[test]
+fn test_share_balance_matches_balance_after_wrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &2_500_000);
+
+    assert_eq!(wrapper.share_balance(&user), 2_500_000);
+    assert_eq!(wrapper.share_balance(&user), wrapper.balance(&user));
+}
+
+#[test]
+fn test_share_balance_tracks_transfers_burns_and_unwraps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &5_000_000);
+    assert_eq!(wrapper.share_balance(&user_a), 5_000_000);
+
+    wrapper.transfer(&user_a, &user_b, &1_500_000);
+    assert_eq!(wrapper.share_balance(&user_a), 3_500_000);
+    assert_eq!(wrapper.share_balance(&user_b), 1_500_000);
+
+    wrapper.burn(&user_b, &500_000);
+    assert_eq!(wrapper.share_balance(&user_b), 1_000_000);
+
+    wrapper.unwrap(&user_a, &1_000_000);
+    assert_eq!(wrapper.share_balance(&user_a), 2_500_000);
+}
+
+#[test]
+fn test_share_balance_tracked_independently_per_user() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &1_000_000);
+
+    assert_eq!(wrapper.share_balance(&user_a), 1_000_000);
+    assert_eq!(wrapper.share_balance(&user_b), 0);
 }
 
 #[test]
@@ -853,6 +911,123 @@ fn test_distribute_rewards_when_paused_fails() {
 }
 
 #[test]
+fn test_pending_rewards_starts_at_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    assert_eq!(wrapper.pending_rewards(), 0);
+}
+
+#[test]
+fn test_pending_rewards_syncs_after_distribute_rewards() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    assert_eq!(wrapper.pending_rewards(), 0);
+
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+}
+
+#[test]
+fn test_pending_rewards_accumulates_across_multiple_distributions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &3_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &3_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &1_000_000);
+    wrapper.distribute_rewards(&rewarder, &500_000);
+    assert_eq!(wrapper.pending_rewards(), 500_000);
+
+    wrapper.distribute_rewards(&rewarder, &1_500_000);
+    assert_eq!(wrapper.pending_rewards(), 2_000_000);
+}
+
+#[test]
+fn test_pending_rewards_unaffected_by_wrap_unwrap_and_withdraw() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+
+    // Wrapping, unwrapping, and withdrawing move shares/assets but are not
+    // themselves reward distributions — pending_rewards must not move.
+    wrapper.wrap(&user, &500_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+
+    wrapper.unwrap(&user, &200_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+
+    wrapper.withdraw(&user, &100_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+}
+
+#[test]
+fn test_pending_rewards_not_synced_when_distribute_rewards_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+    wrapper.wrap(&user, &1_000_000);
+
+    // A rejected invalid-amount call must not sync pending_rewards.
+    assert_eq!(
+        wrapper.try_distribute_rewards(&rewarder, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(wrapper.pending_rewards(), 0);
+
+    // Nor must a call rejected for being paused.
+    wrapper.pause();
+    assert_eq!(
+        wrapper.try_distribute_rewards(&rewarder, &1_000_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+    assert_eq!(wrapper.pending_rewards(), 0);
+
+    // Confirm the contract is still usable afterward: the reentrancy lock was
+    // not left held by either rejected call.
+    wrapper.unpause();
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+}
+
+#[test]
+fn test_pending_rewards_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+
+    assert!(client.try_pending_rewards().is_err());
+}
+
+#[test]
 fn test_withdraw_returns_proportional_tokens_plus_yield() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1229,4 +1404,125 @@ fn test_lockup_is_enforced_per_user() {
         Err(Ok(WrapperError::TokensLocked))
     );
     assert!(wrapper.try_withdraw(&user_b, &500_000).is_ok());
+}
+
+// ─── #720 deposit tests ────────────────────────────────────────────────────────
+
+#[test]
+fn test_deposit_first_deposit_mints_one_to_one() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // First deposit: vault is empty so shares == assets (1:1 bootstrap).
+    let shares_out = wrapper.deposit(&user, &5_000_000);
+
+    assert_eq!(shares_out, 5_000_000);
+    assert_eq!(wrapper.balance(&user), 5_000_000);
+    assert_eq!(wrapper.supply(), 5_000_000);
+    assert_eq!(wrapper.total_assets(), 5_000_000);
+}
+
+#[test]
+fn test_deposit_proportional_shares_after_rewards() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    // Seed the vault with 2 M assets / 2 M shares (price = 1).
+    wrapper.wrap(&user, &2_000_000);
+
+    // Distribute 2 M as rewards — price rises to 2 (4 M assets / 2 M shares).
+    underlying.mint(&admin, &rewarder, &2_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &2_000_000, &u32::MAX);
+    wrapper.distribute_rewards(&rewarder, &2_000_000);
+
+    // Mint user_b some underlying and let them deposit.
+    underlying.mint(&admin, &user_b, &4_000_000);
+    underlying.approve(&user_b, &wrapper_id, &4_000_000, &u32::MAX);
+
+    // At price 2, depositing 4 M assets should yield 2 M shares:
+    //   shares = 4_000_000 * 2_000_000 / 4_000_000 = 2_000_000
+    let shares_out = wrapper.deposit(&user_b, &4_000_000);
+
+    assert_eq!(shares_out, 2_000_000);
+    assert_eq!(wrapper.balance(&user_b), 2_000_000);
+    assert_eq!(wrapper.supply(), 4_000_000); // 2 M (user) + 2 M (user_b)
+    assert_eq!(wrapper.total_assets(), 8_000_000); // 4 M + 4 M
+}
+
+#[test]
+fn test_deposit_zero_amount_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_deposit(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_deposit_negative_amount_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_deposit(&user, &-1),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_deposit_when_paused_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.pause();
+
+    assert_eq!(
+        wrapper.try_deposit(&user, &1_000_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+}
+
+#[test]
+fn test_deposit_when_not_initialized_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    assert_eq!(
+        client.try_deposit(&user, &1_000_000),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_deposit_accumulates_supply_across_multiple_calls() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let user_b = Address::generate(&env);
+
+    underlying.mint(&admin, &user_b, &6_000_000);
+    underlying.approve(&user_b, &wrapper_id, &6_000_000, &u32::MAX);
+
+    // First deposit (1:1 bootstrap): user deposits 2 M → 2 M shares
+    wrapper.deposit(&user, &2_000_000);
+    // Second deposit (still 1:1): user_b deposits 6 M → 6 M shares
+    wrapper.deposit(&user_b, &6_000_000);
+
+    assert_eq!(wrapper.supply(), 8_000_000);
+    assert_eq!(wrapper.balance(&user), 2_000_000);
+    assert_eq!(wrapper.balance(&user_b), 6_000_000);
 }
