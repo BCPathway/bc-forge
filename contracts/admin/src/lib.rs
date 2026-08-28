@@ -1664,6 +1664,7 @@ mod tests {
 
     mod gas_bench;
     mod proptest;
+    mod quorum_proptest;
     mod rbac_errors;
 
     #[contract]
