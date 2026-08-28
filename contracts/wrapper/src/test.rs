@@ -117,6 +117,7 @@ fn test_uninitialized_access_panics() {
     assert!(client.try_decimals().is_err());
     assert!(client.try_supply().is_err());
     assert!(client.try_share_balance(&Address::generate(&env)).is_err());
+    assert!(client.try_pending_rewards().is_err());
 }
 
 #[test]
@@ -907,6 +908,123 @@ fn test_distribute_rewards_when_paused_fails() {
         wrapper.try_distribute_rewards(&rewarder, &1_000_000),
         Err(Ok(WrapperError::ContractPaused))
     );
+}
+
+#[test]
+fn test_pending_rewards_starts_at_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    assert_eq!(wrapper.pending_rewards(), 0);
+}
+
+#[test]
+fn test_pending_rewards_syncs_after_distribute_rewards() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    assert_eq!(wrapper.pending_rewards(), 0);
+
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+}
+
+#[test]
+fn test_pending_rewards_accumulates_across_multiple_distributions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &3_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &3_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &1_000_000);
+    wrapper.distribute_rewards(&rewarder, &500_000);
+    assert_eq!(wrapper.pending_rewards(), 500_000);
+
+    wrapper.distribute_rewards(&rewarder, &1_500_000);
+    assert_eq!(wrapper.pending_rewards(), 2_000_000);
+}
+
+#[test]
+fn test_pending_rewards_unaffected_by_wrap_unwrap_and_withdraw() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.wrap(&user, &2_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+
+    // Wrapping, unwrapping, and withdrawing move shares/assets but are not
+    // themselves reward distributions — pending_rewards must not move.
+    wrapper.wrap(&user, &500_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+
+    wrapper.unwrap(&user, &200_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+
+    wrapper.withdraw(&user, &100_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+}
+
+#[test]
+fn test_pending_rewards_not_synced_when_distribute_rewards_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+    wrapper.wrap(&user, &1_000_000);
+
+    // A rejected invalid-amount call must not sync pending_rewards.
+    assert_eq!(
+        wrapper.try_distribute_rewards(&rewarder, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(wrapper.pending_rewards(), 0);
+
+    // Nor must a call rejected for being paused.
+    wrapper.pause();
+    assert_eq!(
+        wrapper.try_distribute_rewards(&rewarder, &1_000_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+    assert_eq!(wrapper.pending_rewards(), 0);
+
+    // Confirm the contract is still usable afterward: the reentrancy lock was
+    // not left held by either rejected call.
+    wrapper.unpause();
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+    assert_eq!(wrapper.pending_rewards(), 1_000_000);
+}
+
+#[test]
+fn test_pending_rewards_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+
+    assert!(client.try_pending_rewards().is_err());
 }
 
 #[test]

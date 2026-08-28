@@ -46,6 +46,11 @@ pub enum DataKey {
     /// Total vault share supply in circulation. Stored in instance storage
     /// and updated on every mint (`wrap`) and burn (`unwrap`, `burn`, `burn_from`).
     Supply,
+    /// Cumulative underlying tokens received via `distribute_rewards` that have
+    /// not yet been compounded. Stored in instance storage and incremented on
+    /// every `distribute_rewards` call; nothing in this contract consumes or
+    /// resets it yet — that is a later step in the Yield-Bearing Fee Vaults epic.
+    PendingRewards,
     /// Per-account wrapped balance.
     Balance(Address),
     /// Per-account allowance: (owner, spender) → amount.
@@ -222,6 +227,24 @@ impl WrapperContract {
     ///         always mirrors outstanding shares.
     fn write_supply(env: &Env, supply: i128) {
         env.storage().instance().set(&DataKey::Supply, &supply);
+    }
+
+    /// Reads the cumulative amount of undistributed (not-yet-compounded) rewards.
+    ///
+    /// @notice Defaults to 0 when never written (e.g. before the first
+    ///         `distribute_rewards` call).
+    fn read_pending_rewards(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PendingRewards)
+            .unwrap_or(0)
+    }
+
+    /// Writes the cumulative amount of undistributed (not-yet-compounded) rewards.
+    fn write_pending_rewards(env: &Env, pending_rewards: i128) {
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingRewards, &pending_rewards);
     }
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
@@ -556,7 +579,8 @@ impl WrapperContract {
     /// # Errors
     /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
     /// * Returns [`WrapperError::ContractPaused`] if operations are paused.
-    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive.
+    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive, or if
+    ///   syncing `pending_rewards` would overflow `i128`.
     pub fn distribute_rewards(env: Env, caller: Address, amount: i128) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
@@ -580,6 +604,20 @@ impl WrapperContract {
             &amount,
         );
 
+        // Track this distribution as not-yet-compounded (#718). Nothing reads
+        // this back into the exchange rate yet — `total_assets`/`calculate_share_price`
+        // already reflect the transfer above via the underlying token balance;
+        // this is a parallel running total for whatever later compounding step
+        // the epic adds.
+        let pending_rewards = match Self::read_pending_rewards(&env).checked_add(amount) {
+            Some(v) => v,
+            None => {
+                Self::release_lock(&env);
+                return Err(WrapperError::InvalidAmount);
+            }
+        };
+        Self::write_pending_rewards(&env, pending_rewards);
+
         Self::release_lock(&env);
         events::emit_distribute_rewards(&env, &caller, amount);
         Ok(())
@@ -589,6 +627,18 @@ impl WrapperContract {
     pub fn total_assets(env: Env) -> i128 {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_total_assets(&env)
+    }
+
+    /// Returns the cumulative underlying tokens distributed via
+    /// [`WrapperContract::distribute_rewards`] that have not yet been compounded.
+    ///
+    /// @notice This is a running total incremented on every `distribute_rewards`
+    ///         call; nothing in this contract consumes or resets it yet.
+    /// @param env The Soroban environment.
+    /// @return The pending (not-yet-compounded) reward amount, in underlying tokens.
+    pub fn pending_rewards(env: Env) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_pending_rewards(&env)
     }
 
     /// Calculates the current vault share price: `total_assets / total_shares`.
