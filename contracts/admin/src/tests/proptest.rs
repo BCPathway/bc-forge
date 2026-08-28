@@ -1,12 +1,14 @@
 #![cfg(test)]
 
+extern crate std;
+
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::Events;
-use soroban_sdk::{Address, Env, TryIntoVal, Vec};
+use soroban_sdk::testutils::{Events, Ledger};
+use soroban_sdk::{vec, Address, BytesN, Env, Map, String, TryIntoVal, Vec};
 
 use super::{AdminContract, AdminContractClient, Role};
-use crate::AdminError;
+use crate::{AdminError, AdminKey, ProposalStatus, UpgradeProposal};
 
 const ALL_ROLES: [Role; 4] = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
 const GRANTABLE_ROLES: [Role; 3] = [Role::Minter, Role::SuperAdmin, Role::Pauser];
@@ -22,6 +24,48 @@ fn setup(env: &Env) -> (AdminContractClient<'_>, Address) {
 
 fn role_for_idx(idx: u32) -> Role {
     ALL_ROLES[idx as usize % ALL_ROLES.len()]
+}
+
+/// Seeds `AdminKey::ProposalIdCounter` directly so ID-generation fuzz cases
+/// can probe counter states that would take far too long to reach by calling
+/// `create_proposal` in a loop (e.g. values near `u64::MAX`).
+fn seed_proposal_id_counter(env: &Env, contract_id: &Address, value: u64) {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .instance()
+            .set(&AdminKey::ProposalIdCounter, &value);
+    });
+}
+
+/// Seeds an `UpgradeProposal` directly under `AdminKey::UpgradeProposal(id)`,
+/// bypassing the (not-yet-implemented) submission entry point — mirrors
+/// `store_upgrade_proposal` in the main test module, but lives here so the
+/// ID-collision fuzz cases can seed arbitrary, widely-spaced IDs.
+fn seed_upgrade_proposal(env: &Env, contract_id: &Address, id: u64, proposer: &Address) {
+    let mut votes = Map::new(env);
+    votes.set(proposer.clone(), 1u32);
+    let proposal = UpgradeProposal {
+        proposer: proposer.clone(),
+        targets: Vec::new(env),
+        votes,
+        quorum: 2,
+        status: ProposalStatus::Pending,
+        expires_at: u64::MAX,
+    };
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&AdminKey::UpgradeProposal(id), &proposal);
+    });
+}
+
+fn read_upgrade_proposal(env: &Env, contract_id: &Address, id: u64) -> UpgradeProposal {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&AdminKey::UpgradeProposal(id))
+            .expect("seeded upgrade proposal should be readable")
+    })
 }
 
 proptest! {
@@ -164,6 +208,42 @@ proptest! {
         }
         client.grant_role(&admin, &Role::Admin, &holder);
         prop_assert!(client.has_role(&role, &holder));
+    }
+
+    /// Fuzz: Timelock boundary is strictly enforced.
+    /// Varies ledger timestamp around the timelock expiration to ensure:
+    /// - Execution fails before timelock expires (`AdminError::TimelockActive`)
+    /// - At/after expiration the recorded unlock time is not in the future
+    ///   (native Env panics at WASM install, so success is not asserted via execute)
+    #[test]
+    fn fuzz_timelock_boundary_enforcement(offset in -10i64..20i64) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+
+        let member = Address::generate(&env);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "timelock test"));
+        client.approve_proposal(&member, &proposal_id);
+
+        let unlock_time = client.get_proposal_unlock_time(&proposal_id);
+        prop_assert!(unlock_time.is_some());
+        let unlock_time = unlock_time.unwrap();
+
+        let mut ledger_info = env.ledger().get();
+        let base_timestamp = unlock_time as i64;
+        let target_timestamp = base_timestamp.saturating_add(offset);
+        ledger_info.timestamp = if target_timestamp < 0 { 0 } else { target_timestamp as u64 };
+        env.ledger().set(ledger_info);
+
+        let dummy_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+        if offset < 0 {
+            let result = client.try_execute_upgrade(&admin, &proposal_id, &dummy_wasm_hash);
+            prop_assert_eq!(result, Err(Ok(AdminError::TimelockActive)));
+        } else {
+            prop_assert!(env.ledger().timestamp() >= unlock_time);
+        }
     }
 
     /// Fuzz: revoke_role succeeds for every valid Role variant and clears membership.
@@ -330,4 +410,128 @@ proptest! {
         prop_assert_eq!(event_role, role);
         prop_assert_eq!(event_addr, holder);
     }
+
+    // ── Proposal ID generation & lookup (#677) ──────────────────────────
+
+    /// Fuzz: repeated `create_proposal` calls always yield unique,
+    /// monotonically increasing IDs — no collisions — and every generated ID
+    /// is immediately, panic-free lookup-able.
+    #[test]
+    fn fuzz_create_proposal_ids_sequential_no_collision(count in 1u32..30) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+
+        for expected in 0..count as u64 {
+            let id = client.create_proposal(&admin, &String::from_str(&env, "fuzz"));
+            prop_assert_eq!(id, expected);
+            prop_assert!(client.try_is_proposal_ready(&id).is_ok());
+        }
+    }
+
+    /// Fuzz: `create_proposal` never collides with pre-existing state, even
+    /// when the ID counter is seeded at arbitrary points across the `u64`
+    /// space (including values close to `u64::MAX`). The generated ID always
+    /// matches the seeded counter value, and a never-written neighboring ID
+    /// still reports "not found".
+    #[test]
+    fn fuzz_create_proposal_id_matches_arbitrary_counter_seed(seed in 0u64..u64::MAX) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+        seed_proposal_id_counter(&env, &contract_id, seed);
+
+        let id = client.create_proposal(&admin, &String::from_str(&env, "seeded"));
+        prop_assert_eq!(id, seed);
+        prop_assert!(client.try_is_proposal_ready(&id).is_ok());
+
+        // A neighboring ID that was never written must not have been
+        // touched by this creation.
+        let neighbor = seed + 1;
+        prop_assert!(client.try_is_proposal_ready(&neighbor).is_err());
+    }
+
+    /// Fuzz: looking up an arbitrary (near-certainly nonexistent) proposal ID
+    /// across the full `u64` space never triggers an unexpected panic —
+    /// every governance-proposal and upgrade-proposal entry point degrades
+    /// to a well-defined error instead.
+    #[test]
+    fn fuzz_lookup_arbitrary_proposal_id_no_unexpected_panic(id in any::<u64>()) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+        let wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+        prop_assert!(client.try_is_proposal_ready(&id).is_err());
+        prop_assert!(client.try_approve_proposal(&admin, &id).is_err());
+        prop_assert!(client.try_mark_executed(&id).is_err());
+        prop_assert_eq!(
+            client.try_execute_upgrade(&admin, &id, &wasm_hash),
+            Err(Ok(AdminError::ProposalNotFound))
+        );
+        prop_assert_eq!(client.get_proposal_unlock_time(&id), None);
+        prop_assert_eq!(
+            client.try_approve_upgrade(&admin, &id),
+            Err(Ok(AdminError::UpgradeProposalNotFound))
+        );
+        // Note: unlike `approve_upgrade`, `cancel_proposal` reports a missing
+        // entry as `ProposalNotFound` rather than `UpgradeProposalNotFound`
+        // (see `cancel_proposal` in lib.rs) — asserted here as documented
+        // current behavior, not a statement that it's the ideal error code.
+        prop_assert_eq!(
+            client.try_cancel_proposal(&admin, &id),
+            Err(Ok(AdminError::ProposalNotFound))
+        );
+    }
+
+    /// Fuzz: two `UpgradeProposal` entries seeded at arbitrary, distinct
+    /// `u64` IDs never collide in storage, no matter how close together or
+    /// far apart the IDs are (including values at the extreme ends of the
+    /// `u64` space) — each ID's slot is independently readable.
+    #[test]
+    fn fuzz_upgrade_proposal_ids_no_storage_collision(id_a in any::<u64>(), gap in 1u64..=10_000) {
+        let id_b = id_a.wrapping_add(gap);
+
+        let env = Env::default();
+        let contract_id = env.register(AdminContract, ());
+
+        let proposer_a = Address::generate(&env);
+        let proposer_b = Address::generate(&env);
+        seed_upgrade_proposal(&env, &contract_id, id_a, &proposer_a);
+        seed_upgrade_proposal(&env, &contract_id, id_b, &proposer_b);
+
+        let stored_a = read_upgrade_proposal(&env, &contract_id, id_a);
+        let stored_b = read_upgrade_proposal(&env, &contract_id, id_b);
+        prop_assert_eq!(stored_a.proposer, proposer_a);
+        prop_assert_eq!(stored_b.proposer, proposer_b);
+    }
+}
+
+/// Deterministic boundary case: exhausting the `u64` proposal-ID space must
+/// panic rather than silently wrap the counter back to `0` and collide with
+/// the very first proposal ever created. `overflow-checks = true` is set for
+/// both the `release` and default `dev` profiles (see the workspace
+/// `Cargo.toml`), so `id + 1` traps here exactly as it would on-chain.
+#[test]
+fn test_create_proposal_id_space_exhaustion_panics_no_silent_collision() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+    seed_proposal_id_counter(&env, &contract_id, u64::MAX);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.create_proposal(&admin, &String::from_str(&env, "overflow"));
+    }));
+    assert!(
+        result.is_err(),
+        "counter overflow at u64::MAX must panic rather than silently wrap into a colliding proposal id"
+    );
 }

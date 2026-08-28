@@ -596,6 +596,56 @@ fn test_non_pauser_cannot_pause_as() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_pauser_can_unpause_system_correctly() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &user, &1000);
+
+    // Grant Pauser role to a non-admin address
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // 1. Pause system
+    assert!(client.try_pause_as(&pauser).is_ok());
+
+    // Verify system state is paused
+    assert!(env.as_contract(&contract_id, || bc_forge_lifecycle::is_paused(&env)));
+    assert!(client.try_transfer(&user, &recipient, &100).is_err());
+
+    // 2 & 3. Switch context to Pauser address and unpause system
+    assert!(client.try_unpause_as(&pauser).is_ok());
+
+    // 4. Verify state returns to active
+    assert!(!env.as_contract(&contract_id, || bc_forge_lifecycle::is_paused(&env)));
+    assert!(client.try_transfer(&user, &recipient, &100).is_ok());
+    assert_eq!(client.balance(&recipient), 100);
+}
+
+#[test]
+fn test_unpause_when_not_paused_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // Unpausing an active system returns NotPaused error
+    let result = client.try_unpause_as(&pauser);
+    assert_eq!(result, Err(Ok(TokenError::NotPaused)));
+}
+
 // ─── #762: transfer / transfer_from pause hooks ───────────────────────────────
 
 #[test]
