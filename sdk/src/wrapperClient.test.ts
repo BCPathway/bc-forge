@@ -1,5 +1,4 @@
 import { WrapperClient } from './wrapperClient';
-import { Keypair } from '@stellar/stellar-sdk';
 
 const MOCK_CONTRACT_ID = 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526';
 
@@ -32,7 +31,6 @@ describe('WrapperClient surface', () => {
       contractId: MOCK_CONTRACT_ID,
     });
 
-    const keypair = Keypair.random();
     // Simulate/invoke check that function is callable and defined on class prototype
     expect(client.distributeRewards).toBeDefined();
     expect(client.getTotalAssets).toBeDefined();
