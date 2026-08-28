@@ -5,7 +5,6 @@ members = [
     "contracts/*",
     "e2e"
 ]
-# Incomplete crates landed on main without manifests; keep them out of CI.
 exclude = [
     "contracts/compound_fees",
     "contracts/flash_loan_guard",

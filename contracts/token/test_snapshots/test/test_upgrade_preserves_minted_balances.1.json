@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 5,
+    "address": 3,
     "nonce": 0
   },
   "auth": [
@@ -19,12 +19,12 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
                 {
                   "i128": {
-                    "hi": 1267234880266280011,
-                    "lo": 13355576038595088117
+                    "hi": 0,
+                    "lo": 1000
                   }
                 }
               ]
@@ -34,8 +34,6 @@
         }
       ]
     ],
-    [],
-    [],
     [],
     [],
     []
@@ -95,7 +93,7 @@
                   "symbol": "Balance"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 }
               ]
             },
@@ -115,15 +113,15 @@
                       "symbol": "Balance"
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                     }
                   ]
                 },
                 "durability": "persistent",
                 "val": {
                   "i128": {
-                    "hi": 1267234880266280011,
-                    "lo": 13355576038595088117
+                    "hi": 0,
+                    "lo": 1000
                   }
                 }
               }
@@ -249,7 +247,7 @@
                           ]
                         },
                         "val": {
-                          "string": "Fuzz Token"
+                          "string": "bc-forge Token"
                         }
                       },
                       {
@@ -262,8 +260,8 @@
                         },
                         "val": {
                           "i128": {
-                            "hi": 1267234880266280011,
-                            "lo": 13355576038595088117
+                            "hi": 0,
+                            "lo": 1000
                           }
                         }
                       },
@@ -276,7 +274,7 @@
                           ]
                         },
                         "val": {
-                          "string": "FUZZ"
+                          "string": "SFG"
                         }
                       }
                     ]
