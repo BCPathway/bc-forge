@@ -20,6 +20,19 @@ pub fn emit_wrap(env: &Env, caller: &Address, amount: i128, wrapped_amount: i128
     );
 }
 
+/// Emitted when underlying tokens are deposited into the vault and shares are minted.
+///
+/// @param env The Soroban environment.
+/// @param caller The depositing address.
+/// @param assets The amount of underlying tokens deposited.
+/// @param shares The number of vault shares minted to the caller.
+pub fn emit_deposit(env: &Env, caller: &Address, assets: i128, shares: i128) {
+    env.events().publish(
+        (symbol_short!("deposit"),),
+        (caller.clone(), assets, shares),
+    );
+}
+
 /// Emitted when tokens are unwrapped (wrapped → underlying).
 pub fn emit_unwrap(env: &Env, caller: &Address, wrapped_amount: i128, underlying_amount: i128) {
     env.events().publish(
@@ -84,4 +97,46 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
 pub fn emit_distribute_rewards(env: &Env, caller: &Address, amount: i128) {
     env.events()
         .publish((symbol_short!("dist_rw"),), (caller.clone(), amount));
+}
+
+/// Emitted when wrapped shares are withdrawn for proportional underlying tokens.
+///
+/// @notice Publishes withdrawal event data including the caller, burned shares, and payout.
+/// @dev The event topics include the `withdrw` symbol.
+/// @param env The Soroban environment.
+/// @param caller The address withdrawing shares.
+/// @param shares The amount of wrapped shares burned.
+/// @param underlying_amount The amount of underlying tokens transferred to the caller.
+pub fn emit_withdraw(env: &Env, caller: &Address, shares: i128, underlying_amount: i128) {
+    env.events().publish(
+        (symbol_short!("withdrw"),),
+        (caller.clone(), shares, underlying_amount),
+    );
+}
+
+/// Emitted when an admin records a deposit lockup (unlock timestamp) for a user.
+///
+/// @notice Publishes lockup data including the admin caller, the locked user, and the unlock timestamp.
+/// @dev The event topics include the `lockup` symbol.
+/// @param env The Soroban environment.
+/// @param caller The admin address enforcing the lockup.
+/// @param user The address whose deposit is time-locked.
+/// @param unlock_timestamp The timestamp (seconds since epoch) at which the deposit unlocks.
+pub fn emit_unlock_time_set(env: &Env, caller: &Address, user: &Address, unlock_timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("lockup"),),
+        (caller.clone(), user.clone(), unlock_timestamp),
+    );
+}
+
+/// Emitted when an admin clears a user's deposit lockup.
+///
+/// @notice Publishes lockup-clearing data including the admin caller and the unlocked user.
+/// @dev The event topics include the `unlock` symbol.
+/// @param env The Soroban environment.
+/// @param caller The admin address clearing the lockup.
+/// @param user The address whose deposit lockup was removed.
+pub fn emit_unlock_time_cleared(env: &Env, caller: &Address, user: &Address) {
+    env.events()
+        .publish((symbol_short!("unlock"),), (caller.clone(), user.clone()));
 }
