@@ -14,6 +14,7 @@ import {
   TransactionBuilder,
   Keypair,
   xdr,
+  nativeToScVal,
 } from '@stellar/stellar-sdk';
 
 import {
@@ -75,6 +76,58 @@ export class WrapperClient {
    */
   async getTotalSupply(): Promise<bigint> {
     const result = await this.queryContract('supply', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Get the total underlying token assets held by the vault contract.
+   */
+  async getTotalAssets(): Promise<bigint> {
+    const result = await this.queryContract('total_assets', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Get the cumulative underlying tokens distributed via `distributeRewards`
+   * that have not yet been compounded.
+   *
+   * This is a running total incremented on every `distributeRewards` call;
+   * nothing on the contract consumes or resets it yet.
+   */
+  async getPendingRewards(): Promise<bigint> {
+    const result = await this.queryContract('pending_rewards', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Calculate the current vault share price (total assets / total shares).
+   *
+   * The share price is the amount of underlying tokens each outstanding vault
+   * share is entitled to. Throws when the contract reports an error, e.g. when
+   * there are no outstanding shares yet (divide-by-zero protection).
+   *
+   * @returns Share price as bigint (integer division, rounded down)
+   */
+  async calculateSharePrice(): Promise<bigint> {
+    const result = await this.queryContract('calculate_share_price', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Preview the pro-rata reward entitlement for a hypothetical share amount:
+   * `rewards = (userShares * totalAssets) / totalShares`.
+   *
+   * This mirrors what `withdraw()` would pay out for `userShares` right now,
+   * without burning shares or moving tokens. It is computed directly from the
+   * totals rather than via `userShares * calculateSharePrice()`, which floors
+   * twice and can under-report the entitlement — this floors only once, so it
+   * always agrees with `withdraw()`'s actual payout.
+   *
+   * @param userShares - The hypothetical share amount to price out.
+   * @returns The underlying token amount that many shares would be worth.
+   */
+  async calculateRewards(userShares: bigint): Promise<bigint> {
+    const result = await this.queryContract('calculate_rewards', [i128ToScVal(userShares)]);
     return BigInt(scValToNative(result) as string | number | bigint);
   }
 
@@ -194,6 +247,107 @@ export class WrapperClient {
       [addressToScVal(caller), i128ToScVal(wrappedAmount)],
       source,
     );
+  }
+
+  /**
+   * Distribute rewards into the vault/wrapper contract without issuing new shares.
+   *
+   * Transfers `amount` of the underlying token from `caller` into the vault contract,
+   * increasing total underlying assets while keeping share supply constant.
+   *
+   * @param caller - Address providing the reward capital
+   * @param amount - Amount of underlying tokens to distribute
+   * @param source - Caller's keypair
+   */
+  async distributeRewards(
+    caller: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'distribute_rewards',
+      [addressToScVal(caller), i128ToScVal(amount)],
+      source,
+    );
+  }
+
+  /**
+   * Withdraw `shares` of wrapped tokens and receive a proportional share of
+   * the vault's underlying assets, including any accrued yield.
+   *
+   * Burns `shares` of wrapped tokens from `caller` and transfers the
+   * proportional amount of underlying tokens back to `caller`.
+   *
+   * @param caller - Address withdrawing the shares
+   * @param shares - Amount of wrapped shares to burn
+   * @param source - Caller's keypair
+   */
+  async withdraw(caller: string, shares: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'withdraw',
+      [addressToScVal(caller), i128ToScVal(shares)],
+      source,
+    );
+  }
+
+  /**
+   * Enforce the deposit time lockup for a user.
+   *
+   * Records the timestamp (seconds since epoch) at which `user`'s deposit
+   * becomes withdrawable. While the current ledger timestamp is before the
+   * unlock time, `withdraw` reverts with `TokensLocked`. Admin-only.
+   *
+   * @param caller          - Admin address invoking the call
+   * @param user            - Address whose deposit is being time-locked
+   * @param unlockTimestamp - Unix timestamp (seconds) at which the deposit unlocks
+   * @param source          - Caller's keypair
+   */
+  async setUnlockTime(
+    caller: string,
+    user: string,
+    unlockTimestamp: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'set_unlock_time',
+      [
+        addressToScVal(caller),
+        addressToScVal(user),
+        nativeToScVal(unlockTimestamp, { type: 'u64' }),
+      ],
+      source,
+    );
+  }
+
+  /**
+   * Clear the deposit lockup for a user, immediately permitting withdrawals.
+   * Admin-only.
+   *
+   * @param caller - Admin address invoking the call
+   * @param user   - Address whose deposit lockup is being cleared
+   * @param source - Caller's keypair
+   */
+  async clearUnlockTime(
+    caller: string,
+    user: string,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'clear_unlock_time',
+      [addressToScVal(caller), addressToScVal(user)],
+      source,
+    );
+  }
+
+  /**
+   * Get the timestamp at which a user's deposit becomes withdrawable.
+   *
+   * @param user - Address to query
+   * @returns The unlock timestamp in seconds, or null when no lockup is recorded
+   */
+  async getUnlockTime(user: string): Promise<bigint | null> {
+    const result = await this.queryContract('get_unlock_time', [addressToScVal(user)]);
+    return scValToNative(result) as bigint | null;
   }
 
   /**
