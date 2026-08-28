@@ -7,6 +7,23 @@ import {
   nativeToScVal,
   rpc as SorobanRpcNs,
 } from "@stellar/stellar-sdk";
+import { addNetworkOptions } from "../network.js";
+import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/soroban-tx.js";
+
+function describeSubmitOutcome(outcome: PrepareSignSubmitResult): string {
+  switch (outcome.outcome) {
+    case "simulation_failed":
+      return `simulation failed: ${outcome.error}`;
+    case "submission_failed":
+      return `submission failed: ${outcome.error}`;
+    case "failed_on_ledger":
+      return `transaction ${outcome.hash} failed on-ledger`;
+    case "timed_out":
+      return `timed out waiting for confirmation of ${outcome.hash} (last status: ${outcome.lastStatus})`;
+    case "confirmed":
+      return `confirmed (${outcome.hash})`;
+  }
+}
 
 export interface SmokeTestOptions {
   contractId: string;
@@ -31,17 +48,11 @@ export interface SmokeTestResult {
 }
 
 export function createSmokeTestCommand(): Command {
-  return new Command("smoke-test")
+  const cmd = new Command("smoke-test")
     .description("Run a quick ping test against a live contract (mint/transfer)")
     .requiredOption(
       "--contract-id <id>",
       "Contract ID of the deployed token to test"
-    )
-    .requiredOption("--rpc-url <url>", "Soroban RPC endpoint URL")
-    .option(
-      "--network-passphrase <phrase>",
-      "Stellar network passphrase",
-      "Test SDF Network ; September 2015"
     )
     .requiredOption("--source <secret>", "Admin/source account secret key")
     .option("--recipient <address>", "Recipient address (auto-generated if omitted)")
@@ -50,10 +61,15 @@ export function createSmokeTestCommand(): Command {
       "--timeout <ms>",
       "Timeout in milliseconds for the full sequence",
       "30000"
-    )
-    .action(async (opts) => {
-      await runSmokeTest(opts);
-    });
+    );
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (opts) => {
+    await runSmokeTest(opts);
+  });
+
+  return cmd;
 }
 
 export async function runSmokeTest(
@@ -116,14 +132,17 @@ export async function runSmokeTest(
       .setTimeout(30)
       .build();
 
-    const mintResult = await server.sendTransaction(mintTx);
-    if (mintResult.status === "ERROR") {
+    const mintOutcome = await prepareSignAndSubmit(server, mintTx, sourceKeypair, {
+      deadline: startTime + timeout,
+    });
+    if (mintOutcome.outcome !== "confirmed") {
       return {
         success: false,
         sequence,
-        message: `Mint failed: ${JSON.stringify(mintResult.errorResult)}`,
+        message: `Mint failed: ${describeSubmitOutcome(mintOutcome)}`,
       };
     }
+    const mintHash = mintOutcome.hash;
     sequence.push("mint_ok");
 
     // 4. Check balance after mint
@@ -161,14 +180,17 @@ export async function runSmokeTest(
       .setTimeout(30)
       .build();
 
-    const transferResult = await server.sendTransaction(transferTx);
-    if (transferResult.status === "ERROR") {
+    const transferOutcome = await prepareSignAndSubmit(server, transferTx, sourceKeypair, {
+      deadline: startTime + timeout,
+    });
+    if (transferOutcome.outcome !== "confirmed") {
       return {
         success: false,
         sequence,
-        message: `Transfer failed: ${JSON.stringify(transferResult.errorResult)}`,
+        message: `Transfer failed: ${describeSubmitOutcome(transferOutcome)}`,
       };
     }
+    const transferHash = transferOutcome.hash;
     sequence.push("transfer_ok");
 
     // 7. Final balance check
@@ -190,8 +212,8 @@ export async function runSmokeTest(
       message: `Smoke test passed: minted ${amount}, transferred to ${recipientAddress.slice(0, 8)}…`,
       details: {
         balanceBefore,
-        transferHash: transferResult.hash,
-        mintHash: mintResult.hash,
+        transferHash,
+        mintHash,
       },
     };
   } catch (err) {
