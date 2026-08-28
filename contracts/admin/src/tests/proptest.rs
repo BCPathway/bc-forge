@@ -4,8 +4,8 @@ extern crate std;
 
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::Events;
-use soroban_sdk::{Address, BytesN, Env, Map, String, TryIntoVal, Vec};
+use soroban_sdk::testutils::{Events, Ledger};
+use soroban_sdk::{vec, Address, BytesN, Env, Map, String, TryIntoVal, Vec};
 
 use super::{AdminContract, AdminContractClient, Role};
 use crate::{AdminError, AdminKey, ProposalStatus, UpgradeProposal};
@@ -208,6 +208,42 @@ proptest! {
         }
         client.grant_role(&admin, &Role::Admin, &holder);
         prop_assert!(client.has_role(&role, &holder));
+    }
+
+    /// Fuzz: Timelock boundary is strictly enforced.
+    /// Varies ledger timestamp around the timelock expiration to ensure:
+    /// - Execution fails before timelock expires (`AdminError::TimelockActive`)
+    /// - At/after expiration the recorded unlock time is not in the future
+    ///   (native Env panics at WASM install, so success is not asserted via execute)
+    #[test]
+    fn fuzz_timelock_boundary_enforcement(offset in -10i64..20i64) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+
+        let member = Address::generate(&env);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "timelock test"));
+        client.approve_proposal(&member, &proposal_id);
+
+        let unlock_time = client.get_proposal_unlock_time(&proposal_id);
+        prop_assert!(unlock_time.is_some());
+        let unlock_time = unlock_time.unwrap();
+
+        let mut ledger_info = env.ledger().get();
+        let base_timestamp = unlock_time as i64;
+        let target_timestamp = base_timestamp.saturating_add(offset);
+        ledger_info.timestamp = if target_timestamp < 0 { 0 } else { target_timestamp as u64 };
+        env.ledger().set(ledger_info);
+
+        let dummy_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+        if offset < 0 {
+            let result = client.try_execute_upgrade(&admin, &proposal_id, &dummy_wasm_hash);
+            prop_assert_eq!(result, Err(Ok(AdminError::TimelockActive)));
+        } else {
+            prop_assert!(env.ledger().timestamp() >= unlock_time);
+        }
     }
 
     /// Fuzz: revoke_role succeeds for every valid Role variant and clears membership.

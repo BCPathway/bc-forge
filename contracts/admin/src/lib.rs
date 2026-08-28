@@ -1664,6 +1664,7 @@ mod tests {
 
     mod gas_bench;
     mod proptest;
+    mod quorum_proptest;
     mod rbac_errors;
 
     #[contract]
@@ -2145,6 +2146,34 @@ mod tests {
         client.set_admin(&admin);
         let result = client.try_revoke_role(&admin, &Role::Minter, &zero_address(&env));
         assert_eq!(result, Err(Ok(AdminError::InvalidAddress)));
+    }
+
+    // ── Issue #767: Zero-address cannot be granted a role ──────────────────
+
+    /// Assert that attempting to grant **every** role variant to the zero
+    /// address returns `AdminError::InvalidAddress`, covering both the
+    /// happy-path (the zero-address is rejected) and the error state
+    /// (the correct typed error is emitted).
+    #[test]
+    fn test_zero_address_cannot_be_granted_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            let result = client.try_grant_role(&admin, &role, &zero_address(&env));
+            assert_eq!(
+                result,
+                Err(Ok(soroban_sdk::Error::from_contract_error(4))),
+                "grant_role for {:?} to zero address should return InvalidAddress",
+                role
+            );
+        }
     }
 
     #[test]
@@ -3765,6 +3794,51 @@ mod tests {
         // Threshold is 2; creator is 1 approval, so one more is needed.
         assert!(!client.is_proposal_ready(&id));
         client.approve_proposal(&member, &id);
+        assert!(client.is_proposal_ready(&id));
+    }
+
+    #[test]
+    fn test_approve_proposal_reaches_threshold_with_three_signers() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let signer1 = Address::generate(&env);
+        let signer2 = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(
+            &vec![&env, admin.clone(), signer1.clone(), signer2.clone()],
+            &3,
+        );
+        let id = client.create_proposal(&admin, &String::from_str(&env, "upgrade proposal"));
+
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 1);
+
+        client.approve_proposal(&signer1, &id);
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 2);
+
+        client.approve_proposal(&signer2, &id);
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 3);
         assert!(client.is_proposal_ready(&id));
     }
 
