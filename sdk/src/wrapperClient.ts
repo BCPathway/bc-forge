@@ -88,6 +88,18 @@ export class WrapperClient {
   }
 
   /**
+   * Get the cumulative underlying tokens distributed via `distributeRewards`
+   * that have not yet been compounded.
+   *
+   * This is a running total incremented on every `distributeRewards` call;
+   * nothing on the contract consumes or resets it yet.
+   */
+  async getPendingRewards(): Promise<bigint> {
+    const result = await this.queryContract('pending_rewards', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Calculate the current vault share price (total assets / total shares).
    *
    * The share price is the amount of underlying tokens each outstanding vault
