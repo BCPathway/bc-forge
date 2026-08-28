@@ -20,6 +20,19 @@ pub fn emit_wrap(env: &Env, caller: &Address, amount: i128, wrapped_amount: i128
     );
 }
 
+/// Emitted when underlying tokens are deposited into the vault and shares are minted.
+///
+/// @param env The Soroban environment.
+/// @param caller The depositing address.
+/// @param assets The amount of underlying tokens deposited.
+/// @param shares The number of vault shares minted to the caller.
+pub fn emit_deposit(env: &Env, caller: &Address, assets: i128, shares: i128) {
+    env.events().publish(
+        (symbol_short!("deposit"),),
+        (caller.clone(), assets, shares),
+    );
+}
+
 /// Emitted when tokens are unwrapped (wrapped → underlying).
 pub fn emit_unwrap(env: &Env, caller: &Address, wrapped_amount: i128, underlying_amount: i128) {
     env.events().publish(
@@ -84,6 +97,17 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
 pub fn emit_distribute_rewards(env: &Env, caller: &Address, amount: i128) {
     env.events()
         .publish((symbol_short!("dist_rw"),), (caller.clone(), amount));
+}
+
+/// Emitted when vault state parameters are configured or updated.
+///
+/// @notice Publishes vault state configuration event data.
+/// @param env The Soroban environment.
+/// @param caller The admin address setting the vault state.
+/// @param state The updated [`VaultState`].
+pub fn emit_vault_state_set(env: &Env, caller: &Address, state: &crate::VaultState) {
+    env.events()
+        .publish((symbol_short!("v_state"),), (caller.clone(), state.clone()));
 }
 
 /// Emitted when wrapped shares are withdrawn for proportional underlying tokens.

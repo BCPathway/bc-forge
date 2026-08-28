@@ -236,12 +236,19 @@ SDK methods for RBAC:
 
 | Method | Description |
 | --- | --- |
+| `initRbac(superAdmin, source)` | `init_rbac` deployment step: runs `migrate_admin`, then grants the initial `SuperAdmin` role |
+| `grantSuperAdmin(address, source)` | Assign the SuperAdmin role (calls `grant_role`) |
+| `revokeSuperAdmin(address, source)` | Revoke the SuperAdmin role (calls `revoke_role`) |
 | `grantMinter(address, source)` | Grant Minter role (calls `grant_role` on contract) |
 | `revokeMinter(address, source)` | Revoke Minter role (calls `revoke_role` on contract) |
+| `hasRole(role, address)` | Check role membership (calls `has_role`) |
 
 The `source` parameter must be a `Keypair` with the appropriate role. For
-`grant_role`, the caller must hold `SuperAdmin`. The SDK serializes roles using
-`nativeToScVal` for on-chain compatibility.
+`grant_role`, the caller must hold `SuperAdmin`. The configured contract admin
+implicitly satisfies this, so the admin keypair can bootstrap the hierarchy
+with `initRbac` immediately after `initialize`. The SDK serializes roles as
+symbol `ScVal`s (`SuperAdmin`, `Minter`, …) for on-chain compatibility with the
+contract's `Role` enum.
 
 ## Key invariants
 
