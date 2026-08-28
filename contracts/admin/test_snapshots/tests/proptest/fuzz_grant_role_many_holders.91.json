@@ -31,7 +31,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -60,7 +60,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -89,7 +89,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -118,7 +118,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -147,7 +147,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -176,7 +176,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -205,7 +205,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -234,7 +234,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -263,7 +263,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -292,7 +292,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -408,7 +408,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -453,7 +453,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -498,7 +498,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -543,7 +543,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -588,7 +588,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -633,7 +633,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -678,7 +678,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -723,7 +723,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -768,7 +768,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -813,7 +813,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 1
                 }
               }
             },
@@ -1241,7 +1241,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Admin"
                     }
                   ]
                 },
