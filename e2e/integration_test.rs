@@ -115,4 +115,97 @@ async fn test_deployment_verification() {
     println!("✅ Deployment verification test passed!");
 }
 
+/// Test full token lifecycle with all roles
+#[tokio::test]
+async fn test_full_token_lifecycle_with_all_roles() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BcForgeToken, ());
+    let client = BcForgeTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let pauser = Address::generate(&env);
+    let super_admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    let name = String::from_str(&env, "bc-forge-roles");
+    let symbol = String::from_str(&env, "SFGR");
+    client.initialize(&admin, &7, &name, &symbol);
+
+    env.as_contract(&contract_id, || {
+        // Grant Minter and Pauser roles by Admin
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &minter);
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::SuperAdmin, &super_admin);
+    });
+
+    // Minter mints tokens
+    client.mint(&minter, &user1, &500000);
+    assert_eq!(client.balance(&user1), 500000);
+
+    // User1 transfers to User2
+    client.transfer(&user1, &user2, &200000);
+    assert_eq!(client.balance(&user1), 300000);
+    assert_eq!(client.balance(&user2), 200000);
+
+    // Pauser pauses the token
+    client.pause_as(&pauser);
+
+    // Minter shouldn't be able to mint when paused, wait pause_as works for Pauser role
+    // Token transfer shouldn't work, but it panics in contract, so we expect panic.
+    // In soroban tests, we can use try_transfer to check for error.
+    let result = client.try_transfer(&user2, &user1, &10000);
+    assert!(result.is_err(), "transfer should fail when paused");
+
+    // Pauser unpauses the token
+    client.unpause_as(&pauser);
+
+    // Transfer works again
+    client.transfer(&user2, &user1, &10000);
+    assert_eq!(client.balance(&user2), 190000);
+
+    // User2 burns some tokens
+    client.burn(&user2, &90000);
+    assert_eq!(client.balance(&user2), 100000);
+
+    // Validate total supply
+    assert_eq!(client.supply(), 410000);
+
+    println!("✅ Full token lifecycle with all roles test passed!");
+}
+
+/// Test upgrade path from old Admin to new RBAC
+#[tokio::test]
+async fn test_upgrade_path_from_old_admin_to_new_rbac() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BcForgeToken, ());
+    let client = BcForgeTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    
+    let name = String::from_str(&env, "bc-forge-upgrade");
+    let symbol = String::from_str(&env, "SFGU");
+    client.initialize(&admin, &7, &name, &symbol);
+
+    env.as_contract(&contract_id, || {
+        // Before migration, admin does NOT have SuperAdmin role
+        let has_super_admin = bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &admin);
+        assert!(!has_super_admin, "Admin should not have SuperAdmin initially");
+
+        // Run the migration
+        bc_forge_admin::migrate_admin(&env);
+
+        // After migration, admin SHOULD have SuperAdmin role
+        let has_super_admin_now = bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &admin);
+        assert!(has_super_admin_now, "Admin should have SuperAdmin after migration");
+    });
+
+    println!("✅ Upgrade path from old Admin to new RBAC test passed!");
+}
+
 fn main() {}
