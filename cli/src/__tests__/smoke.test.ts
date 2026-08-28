@@ -140,4 +140,58 @@ describe("Smoke Test Command (#704, #706)", () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe("network fees and latency (#708)", () => {
+    it("signs the mint and transfer transactions before submitting them", async () => {
+      const opts = baseOpts();
+      const result = await runSmokeTest(opts);
+      const { TransactionBuilder } = await import("@stellar/stellar-sdk");
+      // runSmokeTest builds 5 transactions per call (balance, mint, balance, transfer, balance);
+      // mocks aren't cleared between tests, so take only this call's slice of the mock history.
+      const thisCallResults = vi.mocked(TransactionBuilder).mock.results.slice(-5);
+      const builtTxs = thisCallResults.map((r) => r.value.build());
+      const signedCount = builtTxs.filter((tx) => tx.sign.mock.calls.length > 0).length;
+      expect(result.success).toBe(true);
+      // mint and transfer each simulate+sign+submit; the 3 read-only balance checks never sign
+      expect(signedCount).toBe(2);
+    });
+
+    it("fails the mint step (without submitting) when simulation/fee assembly fails", async () => {
+      const opts = baseOpts();
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () => createMockServer({ simulationError: "resource limit exceeded" }) as any
+      );
+
+      const result = await runSmokeTest(opts);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Mint failed");
+      expect(result.message).toContain("resource limit exceeded");
+    });
+
+    it("tolerates real confirmation latency by polling past transient NOT_FOUND status", async () => {
+      const opts = baseOpts();
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () => createMockServer({ pendingPollsBeforeSuccess: 2 }) as any
+      );
+
+      const result = await runSmokeTest(opts);
+      expect(result.success).toBe(true);
+      expect(result.sequence).toContain("mint_ok");
+    });
+
+    it("reports a timeout instead of hanging when confirmation never arrives within the budget", async () => {
+      const opts = baseOpts();
+      opts.timeout = "5";
+      const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
+      vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
+        () => createMockServer({ pendingPollsBeforeSuccess: 1000 }) as any
+      );
+
+      const result = await runSmokeTest(opts);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("timed out");
+    });
+  });
 });

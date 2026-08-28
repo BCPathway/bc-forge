@@ -9,9 +9,13 @@
   },
   "scripts": {
     "build": "tsc -b",
+    "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "commander": "^12.1.0",
