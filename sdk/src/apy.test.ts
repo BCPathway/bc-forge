@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @bc-forge/sdk — Tests for calculateApy (#745)
  *
  * All RPC calls are stubbed so the tests run offline.
@@ -36,35 +36,10 @@ function makeSimError(): object {
 
 // We do NOT import from '@stellar/stellar-sdk' directly here to avoid
 // network calls; instead we mock the server constructor inline via jest.
-const mockSimulateTransaction = jest.fn<(...args: unknown[]) => Promise<object>>();
-const mockGetLatestLedger = jest.fn<() => Promise<{ sequence: number }>>();
+import { rpc as SorobanRpc } from '@stellar/stellar-sdk';
 
-jest.mock('@stellar/stellar-sdk', () => {
-  const original = jest.requireActual('@stellar/stellar-sdk') as Record<string, unknown>;
-  return {
-    ...original,
-    rpc: {
-      ...((original.rpc ?? {}) as Record<string, unknown>),
-      Server: jest.fn().mockImplementation(() => ({
-        simulateTransaction: mockSimulateTransaction,
-        getLatestLedger: mockGetLatestLedger,
-      })),
-      Api: {
-        isSimulationError: (r: unknown) =>
-          typeof r === 'object' &&
-          r !== null &&
-          'error' in (r as Record<string, unknown>) &&
-          (r as Record<string, unknown>).error !== undefined,
-        isSimulationSuccess: (r: unknown) =>
-          typeof r === 'object' &&
-          r !== null &&
-          !('error' in (r as Record<string, unknown>)) &&
-          'result' in (r as Record<string, unknown>) &&
-          (r as Record<string, unknown>).result !== null,
-      },
-    },
-  };
-});
+const mockSimulateTransaction = jest.spyOn(SorobanRpc.Server.prototype, 'simulateTransaction') as unknown as jest.Mock;
+const mockGetLatestLedger = jest.spyOn(SorobanRpc.Server.prototype, 'getLatestLedger') as unknown as jest.Mock;
 
 // ─── Import subject after mock setup ─────────────────────────────────────────
 
@@ -84,13 +59,13 @@ const LOOKBACK = 17_280; // ≈ 1 day
 describe('calculateApy (#745)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetLatestLedger.mockResolvedValue({ sequence: LATEST_LEDGER });
+    (mockGetLatestLedger as any).mockResolvedValue({ sequence: LATEST_LEDGER });
   });
 
   describe('happy path', () => {
     it('returns null when the vault has no shares (zero share price)', async () => {
       // Both snapshots: total_assets = 0, supply = 0 → sharePrice = null
-      mockSimulateTransaction.mockResolvedValue(makeSimSuccess(0n));
+      (mockSimulateTransaction as any).mockResolvedValue(makeSimSuccess(0n));
 
       const result = await calculateApy({
         rpcUrl: MOCK_RPC_URL,
@@ -104,7 +79,7 @@ describe('calculateApy (#745)', () => {
 
     it('returns APY ≈ 0 when the share price has not changed', async () => {
       // total_assets = 1 000 000, supply = 1 000 000 → price = 1 at both ledgers
-      mockSimulateTransaction.mockResolvedValue(makeSimSuccess(1_000_000n));
+      (mockSimulateTransaction as any).mockResolvedValue(makeSimSuccess(1_000_000n));
 
       const result = await calculateApy({
         rpcUrl: MOCK_RPC_URL,
@@ -121,7 +96,7 @@ describe('calculateApy (#745)', () => {
       // Historical snapshot: assets = 1 000 000, shares = 1 000 000 → price = 1
       // Current snapshot:    assets = 1 010 000, shares = 1 000 000 → price = 1.01
       let call = 0;
-      mockSimulateTransaction.mockImplementation(async () => {
+      (mockSimulateTransaction as any).mockImplementation(async () => {
         call++;
         // Each snapshot reads total_assets then supply (2 calls each → 4 total)
         // Calls 1-2 → historical snapshot
@@ -149,7 +124,7 @@ describe('calculateApy (#745)', () => {
     });
 
     it('exposes correct historical and current snapshot metadata', async () => {
-      mockSimulateTransaction.mockResolvedValue(makeSimSuccess(2_000_000n));
+      (mockSimulateTransaction as any).mockResolvedValue(makeSimSuccess(2_000_000n));
 
       const result = await calculateApy({
         rpcUrl: MOCK_RPC_URL,
@@ -189,7 +164,7 @@ describe('calculateApy (#745)', () => {
     it('returns null when the historical snapshot simulation fails', async () => {
       // First two calls (historical) fail; next two calls (current) succeed.
       let call = 0;
-      mockSimulateTransaction.mockImplementation(async () => {
+      (mockSimulateTransaction as any).mockImplementation(async () => {
         call++;
         if (call <= 2) return makeSimError();
         return makeSimSuccess(1_000_000n);

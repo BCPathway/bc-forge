@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @bc-forge/sdk — APY Calculation Helper (#745)
  *
  * Calculates the current Annual Percentage Yield for a yield-bearing vault
@@ -140,17 +140,17 @@ async function simulateI128(
     // The Stellar SDK supports `getLedgerEntries` with a ledger argument so
     // we can read state at a historical ledger. For RPC simulation we use
     // the current tip and rely on the node's ledger window.
-    const simulated: SorobanRpc.Api.SimulateTransactionResponse = ledger
+    const simulated: any = ledger
       ? await (server as any).simulateTransaction(tx, ledger)
       : await server.simulateTransaction(tx);
 
-    if (SorobanRpc.Api.isSimulationError(simulated)) return null;
-    if (!SorobanRpc.Api.isSimulationSuccess(simulated) || !simulated.result) return null;
+    if (simulated.error) return null;
+    if (!simulated.result) return null;
 
     const retval = simulated.result.retval;
 
     // total_assets / supply return i128 — extract as BigInt.
-    const i128 = retval.i128();
+    const i128 = retval.i128 ? retval.i128() : undefined;
     if (i128) {
       // XDR i128 is { hi: i64, lo: u64 }
       const hi = BigInt(i128.hi().toString());
@@ -159,11 +159,11 @@ async function simulateI128(
     }
 
     // Fallback: try native i64 / u64 for smaller values.
-    const i64 = retval.i64();
+    const i64 = retval.i64 ? retval.i64() : undefined;
     if (i64 !== undefined && i64 !== null) return BigInt(i64.toString());
 
     return null;
-  } catch {
+  } catch (err) {
     return null;
   }
 }
