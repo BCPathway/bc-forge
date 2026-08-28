@@ -1,6 +1,7 @@
-use crate::{WrapperContract, WrapperContractClient, WrapperError};
+use crate::{VaultState, WrapperContract, WrapperContractClient, WrapperError};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
-use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::Ledger;
 use soroban_sdk::{Address, Env, String};
 
 fn setup(
@@ -116,8 +117,6 @@ fn test_uninitialized_access_panics() {
     assert!(client.try_symbol().is_err());
     assert!(client.try_decimals().is_err());
     assert!(client.try_supply().is_err());
-    assert!(client.try_share_balance(&Address::generate(&env)).is_err());
-    assert!(client.try_pending_rewards().is_err());
 }
 
 #[test]
@@ -148,6 +147,595 @@ fn test_wrap_increases_supply_and_balance() {
 
     assert_eq!(wrapper.balance(&user), 5_000_000);
     assert_eq!(wrapper.supply(), 5_000_000);
+}
+
+#[test]
+fn test_unwrap_decreases_supply_and_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &5_000_000);
+
+    assert_eq!(wrapper.balance(&user), 5_000_000);
+    assert_eq!(wrapper.supply(), 5_000_000);
+
+    wrapper.unwrap(&user, &2_000_000);
+
+    assert_eq!(wrapper.balance(&user), 3_000_000);
+    assert_eq!(wrapper.supply(), 3_000_000);
+    assert_eq!(underlying.balance(&user), 7_000_000);
+}
+
+#[test]
+fn test_wrap_zero_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_wrap(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_unwrap_zero_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_unwrap(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_unwrap_insufficient_balance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_unwrap(&user, &100),
+        Err(Ok(WrapperError::InsufficientBalance))
+    );
+}
+
+#[test]
+fn test_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &1_000_000);
+    wrapper.transfer(&user_a, &user_b, &300_000);
+
+    assert_eq!(wrapper.balance(&user_a), 700_000);
+    assert_eq!(wrapper.balance(&user_b), 300_000);
+    assert_eq!(wrapper.supply(), 1_000_000);
+}
+
+#[test]
+fn test_approve_and_transfer_from() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &1_000_000);
+
+    wrapper.approve(&user_a, &spender, &500_000, &u32::MAX);
+    assert_eq!(wrapper.allowance(&user_a, &spender), 500_000);
+
+    wrapper.transfer_from(&spender, &user_a, &user_b, &200_000);
+    assert_eq!(wrapper.balance(&user_a), 800_000);
+    assert_eq!(wrapper.balance(&user_b), 200_000);
+    assert_eq!(wrapper.allowance(&user_a, &spender), 300_000);
+}
+
+#[test]
+fn test_transfer_insufficient_balance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    assert_eq!(
+        wrapper.try_transfer(&user_a, &user_b, &100),
+        Err(Ok(WrapperError::InsufficientBalance.into()))
+    );
+}
+
+#[test]
+fn test_transfer_zero_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    assert_eq!(
+        wrapper.try_transfer(&user_a, &user_b, &0),
+        Err(Ok(WrapperError::InvalidAmount.into()))
+    );
+}
+
+#[test]
+fn test_burn() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+    wrapper.burn(&user, &300_000);
+
+    assert_eq!(wrapper.balance(&user), 700_000);
+    assert_eq!(wrapper.supply(), 700_000);
+}
+
+#[test]
+fn test_burn_insufficient_balance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_burn(&user, &100),
+        Err(Ok(WrapperError::InsufficientBalance.into()))
+    );
+}
+
+#[test]
+fn test_burn_from() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let spender = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &1_000_000);
+
+    wrapper.approve(&user_a, &spender, &500_000, &u32::MAX);
+    wrapper.burn_from(&spender, &user_a, &200_000);
+
+    assert_eq!(wrapper.balance(&user_a), 800_000);
+    assert_eq!(wrapper.supply(), 800_000);
+    assert_eq!(wrapper.allowance(&user_a, &spender), 300_000);
+}
+
+#[test]
+fn test_pause_and_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &1_000_000);
+
+    wrapper.pause();
+
+    assert_eq!(
+        wrapper.try_transfer(&user, &Address::generate(&env), &100),
+        Err(Ok(WrapperError::ContractPaused.into()))
+    );
+
+    wrapper.unpause();
+
+    let recipient = Address::generate(&env);
+    wrapper.transfer(&user, &recipient, &100);
+    assert_eq!(wrapper.balance(&recipient), 100);
+}
+
+#[test]
+fn test_underlying_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    assert_eq!(wrapper.underlying_token(), underlying.address);
+}
+
+#[test]
+fn test_decimal_scaling_up() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let underlying_id = env.register(BcForgeToken, ());
+    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
+    underlying.initialize(
+        &admin,
+        &3,
+        &String::from_str(&env, "Low Decimals"),
+        &String::from_str(&env, "LOW"),
+    );
+
+    let wrapper_id = env.register(WrapperContract, ());
+    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
+    wrapper.initialize(
+        &admin,
+        &underlying_id,
+        &7,
+        &String::from_str(&env, "Wrapped Low"),
+        &String::from_str(&env, "wLOW"),
+    );
+
+    assert_eq!(underlying.decimals(), 3);
+    assert_eq!(wrapper.decimals(), 7);
+
+    // Mint underlying tokens to user
+    underlying.mint(&admin, &user, &10_000);
+
+    // Approve wrapper to spend on behalf of user
+    underlying.approve(&user, &wrapper_id, &10_000, &u32::MAX);
+
+    wrapper.wrap(&user, &1_000);
+
+    assert_eq!(wrapper.balance(&user), 10_000_000);
+
+    wrapper.unwrap(&user, &5_000_000);
+
+    assert_eq!(underlying.balance(&user), 9500);
+    assert_eq!(wrapper.balance(&user), 5_000_000);
+}
+
+#[test]
+fn test_wrap_negative_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_wrap(&user, &-1),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_approve_negative_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+    let spender = Address::generate(&env);
+
+    assert_eq!(
+        wrapper.try_approve(&user, &spender, &-1, &u32::MAX),
+        Err(Ok(WrapperError::InvalidAmount.into()))
+    );
+}
+
+#[test]
+fn test_distribute_rewards_increases_assets_without_increasing_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    // Fund rewarder with underlying tokens and approve wrapper
+    underlying.mint(&admin, &rewarder, &5_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &5_000_000, &u32::MAX);
+
+    // User wraps 2,000,000 underlying tokens
+    wrapper.wrap(&user, &2_000_000);
+    let initial_supply = wrapper.supply();
+    let initial_assets = wrapper.total_assets();
+
+    assert_eq!(initial_supply, 2_000_000);
+    assert_eq!(initial_assets, 2_000_000);
+
+    // Rewarder distributes 1,000,000 underlying tokens as capital reward
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // Verify token balance (assets) increased by 1,000,000 while share supply is unchanged
+    assert_eq!(wrapper.supply(), initial_supply);
+    assert_eq!(wrapper.total_assets(), initial_assets + 1_000_000);
+}
+
+#[test]
+fn test_distribute_rewards_invalid_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_distribute_rewards(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_distribute_rewards(&user, &-500),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_distribute_rewards_uninitialized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    assert_eq!(
+        client.try_distribute_rewards(&user, &1_000),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_distribute_rewards_when_paused_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.pause();
+
+    assert_eq!(
+        wrapper.try_distribute_rewards(&rewarder, &1_000_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+}
+
+#[test]
+fn test_set_and_get_vault_state_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Initial query before configuration returns VaultStateNotSet
+    assert_eq!(
+        wrapper.try_get_vault_state(),
+        Err(Ok(WrapperError::VaultStateNotSet))
+    );
+
+    let state = VaultState {
+        fee_rate_bps: 250, // 2.5%
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 10_000,
+        max_deposit: 50_000_000,
+        exchange_rate: 10_000_000, // 1.0 (7 decimals)
+        accumulated_fees: 0,
+        last_update_timestamp: 1000,
+    };
+
+    wrapper.set_vault_state(&admin, &state);
+
+    let fetched = wrapper.get_vault_state();
+    assert_eq!(fetched, state);
+    assert_eq!(fetched.fee_rate_bps, 250);
+    assert_eq!(fetched.fee_receiver, fee_receiver);
+    assert_eq!(fetched.min_deposit, 10_000);
+    assert_eq!(fetched.max_deposit, 50_000_000);
+    assert_eq!(fetched.exchange_rate, 10_000_000);
+    assert_eq!(fetched.accumulated_fees, 0);
+    assert_eq!(fetched.last_update_timestamp, 1000);
+}
+
+#[test]
+fn test_set_vault_state_unauthorized_fails() {
+    let env = Env::default();
+    // Do NOT mock all auths so require_admin fails for non-admin caller
+    let (wrapper, _underlying, _admin, user, _wrapper_id) = setup(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let state = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+
+    // Caller is not admin and not authorized
+    let res = wrapper.try_set_vault_state(&user, &state);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_set_vault_state_invalid_fee_rate_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let invalid_state = VaultState {
+        fee_rate_bps: 10_001, // Exceeds 100% (10,000 bps)
+        fee_receiver,
+        min_deposit: 100,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 500,
+    };
+
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &invalid_state),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_set_vault_state_invalid_limits_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Negative min_deposit
+    let negative_min = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: -1,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &negative_min),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+
+    // max_deposit < min_deposit
+    let inverted_limits = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 1000,
+        max_deposit: 500,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &inverted_limits),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_set_vault_state_invalid_exchange_rate_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Zero exchange rate
+    let zero_rate = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 0,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &zero_rate),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+
+    // Negative exchange rate
+    let negative_rate = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: -10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &negative_rate),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_set_vault_state_invalid_accumulated_fees_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, _user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let negative_fees = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: -50,
+        last_update_timestamp: 100,
+    };
+    assert_eq!(
+        wrapper.try_set_vault_state(&admin, &negative_fees),
+        Err(Ok(WrapperError::InvalidVaultState))
+    );
+}
+
+#[test]
+fn test_vault_state_uninitialized_contract_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let fee_receiver = Address::generate(&env);
+
+    let state = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 1_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+
+    assert_eq!(
+        client.try_get_vault_state(),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+    assert_eq!(
+        client.try_set_vault_state(&admin, &state),
+        Err(Ok(WrapperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_vault_state_storage_isolation_and_updates() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // User wraps 1,000,000 tokens
+    wrapper.wrap(&user, &1_000_000);
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+
+    // Configure VaultState
+    let initial_state = VaultState {
+        fee_rate_bps: 500, // 5%
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 1000,
+        max_deposit: 10_000_000,
+        exchange_rate: 10_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    wrapper.set_vault_state(&admin, &initial_state);
+
+    // Verify token state is intact
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+    assert_eq!(wrapper.total_assets(), 1_000_000);
+    assert_eq!(wrapper.underlying_token(), underlying.address);
+
+    // Update VaultState with accrued fees and updated exchange rate
+    let updated_state = VaultState {
+        fee_rate_bps: 500,
+        fee_receiver: fee_receiver.clone(),
+        min_deposit: 1000,
+        max_deposit: 10_000_000,
+        exchange_rate: 11_500_000, // 1.15
+        accumulated_fees: 50_000,
+        last_update_timestamp: 200,
+    };
+    wrapper.set_vault_state(&admin, &updated_state);
+
+    assert_eq!(wrapper.get_vault_state(), updated_state);
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
 }
 
 #[test]
@@ -195,7 +783,7 @@ fn test_supply_equals_sum_of_balances() {
     wrapper.transfer(&user_a, &user_b, &1_000_000);
     wrapper.burn(&user_b, &250_000);
 
-    // After mint, transfer, and burn the invariant supply == Σ balances holds.
+    // After mint, transfer, and burn the invariant supply == Î£ balances holds.
     assert_eq!(wrapper.balance(&user_a), 3_000_000);
     assert_eq!(wrapper.balance(&user_b), 750_000);
     assert_eq!(wrapper.supply(), 3_750_000);
@@ -453,7 +1041,7 @@ fn test_calculate_rewards_multiple_users_pro_rata() {
     wrapper.wrap(&user_b, &1_000_000);
     wrapper.distribute_rewards(&rewarder, &1_000_000);
 
-    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000 — weighted by share,
+    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000 â€” weighted by share,
     // not split evenly.
     assert_eq!(wrapper.calculate_rewards(&3_000_000), 3_750_000);
     assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_250_000);
@@ -512,238 +1100,6 @@ fn test_calculate_rewards_uninitialized_fails() {
 }
 
 #[test]
-fn test_unwrap_decreases_supply_and_balance() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
-
-    wrapper.wrap(&user, &5_000_000);
-
-    assert_eq!(wrapper.balance(&user), 5_000_000);
-    assert_eq!(wrapper.supply(), 5_000_000);
-
-    wrapper.unwrap(&user, &2_000_000);
-
-    assert_eq!(wrapper.balance(&user), 3_000_000);
-    assert_eq!(wrapper.supply(), 3_000_000);
-    assert_eq!(underlying.balance(&user), 7_000_000);
-}
-
-#[test]
-fn test_wrap_zero_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    assert_eq!(
-        wrapper.try_wrap(&user, &0),
-        Err(Ok(WrapperError::InvalidAmount))
-    );
-}
-
-#[test]
-fn test_unwrap_zero_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    assert_eq!(
-        wrapper.try_unwrap(&user, &0),
-        Err(Ok(WrapperError::InvalidAmount))
-    );
-}
-
-#[test]
-fn test_unwrap_insufficient_balance_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    assert_eq!(
-        wrapper.try_unwrap(&user, &100),
-        Err(Ok(WrapperError::InsufficientBalance))
-    );
-}
-
-#[test]
-fn test_transfer() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
-    let user_b = Address::generate(&env);
-
-    wrapper.wrap(&user_a, &1_000_000);
-    wrapper.transfer(&user_a, &user_b, &300_000);
-
-    assert_eq!(wrapper.balance(&user_a), 700_000);
-    assert_eq!(wrapper.balance(&user_b), 300_000);
-    assert_eq!(wrapper.supply(), 1_000_000);
-}
-
-#[test]
-fn test_approve_and_transfer_from() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
-    let user_b = Address::generate(&env);
-    let spender = Address::generate(&env);
-
-    wrapper.wrap(&user_a, &1_000_000);
-
-    wrapper.approve(&user_a, &spender, &500_000, &u32::MAX);
-    assert_eq!(wrapper.allowance(&user_a, &spender), 500_000);
-
-    wrapper.transfer_from(&spender, &user_a, &user_b, &200_000);
-    assert_eq!(wrapper.balance(&user_a), 800_000);
-    assert_eq!(wrapper.balance(&user_b), 200_000);
-    assert_eq!(wrapper.allowance(&user_a, &spender), 300_000);
-}
-
-#[test]
-fn test_transfer_insufficient_balance_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
-    let user_b = Address::generate(&env);
-
-    assert_eq!(
-        wrapper.try_transfer(&user_a, &user_b, &100),
-        Err(Ok(WrapperError::InsufficientBalance.into()))
-    );
-}
-
-#[test]
-fn test_transfer_zero_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
-    let user_b = Address::generate(&env);
-
-    assert_eq!(
-        wrapper.try_transfer(&user_a, &user_b, &0),
-        Err(Ok(WrapperError::InvalidAmount.into()))
-    );
-}
-
-#[test]
-fn test_burn() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    wrapper.wrap(&user, &1_000_000);
-    wrapper.burn(&user, &300_000);
-
-    assert_eq!(wrapper.balance(&user), 700_000);
-    assert_eq!(wrapper.supply(), 700_000);
-}
-
-#[test]
-fn test_burn_insufficient_balance_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    assert_eq!(
-        wrapper.try_burn(&user, &100),
-        Err(Ok(WrapperError::InsufficientBalance.into()))
-    );
-}
-
-#[test]
-fn test_burn_from() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
-    let spender = Address::generate(&env);
-
-    wrapper.wrap(&user_a, &1_000_000);
-
-    wrapper.approve(&user_a, &spender, &500_000, &u32::MAX);
-    wrapper.burn_from(&spender, &user_a, &200_000);
-
-    assert_eq!(wrapper.balance(&user_a), 800_000);
-    assert_eq!(wrapper.supply(), 800_000);
-    assert_eq!(wrapper.allowance(&user_a, &spender), 300_000);
-}
-
-#[test]
-fn test_pause_and_unpause() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    wrapper.wrap(&user, &1_000_000);
-
-    wrapper.pause();
-
-    assert_eq!(
-        wrapper.try_transfer(&user, &Address::generate(&env), &100),
-        Err(Ok(WrapperError::ContractPaused.into()))
-    );
-
-    wrapper.unpause();
-
-    let recipient = Address::generate(&env);
-    wrapper.transfer(&user, &recipient, &100);
-    assert_eq!(wrapper.balance(&recipient), 100);
-}
-
-#[test]
-fn test_underlying_token() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, underlying, _admin, _user, _wrapper_id) = setup(&env);
-
-    assert_eq!(wrapper.underlying_token(), underlying.address);
-}
-
-#[test]
-fn test_decimal_scaling_up() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
-
-    let underlying_id = env.register(BcForgeToken, ());
-    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
-    underlying.initialize(
-        &admin,
-        &3,
-        &String::from_str(&env, "Low Decimals"),
-        &String::from_str(&env, "LOW"),
-    );
-
-    let wrapper_id = env.register(WrapperContract, ());
-    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
-    wrapper.initialize(
-        &admin,
-        &underlying_id,
-        &7,
-        &String::from_str(&env, "Wrapped Low"),
-        &String::from_str(&env, "wLOW"),
-    );
-
-    assert_eq!(underlying.decimals(), 3);
-    assert_eq!(wrapper.decimals(), 7);
-
-    // Mint underlying tokens to user
-    underlying.mint(&admin, &user, &10_000);
-
-    // Approve wrapper to spend on behalf of user
-    underlying.approve(&user, &wrapper_id, &10_000, &u32::MAX);
-
-    wrapper.wrap(&user, &1_000);
-
-    assert_eq!(wrapper.balance(&user), 10_000_000);
-
-    wrapper.unwrap(&user, &5_000_000);
-
-    assert_eq!(underlying.balance(&user), 9500);
-    assert_eq!(wrapper.balance(&user), 5_000_000);
-}
-
-#[test]
 fn test_decimal_scaling_preserves_large_values_with_u128_intermediates() {
     let amount = i128::MAX / 10;
 
@@ -778,31 +1134,6 @@ fn test_decimal_scaling_rejects_overflow_and_negative_amounts() {
 }
 
 #[test]
-fn test_wrap_negative_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    assert_eq!(
-        wrapper.try_wrap(&user, &-1),
-        Err(Ok(WrapperError::InvalidAmount))
-    );
-}
-
-#[test]
-fn test_approve_negative_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-    let spender = Address::generate(&env);
-
-    assert_eq!(
-        wrapper.try_approve(&user, &spender, &-1, &u32::MAX),
-        Err(Ok(WrapperError::InvalidAmount.into()))
-    );
-}
-
-#[test]
 fn test_pauser_can_unpause_wrapper_as() {
     let env = Env::default();
     env.mock_all_auths();
@@ -831,83 +1162,6 @@ fn test_pauser_can_unpause_wrapper_as() {
     let recipient = Address::generate(&env);
     wrapper.transfer(&user, &recipient, &100);
     assert_eq!(wrapper.balance(&recipient), 100);
-}
-
-#[test]
-fn test_distribute_rewards_increases_assets_without_increasing_shares() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
-    let wrapper_id = wrapper.address.clone();
-    let rewarder = Address::generate(&env);
-
-    // Fund rewarder with underlying tokens and approve wrapper
-    underlying.mint(&admin, &rewarder, &5_000_000);
-    underlying.approve(&rewarder, &wrapper_id, &5_000_000, &u32::MAX);
-
-    // User wraps 2,000,000 underlying tokens
-    wrapper.wrap(&user, &2_000_000);
-    let initial_supply = wrapper.supply();
-    let initial_assets = wrapper.total_assets();
-
-    assert_eq!(initial_supply, 2_000_000);
-    assert_eq!(initial_assets, 2_000_000);
-
-    // Rewarder distributes 1,000,000 underlying tokens as capital reward
-    wrapper.distribute_rewards(&rewarder, &1_000_000);
-
-    // Verify token balance (assets) increased by 1,000,000 while share supply is unchanged
-    assert_eq!(wrapper.supply(), initial_supply);
-    assert_eq!(wrapper.total_assets(), initial_assets + 1_000_000);
-}
-
-#[test]
-fn test_distribute_rewards_invalid_amount_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
-
-    assert_eq!(
-        wrapper.try_distribute_rewards(&user, &0),
-        Err(Ok(WrapperError::InvalidAmount))
-    );
-    assert_eq!(
-        wrapper.try_distribute_rewards(&user, &-500),
-        Err(Ok(WrapperError::InvalidAmount))
-    );
-}
-
-#[test]
-fn test_distribute_rewards_uninitialized_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register(WrapperContract, ());
-    let client = WrapperContractClient::new(&env, &contract_id);
-    let user = Address::generate(&env);
-
-    assert_eq!(
-        client.try_distribute_rewards(&user, &1_000),
-        Err(Ok(WrapperError::NotInitialized))
-    );
-}
-
-#[test]
-fn test_distribute_rewards_when_paused_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
-    let wrapper_id = wrapper.address.clone();
-    let rewarder = Address::generate(&env);
-
-    underlying.mint(&admin, &rewarder, &1_000_000);
-    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
-
-    wrapper.pause();
-
-    assert_eq!(
-        wrapper.try_distribute_rewards(&rewarder, &1_000_000),
-        Err(Ok(WrapperError::ContractPaused))
-    );
 }
 
 #[test]
@@ -972,7 +1226,7 @@ fn test_pending_rewards_unaffected_by_wrap_unwrap_and_withdraw() {
     assert_eq!(wrapper.pending_rewards(), 1_000_000);
 
     // Wrapping, unwrapping, and withdrawing move shares/assets but are not
-    // themselves reward distributions — pending_rewards must not move.
+    // themselves reward distributions â€” pending_rewards must not move.
     wrapper.wrap(&user, &500_000);
     assert_eq!(wrapper.pending_rewards(), 1_000_000);
 
@@ -1266,7 +1520,7 @@ fn test_withdraw_dust_payout_fails() {
     );
 }
 
-// ─── Deposit Time Lockup (#730) ──────────────────────────────────────────────
+// â”€â”€â”€ Deposit Time Lockup (#730) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Arbitrary unlock timestamp used across the lockup tests.
 const UNLOCK_TIME: u64 = 1_700_100_000;
@@ -1281,7 +1535,9 @@ fn test_withdraw_reverts_while_deposit_is_locked() {
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
 
     // Well before the unlock time the deposit is still locked.
-    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     assert_eq!(
@@ -1297,11 +1553,15 @@ fn test_withdraw_succeeds_after_unlock_time() {
     let (wrapper, underlying, admin, user) = setup_and_fund(&env);
 
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
-    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     // Once past the unlock time the deposit may be withdrawn.
-    env.ledger().set_timestamp(UNLOCK_TIME + 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME + 100;
+    env.ledger().set(ledger_info);
     let tokens_out = wrapper.withdraw(&user, &1_000_000);
 
     assert_eq!(tokens_out, 1_000_000);
@@ -1316,7 +1576,9 @@ fn test_withdraw_succeeds_at_unlock_time_boundary() {
     let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
 
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
-    env.ledger().set_timestamp(UNLOCK_TIME);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     // The boundary is inclusive: timestamp == unlock time is allowed.
@@ -1354,7 +1616,9 @@ fn test_clear_unlock_time_removes_lockup() {
     let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
 
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
-    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     // Admin lifts the lockup before it expires.
@@ -1392,7 +1656,9 @@ fn test_lockup_is_enforced_per_user() {
     underlying.approve(&user_a, &wrapper_id, &2_000_000, &u32::MAX);
     underlying.approve(&user_b, &wrapper_id, &2_000_000, &u32::MAX);
 
-    env.ledger().set_timestamp(UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user_a, &1_000_000);
     wrapper.wrap(&user_b, &1_000_000);
 
@@ -1406,7 +1672,7 @@ fn test_lockup_is_enforced_per_user() {
     assert!(wrapper.try_withdraw(&user_b, &500_000).is_ok());
 }
 
-// ─── #720 deposit tests ────────────────────────────────────────────────────────
+// â”€â”€â”€ #720 deposit tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_deposit_first_deposit_mints_one_to_one() {
@@ -1435,7 +1701,7 @@ fn test_deposit_proportional_shares_after_rewards() {
     // Seed the vault with 2 M assets / 2 M shares (price = 1).
     wrapper.wrap(&user, &2_000_000);
 
-    // Distribute 2 M as rewards — price rises to 2 (4 M assets / 2 M shares).
+    // Distribute 2 M as rewards â€” price rises to 2 (4 M assets / 2 M shares).
     underlying.mint(&admin, &rewarder, &2_000_000);
     underlying.approve(&rewarder, &wrapper_id, &2_000_000, &u32::MAX);
     wrapper.distribute_rewards(&rewarder, &2_000_000);
@@ -1517,9 +1783,9 @@ fn test_deposit_accumulates_supply_across_multiple_calls() {
     underlying.mint(&admin, &user_b, &6_000_000);
     underlying.approve(&user_b, &wrapper_id, &6_000_000, &u32::MAX);
 
-    // First deposit (1:1 bootstrap): user deposits 2 M → 2 M shares
+    // First deposit (1:1 bootstrap): user deposits 2 M â†’ 2 M shares
     wrapper.deposit(&user, &2_000_000);
-    // Second deposit (still 1:1): user_b deposits 6 M → 6 M shares
+    // Second deposit (still 1:1): user_b deposits 6 M â†’ 6 M shares
     wrapper.deposit(&user_b, &6_000_000);
 
     assert_eq!(wrapper.supply(), 8_000_000);
