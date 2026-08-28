@@ -1,5 +1,10 @@
 import { loadConfigFile, BcForgeConfig } from './config-parser.js';
 import logger from './logger.js';
+import {
+  resolveNetworkConfig,
+  UnknownNetworkError,
+  type NetworkOverrides,
+} from '../network.js';
 
 // Config storage using a simple JSON file approach instead of Conf
 // to avoid ESM compatibility issues
@@ -13,6 +18,7 @@ const CONFIG_DIR = path.join(
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 interface StoredConfig {
+  network?: string;
   rpcUrl?: string;
   networkPassphrase?: string;
   contractId?: string;
@@ -57,17 +63,67 @@ export function getFileConfig(): BcForgeConfig | undefined {
     logger.debug(`Loaded config from ${result.filePath}`);
     return result.config;
   }
+  
+  // Log validation errors if config file exists but is invalid
+  if (!result.success && result.errors && result.errors.length > 0) {
+    logger.warn(`Configuration validation errors in ${result.filePath}:`);
+    result.errors.forEach((error) => {
+      logger.warn(`  • ${error}`);
+    });
+  }
+  
   return undefined;
 }
 
-export function getClientConfig() {
+export function getClientConfig(overrides: NetworkOverrides = {}) {
   const fileCfg = getFileConfig();
+  const hasExplicitNetwork = Boolean(overrides.network?.trim());
+  const rpcFromEnvFile = process.env.RPC_URL || fileCfg?.rpcUrl || storedConfig.rpcUrl;
+  const passphraseFromEnvFile =
+    process.env.NETWORK_PASSPHRASE ||
+    fileCfg?.networkPassphrase ||
+    storedConfig.networkPassphrase;
 
-  return {
-    rpcUrl: (process.env.RPC_URL || fileCfg?.rpcUrl || storedConfig.rpcUrl || 'https://soroban-testnet.stellar.org') as string,
-    networkPassphrase: (process.env.NETWORK_PASSPHRASE || fileCfg?.networkPassphrase || storedConfig.networkPassphrase || 'Test SDF Network ; September 2015') as string,
-    contractId: (process.env.CONTRACT_ID || fileCfg?.contracts?.token?.contractId || storedConfig.contractId || '') as string,
+  const inputs: NetworkOverrides = {
+    network:
+      overrides.network ||
+      process.env.NETWORK ||
+      fileCfg?.network ||
+      storedConfig.network ||
+      'testnet',
+    rpcUrl:
+      overrides.rpcUrl ||
+      (hasExplicitNetwork ? undefined : rpcFromEnvFile),
+    networkPassphrase:
+      overrides.networkPassphrase ||
+      (hasExplicitNetwork ? undefined : passphraseFromEnvFile),
   };
+
+  try {
+    const resolved = resolveNetworkConfig(inputs);
+    return {
+      network: resolved.name,
+      rpcUrl: resolved.rpcUrl,
+      networkPassphrase: resolved.networkPassphrase,
+      contractId: (process.env.CONTRACT_ID || fileCfg?.contracts?.token?.contractId || storedConfig.contractId || '') as string,
+    };
+  } catch (err) {
+    // Config schema allows futurenet/custom; if an RPC URL is already known, use it.
+    if (err instanceof UnknownNetworkError && (overrides.rpcUrl || rpcFromEnvFile)) {
+      const fallback = resolveNetworkConfig({
+        network: 'testnet',
+        rpcUrl: overrides.rpcUrl || rpcFromEnvFile,
+        networkPassphrase: overrides.networkPassphrase || passphraseFromEnvFile,
+      });
+      return {
+        network: fallback.name,
+        rpcUrl: fallback.rpcUrl,
+        networkPassphrase: fallback.networkPassphrase,
+        contractId: (process.env.CONTRACT_ID || fileCfg?.contracts?.token?.contractId || storedConfig.contractId || '') as string,
+      };
+    }
+    throw err;
+  }
 }
 
 export function getSecretKey() {

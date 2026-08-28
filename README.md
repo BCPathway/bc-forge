@@ -1,4 +1,4 @@
-# bc-forge 🔨
+# bc-forge
 
 A modular Soroban smart contract platform for **token minting** on the Stellar blockchain, with a TypeScript SDK for seamless integration.
 
@@ -6,7 +6,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 
 ---
 
-## ✨ Features
+## Features
 
 - **SEP-41 Compliant Token** — Full `TokenInterface` implementation (balance, transfer, approve, burn)
 - **Admin-Controlled Minting** — Only the contract admin can mint new tokens
@@ -22,7 +22,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **End-to-End Integration Tests** — Complete lifecycle testing on Stellar testnet
 - **Automatic Storage TTL Management** — Shared helper module extends Soroban contract and persistent storage TTL across calls
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 bc-forge/
@@ -73,7 +73,7 @@ bc-forge/
 └── README.md                     # This file
 ```
 
-## 🧠 Storage TTL Strategy
+## Storage TTL Strategy
 
 To keep Soroban contract state active, bc-forge now includes shared TTL logic that:
 
@@ -83,7 +83,7 @@ To keep Soroban contract state active, bc-forge now includes shared TTL logic th
 
 This makes the system more resilient to Soroban storage expiry while preserving on-chain security semantics.
 
-## 🛠️ Prerequisites
+## Prerequisites
 
 | Tool | Version | Install |
 |------|---------|---------|
@@ -92,7 +92,7 @@ This makes the system more resilient to Soroban storage expiry while preserving 
 | **Stellar CLI** | 22.0+ | `cargo install stellar-cli --locked` |
 | **Node.js** | 18+ | [nodejs.org](https://nodejs.org) |
 
-## 🚀 Local Setup
+## Local Setup
 
 ### 1. Clone the Repository
 
@@ -148,7 +148,36 @@ npm install
 npm run build
 ```
 
-## 🌐 Deploy to Testnet
+## CLI Deployment Configuration
+
+The CLI reads `.bc-forge.json` from the current working directory. Start with the ready-to-use [`config.example.json`](config.example.json):
+
+```bash
+cp config.example.json .bc-forge.json
+```
+
+You can also generate a minimal file with `bc-forge config init`. The example contains these fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `version` | No | Configuration schema version. Defaults to `1.0.0`. |
+| `name` | Yes | Token or project name. |
+| `symbol` | Yes | Token symbol. |
+| `decimals` | No | Token decimal precision, from 0 to 18. Defaults to `7`. |
+| `admin` | No | Stellar public `G...` address that administers the token. Required when initializing a contract. |
+| `superAdmin` | No | Stellar public `G...` address assigned the initial `SuperAdmin` role during RBAC initialization. Defaults to `admin` when omitted. |
+| `network` | No | Deployment environment: `mainnet`, `testnet`, `futurenet`, `standalone`, or `custom`. Defaults to `testnet`. |
+| `rpcUrl` | No | Soroban RPC endpoint URL. |
+| `networkPassphrase` | No | Stellar network passphrase. |
+| `secretKey` | No | Stellar `S...` secret key used to sign transactions. Prefer `SECRET_KEY` or another secret manager. |
+| `contracts` | No | Map of deployed contract metadata keyed by contract name. |
+| `contracts.<name>.contractId` | No | Deployed Soroban contract ID. |
+| `contracts.<name>.wasmHash` | No | Hash of the deployed contract WASM. |
+| `contracts.<name>.deployer` | No | Stellar public address that deployed the contract. |
+
+Environment variables take precedence over file and local-store values for `RPC_URL`, `NETWORK_PASSPHRASE`, `CONTRACT_ID`, and `SECRET_KEY`. Replace every placeholder before deploying, and do not commit real secret keys.
+
+## Deploy to Testnet
 
 ### Generate a Keypair
 
@@ -188,6 +217,41 @@ stellar contract invoke \
   --symbol "SFG"
 ```
 
+### Initialize RBAC (Assign Initial SuperAdmin)
+
+After initialization, run the `init_rbac` step to bootstrap role-based access
+control and assign the initial `SuperAdmin` role:
+
+```bash
+# Bootstrap the SuperAdmin mapping from the configured admin (idempotent)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  migrate_admin
+
+# Assign the initial SuperAdmin role (the contract admin can perform this grant)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  grant_role \
+  --caller <YOUR_PUBLIC_KEY> \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
+
+# Verify the assignment
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- \
+  has_role \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
+```
+
 ### Mint Tokens
 
 ```bash
@@ -212,7 +276,7 @@ stellar contract invoke \
   --id <ADDRESS>
 ```
 
-## 🧪 Local Development with Quickstart
+## Local Development with Quickstart
 
 If you want to build and test against a local Soroban network, run the Stellar Quickstart container instead of using public testnet services.
 
@@ -267,7 +331,7 @@ const client = new bcForgeClient({
 
 If your local Quickstart setup exposes RPC on a different path, keep the same host and update the URL to match your container configuration.
 
-## 📦 SDK Usage
+## SDK Usage
 
 ```typescript
 import { bcForgeClient } from '@bc-forge/sdk';
@@ -299,7 +363,7 @@ await client.transfer(
 
 See [sdk/README.md](sdk/README.md) for the full API reference.
 
-## 🏗️ Smart Contract Architecture
+## Smart Contract Architecture
 
 See the [access-control diagrams](docs/ACCESS_CONTROL.md) for the current role
 hierarchy, authorization sequence, protected operations, and governance flow.
@@ -330,7 +394,7 @@ hierarchy, authorization sequence, protected operations, and governance flow.
 └─────────────────────────────────────────────────┘
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! bc-forge is maintained on [drips.network](https://www.drips.network) — contributors can earn rewards by resolving posted issues.
 
@@ -352,7 +416,7 @@ docs/<issue-number>-<description>        # Documentation
 test/<issue-number>-<description>        # Test improvements
 ```
 
-## 🔒 Security
+## Security
 
 Security is our top priority. If you discover a security vulnerability in bc-forge, please report it responsibly following our [Security Policy](SECURITY.md).
 
@@ -360,11 +424,11 @@ Security is our top priority. If you discover a security vulnerability in bc-for
 
 For more details about our vulnerability disclosure process, supported versions, scope, and response timeline, please review the [SECURITY.md](SECURITY.md) file.
 
-## 📄 License
+## License
 
 [MIT](LICENSE) — Free for personal and commercial use.
 
-## 🔗 Links
+## Links
 
 - [Soroban Documentation](https://soroban.stellar.org/docs)
 - [Stellar SDK (JS)](https://github.com/stellar/js-stellar-sdk)
