@@ -1,11 +1,8 @@
 /**
- * @bc-forge/sdk — WrapperClient
+ * @bc-forge/sdk — VaultClient
  *
  * High-level TypeScript client for interacting with deployed bc-forge
- * wrapper contracts on the Stellar/Soroban network.
- *
- * The wrapper contract wraps any SEP-41 compliant token into a bc-forge
- * compatible token, enabling cross-contract interoperability.
+ * yield-bearing fee vault and wrapper contracts on the Stellar/Soroban network.
  */
 
 import {
@@ -16,13 +13,13 @@ import {
   xdr,
   nativeToScVal,
 } from '@stellar/stellar-sdk';
+import type { WalletAdapter } from './walletAdapter';
 
 import {
   buildInvokeTransaction,
   submitTransaction,
   addressToScVal,
   i128ToScVal,
-  stringToScVal,
   u32ToScVal,
   scValToNative,
   buildUnsignedTransaction,
@@ -35,36 +32,40 @@ import type { TransactionResult } from './client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface WrapperClientConfig {
+export interface VaultClientConfig {
   /** Soroban RPC endpoint URL */
   rpcUrl: string;
   /** Stellar network passphrase */
   networkPassphrase: string;
-  /** Deployed bc-forge wrapper contract ID */
+  /** Deployed bc-forge vault contract ID */
   contractId: string;
+  /** Optional wallet adapter for browser-based signing flows */
+  walletAdapter?: WalletAdapter;
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
-export class WrapperClient {
+export class VaultClient {
   private rpcUrl: string;
   private networkPassphrase: string;
   private contractId: string;
   private server: SorobanRpc.Server;
   private contract: Contract;
+  private walletAdapter?: WalletAdapter;
 
-  constructor(config: WrapperClientConfig) {
+  constructor(config: VaultClientConfig) {
     this.rpcUrl = config.rpcUrl;
     this.networkPassphrase = config.networkPassphrase;
     this.contractId = config.contractId;
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
+    this.walletAdapter = config.walletAdapter;
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
 
   /**
-   * Get the wrapped token balance for an address.
+   * Get the vault share balance for an address.
    */
   async getBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('balance', [addressToScVal(address)]);
@@ -72,12 +73,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get an address's vault share balance.
-   *
-   * A vault share is minted 1:1 with the wrapped token on `wrap()` and burned
-   * 1:1 on `unwrap()`/`withdraw()`/`burn()`, so this returns the same value as
-   * {@link getBalance} — exposed under vault vocabulary for callers reasoning
-   * about shares rather than raw token units.
+   * Get an address's vault share balance under vault vocabulary.
    */
   async getShareBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('share_balance', [addressToScVal(address)]);
@@ -85,7 +81,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the total wrapped token supply.
+   * Get the total vault share supply in circulation.
    */
   async getTotalSupply(): Promise<bigint> {
     const result = await this.queryContract('supply', []);
@@ -101,11 +97,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the cumulative underlying tokens distributed via `distributeRewards`
-   * that have not yet been compounded.
-   *
-   * This is a running total incremented on every `distributeRewards` call;
-   * nothing on the contract consumes or resets it yet.
+   * Get the cumulative pending/undistributed fees/rewards.
    */
   async getPendingRewards(): Promise<bigint> {
     const result = await this.queryContract('pending_rewards', []);
@@ -114,12 +106,6 @@ export class WrapperClient {
 
   /**
    * Calculate the current vault share price (total assets / total shares).
-   *
-   * The share price is the amount of underlying tokens each outstanding vault
-   * share is entitled to. Throws when the contract reports an error, e.g. when
-   * there are no outstanding shares yet (divide-by-zero protection).
-   *
-   * @returns Share price as bigint (integer division, rounded down)
    */
   async calculateSharePrice(): Promise<bigint> {
     const result = await this.queryContract('calculate_share_price', []);
@@ -127,17 +113,7 @@ export class WrapperClient {
   }
 
   /**
-   * Preview the pro-rata reward entitlement for a hypothetical share amount:
-   * `rewards = (userShares * totalAssets) / totalShares`.
-   *
-   * This mirrors what `withdraw()` would pay out for `userShares` right now,
-   * without burning shares or moving tokens. It is computed directly from the
-   * totals rather than via `userShares * calculateSharePrice()`, which floors
-   * twice and can under-report the entitlement — this floors only once, so it
-   * always agrees with `withdraw()`'s actual payout.
-   *
-   * @param userShares - The hypothetical share amount to price out.
-   * @returns The underlying token amount that many shares would be worth.
+   * Calculate the pro-rata reward/underlying token entitlement for a given amount of shares.
    */
   async calculateRewards(userShares: bigint): Promise<bigint> {
     const result = await this.queryContract('calculate_rewards', [i128ToScVal(userShares)]);
@@ -145,7 +121,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the underlying SEP-41 token contract address being wrapped.
+   * Get the underlying token contract address.
    */
   async getUnderlyingToken(): Promise<string> {
     const result = await this.queryContract('underlying_token', []);
@@ -153,7 +129,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the human-readable wrapper token name.
+   * Get the human-readable vault share token name.
    */
   async getName(): Promise<string> {
     const result = await this.queryContract('name', []);
@@ -161,7 +137,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the wrapper token ticker symbol.
+   * Get the vault share token ticker symbol.
    */
   async getSymbol(): Promise<string> {
     const result = await this.queryContract('symbol', []);
@@ -169,7 +145,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the number of decimal places for the wrapper token.
+   * Get the number of decimal places for the vault.
    */
   async getDecimals(): Promise<number> {
     const result = await this.queryContract('decimals', []);
@@ -177,7 +153,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the spending allowance from `owner` to `spender`.
+   * Get spending allowance from owner to spender.
    */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
     const result = await this.queryContract('allowance', [
@@ -188,89 +164,80 @@ export class WrapperClient {
   }
 
   /**
-   * Get the contract version string.
+   * Get the deposit lockup expiration timestamp for a user.
    */
-  async getVersion(): Promise<string> {
-    const result = await this.queryContract('version', []);
-    return scValToNative(result) as string;
+  async getUnlockTime(user: string): Promise<bigint | null> {
+    const result = await this.queryContract('get_unlock_time', [addressToScVal(user)]);
+    return scValToNative(result) as bigint | null;
   }
 
   // ─── Write Transactions ──────────────────────────────────────────────────
 
   /**
-   * Initialize the wrapper contract. Can only be called once.
+   * Deposit underlying tokens into the vault and receive minted vault shares.
    *
-   * @param admin           - Admin address
-   * @param tokenContractId - The SEP-41 token contract to wrap
-   * @param decimal         - Decimal precision for the wrapper token
-   * @param name            - Human-readable name (e.g. "Wrapped USDC")
-   * @param symbol          - Ticker symbol (e.g. "wUSDC")
-   * @param source          - Admin keypair
+   * @param caller       - Depositor address
+   * @param amount       - Amount of underlying tokens to deposit
+   * @param source       - Depositor keypair (or signer)
+   * @param minSharesOut - Optional minimum shares to receive (slippage protection)
    */
-  async initialize(
-    admin: string,
-    tokenContractId: string,
-    decimal: number,
-    name: string,
-    symbol: string,
+  async deposit(
+    caller: string,
+    amount: bigint,
     source: Keypair,
+    minSharesOut?: bigint,
   ): Promise<TransactionResult> {
-    return this.invokeContract(
-      'initialize',
-      [
-        addressToScVal(admin),
-        addressToScVal(tokenContractId),
-        u32ToScVal(decimal),
-        stringToScVal(name),
-        stringToScVal(symbol),
-      ],
-      source,
-    );
+    const args =
+      minSharesOut !== undefined
+        ? [addressToScVal(caller), i128ToScVal(amount), i128ToScVal(minSharesOut)]
+        : [addressToScVal(caller), i128ToScVal(amount)];
+    return this.invokeContract('deposit', args, source);
   }
 
   /**
-   * Wrap `amount` of the underlying token.
+   * Withdraw vault shares and receive proportional underlying tokens plus accrued yield.
    *
-   * Transfers `amount` of the underlying token from `caller` into the wrapper
-   * contract, then mints the equivalent wrapped tokens to `caller`. The caller
-   * must have pre-approved the wrapper contract to spend `amount` of the
-   * underlying token before calling this.
+   * @param caller       - Withdrawer address
+   * @param shares       - Amount of vault shares to burn
+   * @param source       - Withdrawer keypair (or signer)
+   * @param minTokensOut - Optional minimum tokens to receive (slippage protection)
+   */
+  async withdraw(
+    caller: string,
+    shares: bigint,
+    source: Keypair,
+    minTokensOut?: bigint,
+  ): Promise<TransactionResult> {
+    const args =
+      minTokensOut !== undefined
+        ? [addressToScVal(caller), i128ToScVal(shares), i128ToScVal(minTokensOut)]
+        : [addressToScVal(caller), i128ToScVal(shares)];
+    return this.invokeContract('withdraw', args, source);
+  }
+
+  /**
+   * Compound pending protocol fees into the vault's total assets.
    *
-   * @param caller - Address wrapping the tokens
-   * @param amount - Amount of underlying tokens to wrap
+   * @param caller - Address executing the compound operation
    * @param source - Caller's keypair
    */
-  async wrap(caller: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('wrap', [addressToScVal(caller), i128ToScVal(amount)], source);
+  async compound(caller: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('compound_fees', [addressToScVal(caller)], source);
   }
 
   /**
-   * Unwrap `wrappedAmount` of wrapped tokens back to the underlying token.
-   *
-   * Burns `wrappedAmount` of wrapped tokens from `caller` and transfers the
-   * equivalent underlying tokens back to `caller`.
-   *
-   * @param caller        - Address unwrapping the tokens
-   * @param wrappedAmount - Amount of wrapped tokens to unwrap
-   * @param source        - Caller's keypair
+   * Compound pending fees alias for compound_fees.
    */
-  async unwrap(caller: string, wrappedAmount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'unwrap',
-      [addressToScVal(caller), i128ToScVal(wrappedAmount)],
-      source,
-    );
+  async compoundFees(caller: string, source: Keypair): Promise<TransactionResult> {
+    return this.compound(caller, source);
   }
 
   /**
-   * Distribute rewards into the vault/wrapper contract without issuing new shares.
+   * Distribute rewards into the vault without issuing new shares.
    *
-   * Transfers `amount` of the underlying token from `caller` into the vault contract,
-   * increasing total underlying assets while keeping share supply constant.
-   *
-   * @param caller - Address providing the reward capital
+   * @param caller - Reward provider address
    * @param amount - Amount of underlying tokens to distribute
-   * @param source - Caller's keypair
+   * @param source - Caller keypair
    */
   async distributeRewards(
     caller: string,
@@ -285,31 +252,25 @@ export class WrapperClient {
   }
 
   /**
-   * Withdraw `shares` of wrapped tokens and receive a proportional share of
-   * the vault's underlying assets, including any accrued yield.
-   *
-   * Burns `shares` of wrapped tokens from `caller` and transfers the
-   * proportional amount of underlying tokens back to `caller`.
-   *
-   * @param caller - Address withdrawing the shares
-   * @param shares - Amount of wrapped shares to burn
-   * @param source - Caller's keypair
+   * Wrap underlying tokens into vault shares (1:1 standard wrapper entrypoint).
    */
-  async withdraw(caller: string, shares: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('withdraw', [addressToScVal(caller), i128ToScVal(shares)], source);
+  async wrap(caller: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('wrap', [addressToScVal(caller), i128ToScVal(amount)], source);
   }
 
   /**
-   * Enforce the deposit time lockup for a user.
-   *
-   * Records the timestamp (seconds since epoch) at which `user`'s deposit
-   * becomes withdrawable. While the current ledger timestamp is before the
-   * unlock time, `withdraw` reverts with `TokensLocked`. Admin-only.
-   *
-   * @param caller          - Admin address invoking the call
-   * @param user            - Address whose deposit is being time-locked
-   * @param unlockTimestamp - Unix timestamp (seconds) at which the deposit unlocks
-   * @param source          - Caller's keypair
+   * Unwrap vault shares back to underlying tokens (1:1 standard wrapper exitpoint).
+   */
+  async unwrap(caller: string, wrappedAmount: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'unwrap',
+      [addressToScVal(caller), i128ToScVal(wrappedAmount)],
+      source,
+    );
+  }
+
+  /**
+   * Set deposit time lockup for a user (admin operation).
    */
   async setUnlockTime(
     caller: string,
@@ -329,12 +290,7 @@ export class WrapperClient {
   }
 
   /**
-   * Clear the deposit lockup for a user, immediately permitting withdrawals.
-   * Admin-only.
-   *
-   * @param caller - Admin address invoking the call
-   * @param user   - Address whose deposit lockup is being cleared
-   * @param source - Caller's keypair
+   * Clear deposit time lockup for a user (admin operation).
    */
   async clearUnlockTime(caller: string, user: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
@@ -345,23 +301,7 @@ export class WrapperClient {
   }
 
   /**
-   * Get the timestamp at which a user's deposit becomes withdrawable.
-   *
-   * @param user - Address to query
-   * @returns The unlock timestamp in seconds, or null when no lockup is recorded
-   */
-  async getUnlockTime(user: string): Promise<bigint | null> {
-    const result = await this.queryContract('get_unlock_time', [addressToScVal(user)]);
-    return scValToNative(result) as bigint | null;
-  }
-
-  /**
-   * Transfer wrapped tokens between addresses.
-   *
-   * @param from   - Sender address
-   * @param to     - Recipient address
-   * @param amount - Number of wrapped tokens
-   * @param source - Sender's keypair
+   * Transfer vault shares between addresses.
    */
   async transfer(
     from: string,
@@ -377,13 +317,7 @@ export class WrapperClient {
   }
 
   /**
-   * Approve a spender to use wrapped tokens on your behalf.
-   *
-   * @param from    - Token owner
-   * @param spender - Approved spender
-   * @param amount  - Maximum spendable amount
-   * @param exp     - Expiration ledger (0 for no expiration)
-   * @param source  - Owner's keypair
+   * Approve a spender for vault shares.
    */
   async approve(
     from: string,
@@ -400,93 +334,111 @@ export class WrapperClient {
   }
 
   /**
-   * Burn wrapped tokens from an address.
-   *
-   * @param from   - Address whose tokens to burn
-   * @param amount - Number of wrapped tokens to burn
-   * @param source - Burner's keypair
+   * Transfer vault shares from an approved address.
    */
-  async burn(from: string, amount: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('burn', [addressToScVal(from), i128ToScVal(amount)], source);
+  async transferFrom(
+    spender: string,
+    from: string,
+    to: string,
+    amount: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'transfer_from',
+      [addressToScVal(spender), addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      source,
+    );
   }
 
-  /**
-   * Pause all wrap/unwrap and transfer operations. Admin-only.
-   */
-  async pause(source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('pause', [], source);
-  }
+  // ─── Offline Transaction Building & Simulation ───────────────────────────
 
   /**
-   * Unpause operations. Admin-only.
+   * Build an unsigned transaction XDR for deposit.
    */
-  async unpause(source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract('unpause', [], source);
-  }
-
-  /**
-   * Check if the wrapper contract is currently paused.
-   *
-   * @returns True if the contract is paused, false otherwise.
-   */
-  async isPaused(): Promise<boolean> {
-    const result = await this.queryContract('is_paused', []);
-    return scValToNative(result) as boolean;
-  }
-
-  // ─── Offline Transaction Builders ────────────────────────────────────────
-
-  /**
-   * Build an unsigned wrap transaction for offline signing.
-   *
-   * @param caller          - Address wrapping the tokens
-   * @param amount          - Amount of underlying tokens to wrap
-   * @param sourcePublicKey - Caller's public key
-   * @returns Unsigned transaction XDR string
-   */
-  async buildWrapTx(caller: string, amount: bigint, sourcePublicKey: string): Promise<string> {
+  async buildDepositTx(
+    caller: string,
+    amount: bigint,
+    sourcePublicKey: string,
+    minSharesOut?: bigint,
+  ): Promise<string> {
+    const args =
+      minSharesOut !== undefined
+        ? [addressToScVal(caller), i128ToScVal(amount), i128ToScVal(minSharesOut)]
+        : [addressToScVal(caller), i128ToScVal(amount)];
     return buildUnsignedTransaction(
       this.rpcUrl,
       this.networkPassphrase,
       this.contractId,
-      'wrap',
-      [addressToScVal(caller), i128ToScVal(amount)],
+      'deposit',
+      args,
       sourcePublicKey,
     );
   }
 
   /**
-   * Build an unsigned unwrap transaction for offline signing.
-   *
-   * @param caller          - Address unwrapping the tokens
-   * @param wrappedAmount   - Amount of wrapped tokens to unwrap
-   * @param sourcePublicKey - Caller's public key
-   * @returns Unsigned transaction XDR string
+   * Build an unsigned transaction XDR for withdraw.
    */
-  async buildUnwrapTx(
+  async buildWithdrawTx(
     caller: string,
-    wrappedAmount: bigint,
+    shares: bigint,
+    sourcePublicKey: string,
+    minTokensOut?: bigint,
+  ): Promise<string> {
+    const args =
+      minTokensOut !== undefined
+        ? [addressToScVal(caller), i128ToScVal(shares), i128ToScVal(minTokensOut)]
+        : [addressToScVal(caller), i128ToScVal(shares)];
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'withdraw',
+      args,
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned transaction XDR for compounding fees.
+   */
+  async buildCompoundTx(caller: string, sourcePublicKey: string): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'compound_fees',
+      [addressToScVal(caller)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned transaction XDR for distributing rewards.
+   */
+  async buildDistributeRewardsTx(
+    caller: string,
+    amount: bigint,
     sourcePublicKey: string,
   ): Promise<string> {
     return buildUnsignedTransaction(
       this.rpcUrl,
       this.networkPassphrase,
       this.contractId,
-      'unwrap',
-      [addressToScVal(caller), i128ToScVal(wrappedAmount)],
+      'distribute_rewards',
+      [addressToScVal(caller), i128ToScVal(amount)],
       sourcePublicKey,
     );
   }
 
   /**
-   * Sign an unsigned transaction XDR.
+   * Sign an unsigned transaction XDR with a Keypair.
    */
-  signTx(txXdr: string, keypair: Keypair): string {
-    return signTransaction(txXdr, this.networkPassphrase, keypair);
+  signTx(xdrString: string, signer: Keypair): string {
+    return signTransaction(xdrString, this.networkPassphrase, signer);
   }
 
   /**
-   * Simulate a contract invocation without submitting.
+   * Simulate a contract call without submitting a transaction.
    */
   async simulate(method: string, args: xdr.ScVal[], sourcePublicKey: string): Promise<unknown> {
     return simulateTransaction(
@@ -500,29 +452,46 @@ export class WrapperClient {
   }
 
   /**
-   * Simulate a wrap operation.
+   * Simulate a deposit operation.
    */
-  async simulateWrap(caller: string, amount: bigint, sourcePublicKey: string): Promise<unknown> {
-    return this.simulate('wrap', [addressToScVal(caller), i128ToScVal(amount)], sourcePublicKey);
-  }
-
-  /**
-   * Simulate an unwrap operation.
-   */
-  async simulateUnwrap(
+  async simulateDeposit(
     caller: string,
-    wrappedAmount: bigint,
+    amount: bigint,
     sourcePublicKey: string,
+    minSharesOut?: bigint,
   ): Promise<unknown> {
-    return this.simulate(
-      'unwrap',
-      [addressToScVal(caller), i128ToScVal(wrappedAmount)],
-      sourcePublicKey,
-    );
+    const args =
+      minSharesOut !== undefined
+        ? [addressToScVal(caller), i128ToScVal(amount), i128ToScVal(minSharesOut)]
+        : [addressToScVal(caller), i128ToScVal(amount)];
+    return this.simulate('deposit', args, sourcePublicKey);
   }
 
   /**
-   * Get recent events for the wrapper contract.
+   * Simulate a withdraw operation.
+   */
+  async simulateWithdraw(
+    caller: string,
+    shares: bigint,
+    sourcePublicKey: string,
+    minTokensOut?: bigint,
+  ): Promise<unknown> {
+    const args =
+      minTokensOut !== undefined
+        ? [addressToScVal(caller), i128ToScVal(shares), i128ToScVal(minTokensOut)]
+        : [addressToScVal(caller), i128ToScVal(shares)];
+    return this.simulate('withdraw', args, sourcePublicKey);
+  }
+
+  /**
+   * Simulate a compound fees operation.
+   */
+  async simulateCompound(caller: string, sourcePublicKey: string): Promise<unknown> {
+    return this.simulate('compound_fees', [addressToScVal(caller)], sourcePublicKey);
+  }
+
+  /**
+   * Get recent events for the vault contract.
    */
   async getEvents(startLedger?: number): Promise<unknown[]> {
     const response = await this.server.getEvents({
