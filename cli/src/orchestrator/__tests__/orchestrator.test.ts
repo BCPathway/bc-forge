@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Keypair } from '@stellar/stellar-sdk';
 import { runDeploymentOrchestrator } from '../orchestrator.js';
 import * as initModule from '../init-superadmin.js';
@@ -11,11 +11,11 @@ const KEYPAIR = Keypair.random();
 
 describe('runDeploymentOrchestrator', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should successfully run the full orchestrator pipeline and return success', async () => {
-    jest.spyOn(configParser, 'loadConfigFile').mockReturnValue({
+    vi.spyOn(configParser, 'loadConfigFile').mockReturnValue({
       success: true,
       filePath: '/mock/.bc-forge.json',
       config: {
@@ -25,7 +25,7 @@ describe('runDeploymentOrchestrator', () => {
       },
     });
 
-    jest.spyOn(initModule, 'initializeSuperAdmin').mockResolvedValue({
+    vi.spyOn(initModule, 'initializeSuperAdmin').mockResolvedValue({
       success: true,
       contractId: TOKEN_ID,
       deployer: KEYPAIR.publicKey(),
@@ -33,7 +33,7 @@ describe('runDeploymentOrchestrator', () => {
       txHash: 'mock-init-tx',
     });
 
-    jest.spyOn(connectModule, 'connectContractIds').mockResolvedValue({
+    vi.spyOn(connectModule, 'connectContractIds').mockResolvedValue({
       success: true,
       linkedContracts: { 'token.adminContractId': ADMIN_ID },
       txHashes: { 'token.setAdminContract': 'mock-link-tx' },
@@ -54,11 +54,11 @@ describe('runDeploymentOrchestrator', () => {
   });
 
   it('should report errors when step 1 or step 2 fails', async () => {
-    jest.spyOn(configParser, 'loadConfigFile').mockReturnValue({
+    vi.spyOn(configParser, 'loadConfigFile').mockReturnValue({
       success: false,
     });
 
-    jest.spyOn(initModule, 'initializeSuperAdmin').mockResolvedValue({
+    vi.spyOn(initModule, 'initializeSuperAdmin').mockResolvedValue({
       success: false,
       contractId: TOKEN_ID,
       deployer: KEYPAIR.publicKey(),
@@ -66,7 +66,7 @@ describe('runDeploymentOrchestrator', () => {
       error: 'Simulated initialization failure',
     });
 
-    jest.spyOn(connectModule, 'connectContractIds').mockResolvedValue({
+    vi.spyOn(connectModule, 'connectContractIds').mockResolvedValue({
       success: false,
       linkedContracts: {},
       txHashes: {},

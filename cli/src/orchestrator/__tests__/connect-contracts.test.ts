@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Keypair } from '@stellar/stellar-sdk';
 import { connectContractIds, linkContracts } from '../connect-contracts.js';
 import * as configParser from '../../utils/config-parser.js';
@@ -13,12 +13,12 @@ const SIGNER_SECRET = SIGNER_KEYPAIR.secret();
 
 describe('connectContractIds (Issue #693)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Happy Paths', () => {
     it('should successfully link Admin Contract ID to Token Contract', async () => {
-      jest.spyOn(configUtil, 'getSecretKey').mockReturnValue(SIGNER_SECRET);
+      vi.spyOn(configUtil, 'getSecretKey').mockReturnValue(SIGNER_SECRET);
 
       const result = await connectContractIds({
         adminContractId: ADMIN_CONTRACT_ID,
@@ -63,11 +63,11 @@ describe('connectContractIds (Issue #693)', () => {
     });
 
     it('should persist all linked contract IDs to .bc-forge.json deployment config', async () => {
-      const mockSave = jest.spyOn(configParser, 'saveConfigFile').mockReturnValue({
+      const mockSave = vi.spyOn(configParser, 'saveConfigFile').mockReturnValue({
         success: true,
         filePath: '/mock/.bc-forge.json',
       });
-      jest.spyOn(configParser, 'loadConfigFile').mockReturnValue({
+      vi.spyOn(configParser, 'loadConfigFile').mockReturnValue({
         success: true,
         filePath: '/mock/.bc-forge.json',
         config: {
@@ -102,8 +102,8 @@ describe('connectContractIds (Issue #693)', () => {
 
   describe('Error States', () => {
     it('should fail when no contract IDs are provided or found in config', async () => {
-      jest.spyOn(configParser, 'loadConfigFile').mockReturnValue({ success: false });
-      jest.spyOn(configUtil, 'getClientConfig').mockReturnValue({
+      vi.spyOn(configParser, 'loadConfigFile').mockReturnValue({ success: false });
+      vi.spyOn(configUtil, 'getClientConfig').mockReturnValue({
         rpcUrl: 'https://soroban-testnet.stellar.org',
         networkPassphrase: 'Test SDF Network ; September 2015',
         contractId: '',
@@ -160,7 +160,7 @@ describe('connectContractIds (Issue #693)', () => {
     });
 
     it('should fail when deployer secret key is not provided or configured', async () => {
-      jest.spyOn(configUtil, 'getSecretKey').mockReturnValue('');
+      vi.spyOn(configUtil, 'getSecretKey').mockReturnValue('');
 
       const result = await connectContractIds({
         adminContractId: ADMIN_CONTRACT_ID,

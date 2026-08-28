@@ -25,6 +25,10 @@ describe("CLI TypeScript project structure (#683)", () => {
         "check-status",
         "verify-hash",
         "generate-bindings",
+        "deploy",
+        "init-superadmin",
+        "connect",
+        "orchestrate",
       ])
     );
   });

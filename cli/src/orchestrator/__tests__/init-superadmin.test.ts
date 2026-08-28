@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Keypair } from '@stellar/stellar-sdk';
 import { initializeSuperAdmin, isValidContractId, isValidStellarAddress } from '../init-superadmin.js';
 import * as configParser from '../../utils/config-parser.js';
@@ -12,7 +12,7 @@ const VALID_SECRET_KEY = VALID_DEPLOYER_KEYPAIR.secret();
 
 describe('initializeSuperAdmin (Issue #694)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Validation Helpers', () => {
@@ -33,8 +33,8 @@ describe('initializeSuperAdmin (Issue #694)', () => {
 
   describe('Happy Paths', () => {
     it('should automatically construct and submit init transaction and verify SuperAdmin role on-chain', async () => {
-      jest.spyOn(configUtil, 'getSecretKey').mockReturnValue(VALID_SECRET_KEY);
-      jest.spyOn(configUtil, 'getClientConfig').mockReturnValue({
+      vi.spyOn(configUtil, 'getSecretKey').mockReturnValue(VALID_SECRET_KEY);
+      vi.spyOn(configUtil, 'getClientConfig').mockReturnValue({
         rpcUrl: 'https://soroban-testnet.stellar.org',
         networkPassphrase: 'Test SDF Network ; September 2015',
         contractId: VALID_CONTRACT_ID,
@@ -72,11 +72,11 @@ describe('initializeSuperAdmin (Issue #694)', () => {
     });
 
     it('should update configuration file with deployer and initialized contract state', async () => {
-      const mockSave = jest.spyOn(configParser, 'saveConfigFile').mockReturnValue({
+      const mockSave = vi.spyOn(configParser, 'saveConfigFile').mockReturnValue({
         success: true,
         filePath: '/mock/path/.bc-forge.json',
       });
-      jest.spyOn(configParser, 'loadConfigFile').mockReturnValue({
+      vi.spyOn(configParser, 'loadConfigFile').mockReturnValue({
         success: true,
         filePath: '/mock/path/.bc-forge.json',
         config: {
@@ -104,10 +104,10 @@ describe('initializeSuperAdmin (Issue #694)', () => {
 
   describe('Error States', () => {
     it('should fail when contractId is missing and not configured', async () => {
-      jest.spyOn(configParser, 'loadConfigFile').mockReturnValue({
+      vi.spyOn(configParser, 'loadConfigFile').mockReturnValue({
         success: false,
       });
-      jest.spyOn(configUtil, 'getClientConfig').mockReturnValue({
+      vi.spyOn(configUtil, 'getClientConfig').mockReturnValue({
         rpcUrl: 'https://soroban-testnet.stellar.org',
         networkPassphrase: 'Test SDF Network ; September 2015',
         contractId: '',
@@ -135,7 +135,7 @@ describe('initializeSuperAdmin (Issue #694)', () => {
     });
 
     it('should fail when secret key is not provided or configured', async () => {
-      jest.spyOn(configUtil, 'getSecretKey').mockReturnValue('');
+      vi.spyOn(configUtil, 'getSecretKey').mockReturnValue('');
 
       const result = await initializeSuperAdmin({
         contractId: VALID_CONTRACT_ID,

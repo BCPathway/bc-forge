@@ -9,6 +9,7 @@ import {
   createConnectCommand,
   createOrchestrateCommand,
 } from "./commands/orchestrator.js";
+import { createDeployCommand } from "./commands/deploy.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 
 const VERSION = "0.1.0";
@@ -36,6 +37,7 @@ export function buildProgram(): Command {
     .addCommand(createCheckStatusCommand())
     .addCommand(createVerifyHashCommand())
     .addCommand(createGenerateBindingsCommand())
+    .addCommand(createDeployCommand())
     .addCommand(createInitSuperAdminCommand())
     .addCommand(createConnectCommand())
     .addCommand(createOrchestrateCommand());
