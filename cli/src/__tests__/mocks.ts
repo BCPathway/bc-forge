@@ -37,22 +37,53 @@ export interface MockServerOptions {
   balances?: Record<string, bigint>;
   failMethods?: string[];
   latency?: number;
+  simulationError?: string;
+  /** Number of `getTransaction` polls that report NOT_FOUND before the terminal status, simulating real confirmation latency. */
+  pendingPollsBeforeSuccess?: number;
+  /** Terminal status returned once `pendingPollsBeforeSuccess` polls have elapsed. Default SUCCESS. */
+  finalTransactionStatus?: "SUCCESS" | "FAILED";
 }
 
 export function createMockServer(options: MockServerOptions = {}) {
+  let pollCount = 0;
+
   return {
     getAccount: vi.fn(async (publicKey: string) => createMockAccount(publicKey)),
+    prepareTransaction: vi.fn(async (tx: any) => {
+      if (options.latency) await new Promise((r) => setTimeout(r, options.latency));
+      if (options.simulationError) {
+        throw new Error(options.simulationError);
+      }
+      return tx;
+    }),
     sendTransaction: vi.fn(async () => {
       if (options.latency) await new Promise((r) => setTimeout(r, options.latency));
       return { status: "PENDING", hash: `mock_hash_${Date.now()}` };
     }),
     getTransaction: vi.fn(async (txHash: string) => {
       if (options.latency) await new Promise((r) => setTimeout(r, options.latency));
-      return { status: "SUCCESS", hash: txHash, resultXdr: "AAAAAAA=" };
+      const pendingPolls = options.pendingPollsBeforeSuccess ?? 0;
+      if (pollCount < pendingPolls) {
+        pollCount++;
+        return { status: "NOT_FOUND", hash: txHash };
+      }
+      return { status: options.finalTransactionStatus ?? "SUCCESS", hash: txHash, resultXdr: "AAAAAAA=" };
     }),
     simulateTransaction: vi.fn(async () => {
       if (options.latency) await new Promise((r) => setTimeout(r, options.latency));
-      return { status: "SIMULATION_SUCCESS", result: { retval: undefined } };
+      if (options.simulationError) {
+        return { error: options.simulationError, events: [], id: "0", latestLedger: 1, _parsed: true };
+      }
+      return {
+        status: "SIMULATION_SUCCESS",
+        result: { retval: undefined },
+        minResourceFee: "200000",
+        transactionData: {},
+        events: [],
+        id: "0",
+        latestLedger: 1,
+        _parsed: true,
+      };
     }),
   } as any;
 }

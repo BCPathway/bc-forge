@@ -21,6 +21,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.96.0
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -79,6 +80,34 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+  # ─── TypeScript CLI CI ──────────────────────────────────────────────────
+  cli:
+    name: TypeScript CLI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: .
 
       - name: Build
         run: npm run build
