@@ -14,6 +14,7 @@ import {
   TransactionBuilder,
   Keypair,
   xdr,
+  nativeToScVal,
 } from '@stellar/stellar-sdk';
 
 import {
