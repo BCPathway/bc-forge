@@ -517,14 +517,14 @@ proptest! {
 
     /// Fuzz: grant_role with explicitly empty and extremely long strings
     #[test]
-    fn fuzz_grant_role_empty_and_max_length(length in prop::sample::select(vec![0usize, 10000usize])) {
+    fn fuzz_grant_role_empty_and_max_length(length in prop::sample::select(std::vec![0usize, 10000usize])) {
         let env = Env::default();
         let (client, admin) = setup(&env);
         let contract_id = client.address.clone();
 
         // Generate a string of 'A's of the given length.
         // For length=0, it's empty bytes/string. For 10000, it's max-length.
-        let s = std::string::String::from_utf8(vec![b'A'; length]).unwrap();
+        let s = std::string::String::from_utf8(std::vec![b'A'; length]).unwrap();
 
         let string_val = soroban_sdk::String::from_str(&env, &s);
         let args_str = soroban_sdk::vec![
