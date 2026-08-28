@@ -4,7 +4,7 @@ extern crate std;
 
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::Events;
+use soroban_sdk::testutils::{Events, Ledger};
 use soroban_sdk::{vec, Address, BytesN, Env, Map, String, TryIntoVal, Vec};
 
 use super::{AdminContract, AdminContractClient, Role};
