@@ -54,6 +54,7 @@
 //! | `14` | `InvalidWasmHash` | `require_valid_wasm_hash` for an unregistered/malformed hash |
 //! | `15` | `NotProposer` | `cancel_proposal` when `caller` did not submit the proposal |
 //! | `16` | `ProposalNotCancellable` | `cancel_proposal` on a `Cancelled` or `Expired` proposal |
+//! | `20` | `Unauthorized` | general authorization failure (caller not permitted) |
 //!
 //! ## Event Emissions
 //!
@@ -240,6 +241,10 @@ pub enum AdminError {
     ProposalNotPending = 18,
     /// The caller already cast a vote on this upgrade proposal.
     DuplicateVote = 19,
+    /// General authorization failure: the caller is not permitted to perform
+    /// the requested operation. Distinct from [`AdminError::UnauthorizedRole`],
+    /// which is specific to a role-guard failure.
+    Unauthorized = 20,
 }
 
 /// Storage keys for the access-control layer.
@@ -314,6 +319,13 @@ pub enum AdminKey {
 /// @title Role
 /// @notice Enumerates the roles recognized by the access-control layer.
 /// @dev Append new variants only; inserting would remap previously persisted role entries.
+/// @custom:storage-format Roles are persisted per-address as a `u32` bitmask
+/// under `AdminKey::RoleMask(Address)`; each variant maps to a single bit —
+/// `Admin` = `1 << 0` (1), `Minter` = `1 << 1` (2), `SuperAdmin` = `1 << 2`
+/// (4), `Pauser` = `1 << 3` (8) — see [`ROLE_BIT_ADMIN`], [`ROLE_BIT_MINTER`],
+/// [`ROLE_BIT_SUPER_ADMIN`] and [`ROLE_BIT_PAUSER`].
+/// @custom:bitmask-helper Use [`mask_has_role`] to test a bit, [`mask_with_role`]
+/// to set one, and [`mask_without_role`] to clear one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[contracttype]
 pub enum Role {
@@ -344,22 +356,30 @@ pub const MINTER_ROLE: Role = Role::Minter;
 /// Bitmask bit for the [`Role::Admin`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
 ///
-/// @notice Bitmask value `1 << 0` corresponding to the Admin role.
+/// @notice Bitmask value `1 << 0` (decimal `1`) corresponding to the Admin role.
+/// @custom:bitmask-value 1 — the role bit used by [`Role::Admin`] in
+/// `AdminKey::RoleMask(Address)` storage.
 pub const ROLE_BIT_ADMIN: u32 = 1 << 0;
 /// Bitmask bit for the [`Role::Minter`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
 ///
-/// @notice Bitmask value `1 << 1` corresponding to the Minter role.
+/// @notice Bitmask value `1 << 1` (decimal `2`) corresponding to the Minter role.
+/// @custom:bitmask-value 2 — the role bit used by [`Role::Minter`] in
+/// `AdminKey::RoleMask(Address)` storage.
 pub const ROLE_BIT_MINTER: u32 = 1 << 1;
 /// Bitmask bit for the [`Role::SuperAdmin`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
 ///
-/// @notice Bitmask value `1 << 2` corresponding to the SuperAdmin role.
+/// @notice Bitmask value `1 << 2` (decimal `4`) corresponding to the SuperAdmin role.
+/// @custom:bitmask-value 4 — the role bit used by [`Role::SuperAdmin`] in
+/// `AdminKey::RoleMask(Address)` storage.
 pub const ROLE_BIT_SUPER_ADMIN: u32 = 1 << 2;
 /// Bitmask bit for the [`Role::Pauser`] role within a
 /// [`AdminKey::RoleMask(Address)`] entry.
 ///
-/// @notice Bitmask value `1 << 3` corresponding to the Pauser role.
+/// @notice Bitmask value `1 << 3` (decimal `8`) corresponding to the Pauser role.
+/// @custom:bitmask-value 8 — the role bit used by [`Role::Pauser`] in
+/// `AdminKey::RoleMask(Address)` storage.
 pub const ROLE_BIT_PAUSER: u32 = 1 << 3;
 
 /// Returns the bitmask bit for `role`, or `None` for an unrecognized variant.
@@ -370,6 +390,46 @@ fn role_bit(role: Role) -> Option<u32> {
         Role::SuperAdmin => Some(ROLE_BIT_SUPER_ADMIN),
         Role::Pauser => Some(ROLE_BIT_PAUSER),
     }
+}
+
+/// Bitwise-AND test: does `mask` contain the bit for `role`?
+///
+/// @notice Checks whether a role bitmask holds the given role.
+/// @dev Returns `false` for an unrecognized role discriminant. Pure bitwise
+/// operation on the `AdminKey::RoleMask(Address)` representation; does not
+/// touch storage.
+/// @param mask The u32 role bitmask to test.
+/// @param role The role whose bit should be checked.
+/// @return `true` when the role's bit is set in `mask`, `false` otherwise.
+#[inline(always)]
+pub fn mask_has_role(mask: u32, role: Role) -> bool {
+    role_bit(role).is_some_and(|bit| mask & bit != 0)
+}
+
+/// Bitwise-OR helper: returns `mask` with the bit for `role` set.
+///
+/// @notice Adds a role to a role bitmask.
+/// @dev Pure bitwise operation; does not touch storage. Returns `mask`
+/// unchanged for an unrecognized role discriminant.
+/// @param mask The u32 role bitmask to modify.
+/// @param role The role whose bit should be added.
+/// @return A copy of `mask` with the role's bit set.
+#[inline(always)]
+pub fn mask_with_role(mask: u32, role: Role) -> u32 {
+    role_bit(role).map_or(mask, |bit| mask | bit)
+}
+
+/// Bitwise AND-NOT helper: returns `mask` with the bit for `role` cleared.
+///
+/// @notice Removes a role from a role bitmask.
+/// @dev Pure bitwise operation; does not touch storage. Returns `mask`
+/// unchanged for an unrecognized role discriminant.
+/// @param mask The u32 role bitmask to modify.
+/// @param role The role whose bit should be cleared.
+/// @return A copy of `mask` with the role's bit cleared.
+#[inline(always)]
+pub fn mask_without_role(mask: u32, role: Role) -> u32 {
+    role_bit(role).map_or(mask, |bit| mask & !bit)
 }
 
 /// Every `(role, bit)` pair in bit order, used for legacy-entry migration.
@@ -1604,6 +1664,7 @@ mod tests {
 
     mod gas_bench;
     mod proptest;
+    mod rbac_errors;
 
     #[contract]
     struct AdminContract;
@@ -2016,6 +2077,24 @@ mod tests {
         let result = client.try_grant_role(&caller, &Role::Minter, &role_holder);
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
         assert!(!client.has_role(&Role::Minter, &role_holder));
+    }
+
+    #[test]
+    fn test_minter_cannot_grant_superadmin_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let minter = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.grant_role(&admin, &Role::Minter, &minter);
+
+        let result = client.try_grant_role(&minter, &Role::SuperAdmin, &target);
+        assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(3))));
+        assert!(!client.has_role(&Role::SuperAdmin, &target));
     }
 
     #[test]
