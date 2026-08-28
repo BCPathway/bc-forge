@@ -1,6 +1,6 @@
-use soroban_sdk::{contract, contractimpl, Address, Env};
 use crate::error::VaultError; // Assuming a custom error enum exists
-use crate::storage; // Assuming standard data storage accessors
+use crate::storage;
+use soroban_sdk::{contract, contractimpl, Address, Env}; // Assuming standard data storage accessors
 
 #[contract]
 pub struct FeeVaultContract;
@@ -23,7 +23,7 @@ impl FeeVaultContract {
         let vault_address = env.current_contract_address();
 
         // 3. Invoke the fee contract to harvest/pull pending tokens
-        // Assuming the fee contract exposes a function like `harvest_fees` or `claim` 
+        // Assuming the fee contract exposes a function like `harvest_fees` or `claim`
         // that transfers tokens directly to the vault.
         let fee_client = FeeContractClient::new(&env, &fee_contract);
         let pending_amount: i128 = fee_client.harvest(&vault_address);
@@ -37,14 +37,12 @@ impl FeeVaultContract {
         let new_balance = current_balance
             .checked_add(pending_amount)
             .ok_or(VaultError::MathOverflow)?;
-            
+
         storage::set_total_underlying(&env, &new_balance);
 
         // 5. Emit compounding event
-        env.events().publish(
-            (symbol_short!("compound"), caller),
-            pending_amount,
-        );
+        env.events()
+            .publish((symbol_short!("compound"), caller), pending_amount);
 
         Ok(())
     }

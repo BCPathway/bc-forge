@@ -1,10 +1,10 @@
 use soroban_sdk::{contract, contractimpl, Address, Env};
 
-@contract
+#[contract]
 pub struct YieldVaultContract;
 
-@contractimpl
-impl YieldVaultContract {
+#[contract]
+impl impl YieldVaultContract {
     pub fn deposit(env: Env, user: Address, token_amount: i128, min_shares_out: i128) -> i128 {
         user.require_auth();
 
