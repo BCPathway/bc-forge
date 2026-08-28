@@ -5,8 +5,8 @@ import * as initModule from '../init-superadmin.js';
 import * as connectModule from '../connect-contracts.js';
 import * as configParser from '../../utils/config-parser.js';
 
-const ADMIN_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1';
-const TOKEN_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2';
+const ADMIN_ID = `C${'A'.repeat(54)}B`;
+const TOKEN_ID = `C${'A'.repeat(54)}C`;
 const KEYPAIR = Keypair.random();
 
 describe('runDeploymentOrchestrator', () => {

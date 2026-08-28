@@ -4,10 +4,10 @@ import { connectContractIds, linkContracts } from '../connect-contracts.js';
 import * as configParser from '../../utils/config-parser.js';
 import * as configUtil from '../../utils/config.js';
 
-const ADMIN_CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1';
-const TOKEN_CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2';
-const VESTING_CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3';
-const WRAPPER_CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4';
+const ADMIN_CONTRACT_ID = `C${'A'.repeat(54)}B`;
+const TOKEN_CONTRACT_ID = `C${'A'.repeat(54)}C`;
+const VESTING_CONTRACT_ID = `C${'A'.repeat(54)}D`;
+const WRAPPER_CONTRACT_ID = `C${'A'.repeat(54)}E`;
 const SIGNER_KEYPAIR = Keypair.random();
 const SIGNER_SECRET = SIGNER_KEYPAIR.secret();
 
