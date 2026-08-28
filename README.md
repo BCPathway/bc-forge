@@ -295,6 +295,37 @@ const client = new bcForgeClient({
 
 If your local Quickstart setup exposes RPC on a different path, keep the same host and update the URL to match your container configuration.
 
+## 🐳 Backend Service Docker Deployment
+
+The indexer API lives in `indexer/` and can be built from the repository root so the Docker image can resolve the local `@bc-forge/sdk` package dependency.
+
+```bash
+docker build -f indexer/Dockerfile -t bc-forge-indexer .
+```
+
+Run it with the required production env vars:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e DATABASE_URL="postgresql://user:password@host:5432/bc_forge?schema=public" \
+  -e CONTRACT_ID="CABC...XYZ" \
+  -e RPC_URL="https://soroban-testnet.stellar.org" \
+  -e PORT=3000 \
+  bc-forge-indexer
+```
+
+Required env vars:
+
+- `DATABASE_URL`: PostgreSQL connection string used by Prisma.
+- `CONTRACT_ID`: Soroban contract ID that the indexer should track.
+
+Optional env vars:
+
+- `RPC_URL`: Soroban RPC endpoint. Defaults to the Stellar testnet RPC.
+- `PORT`: HTTP port for the Express API. Defaults to `3000`.
+
+For Render, configure the service as a Docker deployment with `indexer/Dockerfile` as the Dockerfile path and set the same env vars, plus a managed PostgreSQL `DATABASE_URL`.
+
 ## 📦 SDK Usage
 
 ```typescript
