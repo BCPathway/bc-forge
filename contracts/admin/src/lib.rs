@@ -614,6 +614,11 @@ pub struct UpgradeProposal {
     /// the pre-quorum clock only: it decides `Pending` to `Expired` and nothing
     /// else. Any post-quorum execution deadline is timelock state owned by #660.
     pub expires_at: u64,
+    /// Unix timestamp (seconds) when the post-quorum execution timelock expires.
+    /// `None` while the proposal has not yet reached quorum; set to
+    /// `env.ledger().timestamp() + TIMELOCK_DELAY_SECS` the moment quorum is
+    /// first reached and never reset by later votes.
+    pub timelock_expires_at: Option<u64>,
 }
 
 /// Strkey of the well-known Stellar "null" account: an ed25519 public key
@@ -1299,6 +1304,18 @@ fn _start_timelock_if_quorate(env: &Env, proposal_id: u64) {
     extend_instance_ttl(env);
 }
 
+/// Records the timelock expiration for an [`UpgradeProposal`] when quorum is first reached.
+///
+/// Sets `timelock_expires_at` to `Some(env.ledger().timestamp() + TIMELOCK_DELAY_SECS)`
+/// the moment quorum is reached (`proposal.status == ProposalStatus::Approved`).
+/// Idempotent: if `timelock_expires_at` is already `Some`, it is never reset by later votes.
+fn _start_upgrade_timelock_if_quorate(env: &Env, proposal: &mut UpgradeProposal) {
+    if proposal.status == ProposalStatus::Approved && proposal.timelock_expires_at.is_none() {
+        proposal.timelock_expires_at =
+            Some(env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS));
+    }
+}
+
 /// Returns the unix timestamp at which `proposal_id`'s timelock expires, if any.
 ///
 /// @notice Returns `Some(unlock_time)` once the proposal has reached quorum, `None` before that.
@@ -1706,6 +1723,7 @@ pub fn submit_upgrade_proposal(
         quorum,
         status,
         expires_at: env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS),
+        timelock_expires_at: None,
     };
 
     let key = AdminKey::UpgradeProposal(id);
@@ -1715,6 +1733,90 @@ pub fn submit_upgrade_proposal(
 
     events::emit_upgrade_proposal_submitted(env, &submitter, id, &new_wasm_hash);
     Ok(id)
+}
+
+/// Executes an approved WASM upgrade immediately when all signers have approved.
+///
+/// This is an emergency bypass for critical security patches: when 100% of the
+/// configured admin pool members have approved a proposal, this function allows
+/// immediate execution without waiting for the mandatory timelock delay.
+///
+/// The security model remains strong: 100% approval is much stricter than the
+/// configured threshold (typically 2-of-3 or similar), and all other checks
+/// (authorization, pool membership, existence, prior execution) are preserved.
+///
+/// # Authorization & Guarantees
+///
+/// - The executor must be an admin-pool member and must have authorized the
+///   invocation; execution is not restricted to the singular contract admin.
+/// - The proposal identified by `proposal_id` must exist, must not have been
+///   executed before, and must have approvals from **every** admin-pool member
+///   (100% quorum, checked via `approvals.len() == pool.len()`).
+/// - **No timelock is enforced** — execution proceeds immediately upon 100% approval.
+/// - The `executed` flag is persisted **before** the external WASM update is
+///   performed (checks-effects-interactions), so a reentrant call can never
+///   execute the same proposal twice.
+/// - If 100% approval is not met, the function reverts with [`AdminError::QuorumNotMet`].
+///
+/// # Errors
+///
+/// Returns [`AdminError::UnauthorizedRole`] if the executor is not an admin-pool member,
+/// [`AdminError::ProposalNotFound`] if no proposal exists under `proposal_id`,
+/// [`AdminError::ProposalAlreadyExecuted`] if the proposal was already executed, or
+/// [`AdminError::QuorumNotMet`] if not all admin-pool members have approved (100% quorum not met).
+///
+/// # Events
+///
+/// Emits an `upgraded` event with `(executor, proposal_id, wasm_hash)` on success.
+///
+/// @notice Executes proposal `proposal_id` immediately as a WASM upgrade to `wasm_hash`, but only if all signers have approved (100% quorum).
+/// @dev Requires pool membership, authorization, and unanimous approval. Bypasses the timelock guard. The executed flag is set before the WASM update to guard against reentrancy.
+/// @param env The Soroban environment.
+/// @param executor The address performing the upgrade; must be an admin-pool member.
+/// @param proposal_id The ID of the proposal; must have unanimous approval.
+/// @param wasm_hash The hash of the new WASM to install on the current contract.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
+pub fn emergency_execute_upgrade(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+    wasm_hash: soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
+    executor.require_auth();
+
+    let pool = get_admin_pool(env);
+    if !pool.contains(&executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+
+    // Emergency quorum check: all signers must have approved (100% agreement).
+    // proposal.approvals.len() must equal the total pool size.
+    if proposal.approvals.len() != pool.len() {
+        return Err(AdminError::QuorumNotMet);
+    }
+
+    // Effect first (checks-effects-interactions): persist the executed flag so
+    // a reentrant invocation cannot execute the same proposal twice.
+    proposal.executed = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
+
+    env.deployer().update_current_contract_wasm(wasm_hash);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1730,6 +1832,7 @@ mod tests {
 
     mod gas_bench;
     mod proptest;
+    mod quorum_proptest;
     mod rbac_errors;
 
     #[contract]
@@ -1811,6 +1914,15 @@ mod tests {
             wasm_hash: soroban_sdk::BytesN<32>,
         ) -> Result<(), AdminError> {
             super::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+        }
+
+        pub fn emergency_execute_upgrade(
+            env: Env,
+            executor: Address,
+            proposal_id: u64,
+            wasm_hash: soroban_sdk::BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::emergency_execute_upgrade(&env, executor, proposal_id, wasm_hash)
         }
 
         pub fn get_proposal_unlock_time(env: Env, proposal_id: u64) -> Option<u64> {
@@ -2220,6 +2332,34 @@ mod tests {
         client.set_admin(&admin);
         let result = client.try_revoke_role(&admin, &Role::Minter, &zero_address(&env));
         assert_eq!(result, Err(Ok(AdminError::InvalidAddress)));
+    }
+
+    // ── Issue #767: Zero-address cannot be granted a role ──────────────────
+
+    /// Assert that attempting to grant **every** role variant to the zero
+    /// address returns `AdminError::InvalidAddress`, covering both the
+    /// happy-path (the zero-address is rejected) and the error state
+    /// (the correct typed error is emitted).
+    #[test]
+    fn test_zero_address_cannot_be_granted_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            let result = client.try_grant_role(&admin, &role, &zero_address(&env));
+            assert_eq!(
+                result,
+                Err(Ok(soroban_sdk::Error::from_contract_error(4))),
+                "grant_role for {:?} to zero address should return InvalidAddress",
+                role
+            );
+        }
     }
 
     #[test]
@@ -3844,6 +3984,51 @@ mod tests {
     }
 
     #[test]
+    fn test_approve_proposal_reaches_threshold_with_three_signers() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let signer1 = Address::generate(&env);
+        let signer2 = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(
+            &vec![&env, admin.clone(), signer1.clone(), signer2.clone()],
+            &3,
+        );
+        let id = client.create_proposal(&admin, &String::from_str(&env, "upgrade proposal"));
+
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 1);
+
+        client.approve_proposal(&signer1, &id);
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 2);
+
+        client.approve_proposal(&signer2, &id);
+        let proposal: Proposal = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
+        });
+        assert_eq!(proposal.approvals.len(), 3);
+        assert!(client.is_proposal_ready(&id));
+    }
+
+    #[test]
     #[should_panic(expected = "Error(Contract, #3)")]
     fn test_approve_proposal_rejects_non_admin() {
         let env = Env::default();
@@ -3954,6 +4139,7 @@ mod tests {
     #[test]
     fn test_is_proposal_ready_returns_false_for_nonexistent_proposal() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
 
@@ -3968,24 +4154,26 @@ mod tests {
         ["Approved", "Cancelled", "Executed", "Expired", "Pending"];
 
     /// Encoded field names of [`UpgradeProposal`], frozen the same way.
-    const UPGRADE_PROPOSAL_FIELD_NAMES: [&str; 6] = [
+    const UPGRADE_PROPOSAL_FIELD_NAMES: [&str; 7] = [
         "expires_at",
         "proposer",
         "quorum",
         "status",
         "targets",
+        "timelock_expires_at",
         "votes",
     ];
 
     /// Encoded value kind per [`UpgradeProposal`] field. A width change
     /// (`quorum` from `u64` to `u32`) re-encodes the value and orphans stored
     /// proposals exactly as a rename does, and no name check would catch it.
-    const UPGRADE_PROPOSAL_FIELD_KINDS: [(&str, &str); 6] = [
+    const UPGRADE_PROPOSAL_FIELD_KINDS: [(&str, &str); 7] = [
         ("expires_at", "u64"),
         ("proposer", "address"),
         ("quorum", "u64"),
         ("status", "vec"),
         ("targets", "vec"),
+        ("timelock_expires_at", "option"),
         ("votes", "map"),
     ];
 
@@ -4022,6 +4210,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: 1_724_000_000,
+            timelock_expires_at: None,
         }
     }
 
@@ -4058,6 +4247,7 @@ mod tests {
             ScVal::Address(_) => "address",
             ScVal::Vec(_) => "vec",
             ScVal::Map(_) => "map",
+            ScVal::Void => "option",
             _ => "unexpected",
         }
     }
@@ -4095,6 +4285,7 @@ mod tests {
             quorum: _,
             status: _,
             expires_at: _,
+            timelock_expires_at: _,
         } = &proposal;
 
         let encoded = encoded_fields(&env, proposal);
@@ -4251,6 +4442,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4283,6 +4475,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4314,6 +4507,7 @@ mod tests {
             quorum: 1,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4342,6 +4536,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4386,6 +4581,7 @@ mod tests {
             quorum: 1,
             status: ProposalStatus::Approved,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4413,6 +4609,7 @@ mod tests {
             quorum: 1,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp(),
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4712,6 +4909,57 @@ mod tests {
         assert_eq!(read_upgrade_proposal_id_counter(&env, &contract_id), None);
     }
 
+    // ── UpgradeProposal timelock state structure (#660) ─────────────────────────
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_none_on_creation() {
+        let env = Env::default();
+        let proposal = upgrade_proposal_fixture(&env);
+        assert_eq!(proposal.timelock_expires_at, None);
+    }
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_set_when_quorum_first_reached() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        assert_eq!(proposal.status, ProposalStatus::Pending);
+        assert_eq!(proposal.timelock_expires_at, None);
+
+        proposal.status = ProposalStatus::Approved;
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+
+        let expected_unlock = env.ledger().timestamp().saturating_add(TIMELOCK_DELAY_SECS);
+        assert_eq!(proposal.timelock_expires_at, Some(expected_unlock));
+    }
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_not_reset_by_later_votes() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        proposal.status = ProposalStatus::Approved;
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+
+        let initial_timelock = proposal.timelock_expires_at;
+        assert!(initial_timelock.is_some());
+
+        // Advance ledger timestamp by 100 seconds
+        env.ledger().set_timestamp(env.ledger().timestamp() + 100);
+
+        // Subsequent votes/calls on already-quorate proposal must not reset timelock_expires_at
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+        assert_eq!(proposal.timelock_expires_at, initial_timelock);
+    }
+
+    #[test]
+    fn test_upgrade_proposal_timelock_expires_at_remains_none_below_quorum() {
+        let env = Env::default();
+        let mut proposal = upgrade_proposal_fixture(&env);
+        assert_eq!(proposal.status, ProposalStatus::Pending);
+
+        _start_upgrade_timelock_if_quorate(&env, &mut proposal);
+        assert_eq!(proposal.timelock_expires_at, None);
+    }
+
     // ── cancel_proposal (#662) ──────────────────────────────────────────────
 
     /// Writes `proposal` directly into the contract's `UpgradeProposal(id)`
@@ -4754,6 +5002,7 @@ mod tests {
             quorum: 2,
             status,
             expires_at: 1_724_000_000,
+            timelock_expires_at: None,
         }
     }
 
