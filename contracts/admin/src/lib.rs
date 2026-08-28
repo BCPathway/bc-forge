@@ -1664,6 +1664,7 @@ mod tests {
 
     mod gas_bench;
     mod proptest;
+    mod quorum_proptest;
     mod rbac_errors;
 
     #[contract]
@@ -2145,6 +2146,34 @@ mod tests {
         client.set_admin(&admin);
         let result = client.try_revoke_role(&admin, &Role::Minter, &zero_address(&env));
         assert_eq!(result, Err(Ok(AdminError::InvalidAddress)));
+    }
+
+    // ── Issue #767: Zero-address cannot be granted a role ──────────────────
+
+    /// Assert that attempting to grant **every** role variant to the zero
+    /// address returns `AdminError::InvalidAddress`, covering both the
+    /// happy-path (the zero-address is rejected) and the error state
+    /// (the correct typed error is emitted).
+    #[test]
+    fn test_zero_address_cannot_be_granted_any_role() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let roles = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
+        for role in roles {
+            let result = client.try_grant_role(&admin, &role, &zero_address(&env));
+            assert_eq!(
+                result,
+                Err(Ok(soroban_sdk::Error::from_contract_error(4))),
+                "grant_role for {:?} to zero address should return InvalidAddress",
+                role
+            );
+        }
     }
 
     #[test]
