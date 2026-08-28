@@ -4,8 +4,6 @@
 //! range of amounts against unauthorized callers, asserting that only an
 //! authorized minter can ever create tokens.
 
-#![cfg(test)]
-
 extern crate std;
 
 use crate::{BcForgeToken, BcForgeTokenClient};

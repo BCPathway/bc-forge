@@ -7,6 +7,8 @@ import {
   hash,
   rpc as SorobanRpcNs,
 } from "@stellar/stellar-sdk";
+import { addNetworkOptions } from "../network.js";
+import { prepareSignAndSubmit } from "../utils/soroban-tx.js";
 
 export interface FeeEstimate {
   baseFee: string;
@@ -32,21 +34,16 @@ export interface UpgradeOptions {
   proposalId?: string;
   dryRun?: boolean;
   estimate?: boolean;
+  timeout?: number;
 }
 
 export function createUpgradeCommand(): Command {
-  return new Command("upgrade")
+  const cmd = new Command("upgrade")
     .description("Submit a multisig upgrade proposal for a deployed contract")
     .requiredOption("--wasm <path>", "Path to the new WASM binary")
     .requiredOption(
       "--contract-id <id>",
       "Contract ID of the deployed contract to upgrade"
-    )
-    .requiredOption("--rpc-url <url>", "Soroban RPC endpoint URL")
-    .option(
-      "--network-passphrase <phrase>",
-      "Stellar network passphrase",
-      "Test SDF Network ; September 2015"
     )
     .requiredOption("--source <secret>", "Source account secret key")
     .option("--proposal-id <id>", "Existing proposal ID to execute")
@@ -56,9 +53,22 @@ export function createUpgradeCommand(): Command {
       "Dry-run to estimate total fee cost without submitting",
       false
     )
-    .action(async (opts) => {
-      await runUpgrade(opts);
+    .option(
+      "--timeout <ms>",
+      "Timeout in milliseconds to wait for on-chain confirmation",
+      "30000"
+    );
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (opts) => {
+    await runUpgrade({
+      ...opts,
+      wasmPath: opts.wasmPath ?? opts.wasm,
     });
+  });
+
+  return cmd;
 }
 
 export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
@@ -143,22 +153,48 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
       };
     }
 
-    // 6. Submit on-chain
-    const result = await server.sendTransaction(tx);
+    // 6. Submit on-chain (simulate + assemble fee/footprint, sign, submit, await confirmation)
+    const timeout = Number(opts.timeout) || 30000;
+    const outcome = await prepareSignAndSubmit(server, tx, sourceKeypair, {
+      deadline: Date.now() + timeout,
+    });
 
-    if (result.status === "ERROR") {
-      return {
-        success: false,
-        message: `Transaction submission failed: ${JSON.stringify(result.errorResult)}`,
-      };
+    switch (outcome.outcome) {
+      case "simulation_failed":
+        return {
+          success: false,
+          wasmHash,
+          message: `Simulation failed: ${outcome.error}`,
+        };
+      case "submission_failed":
+        return {
+          success: false,
+          wasmHash,
+          txHash: outcome.hash,
+          message: `Transaction submission failed: ${outcome.error}`,
+        };
+      case "failed_on_ledger":
+        return {
+          success: false,
+          wasmHash,
+          txHash: outcome.hash,
+          message: `Upgrade transaction failed on-ledger. Hash: ${outcome.hash}`,
+        };
+      case "timed_out":
+        return {
+          success: false,
+          wasmHash,
+          txHash: outcome.hash,
+          message: `Timed out after ${timeout}ms waiting for confirmation. Hash: ${outcome.hash} (last status: ${outcome.lastStatus})`,
+        };
+      case "confirmed":
+        return {
+          success: true,
+          txHash: outcome.hash,
+          wasmHash,
+          message: `Upgrade transaction submitted. Hash: ${outcome.hash}`,
+        };
     }
-
-    return {
-      success: true,
-      txHash: result.hash,
-      wasmHash,
-      message: `Upgrade transaction submitted. Hash: ${result.hash}`,
-    };
   } catch (err) {
     return {
       success: false,

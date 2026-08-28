@@ -29,3 +29,8 @@ export type { WalletAdapter } from './walletAdapter';
 export { FreighterAdapter } from './adapters/freighterAdapter';
 export { AlbedoAdapter } from './adapters/albedoAdapter';
 export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
+
+// ─── APY helpers (#745) ──────────────────────────────────────────────────────
+export { calculateApy } from './apy';
+export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
+

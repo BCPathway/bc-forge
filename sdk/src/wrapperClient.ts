@@ -72,6 +72,19 @@ export class WrapperClient {
   }
 
   /**
+   * Get an address's vault share balance.
+   *
+   * A vault share is minted 1:1 with the wrapped token on `wrap()` and burned
+   * 1:1 on `unwrap()`/`withdraw()`/`burn()`, so this returns the same value as
+   * {@link getBalance} — exposed under vault vocabulary for callers reasoning
+   * about shares rather than raw token units.
+   */
+  async getShareBalance(address: string): Promise<bigint> {
+    const result = await this.queryContract('share_balance', [addressToScVal(address)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Get the total wrapped token supply.
    */
   async getTotalSupply(): Promise<bigint> {
@@ -88,6 +101,18 @@ export class WrapperClient {
   }
 
   /**
+   * Get the cumulative underlying tokens distributed via `distributeRewards`
+   * that have not yet been compounded.
+   *
+   * This is a running total incremented on every `distributeRewards` call;
+   * nothing on the contract consumes or resets it yet.
+   */
+  async getPendingRewards(): Promise<bigint> {
+    const result = await this.queryContract('pending_rewards', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Calculate the current vault share price (total assets / total shares).
    *
    * The share price is the amount of underlying tokens each outstanding vault
@@ -98,6 +123,24 @@ export class WrapperClient {
    */
   async calculateSharePrice(): Promise<bigint> {
     const result = await this.queryContract('calculate_share_price', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Preview the pro-rata reward entitlement for a hypothetical share amount:
+   * `rewards = (userShares * totalAssets) / totalShares`.
+   *
+   * This mirrors what `withdraw()` would pay out for `userShares` right now,
+   * without burning shares or moving tokens. It is computed directly from the
+   * totals rather than via `userShares * calculateSharePrice()`, which floors
+   * twice and can under-report the entitlement — this floors only once, so it
+   * always agrees with `withdraw()`'s actual payout.
+   *
+   * @param userShares - The hypothetical share amount to price out.
+   * @returns The underlying token amount that many shares would be worth.
+   */
+  async calculateRewards(userShares: bigint): Promise<bigint> {
+    const result = await this.queryContract('calculate_rewards', [i128ToScVal(userShares)]);
     return BigInt(scValToNative(result) as string | number | bigint);
   }
 

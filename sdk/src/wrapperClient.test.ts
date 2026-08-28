@@ -14,6 +14,9 @@ describe('WrapperClient surface', () => {
     expect(typeof client.distributeRewards).toBe('function');
     expect(typeof client.getTotalAssets).toBe('function');
     expect(typeof client.calculateSharePrice).toBe('function');
+    expect(typeof client.calculateRewards).toBe('function');
+    expect(typeof client.getShareBalance).toBe('function');
+    expect(typeof client.getPendingRewards).toBe('function');
     expect(typeof client.wrap).toBe('function');
     expect(typeof client.unwrap).toBe('function');
     expect(typeof client.withdraw).toBe('function');
