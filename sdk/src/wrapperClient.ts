@@ -431,11 +431,7 @@ export class WrapperClient {
    * @param source - Caller's keypair
    */
   async withdraw(caller: string, shares: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'withdraw',
-      [addressToScVal(caller), i128ToScVal(shares)],
-      source,
-    );
+    return this.invokeContract('withdraw', [addressToScVal(caller), i128ToScVal(shares)], source);
   }
 
   /**
@@ -475,11 +471,7 @@ export class WrapperClient {
    * @param user   - Address whose deposit lockup is being cleared
    * @param source - Caller's keypair
    */
-  async clearUnlockTime(
-    caller: string,
-    user: string,
-    source: Keypair,
-  ): Promise<TransactionResult> {
+  async clearUnlockTime(caller: string, user: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'clear_unlock_time',
       [addressToScVal(caller), addressToScVal(user)],
