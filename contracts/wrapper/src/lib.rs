@@ -480,9 +480,9 @@ impl WrapperContract {
             // get the pre-deposit asset total so the exchange rate reflects the vault state
             // before this deposit.
             let total_assets_after = underlying_client.balance(&env.current_contract_address());
-            let total_assets_before = total_assets_after
-                .checked_sub(assets)
-                .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount));
+            let total_assets_before = total_assets_after.checked_sub(assets).unwrap_or_else(|| {
+                soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
+            });
 
             if total_assets_before <= 0 {
                 // Edge case: vault had zero assets but nonzero shares — treat like first deposit.
