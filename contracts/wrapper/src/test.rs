@@ -116,6 +116,7 @@ fn test_uninitialized_access_panics() {
     assert!(client.try_symbol().is_err());
     assert!(client.try_decimals().is_err());
     assert!(client.try_supply().is_err());
+    assert!(client.try_share_balance(&Address::generate(&env)).is_err());
     assert!(client.try_pending_rewards().is_err());
 }
 
@@ -202,6 +203,62 @@ fn test_supply_equals_sum_of_balances() {
         wrapper.balance(&user_a) + wrapper.balance(&user_b),
         wrapper.supply()
     );
+}
+
+#[test]
+fn test_share_balance_zero_for_address_that_never_wrapped() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user) = setup_and_fund(&env);
+    let stranger = Address::generate(&env);
+
+    assert_eq!(wrapper.share_balance(&stranger), 0);
+}
+
+#[test]
+fn test_share_balance_matches_balance_after_wrap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.wrap(&user, &2_500_000);
+
+    assert_eq!(wrapper.share_balance(&user), 2_500_000);
+    assert_eq!(wrapper.share_balance(&user), wrapper.balance(&user));
+}
+
+#[test]
+fn test_share_balance_tracks_transfers_burns_and_unwraps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &5_000_000);
+    assert_eq!(wrapper.share_balance(&user_a), 5_000_000);
+
+    wrapper.transfer(&user_a, &user_b, &1_500_000);
+    assert_eq!(wrapper.share_balance(&user_a), 3_500_000);
+    assert_eq!(wrapper.share_balance(&user_b), 1_500_000);
+
+    wrapper.burn(&user_b, &500_000);
+    assert_eq!(wrapper.share_balance(&user_b), 1_000_000);
+
+    wrapper.unwrap(&user_a, &1_000_000);
+    assert_eq!(wrapper.share_balance(&user_a), 2_500_000);
+}
+
+#[test]
+fn test_share_balance_tracked_independently_per_user() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user_a) = setup_and_fund(&env);
+    let user_b = Address::generate(&env);
+
+    wrapper.wrap(&user_a, &1_000_000);
+
+    assert_eq!(wrapper.share_balance(&user_a), 1_000_000);
+    assert_eq!(wrapper.share_balance(&user_b), 0);
 }
 
 #[test]

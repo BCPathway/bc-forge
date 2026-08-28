@@ -605,6 +605,23 @@ impl WrapperContract {
         Self::read_supply(&env)
     }
 
+    /// Returns `user`'s vault share balance.
+    ///
+    /// @notice A vault share is minted 1:1 with the wrapper token on `wrap`
+    ///         and burned 1:1 on `unwrap`/`withdraw`/`burn`/`burn_from`, so
+    ///         this reads the same persistent `Balance` entry as the
+    ///         `TokenInterface::balance` getter — exposed here under vault
+    ///         vocabulary for callers reasoning about shares rather than
+    ///         raw token units. Returns 0 for an address that has never held
+    ///         shares.
+    /// @param env The Soroban environment.
+    /// @param user The address to query.
+    /// @return The number of vault shares `user` currently holds.
+    pub fn share_balance(env: Env, user: Address) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_balance(&env, &user)
+    }
+
     /// Pause all wrap/unwrap and transfer operations. Requires Pauser role.
     pub fn pause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
