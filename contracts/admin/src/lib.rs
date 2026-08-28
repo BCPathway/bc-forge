@@ -1668,6 +1668,90 @@ pub fn require_valid_wasm_hash(
     Ok(())
 }
 
+/// Executes an approved WASM upgrade immediately when all signers have approved.
+///
+/// This is an emergency bypass for critical security patches: when 100% of the
+/// configured admin pool members have approved a proposal, this function allows
+/// immediate execution without waiting for the mandatory timelock delay.
+///
+/// The security model remains strong: 100% approval is much stricter than the
+/// configured threshold (typically 2-of-3 or similar), and all other checks
+/// (authorization, pool membership, existence, prior execution) are preserved.
+///
+/// # Authorization & Guarantees
+///
+/// - The executor must be an admin-pool member and must have authorized the
+///   invocation; execution is not restricted to the singular contract admin.
+/// - The proposal identified by `proposal_id` must exist, must not have been
+///   executed before, and must have approvals from **every** admin-pool member
+///   (100% quorum, checked via `approvals.len() == pool.len()`).
+/// - **No timelock is enforced** — execution proceeds immediately upon 100% approval.
+/// - The `executed` flag is persisted **before** the external WASM update is
+///   performed (checks-effects-interactions), so a reentrant call can never
+///   execute the same proposal twice.
+/// - If 100% approval is not met, the function reverts with [`AdminError::QuorumNotMet`].
+///
+/// # Errors
+///
+/// Returns [`AdminError::UnauthorizedRole`] if the executor is not an admin-pool member,
+/// [`AdminError::ProposalNotFound`] if no proposal exists under `proposal_id`,
+/// [`AdminError::ProposalAlreadyExecuted`] if the proposal was already executed, or
+/// [`AdminError::QuorumNotMet`] if not all admin-pool members have approved (100% quorum not met).
+///
+/// # Events
+///
+/// Emits an `upgraded` event with `(executor, proposal_id, wasm_hash)` on success.
+///
+/// @notice Executes proposal `proposal_id` immediately as a WASM upgrade to `wasm_hash`, but only if all signers have approved (100% quorum).
+/// @dev Requires pool membership, authorization, and unanimous approval. Bypasses the timelock guard. The executed flag is set before the WASM update to guard against reentrancy.
+/// @param env The Soroban environment.
+/// @param executor The address performing the upgrade; must be an admin-pool member.
+/// @param proposal_id The ID of the proposal; must have unanimous approval.
+/// @param wasm_hash The hash of the new WASM to install on the current contract.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
+pub fn emergency_execute_upgrade(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+    wasm_hash: soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
+    executor.require_auth();
+
+    let pool = get_admin_pool(env);
+    if !pool.contains(&executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+
+    // Emergency quorum check: all signers must have approved (100% agreement).
+    // proposal.approvals.len() must equal the total pool size.
+    if proposal.approvals.len() != pool.len() {
+        return Err(AdminError::QuorumNotMet);
+    }
+
+    // Effect first (checks-effects-interactions): persist the executed flag so
+    // a reentrant invocation cannot execute the same proposal twice.
+    proposal.executed = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
+
+    env.deployer().update_current_contract_wasm(wasm_hash);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1763,6 +1847,15 @@ mod tests {
             wasm_hash: soroban_sdk::BytesN<32>,
         ) -> Result<(), AdminError> {
             super::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+        }
+
+        pub fn emergency_execute_upgrade(
+            env: Env,
+            executor: Address,
+            proposal_id: u64,
+            wasm_hash: soroban_sdk::BytesN<32>,
+        ) -> Result<(), AdminError> {
+            super::emergency_execute_upgrade(&env, executor, proposal_id, wasm_hash)
         }
 
         pub fn get_proposal_unlock_time(env: Env, proposal_id: u64) -> Option<u64> {
@@ -3970,6 +4063,7 @@ mod tests {
     #[test]
     fn test_is_proposal_ready_returns_false_for_nonexistent_proposal() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
 
