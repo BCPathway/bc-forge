@@ -3876,6 +3876,7 @@ mod tests {
         client.mark_executed(&9999);
     }
 
+    #[test]
     fn test_is_proposal_ready_returns_false_for_nonexistent_proposal() {
         let env = Env::default();
         let contract_id = env.register(AdminContract, ());
