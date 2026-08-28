@@ -6,8 +6,6 @@
 //! the error-adjacent states the helpers must handle: a user with no lock at
 //! all, and a lock whose unlock timestamp has already passed (expired).
 
-#![cfg(test)]
-
 use crate::{BcForgeToken, BcForgeTokenClient, DataKey, LockupState};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
