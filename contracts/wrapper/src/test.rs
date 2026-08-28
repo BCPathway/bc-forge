@@ -1526,3 +1526,154 @@ fn test_deposit_accumulates_supply_across_multiple_calls() {
     assert_eq!(wrapper.balance(&user), 2_000_000);
     assert_eq!(wrapper.balance(&user_b), 6_000_000);
 }
+
+// ─── Withdrawal Math Tests (#736) ───────────────────────────────────────────
+
+#[test]
+fn test_withdrawal_math_deposit_compound_yield_withdraw_returns_greater_than_initial_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    let initial_deposit = 1_000_000i128;
+    let yield_amount = 500_000i128;
+
+    // 1. User deposits initial assets into the vault
+    let shares_minted = wrapper.deposit(&user, &initial_deposit);
+    assert_eq!(shares_minted, initial_deposit);
+    let user_underlying_balance_after_deposit = underlying.balance(&user);
+
+    // 2. Fund rewarder and compound yield into the vault
+    underlying.mint(&admin, &rewarder, &yield_amount);
+    underlying.approve(&rewarder, &wrapper_id, &yield_amount, &u32::MAX);
+    wrapper.distribute_rewards(&rewarder, &yield_amount);
+
+    // Verify vault assets grew while share supply stayed constant
+    assert_eq!(wrapper.total_assets(), initial_deposit + yield_amount);
+    assert_eq!(wrapper.supply(), shares_minted);
+
+    // 3. Withdraw all shares
+    let tokens_returned = wrapper.withdraw(&user, &shares_minted);
+
+    // 4. Assert tokens returned > initial deposit
+    assert!(
+        tokens_returned > initial_deposit,
+        "Expected tokens returned ({}) to be greater than initial deposit ({})",
+        tokens_returned,
+        initial_deposit
+    );
+    assert_eq!(tokens_returned, initial_deposit + yield_amount);
+    assert_eq!(
+        underlying.balance(&user),
+        user_underlying_balance_after_deposit + tokens_returned
+    );
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), 0);
+}
+
+#[test]
+fn test_withdrawal_math_multi_user_pro_rata_payout_with_compounded_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user_a) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let user_b = Address::generate(&env);
+    let rewarder = Address::generate(&env);
+
+    let deposit_a = 2_000_000i128;
+    let deposit_b = 4_000_000i128;
+    let yield_amount = 3_000_000i128;
+
+    underlying.mint(&admin, &user_b, &deposit_b);
+    underlying.approve(&user_b, &wrapper_id, &deposit_b, &u32::MAX);
+    underlying.mint(&admin, &rewarder, &yield_amount);
+    underlying.approve(&rewarder, &wrapper_id, &yield_amount, &u32::MAX);
+
+    // User A and User B deposit
+    let shares_a = wrapper.deposit(&user_a, &deposit_a);
+    let shares_b = wrapper.deposit(&user_b, &deposit_b);
+
+    // Compound yield
+    wrapper.distribute_rewards(&rewarder, &yield_amount);
+
+    // User A withdraws all shares -> 1/3 of total pool
+    let tokens_a = wrapper.withdraw(&user_a, &shares_a);
+    assert_eq!(tokens_a, 3_000_000); // 2M principal + 1M yield
+    assert!(tokens_a > deposit_a);
+
+    // User B withdraws all shares -> 2/3 of total pool
+    let tokens_b = wrapper.withdraw(&user_b, &shares_b);
+    assert_eq!(tokens_b, 6_000_000); // 4M principal + 2M yield
+    assert!(tokens_b > deposit_b);
+
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), 0);
+}
+
+#[test]
+fn test_withdrawal_math_sequential_partial_withdrawals_after_compounding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    let initial_deposit = 10_000_000i128;
+    let yield_amount = 5_000_000i128;
+
+    underlying.mint(&admin, &rewarder, &yield_amount);
+    underlying.approve(&rewarder, &wrapper_id, &yield_amount, &u32::MAX);
+
+    let total_shares = wrapper.deposit(&user, &initial_deposit);
+    wrapper.distribute_rewards(&rewarder, &yield_amount);
+
+    // Partial withdrawal 1: withdraw 25% shares
+    let quarter_shares = total_shares / 4;
+    let payout_1 = wrapper.withdraw(&user, &quarter_shares);
+    assert_eq!(payout_1, 3_750_000); // 2.5M principal + 1.25M yield
+    assert!(payout_1 > initial_deposit / 4);
+
+    // Partial withdrawal 2: withdraw remaining 75% shares
+    let remaining_shares = wrapper.balance(&user);
+    let payout_2 = wrapper.withdraw(&user, &remaining_shares);
+    assert_eq!(payout_2, 11_250_000); // 7.5M principal + 3.75M yield
+    assert!(payout_2 > (initial_deposit * 3) / 4);
+
+    assert_eq!(payout_1 + payout_2, initial_deposit + yield_amount);
+    assert_eq!(wrapper.supply(), 0);
+}
+
+#[test]
+fn test_withdrawal_math_reverts_on_zero_or_negative_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.deposit(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_withdraw(&user, &-500),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_withdrawal_math_reverts_on_insufficient_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.deposit(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_withdraw(&user, &1_000_001),
+        Err(Ok(WrapperError::InsufficientBalance))
+    );
+}
+
