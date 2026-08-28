@@ -216,23 +216,6 @@ impl WrapperContract {
     ///
     /// @notice Returns the total number of shares in circulation; defaults to 0
     ///         when the supply has never been written (e.g. before initialization).
-    fn read_unlock_time(env: &Env, user: &Address) -> Option<u64> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::UnlockTime(user.clone()))
-    }
-
-    fn write_unlock_time(env: &Env, user: &Address, unlock_timestamp: u64) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::UnlockTime(user.clone()), &unlock_timestamp);
-    }
-
-    fn remove_unlock_time(env: &Env, user: &Address) {
-        env.storage()
-            .persistent()
-            .remove(&DataKey::UnlockTime(user.clone()));
-    }
     fn read_supply(env: &Env) -> i128 {
         env.storage().instance().get(&DataKey::Supply).unwrap_or(0)
     }
