@@ -3780,23 +3780,35 @@ mod tests {
         let signer2 = Address::generate(&env);
 
         client.set_admin(&admin);
-        client.set_admin_pool(&vec![&env, admin.clone(), signer1.clone(), signer2.clone()], &3);
+        client.set_admin_pool(
+            &vec![&env, admin.clone(), signer1.clone(), signer2.clone()],
+            &3,
+        );
         let id = client.create_proposal(&admin, &String::from_str(&env, "upgrade proposal"));
 
         let proposal: Proposal = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&AdminKey::Proposal(id)).unwrap()
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
         });
         assert_eq!(proposal.approvals.len(), 1);
 
         client.approve_proposal(&signer1, &id);
         let proposal: Proposal = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&AdminKey::Proposal(id)).unwrap()
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
         });
         assert_eq!(proposal.approvals.len(), 2);
 
         client.approve_proposal(&signer2, &id);
         let proposal: Proposal = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&AdminKey::Proposal(id)).unwrap()
+            env.storage()
+                .instance()
+                .get(&AdminKey::Proposal(id))
+                .unwrap()
         });
         assert_eq!(proposal.approvals.len(), 3);
         assert!(client.is_proposal_ready(&id));
