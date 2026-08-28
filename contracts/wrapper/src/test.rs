@@ -1676,4 +1676,3 @@ fn test_withdrawal_math_reverts_on_insufficient_shares() {
         Err(Ok(WrapperError::InsufficientBalance))
     );
 }
-
