@@ -1,6 +1,7 @@
 use crate::{VaultState, WrapperContract, WrapperContractClient, WrapperError};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::Ledger;
 use soroban_sdk::{Address, Env, String};
 
 fn setup(
