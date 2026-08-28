@@ -35,7 +35,12 @@ export { FreighterAdapter } from './adapters/freighterAdapter';
 export { AlbedoAdapter } from './adapters/albedoAdapter';
 export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
 
+// ─── Vault and Wrapper Clients (#744) ────────────────────────────────────────
+export { VaultClient } from './vaultClient';
+export type { VaultClientConfig } from './vaultClient';
+export { WrapperClient } from './wrapperClient';
+export type { WrapperClientConfig } from './wrapperClient';
+
 // ─── APY helpers (#745) ──────────────────────────────────────────────────────
 export { calculateApy } from './apy';
 export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
-

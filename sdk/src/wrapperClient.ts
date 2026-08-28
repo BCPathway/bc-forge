@@ -1,5 +1,5 @@
 /**
- * @bc-forge/sdk — WrapperClient
+ * @bc-forge/sdk â€” WrapperClient
  *
  * High-level TypeScript client for interacting with deployed bc-forge
  * wrapper contracts on the Stellar/Soroban network.
@@ -33,7 +33,7 @@ import {
 import { SimulationError, RPCError } from './errors';
 import type { TransactionResult } from './client';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface WrapperClientConfig {
   /** Soroban RPC endpoint URL */
@@ -44,7 +44,27 @@ export interface WrapperClientConfig {
   contractId: string;
 }
 
-// ─── Client ──────────────────────────────────────────────────────────────────
+/**
+ * Vault configuration parameters, limits, exchange rate, and fee state.
+ */
+export interface VaultState {
+  /** Fee rate in basis points (e.g. 100 = 1%) */
+  feeRateBps: number;
+  /** Address designated to receive collected vault fees */
+  feeReceiver: string;
+  /** Minimum deposit limit per operation */
+  minDeposit: bigint;
+  /** Maximum deposit cap per operation or total vault capacity */
+  maxDeposit: bigint;
+  /** Current exchange rate between shares and underlying asset */
+  exchangeRate: bigint;
+  /** Accumulated undistributed fees */
+  accumulatedFees: bigint;
+  /** Timestamp of the last fee accumulation or rate update */
+  lastUpdateTimestamp: bigint;
+}
+
+// â”€â”€â”€ Client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export class WrapperClient {
   private rpcUrl: string;
@@ -61,26 +81,13 @@ export class WrapperClient {
     this.contract = new Contract(this.contractId);
   }
 
-  // ─── Read-Only Queries ───────────────────────────────────────────────────
+  // â”€â”€â”€ Read-Only Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Get the wrapped token balance for an address.
    */
   async getBalance(address: string): Promise<bigint> {
     const result = await this.queryContract('balance', [addressToScVal(address)]);
-    return BigInt(scValToNative(result) as string | number | bigint);
-  }
-
-  /**
-   * Get an address's vault share balance.
-   *
-   * A vault share is minted 1:1 with the wrapped token on `wrap()` and burned
-   * 1:1 on `unwrap()`/`withdraw()`/`burn()`, so this returns the same value as
-   * {@link getBalance} — exposed under vault vocabulary for callers reasoning
-   * about shares rather than raw token units.
-   */
-  async getShareBalance(address: string): Promise<bigint> {
-    const result = await this.queryContract('share_balance', [addressToScVal(address)]);
     return BigInt(scValToNative(result) as string | number | bigint);
   }
 
@@ -101,47 +108,28 @@ export class WrapperClient {
   }
 
   /**
-   * Get the cumulative underlying tokens distributed via `distributeRewards`
-   * that have not yet been compounded.
-   *
-   * This is a running total incremented on every `distributeRewards` call;
-   * nothing on the contract consumes or resets it yet.
+   * Get the current vault configuration parameters, limits, exchange rate, and fee state.
    */
-  async getPendingRewards(): Promise<bigint> {
-    const result = await this.queryContract('pending_rewards', []);
-    return BigInt(scValToNative(result) as string | number | bigint);
-  }
-
-  /**
-   * Calculate the current vault share price (total assets / total shares).
-   *
-   * The share price is the amount of underlying tokens each outstanding vault
-   * share is entitled to. Throws when the contract reports an error, e.g. when
-   * there are no outstanding shares yet (divide-by-zero protection).
-   *
-   * @returns Share price as bigint (integer division, rounded down)
-   */
-  async calculateSharePrice(): Promise<bigint> {
-    const result = await this.queryContract('calculate_share_price', []);
-    return BigInt(scValToNative(result) as string | number | bigint);
-  }
-
-  /**
-   * Preview the pro-rata reward entitlement for a hypothetical share amount:
-   * `rewards = (userShares * totalAssets) / totalShares`.
-   *
-   * This mirrors what `withdraw()` would pay out for `userShares` right now,
-   * without burning shares or moving tokens. It is computed directly from the
-   * totals rather than via `userShares * calculateSharePrice()`, which floors
-   * twice and can under-report the entitlement — this floors only once, so it
-   * always agrees with `withdraw()`'s actual payout.
-   *
-   * @param userShares - The hypothetical share amount to price out.
-   * @returns The underlying token amount that many shares would be worth.
-   */
-  async calculateRewards(userShares: bigint): Promise<bigint> {
-    const result = await this.queryContract('calculate_rewards', [i128ToScVal(userShares)]);
-    return BigInt(scValToNative(result) as string | number | bigint);
+  async getVaultState(): Promise<VaultState> {
+    const result = await this.queryContract('get_vault_state', []);
+    const native = scValToNative(result) as {
+      accumulated_fees: bigint | number | string;
+      exchange_rate: bigint | number | string;
+      fee_rate_bps: number;
+      fee_receiver: string;
+      last_update_timestamp: bigint | number | string;
+      max_deposit: bigint | number | string;
+      min_deposit: bigint | number | string;
+    };
+    return {
+      feeRateBps: Number(native.fee_rate_bps),
+      feeReceiver: native.fee_receiver,
+      minDeposit: BigInt(native.min_deposit),
+      maxDeposit: BigInt(native.max_deposit),
+      exchangeRate: BigInt(native.exchange_rate),
+      accumulatedFees: BigInt(native.accumulated_fees),
+      lastUpdateTimestamp: BigInt(native.last_update_timestamp),
+    };
   }
 
   /**
@@ -195,7 +183,7 @@ export class WrapperClient {
     return scValToNative(result) as string;
   }
 
-  // ─── Write Transactions ──────────────────────────────────────────────────
+  // â”€â”€â”€ Write Transactions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Initialize the wrapper contract. Can only be called once.
@@ -285,6 +273,113 @@ export class WrapperClient {
   }
 
   /**
+   * Configure vault parameters, limits, exchange rate, and fee state.
+   *
+   * @param caller - Admin caller address
+   * @param state  - The complete VaultState configuration
+   * @param source - Admin's keypair
+   */
+  async setVaultState(
+    caller: string,
+    state: VaultState,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    const stateScVal = xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('accumulated_fees'),
+        val: i128ToScVal(state.accumulatedFees),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('exchange_rate'),
+        val: i128ToScVal(state.exchangeRate),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('fee_rate_bps'),
+        val: u32ToScVal(state.feeRateBps),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('fee_receiver'),
+        val: addressToScVal(state.feeReceiver),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('last_update_timestamp'),
+        val: xdr.ScVal.scvU64(new xdr.Uint64(state.lastUpdateTimestamp)),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('max_deposit'),
+        val: i128ToScVal(state.maxDeposit),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('min_deposit'),
+        val: i128ToScVal(state.minDeposit),
+      }),
+    ]);
+
+    return this.invokeContract(
+      'set_vault_state',
+      [addressToScVal(caller), stateScVal],
+      source,
+    );
+  }
+
+  /**
+   * Get an address's vault share balance.
+   *
+   * A vault share is minted 1:1 with the wrapped token on `wrap()` and burned
+   * 1:1 on `unwrap()`/`withdraw()`/`burn()`, so this returns the same value as
+   * {@link getBalance} â€” exposed under vault vocabulary for callers reasoning
+   * about shares rather than raw token units.
+   */
+  async getShareBalance(address: string): Promise<bigint> {
+    const result = await this.queryContract('share_balance', [addressToScVal(address)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Get the cumulative underlying tokens distributed via `distributeRewards`
+   * that have not yet been compounded.
+   *
+   * This is a running total incremented on every `distributeRewards` call;
+   * nothing on the contract consumes or resets it yet.
+   */
+  async getPendingRewards(): Promise<bigint> {
+    const result = await this.queryContract('pending_rewards', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Calculate the current vault share price (total assets / total shares).
+   *
+   * The share price is the amount of underlying tokens each outstanding vault
+   * share is entitled to. Throws when the contract reports an error, e.g. when
+   * there are no outstanding shares yet (divide-by-zero protection).
+   *
+   * @returns Share price as bigint (integer division, rounded down)
+   */
+  async calculateSharePrice(): Promise<bigint> {
+    const result = await this.queryContract('calculate_share_price', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Preview the pro-rata reward entitlement for a hypothetical share amount:
+   * `rewards = (userShares * totalAssets) / totalShares`.
+   *
+   * This mirrors what `withdraw()` would pay out for `userShares` right now,
+   * without burning shares or moving tokens. It is computed directly from the
+   * totals rather than via `userShares * calculateSharePrice()`, which floors
+   * twice and can under-report the entitlement â€” this floors only once, so it
+   * always agrees with `withdraw()`'s actual payout.
+   *
+   * @param userShares - The hypothetical share amount to price out.
+   * @returns The underlying token amount that many shares would be worth.
+   */
+  async calculateRewards(userShares: bigint): Promise<bigint> {
+    const result = await this.queryContract('calculate_rewards', [i128ToScVal(userShares)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Withdraw `shares` of wrapped tokens and receive a proportional share of
    * the vault's underlying assets, including any accrued yield.
    *
@@ -296,11 +391,7 @@ export class WrapperClient {
    * @param source - Caller's keypair
    */
   async withdraw(caller: string, shares: bigint, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'withdraw',
-      [addressToScVal(caller), i128ToScVal(shares)],
-      source,
-    );
+    return this.invokeContract('withdraw', [addressToScVal(caller), i128ToScVal(shares)], source);
   }
 
   /**
@@ -340,11 +431,7 @@ export class WrapperClient {
    * @param user   - Address whose deposit lockup is being cleared
    * @param source - Caller's keypair
    */
-  async clearUnlockTime(
-    caller: string,
-    user: string,
-    source: Keypair,
-  ): Promise<TransactionResult> {
+  async clearUnlockTime(caller: string, user: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
       'clear_unlock_time',
       [addressToScVal(caller), addressToScVal(user)],
@@ -442,7 +529,7 @@ export class WrapperClient {
     return scValToNative(result) as boolean;
   }
 
-  // ─── Offline Transaction Builders ────────────────────────────────────────
+  // â”€â”€â”€ Offline Transaction Builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Build an unsigned wrap transaction for offline signing.
@@ -540,7 +627,7 @@ export class WrapperClient {
     return response.events;
   }
 
-  // ─── Internal Helpers ────────────────────────────────────────────────────
+  // â”€â”€â”€ Internal Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
     let lastError: unknown;
