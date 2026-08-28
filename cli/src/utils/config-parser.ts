@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Ajv from 'ajv';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +20,7 @@ export interface BcForgeConfig {
   symbol: string;
   decimals?: number;
   admin?: string;
-  network?: 'mainnet' | 'testnet' | 'futurenet' | 'standalone' | 'custom' | string;
+  network?: 'mainnet' | 'testnet' | 'futurenet' | 'standalone' | 'local' | 'custom' | string;
   rpcUrl?: string;
   networkPassphrase?: string;
   secretKey?: string;
@@ -44,8 +43,44 @@ export interface ConfigParseResult {
 
 const DEFAULT_CONFIG_FILENAME = '.bc-forge.json';
 
+import { Ajv } from 'ajv';
+
 const ajv = new Ajv({ allErrors: true, useDefaults: true });
-const validateSchema = ajv.compile(bcForgeSchema);
+const validate = ajv.compile(bcForgeSchema);
+
+/**
+ * Formats detailed error messages from AJV validation errors.
+ */
+function formatValidationErrors(errors: any[] | null | undefined): string[] {
+  if (!errors || errors.length === 0) {
+    return ['Configuration validation failed.'];
+  }
+
+  return errors.map((error) => {
+    const path = error.instancePath || '/';
+    const keyword = error.keyword;
+    const params = error.params;
+
+    switch (keyword) {
+      case 'type':
+        return `${path || 'root'}: expected ${params.type}, got ${typeof error.data}`;
+      case 'required':
+        return `Missing required field: "${params.missingProperty}"`;
+      case 'enum':
+        return `${path}: must be one of [${params.allowedValues.join(', ')}], got "${error.data}"`;
+      case 'pattern':
+        return `${path}: invalid format. Expected pattern: ${params.pattern}`;
+      case 'minimum':
+        return `${path}: must be >= ${params.limit}, got ${error.data}`;
+      case 'maximum':
+        return `${path}: must be <= ${params.limit}, got ${error.data}`;
+      case 'additionalProperties':
+        return `${path}: unexpected additional property "${params.additionalProperty}"`;
+      default:
+        return `${path || 'root'}: ${error.message}`;
+    }
+  });
+}
 
 /**
  * Validates a configuration object against the .bc-forge.json schema.
@@ -54,17 +89,23 @@ export function validateConfig(data: unknown): ConfigValidationResult {
   if (data === null || typeof data !== 'object') {
     return {
       valid: false,
-      errors: ['Configuration must be a valid JSON object.']
+      errors: ['Configuration must be a valid JSON object, got ' + typeof data]
     };
   }
 
-  const valid = validateSchema(data);
-  if (!valid && validateSchema.errors) {
-    const errors = validateSchema.errors.map(err => {
-      const fieldPath = err.instancePath ? err.instancePath : 'root';
-      return `[${fieldPath}] ${err.message}`;
-    });
-    return { valid: false, errors };
+  if (Array.isArray(data)) {
+    return {
+      valid: false,
+      errors: ['Configuration must be a JSON object, not an array']
+    };
+  }
+
+  const valid = validate(data);
+  if (!valid) {
+    return {
+      valid: false,
+      errors: formatValidationErrors(validate.errors)
+    };
   }
 
   const config = data as BcForgeConfig;
