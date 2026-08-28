@@ -3,7 +3,12 @@
  *
  * Allows frontend devs to test logic without a live Soroban RPC.
  */
-import type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
+import type {
+  BatchMintRecipient,
+  bcForgeClientConfig,
+  RbacInitResult,
+  TransactionResult,
+} from './client';
 import { formatAtomicAmount } from './utils';
 
 interface AccountState {
@@ -13,6 +18,7 @@ interface AccountState {
 
 export class MockBcForgeClient {
   private accounts: Record<string, AccountState> = {};
+  private roles: Record<string, Set<string>> = {};
   private totalSupply: bigint = 0n;
   private name: string = 'MockToken';
   private symbol: string = 'MOCK';
@@ -111,6 +117,32 @@ export class MockBcForgeClient {
 
   async revokeMinter(_address: string): Promise<TransactionResult> {
     return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async grantSuperAdmin(address: string): Promise<TransactionResult> {
+    if (!this.roles[address]) this.roles[address] = new Set();
+    this.roles[address].add('SuperAdmin');
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async revokeSuperAdmin(address: string): Promise<TransactionResult> {
+    if (!this.roles[address]?.has('SuperAdmin')) {
+      return { success: false, hash: 'mock-hash', returnValue: 'SuperAdmin role not held' };
+    }
+    this.roles[address].delete('SuperAdmin');
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async hasRole(role: string, address: string): Promise<boolean> {
+    return this.roles[address]?.has(role) ?? false;
+  }
+
+  async initRbac(superAdmin: string): Promise<RbacInitResult> {
+    const grant = await this.grantSuperAdmin(superAdmin);
+    return {
+      migrate: { success: true, hash: 'mock-hash', returnValue: null },
+      grant,
+    };
   }
 
   async transferFrom(

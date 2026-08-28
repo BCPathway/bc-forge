@@ -19,7 +19,12 @@
  */
 
 export { bcForgeClient, Role } from './client';
-export type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
+export type {
+  BatchMintRecipient,
+  bcForgeClientConfig,
+  RbacInitResult,
+  TransactionResult,
+} from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
@@ -29,3 +34,8 @@ export type { WalletAdapter } from './walletAdapter';
 export { FreighterAdapter } from './adapters/freighterAdapter';
 export { AlbedoAdapter } from './adapters/albedoAdapter';
 export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
+
+// ─── APY helpers (#745) ──────────────────────────────────────────────────────
+export { calculateApy } from './apy';
+export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
+

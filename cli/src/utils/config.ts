@@ -63,6 +63,15 @@ export function getFileConfig(): BcForgeConfig | undefined {
     logger.debug(`Loaded config from ${result.filePath}`);
     return result.config;
   }
+  
+  // Log validation errors if config file exists but is invalid
+  if (!result.success && result.errors && result.errors.length > 0) {
+    logger.warn(`Configuration validation errors in ${result.filePath}:`);
+    result.errors.forEach((error) => {
+      logger.warn(`  • ${error}`);
+    });
+  }
+  
   return undefined;
 }
 
