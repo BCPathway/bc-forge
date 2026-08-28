@@ -1,15 +1,15 @@
 [package]
-name = "bc-forge-yield-vault"
+name = "bc-forge-compound-fees"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Yield vault helpers for slippage and share-balance guards"
-license = "MIT"
-description = "Yield vault for bc-forge contracts (work in progress)"
+description = "Fee-compounding vault for bc-forge contracts (work in progress)"
 license = "MIT"
 repository = "https://github.com/BCPathway/bc-forge"
 homepage = "https://github.com/BCPathway/bc-forge"
-
+readme = "../../README.md"
+keywords = ["soroban", "stellar", "smart-contract", "fees", "compound"]
+categories = ["cryptography::cryptocurrencies", "wasm"]
 
 [lib]
 crate-type = ["rlib"]

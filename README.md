@@ -165,6 +165,7 @@ You can also generate a minimal file with `bc-forge config init`. The example co
 | `symbol` | Yes | Token symbol. |
 | `decimals` | No | Token decimal precision, from 0 to 18. Defaults to `7`. |
 | `admin` | No | Stellar public `G...` address that administers the token. Required when initializing a contract. |
+| `superAdmin` | No | Stellar public `G...` address assigned the initial `SuperAdmin` role during RBAC initialization. Defaults to `admin` when omitted. |
 | `network` | No | Deployment environment: `mainnet`, `testnet`, `futurenet`, `standalone`, or `custom`. Defaults to `testnet`. |
 | `rpcUrl` | No | Soroban RPC endpoint URL. |
 | `networkPassphrase` | No | Stellar network passphrase. |
@@ -214,6 +215,41 @@ stellar contract invoke \
   --decimal 7 \
   --name "bc-forge Token" \
   --symbol "SFG"
+```
+
+### Initialize RBAC (Assign Initial SuperAdmin)
+
+After initialization, run the `init_rbac` step to bootstrap role-based access
+control and assign the initial `SuperAdmin` role:
+
+```bash
+# Bootstrap the SuperAdmin mapping from the configured admin (idempotent)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  migrate_admin
+
+# Assign the initial SuperAdmin role (the contract admin can perform this grant)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  grant_role \
+  --caller <YOUR_PUBLIC_KEY> \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
+
+# Verify the assignment
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- \
+  has_role \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
 ```
 
 ### Mint Tokens

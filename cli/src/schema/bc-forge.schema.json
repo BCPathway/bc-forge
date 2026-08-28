@@ -29,6 +29,11 @@
       "pattern": "^G[A-Z2-7]{55}$",
       "description": "Stellar G-address of the contract admin"
     },
+    "superAdmin": {
+      "type": "string",
+      "pattern": "^G[A-Z2-7]{55}$",
+      "description": "Stellar G-address assigned the initial SuperAdmin role during RBAC init"
+    },
     "network": {
       "type": "string",
       "enum": ["mainnet", "testnet", "futurenet", "standalone", "local", "custom"],

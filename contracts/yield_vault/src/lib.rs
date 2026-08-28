@@ -43,6 +43,7 @@ impl YieldVaultContract {
         shares_in
     }
 
+
     fn get_share_balance(_env: &Env, _user: &Address) -> i128 {
         1000
     }
@@ -50,3 +51,4 @@ impl YieldVaultContract {
 
 #[cfg(test)]
 mod test;
+}

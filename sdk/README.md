@@ -162,6 +162,33 @@ await client.initialize(
 console.log('Contract initialized');
 ```
 
+## RBAC Initialization (SuperAdmin)
+
+After `initialize`, run the `init_rbac` deployment step to bootstrap role-based
+access control and assign the initial `SuperAdmin`:
+
+```typescript
+import { bcForgeClient, Role } from '@bc-forge/sdk';
+
+const adminKeypair = Keypair.fromSecret('SXXX...SECRET');
+
+// One-time RBAC bootstrap: migrate_admin + grant SuperAdmin role
+const rbac = await client.initRbac(adminKeypair.publicKey(), adminKeypair);
+console.log('migrate_admin TX:', rbac.migrate.hash, 'Success:', rbac.migrate.success);
+console.log('grant_role TX:', rbac.grant.hash, 'Success:', rbac.grant.success);
+
+// Verify the assignment
+const isSuperAdmin = await client.hasRole(Role.SuperAdmin, adminKeypair.publicKey());
+console.log('Is SuperAdmin:', isSuperAdmin);
+```
+
+You can also assign or revoke the role independently:
+
+```typescript
+await client.grantSuperAdmin('GOTHER...ADMIN', adminKeypair);
+await client.revokeSuperAdmin('GOTHER...ADMIN', adminKeypair);
+```
+
 ## Batch Minting
 
 ```typescript
@@ -395,6 +422,7 @@ await client.unpause(adminKeypair);
 | `getVersion()` | `string` | Contract version |
 | `getBalances(addresses[], batchSize)` | `bigint[]` | Batch query multiple balances |
 | `getEvents(startLedger?)` | `any[]` | Get contract events |
+| `hasRole(role, address)` | `boolean` | Check whether an address holds a role |
 
 ### Write Methods (require Keypair)
 
@@ -439,6 +467,9 @@ When a `walletAdapter` is configured and connected, write methods may be invoked
 | `updateSymbol(newSymbol, source)` | Update token symbol (admin-only) |
 | `lockTokens(user, amount, unlockTime, source)` | Lock tokens for vesting |
 | `withdrawLocked(user, source)` | Withdraw matured locked tokens |
+| `initRbac(superAdmin, source)` | `init_rbac` step: migrate_admin + grant initial SuperAdmin |
+| `grantSuperAdmin(address, source)` | Grant the SuperAdmin role |
+| `revokeSuperAdmin(address, source)` | Revoke the SuperAdmin role |
 
 ### Offline Transaction Builders
 
