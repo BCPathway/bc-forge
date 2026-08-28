@@ -1,5 +1,5 @@
 /**
- * @bc-forge/sdk — WrapperClient
+ * @bc-forge/sdk â€” WrapperClient
  *
  * High-level TypeScript client for interacting with deployed bc-forge
  * wrapper contracts on the Stellar/Soroban network.
@@ -32,7 +32,7 @@ import {
 import { SimulationError, RPCError } from './errors';
 import type { TransactionResult } from './client';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface WrapperClientConfig {
   /** Soroban RPC endpoint URL */
@@ -63,7 +63,7 @@ export interface VaultState {
   lastUpdateTimestamp: bigint;
 }
 
-// ─── Client ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export class WrapperClient {
   private rpcUrl: string;
@@ -80,7 +80,7 @@ export class WrapperClient {
     this.contract = new Contract(this.contractId);
   }
 
-  // ─── Read-Only Queries ───────────────────────────────────────────────────
+  // â”€â”€â”€ Read-Only Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Get the wrapped token balance for an address.
@@ -222,7 +222,7 @@ export class WrapperClient {
     return scValToNative(result) as string;
   }
 
-  // ─── Write Transactions ──────────────────────────────────────────────────
+  // â”€â”€â”€ Write Transactions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Initialize the wrapper contract. Can only be called once.
@@ -362,6 +362,142 @@ export class WrapperClient {
   }
 
   /**
+   * Get an address's vault share balance.
+   *
+   * A vault share is minted 1:1 with the wrapped token on `wrap()` and burned
+   * 1:1 on `unwrap()`/`withdraw()`/`burn()`, so this returns the same value as
+   * {@link getBalance} â€” exposed under vault vocabulary for callers reasoning
+   * about shares rather than raw token units.
+   */
+  async getShareBalance(address: string): Promise<bigint> {
+    const result = await this.queryContract('share_balance', [addressToScVal(address)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Get the cumulative underlying tokens distributed via `distributeRewards`
+   * that have not yet been compounded.
+   *
+   * This is a running total incremented on every `distributeRewards` call;
+   * nothing on the contract consumes or resets it yet.
+   */
+  async getPendingRewards(): Promise<bigint> {
+    const result = await this.queryContract('pending_rewards', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Calculate the current vault share price (total assets / total shares).
+   *
+   * The share price is the amount of underlying tokens each outstanding vault
+   * share is entitled to. Throws when the contract reports an error, e.g. when
+   * there are no outstanding shares yet (divide-by-zero protection).
+   *
+   * @returns Share price as bigint (integer division, rounded down)
+   */
+  async calculateSharePrice(): Promise<bigint> {
+    const result = await this.queryContract('calculate_share_price', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Preview the pro-rata reward entitlement for a hypothetical share amount:
+   * `rewards = (userShares * totalAssets) / totalShares`.
+   *
+   * This mirrors what `withdraw()` would pay out for `userShares` right now,
+   * without burning shares or moving tokens. It is computed directly from the
+   * totals rather than via `userShares * calculateSharePrice()`, which floors
+   * twice and can under-report the entitlement â€” this floors only once, so it
+   * always agrees with `withdraw()`'s actual payout.
+   *
+   * @param userShares - The hypothetical share amount to price out.
+   * @returns The underlying token amount that many shares would be worth.
+   */
+  async calculateRewards(userShares: bigint): Promise<bigint> {
+    const result = await this.queryContract('calculate_rewards', [i128ToScVal(userShares)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Withdraw `shares` of wrapped tokens and receive a proportional share of
+   * the vault's underlying assets, including any accrued yield.
+   *
+   * Burns `shares` of wrapped tokens from `caller` and transfers the
+   * proportional amount of underlying tokens back to `caller`.
+   *
+   * @param caller - Address withdrawing the shares
+   * @param shares - Amount of wrapped shares to burn
+   * @param source - Caller's keypair
+   */
+  async withdraw(caller: string, shares: bigint, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'withdraw',
+      [addressToScVal(caller), i128ToScVal(shares)],
+      source,
+    );
+  }
+
+  /**
+   * Enforce the deposit time lockup for a user.
+   *
+   * Records the timestamp (seconds since epoch) at which `user`'s deposit
+   * becomes withdrawable. While the current ledger timestamp is before the
+   * unlock time, `withdraw` reverts with `TokensLocked`. Admin-only.
+   *
+   * @param caller          - Admin address invoking the call
+   * @param user            - Address whose deposit is being time-locked
+   * @param unlockTimestamp - Unix timestamp (seconds) at which the deposit unlocks
+   * @param source          - Caller's keypair
+   */
+  async setUnlockTime(
+    caller: string,
+    user: string,
+    unlockTimestamp: bigint,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'set_unlock_time',
+      [
+        addressToScVal(caller),
+        addressToScVal(user),
+        nativeToScVal(unlockTimestamp, { type: 'u64' }),
+      ],
+      source,
+    );
+  }
+
+  /**
+   * Clear the deposit lockup for a user, immediately permitting withdrawals.
+   * Admin-only.
+   *
+   * @param caller - Admin address invoking the call
+   * @param user   - Address whose deposit lockup is being cleared
+   * @param source - Caller's keypair
+   */
+  async clearUnlockTime(
+    caller: string,
+    user: string,
+    source: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'clear_unlock_time',
+      [addressToScVal(caller), addressToScVal(user)],
+      source,
+    );
+  }
+
+  /**
+   * Get the timestamp at which a user's deposit becomes withdrawable.
+   *
+   * @param user - Address to query
+   * @returns The unlock timestamp in seconds, or null when no lockup is recorded
+   */
+  async getUnlockTime(user: string): Promise<bigint | null> {
+    const result = await this.queryContract('get_unlock_time', [addressToScVal(user)]);
+    return scValToNative(result) as bigint | null;
+  }
+
+  /**
    * Transfer wrapped tokens between addresses.
    *
    * @param from   - Sender address
@@ -440,7 +576,7 @@ export class WrapperClient {
     return scValToNative(result) as boolean;
   }
 
-  // ─── Offline Transaction Builders ────────────────────────────────────────
+  // â”€â”€â”€ Offline Transaction Builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Build an unsigned wrap transaction for offline signing.
@@ -538,7 +674,7 @@ export class WrapperClient {
     return response.events;
   }
 
-  // ─── Internal Helpers ────────────────────────────────────────────────────
+  // â”€â”€â”€ Internal Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
     let lastError: unknown;

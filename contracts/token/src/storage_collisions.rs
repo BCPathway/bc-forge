@@ -13,8 +13,6 @@
 //! so `approve`, the rate-limit counters and a guarded `mint` are exercised
 //! against the slots initialization created.
 
-#![cfg(test)]
-
 use crate::reentrancy_guard::ReentrancyGuardState;
 use crate::{BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use bc_forge_admin::{AdminKey, Role};
@@ -28,7 +26,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 13] = [
+const DATA_KEY_SLOT_NAMES: [&str; 14] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -36,6 +34,7 @@ const DATA_KEY_SLOT_NAMES: [&str; 13] = [
     "Decimals",
     "FeeConfig",
     "FeeExemption",
+    "Lockup",
     "MaxSupply",
     "Name",
     "PendingAdmin",
@@ -84,6 +83,7 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::Allowance(_, _) => "Allowance",
         DataKey::AllowanceExp(_, _) => "AllowanceExp",
         DataKey::Balance(_) => "Balance",
+        DataKey::Lockup(_) => "Lockup",
         DataKey::Decimals => "Decimals",
         DataKey::Name => "Name",
         DataKey::Symbol => "Symbol",
@@ -95,7 +95,7 @@ fn data_key_name(key: &DataKey) -> &'static str {
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 13] {
+fn all_data_keys(env: &Env) -> [DataKey; 14] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -104,6 +104,7 @@ fn all_data_keys(env: &Env) -> [DataKey; 13] {
         DataKey::Allowance(owner.clone(), spender.clone()),
         DataKey::AllowanceExp(owner.clone(), spender),
         DataKey::Balance(owner.clone()),
+        DataKey::Lockup(owner.clone()),
         DataKey::Decimals,
         DataKey::Name,
         DataKey::Symbol,

@@ -148,6 +148,35 @@ npm install
 npm run build
 ```
 
+## CLI Deployment Configuration
+
+The CLI reads `.bc-forge.json` from the current working directory. Start with the ready-to-use [`config.example.json`](config.example.json):
+
+```bash
+cp config.example.json .bc-forge.json
+```
+
+You can also generate a minimal file with `bc-forge config init`. The example contains these fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `version` | No | Configuration schema version. Defaults to `1.0.0`. |
+| `name` | Yes | Token or project name. |
+| `symbol` | Yes | Token symbol. |
+| `decimals` | No | Token decimal precision, from 0 to 18. Defaults to `7`. |
+| `admin` | No | Stellar public `G...` address that administers the token. Required when initializing a contract. |
+| `superAdmin` | No | Stellar public `G...` address assigned the initial `SuperAdmin` role during RBAC initialization. Defaults to `admin` when omitted. |
+| `network` | No | Deployment environment: `mainnet`, `testnet`, `futurenet`, `standalone`, or `custom`. Defaults to `testnet`. |
+| `rpcUrl` | No | Soroban RPC endpoint URL. |
+| `networkPassphrase` | No | Stellar network passphrase. |
+| `secretKey` | No | Stellar `S...` secret key used to sign transactions. Prefer `SECRET_KEY` or another secret manager. |
+| `contracts` | No | Map of deployed contract metadata keyed by contract name. |
+| `contracts.<name>.contractId` | No | Deployed Soroban contract ID. |
+| `contracts.<name>.wasmHash` | No | Hash of the deployed contract WASM. |
+| `contracts.<name>.deployer` | No | Stellar public address that deployed the contract. |
+
+Environment variables take precedence over file and local-store values for `RPC_URL`, `NETWORK_PASSPHRASE`, `CONTRACT_ID`, and `SECRET_KEY`. Replace every placeholder before deploying, and do not commit real secret keys.
+
 ## 🌐 Deploy to Testnet
 
 ### Generate a Keypair
@@ -186,6 +215,41 @@ stellar contract invoke \
   --decimal 7 \
   --name "bc-forge Token" \
   --symbol "SFG"
+```
+
+### Initialize RBAC (Assign Initial SuperAdmin)
+
+After initialization, run the `init_rbac` step to bootstrap role-based access
+control and assign the initial `SuperAdmin` role:
+
+```bash
+# Bootstrap the SuperAdmin mapping from the configured admin (idempotent)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  migrate_admin
+
+# Assign the initial SuperAdmin role (the contract admin can perform this grant)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  grant_role \
+  --caller <YOUR_PUBLIC_KEY> \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
+
+# Verify the assignment
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- \
+  has_role \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
 ```
 
 ### Mint Tokens
