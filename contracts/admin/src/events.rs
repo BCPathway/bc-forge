@@ -73,19 +73,18 @@ pub fn emit_upgraded(env: &Env, executor: &Address, proposal_id: u64, wasm_hash:
     );
 }
 
-/// Emitted when a multi-sig governance proposal is cancelled by its creator.
+/// Emitted when a multi-sig WASM upgrade proposal is cancelled by its
+/// proposer. Resolves issue #662.
 ///
-/// Topics: `prp_cncld`
-/// Data:   `(canceller, proposal_id)`
+/// Topics: `prop_cncl`
+/// Data:   `(caller, proposal_id)`
 ///
-/// @notice Publishes proposal-cancellation event data including the cancelling address and proposal ID.
-/// @dev The event topics include the `prp_cncld` symbol.
+/// @notice Publishes upgrade-proposal-cancellation event data including the cancelling proposer and the proposal ID.
+/// @dev The event topics include the `prop_cncl` symbol.
 /// @param env The Soroban environment.
-/// @param canceller The address that cancelled the proposal (must be the creator).
-/// @param proposal_id The ID of the cancelled proposal.
-pub fn emit_proposal_cancelled(env: &Env, canceller: &Address, proposal_id: u64) {
-    env.events().publish(
-        (symbol_short!("prp_cncld"),),
-        (canceller.clone(), proposal_id),
-    );
+/// @param caller The proposer that cancelled the proposal.
+/// @param proposal_id The ID of the upgrade proposal that was cancelled.
+pub fn emit_proposal_cancelled(env: &Env, caller: &Address, proposal_id: u64) {
+    env.events()
+        .publish((symbol_short!("prop_cncl"),), (caller.clone(), proposal_id));
 }
