@@ -280,7 +280,7 @@ proptest! {
         }
 
         for (i, role) in GRANTABLE_ROLES.iter().enumerate() {
-            let still_held = (mask >> i) & 1 == 1 && !((revoke_mask >> i) & 1 == 1);
+            let still_held = (mask >> i) & 1 == 1 && ((revoke_mask >> i) & 1 != 1);
             prop_assert_eq!(client.has_role(role, &holder), still_held);
         }
     }
@@ -521,11 +521,11 @@ proptest! {
         let env = Env::default();
         let (client, admin) = setup(&env);
         let contract_id = client.address.clone();
-        
+
         // Generate a string of 'A's of the given length.
         // For length=0, it's empty bytes/string. For 10000, it's max-length.
         let s = std::string::String::from_utf8(vec![b'A'; length]).unwrap();
-        
+
         let string_val = soroban_sdk::String::from_str(&env, &s);
         let args_str = soroban_sdk::vec![
             &env,
