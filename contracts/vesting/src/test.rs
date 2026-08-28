@@ -164,7 +164,7 @@ fn test_initialize_succeeds_for_deployer() {
     let vesting = VestingContractClient::new(&env, &vesting_id);
 
     let result = vesting.try_initialize(&admin, &token_id);
-    assert_eq!(result, Ok(()));
+    assert_eq!(result, Ok(Ok(())));
 }
 
 #[test]

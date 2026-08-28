@@ -50,7 +50,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -157,7 +157,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 5
+                  "u32": 6
                 }
               }
             },
@@ -321,7 +321,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Minter"
                     }
                   ]
                 },

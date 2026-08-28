@@ -1043,6 +1043,16 @@ pub fn require_super_admin(env: &Env, address: &Address) {
     require_role_guard(env, SUPER_ADMIN_ROLE, address);
 }
 
+/// Requires that the current invocation is authorized by the contract deployer.
+///
+/// Used to protect one-shot `init` entry points so a third party cannot
+/// initialize a freshly deployed contract as themselves.
+pub fn require_deployer(env: &Env) {
+    // Soroban SDK 22's Deployer has no require_auth(); the deploying
+    // invocation is authorized as the current contract.
+    env.current_contract_address().require_auth();
+}
+
 /// Requires that the caller has fee-admin privileges and has authorized the invocation.
 ///
 /// @notice Reverts unless `address` holds the `Admin` role and has authorized the call.

@@ -2,10 +2,26 @@
 resolver = "2"
 
 members = [
-    "contracts/*",
+    "contracts/admin",
+    "contracts/lifecycle",
+    "contracts/rate-limit",
+    "contracts/split",
+    "contracts/token",
+    "contracts/ttl",
+    "contracts/vesting",
+    "contracts/wrapper",
     "e2e"
 ]
-default-members = ["contracts/*"]
+default-members = [
+    "contracts/admin",
+    "contracts/lifecycle",
+    "contracts/rate-limit",
+    "contracts/split",
+    "contracts/token",
+    "contracts/ttl",
+    "contracts/vesting",
+    "contracts/wrapper"
+]
 
 [profile.release]
 opt-level = "z"
