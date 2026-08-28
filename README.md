@@ -367,6 +367,7 @@ See [sdk/README.md](sdk/README.md) for the full API reference.
 
 See the [access-control diagrams](docs/ACCESS_CONTROL.md) for the current role
 hierarchy, authorization sequence, protected operations, and governance flow.
+See the [Vault Integration Guide](docs/VAULTS.md) for details on yield-bearing fee vaults, APY calculations, and frontend dApp integration.
 
 ```
 ┌─────────────────────────────────────────────────┐
