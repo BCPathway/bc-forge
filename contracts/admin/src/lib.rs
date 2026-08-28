@@ -4272,6 +4272,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4304,6 +4305,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4335,6 +4337,7 @@ mod tests {
             quorum: 1,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4363,6 +4366,7 @@ mod tests {
             quorum: 2,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4407,6 +4411,7 @@ mod tests {
             quorum: 1,
             status: ProposalStatus::Approved,
             expires_at: env.ledger().timestamp() + 1_000,
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
@@ -4434,6 +4439,7 @@ mod tests {
             quorum: 1,
             status: ProposalStatus::Pending,
             expires_at: env.ledger().timestamp(),
+            timelock_expires_at: None,
         };
         seed_upgrade_proposal(&env, &contract_id, 1, &proposal);
 
