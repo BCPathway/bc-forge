@@ -280,7 +280,7 @@ proptest! {
         }
 
         for (i, role) in GRANTABLE_ROLES.iter().enumerate() {
-            let still_held = (mask >> i) & 1 == 1 && !((revoke_mask >> i) & 1 == 1);
+            let still_held = (mask >> i) & 1 == 1 && ((revoke_mask >> i) & 1 != 1);
             prop_assert_eq!(client.has_role(role, &holder), still_held);
         }
     }
