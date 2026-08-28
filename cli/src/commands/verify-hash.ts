@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { Contract, xdr, rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import { getClientConfig } from '../utils/config.js';
 import logger from '../utils/logger.js';
+import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
 
 export type HashVerdict = 'match' | 'mismatch' | 'missing_local' | 'missing_onchain' | 'invalid';
 
@@ -133,19 +134,24 @@ export async function verifyHash(
  * Builds the `verify-hash` command.
  */
 export function createVerifyHashCommand(): Command {
-  return new Command('verify-hash')
+  const cmd = new Command('verify-hash')
     .description('Diff a local WASM build against the hash a deployed contract runs')
     .requiredOption('--wasm <path>', 'Path to the locally built .wasm artifact')
     .option('--contract-id <id>', 'Contract to verify against (defaults to the configured contract)')
-    .option('--name <name>', 'Label for the contract in the report', 'contract')
-    .action(async (options) => {
+    .option('--name <name>', 'Label for the contract in the report', 'contract');
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (options, command) => {
       try {
-        const clientConfig = getClientConfig();
+        const clientConfig = getClientConfig(explicitNetworkOverrides(command));
         const contractId = options.contractId || clientConfig.contractId;
 
         logger.debug(`Verifying ${options.wasm} against ${contractId}`);
 
-        const server = new SorobanRpc.Server(clientConfig.rpcUrl);
+        const server = new SorobanRpc.Server(clientConfig.rpcUrl, {
+          allowHttp: clientConfig.rpcUrl.startsWith('http://'),
+        });
         const result = await verifyHash(server, options.name, contractId, options.wasm);
 
         if (result.localHash) logger.info(`Local hash:    ${result.localHash}`);
@@ -162,4 +168,6 @@ export function createVerifyHashCommand(): Command {
         process.exitCode = 1;
       }
     });
+
+  return cmd;
 }
