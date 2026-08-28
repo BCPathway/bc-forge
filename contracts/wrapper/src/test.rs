@@ -1740,7 +1740,9 @@ fn test_withdraw_reverts_while_deposit_is_locked() {
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
 
     // Well before the unlock time the deposit is still locked.
-    env.ledger().with_mut(|li| li.timestamp = UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     assert_eq!(
@@ -1756,11 +1758,15 @@ fn test_withdraw_succeeds_after_unlock_time() {
     let (wrapper, underlying, admin, user) = setup_and_fund(&env);
 
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
-    env.ledger().with_mut(|li| li.timestamp = UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     // Once past the unlock time the deposit may be withdrawn.
-    env.ledger().with_mut(|li| li.timestamp = UNLOCK_TIME + 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME + 100;
+    env.ledger().set(ledger_info);
     let tokens_out = wrapper.withdraw(&user, &1_000_000);
 
     assert_eq!(tokens_out, 1_000_000);
@@ -1775,7 +1781,9 @@ fn test_withdraw_succeeds_at_unlock_time_boundary() {
     let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
 
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
-    env.ledger().with_mut(|li| li.timestamp = UNLOCK_TIME);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     // The boundary is inclusive: timestamp == unlock time is allowed.
@@ -1813,7 +1821,9 @@ fn test_clear_unlock_time_removes_lockup() {
     let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
 
     wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
-    env.ledger().with_mut(|li| li.timestamp = UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user, &1_000_000);
 
     // Admin lifts the lockup before it expires.
@@ -1851,7 +1861,9 @@ fn test_lockup_is_enforced_per_user() {
     underlying.approve(&user_a, &wrapper_id, &2_000_000, &u32::MAX);
     underlying.approve(&user_b, &wrapper_id, &2_000_000, &u32::MAX);
 
-    env.ledger().with_mut(|li| li.timestamp = UNLOCK_TIME - 100);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
     wrapper.wrap(&user_a, &1_000_000);
     wrapper.wrap(&user_b, &1_000_000);
 
