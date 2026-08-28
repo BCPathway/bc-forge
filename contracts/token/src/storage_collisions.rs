@@ -13,8 +13,6 @@
 //! so `approve`, the rate-limit counters and a guarded `mint` are exercised
 //! against the slots initialization created.
 
-#![cfg(test)]
-
 use crate::reentrancy_guard::ReentrancyGuardState;
 use crate::{BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use bc_forge_admin::{AdminKey, Role};

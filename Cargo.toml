@@ -5,6 +5,10 @@ members = [
     "contracts/*",
     "e2e"
 ]
+exclude = [
+    "contracts/compound_fees",
+    "contracts/flash_loan_guard",
+]
 default-members = ["contracts/*"]
 
 [profile.release]
