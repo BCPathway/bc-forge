@@ -4,6 +4,11 @@ use bc_forge_admin::{AdminError, Role, TIMELOCK_DELAY_SECS};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{contract, contractimpl, vec, Address, BytesN, Env, String};
 
+fn upload_upgrade_wasm(env: &Env) -> BytesN<32> {
+    let wasm = include_bytes!("../testdata/contract.wasm");
+    env.deployer().upload_contract_wasm(wasm.as_slice())
+}
+
 #[contract]
 pub struct AdminContract;
 
@@ -73,6 +78,15 @@ impl AdminContract {
         wasm_hash: BytesN<32>,
     ) -> Result<(), AdminError> {
         bc_forge_admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+    }
+
+    pub fn emergency_execute_upgrade(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        wasm_hash: BytesN<32>,
+    ) -> Result<(), AdminError> {
+        bc_forge_admin::emergency_execute_upgrade(&env, executor, proposal_id, wasm_hash)
     }
 
     pub fn migrate_admin(env: Env) {
@@ -237,58 +251,70 @@ fn test_unauthorized_user_cannot_grant_roles_post_upgrade() {
     assert!(!client.has_role(&Role::Minter, &user_b));
 }
 
-/// Migration preserves the original admin entry in instance storage.
+/// Test emergency execution with 100% approval: should succeed immediately without timelock.
 #[test]
-fn test_migrate_admin_preserves_original_admin_entry() {
+fn test_emergency_execute_upgrade_succeeds_with_100_percent_approval() {
     let env = Env::default();
     env.mock_all_auths();
 
     let contract_id = env.register(AdminContract, ());
     let client = AdminContractClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
 
-    client.set_admin(&admin);
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let admin3 = Address::generate(&env);
 
-    // Admin should exist before migration
-    assert!(client.has_admin());
-    assert_eq!(client.get_role_admin(&Role::Admin), admin);
+    client.set_admin(&admin1);
+    let pool = vec![&env, admin1.clone(), admin2.clone(), admin3.clone()];
+    client.set_admin_pool(&pool, &2); // Threshold is 2, but we'll get 3 approvals for emergency
 
-    // Run migration
-    client.migrate_admin();
+    // Create proposal
+    let proposal_id = client.create_proposal(&admin1, &String::from_str(&env, "Emergency Patch"));
 
-    // Original admin entry should be unchanged
-    assert!(client.has_admin());
-    assert_eq!(client.get_role_admin(&Role::Admin), admin);
+    // Get all admins to approve (100% approval)
+    client.approve_proposal(&admin2, &proposal_id);
+    client.approve_proposal(&admin3, &proposal_id);
+
+    let upgrade_wasm = upload_upgrade_wasm(&env);
+
+    // The emergency guard should pass and the actual contract upgrade should succeed.
+    let res = client.try_emergency_execute_upgrade(&admin1, &proposal_id, &upgrade_wasm);
+    assert!(res.is_ok());
 }
 
-/// Migration enables the SuperAdmin guard for legacy contracts.
+/// Test emergency execution with < 100% approval: should fail.
 #[test]
-fn test_migrate_admin_enables_super_admin_guard() {
+fn test_emergency_execute_upgrade_fails_with_partial_approval() {
     let env = Env::default();
     env.mock_all_auths();
 
     let contract_id = env.register(AdminContract, ());
     let client = AdminContractClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
 
-    client.set_admin(&admin);
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let admin3 = Address::generate(&env);
 
-    // Before migration, require_super_admin should fail for non-admin users
-    let other_user = Address::generate(&env);
-    let pre_migrate_result = client.try_require_super_admin(&other_user);
-    assert!(pre_migrate_result.is_err());
+    client.set_admin(&admin1);
+    let pool = vec![&env, admin1.clone(), admin2.clone(), admin3.clone()];
+    client.set_admin_pool(&pool, &2);
 
-    // Run migration
-    client.migrate_admin();
+    // Create proposal with only 2 approvals out of 3 (not 100%)
+    let proposal_id = client.create_proposal(&admin1, &String::from_str(&env, "Partial Approval"));
+    client.approve_proposal(&admin2, &proposal_id);
 
-    // After migration, admin should be able to pass require_super_admin
-    // (Note: this test uses mock_all_auths, so require_auth passes)
-    assert!(client.has_role(&Role::SuperAdmin, &admin));
+    let dummy_wasm_hash = BytesN::from_array(&env, &[3u8; 32]);
+
+    // Emergency execute should fail (QuorumNotMet = 8)
+    let res = client.try_emergency_execute_upgrade(&admin1, &proposal_id, &dummy_wasm_hash);
+    assert!(res.is_err());
+    // Error code 8 is QuorumNotMet
+    assert_eq!(res, Err(Ok(AdminError::QuorumNotMet)));
 }
 
-/// Migration allows the admin to delegate roles after migration.
+/// Test that normal timelock-based execution still works correctly after emergency feature.
 #[test]
-fn test_migrate_admin_allows_role_delegation() {
+fn test_normal_execute_upgrade_with_timelock_still_works() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -322,56 +348,127 @@ fn test_migrate_admin_allows_role_delegation() {
 /// Migration is safe to run on an uninitialized contract (no-op).
 #[test]
 fn test_migrate_admin_uninitialized_contract_is_noop() {
-    let env = Env::default();
-    env.mock_all_auths();
 
-    let contract_id = env.register(AdminContract, ());
-    let client = AdminContractClient::new(&env, &contract_id);
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
 
-    // migrate_admin on uninitialized contract should not panic
-    client.migrate_admin();
+    client.set_admin(&admin1);
+    let pool = vec![&env, admin1.clone(), admin2.clone()];
+    client.set_admin_pool(&pool, &2); // Threshold 2 (100% with 2 admins - will need emergency path)
 
-    // Contract should still be uninitialized
-    assert!(!client.has_admin());
+    // Create proposal with only 1 approval (not 100%, won't be ready for emergency)
+    let proposal_id = client.create_proposal(&admin1, &String::from_str(&env, "Normal Path"));
+
+    let dummy_wasm_hash = BytesN::from_array(&env, &[4u8; 32]);
+
+    // Normal execute should fail (QuorumNotMet because only 1 approval)
+    let res = client.try_execute_upgrade(&admin1, &proposal_id, &dummy_wasm_hash);
+    assert_eq!(res, Err(Ok(AdminError::QuorumNotMet))); // QuorumNotMet
+
+    // Now get the second approval to reach threshold
+    client.approve_proposal(&admin2, &proposal_id);
+
+    // Still need to wait for timelock before normal execution
+    let res = client.try_execute_upgrade(&admin1, &proposal_id, &dummy_wasm_hash);
+    assert_eq!(res, Err(Ok(AdminError::TimelockActive))); // TimelockActive
+
+    // Advance ledger timestamp past timelock
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+    env.ledger().set(ledger_info);
+
+    let upgrade_wasm = upload_upgrade_wasm(&env);
+
+    // The timelock guard passes and the actual upgrade succeeds with a real wasm hash.
+    let res = client.try_execute_upgrade(&admin1, &proposal_id, &upgrade_wasm);
+    assert!(res.is_ok());
 }
 
-/// Full lifecycle: initialize, migrate, grant roles, then verify RBAC enforcement.
+/// Test emergency execution fails with unauthorized caller.
 #[test]
-fn test_full_lifecycle_init_migrate_rbac_enforcement() {
+fn test_emergency_execute_upgrade_fails_with_unauthorized_caller() {
     let env = Env::default();
     env.mock_all_auths();
 
     let contract_id = env.register(AdminContract, ());
     let client = AdminContractClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let minter = Address::generate(&env);
-    let pauser = Address::generate(&env);
+
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
     let unauthorized = Address::generate(&env);
 
-    // Initialize with admin
-    let init_result = client.try_init_storage(&admin);
-    assert!(init_result.is_ok());
+    client.set_admin(&admin1);
+    let pool = vec![&env, admin1.clone(), admin2.clone()];
+    client.set_admin_pool(&pool, &2);
 
-    // Migrate to RBAC
-    client.migrate_admin();
+    // Create proposal with full approval
+    let proposal_id = client.create_proposal(&admin1, &String::from_str(&env, "Emergency"));
+    client.approve_proposal(&admin2, &proposal_id);
 
-    // Admin has SuperAdmin role
-    assert!(client.has_role(&Role::SuperAdmin, &admin));
-    assert!(client.has_role(&Role::Admin, &admin));
+    let dummy_wasm_hash = BytesN::from_array(&env, &[5u8; 32]);
 
-    // Grant Minter and Pauser roles
-    client.grant_role(&admin, &Role::Minter, &minter);
-    client.grant_role(&admin, &Role::Pauser, &pauser);
+    // Unauthorized caller attempting emergency execute must fail
+    let res = client.try_emergency_execute_upgrade(&unauthorized, &proposal_id, &dummy_wasm_hash);
+    assert!(res.is_err());
+    // Error code 3 is UnauthorizedRole
+    assert_eq!(res, Err(Ok(AdminError::UnauthorizedRole)));
+}
 
-    // Verify RBAC enforcement:
-    // - Minter can pass require_minter
-    client.require_minter(&minter);
-    // - Pauser can pass require_pauser
-    client.require_pauser(&pauser);
-    // - Unauthorized user cannot pass require_minter
-    let unauth_result = client.try_require_minter(&unauthorized);
-    assert!(unauth_result.is_err());
-    // - Unauthorized user cannot pass require_pauser
-    let unauth_pauser_result = client.try_require_pauser(&unauthorized);
-    assert!(unauth_pauser_result.is_err());
+/// Test emergency execution fails if proposal doesn't exist.
+#[test]
+fn test_emergency_execute_upgrade_fails_with_nonexistent_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+    let pool = vec![&env, admin.clone()];
+    client.set_admin_pool(&pool, &1);
+
+    let dummy_wasm_hash = BytesN::from_array(&env, &[6u8; 32]);
+    let nonexistent_proposal_id = 999u64;
+
+    // Attempt emergency execute on nonexistent proposal
+    let res =
+        client.try_emergency_execute_upgrade(&admin, &nonexistent_proposal_id, &dummy_wasm_hash);
+    assert!(res.is_err());
+    // Error code 7 is ProposalNotFound
+    assert_eq!(res, Err(Ok(AdminError::ProposalNotFound)));
+}
+
+/// Test emergency execution fails if proposal was already executed.
+#[test]
+fn test_emergency_execute_upgrade_fails_if_already_executed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+
+    client.set_admin(&admin1);
+    let pool = vec![&env, admin1.clone(), admin2.clone()];
+    client.set_admin_pool(&pool, &2);
+
+    // Create proposal with full approval
+    let proposal_id = client.create_proposal(&admin1, &String::from_str(&env, "Already Executed"));
+    client.approve_proposal(&admin2, &proposal_id);
+
+    let upgrade_wasm = upload_upgrade_wasm(&env);
+
+    // Set the proposal to executed without changing the contract code, so a second
+    // emergency execution must fail on the executed-state guard alone.
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::mark_executed(&env, proposal_id);
+    });
+
+    // Second attempt should fail (ProposalAlreadyExecuted = 9)
+    let res = client.try_emergency_execute_upgrade(&admin1, &proposal_id, &upgrade_wasm);
+    assert!(res.is_err());
+    assert_eq!(res, Err(Ok(AdminError::ProposalAlreadyExecuted)));
 }

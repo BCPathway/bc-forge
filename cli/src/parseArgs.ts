@@ -4,6 +4,7 @@ import { createSmokeTestCommand } from "./commands/smoke-test.js";
 import { createCheckStatusCommand } from "./commands/check-status.js";
 import { createVerifyHashCommand } from "./commands/verify-hash.js";
 import { createGenerateBindingsCommand } from "./commands/generate-bindings.js";
+import { createDeployCommand } from "./commands/deploy.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 
 const VERSION = "0.1.0";
@@ -30,7 +31,8 @@ export function buildProgram(): Command {
     .addCommand(createSmokeTestCommand())
     .addCommand(createCheckStatusCommand())
     .addCommand(createVerifyHashCommand())
-    .addCommand(createGenerateBindingsCommand());
+    .addCommand(createGenerateBindingsCommand())
+    .addCommand(createDeployCommand());
 
   return program;
 }
