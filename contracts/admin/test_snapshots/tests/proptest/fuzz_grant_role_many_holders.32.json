@@ -23,7 +23,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -52,7 +52,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -86,14 +86,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "Role"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Admin"
-                    }
-                  ]
+                  "symbol": "RoleMask"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -113,14 +106,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "Role"
-                    },
-                    {
-                      "vec": [
-                        {
-                          "symbol": "Admin"
-                        }
-                      ]
+                      "symbol": "RoleMask"
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -129,7 +115,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "bool": true
+                  "u32": 1
                 }
               }
             },
@@ -145,14 +131,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "Role"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Minter"
-                    }
-                  ]
+                  "symbol": "RoleMask"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -172,14 +151,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "Role"
-                    },
-                    {
-                      "vec": [
-                        {
-                          "symbol": "Minter"
-                        }
-                      ]
+                      "symbol": "RoleMask"
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -188,7 +160,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "bool": true
+                  "u32": 4
                 }
               }
             },
@@ -204,14 +176,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "Role"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Minter"
-                    }
-                  ]
+                  "symbol": "RoleMask"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -231,14 +196,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "Role"
-                    },
-                    {
-                      "vec": [
-                        {
-                          "symbol": "Minter"
-                        }
-                      ]
+                      "symbol": "RoleMask"
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -247,7 +205,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "bool": true
+                  "u32": 4
                 }
               }
             },
@@ -411,7 +369,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },

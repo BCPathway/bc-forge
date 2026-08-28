@@ -47,14 +47,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "Role"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Admin"
-                    }
-                  ]
+                  "symbol": "RoleMask"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -74,14 +67,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "Role"
-                    },
-                    {
-                      "vec": [
-                        {
-                          "symbol": "Admin"
-                        }
-                      ]
+                      "symbol": "RoleMask"
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
@@ -90,7 +76,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "bool": true
+                  "u32": 1
                 }
               }
             },
