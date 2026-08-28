@@ -1,11 +1,9 @@
 {
   "generators": {
-    "address": 2,
+    "address": 1,
     "nonce": 0
   },
   "auth": [
-    [],
-    [],
     [],
     [],
     [],
