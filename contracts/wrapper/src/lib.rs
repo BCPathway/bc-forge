@@ -46,6 +46,11 @@ pub enum DataKey {
     /// Total vault share supply in circulation. Stored in instance storage
     /// and updated on every mint (`wrap`) and burn (`unwrap`, `burn`, `burn_from`).
     Supply,
+    /// Cumulative underlying tokens received via `distribute_rewards` that have
+    /// not yet been compounded. Stored in instance storage and incremented on
+    /// every `distribute_rewards` call; nothing in this contract consumes or
+    /// resets it yet — that is a later step in the Yield-Bearing Fee Vaults epic.
+    PendingRewards,
     /// Per-account wrapped balance.
     Balance(Address),
     /// Per-account allowance: (owner, spender) → amount.
@@ -241,6 +246,24 @@ impl WrapperContract {
         env.storage().instance().set(&DataKey::Supply, &supply);
     }
 
+    /// Reads the cumulative amount of undistributed (not-yet-compounded) rewards.
+    ///
+    /// @notice Defaults to 0 when never written (e.g. before the first
+    ///         `distribute_rewards` call).
+    fn read_pending_rewards(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PendingRewards)
+            .unwrap_or(0)
+    }
+
+    /// Writes the cumulative amount of undistributed (not-yet-compounded) rewards.
+    fn write_pending_rewards(env: &Env, pending_rewards: i128) {
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingRewards, &pending_rewards);
+    }
+
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
         // Check expiration first
         if let Some(exp) = env
@@ -428,6 +451,107 @@ impl WrapperContract {
         Ok(())
     }
 
+    /// Deposit `assets` of the underlying token and receive proportional vault shares.
+    ///
+    /// This is the vault-style entry point (analogous to ERC-4626 `deposit`). Unlike
+    /// [`WrapperContract::wrap`], which mints shares at a flat decimal-scaled 1:1 rate,
+    /// `deposit` always uses the **current share price** so that depositors entering after
+    /// rewards have been distributed receive the correct (lower) number of shares:
+    ///
+    /// ```text
+    /// shares_out = assets * total_shares / total_assets   (when total_shares > 0)
+    /// shares_out = assets                                   (first deposit: 1:1 bootstrap)
+    /// ```
+    ///
+    /// Rounding is in favour of the protocol (floor division), and the call reverts if the
+    /// computed share amount rounds down to zero.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address depositing underlying tokens; must have pre-approved this
+    ///              contract to spend `assets` of the underlying token.
+    /// * `assets` - Amount of underlying tokens to deposit. Must be positive.
+    ///
+    /// # Returns
+    /// The number of vault shares minted to `caller`.
+    ///
+    /// # Errors
+    /// * [`WrapperError::NotInitialized`] if the contract is uninitialized.
+    /// * [`WrapperError::ContractPaused`] if operations are paused.
+    /// * [`WrapperError::InvalidAmount`] if `assets` is non-positive, or if the share
+    ///   calculation overflows or rounds down to zero.
+    /// * [`WrapperError::Reentrant`] if a reentrant call is detected.
+    ///
+    /// # Security
+    /// Protected by a reentrancy guard. The caller must have pre-approved this
+    /// contract to spend `assets` of the underlying token.
+    pub fn deposit(env: Env, caller: Address, assets: i128) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if assets <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        Self::acquire_lock(&env)?;
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+
+        // Pull underlying tokens from caller into this contract.
+        underlying_client.transfer_from(
+            &env.current_contract_address(),
+            &caller,
+            &env.current_contract_address(),
+            &assets,
+        );
+
+        // Calculate shares to mint based on the current exchange rate:
+        //   shares = assets * total_shares / total_assets  (post-transfer, so total_assets
+        //   already includes the newly deposited tokens — we read it before the transfer to
+        //   get the pre-deposit total, which is the correct reference price).
+        let total_shares = Self::read_supply(&env);
+        let shares_out: i128 = if total_shares == 0 {
+            // First deposit — bootstrap at 1:1 (assets == shares).
+            assets
+        } else {
+            // total_assets includes the freshly transferred tokens; subtract them back to
+            // get the pre-deposit asset total so the exchange rate reflects the vault state
+            // before this deposit.
+            let total_assets_after = underlying_client.balance(&env.current_contract_address());
+            let total_assets_before = total_assets_after.checked_sub(assets).unwrap_or_else(|| {
+                soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
+            });
+
+            if total_assets_before <= 0 {
+                // Edge case: vault had zero assets but nonzero shares — treat like first deposit.
+                assets
+            } else {
+                assets
+                    .checked_mul(total_shares)
+                    .and_then(|product| product.checked_div(total_assets_before))
+                    .unwrap_or_else(|| {
+                        soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
+                    })
+            }
+        };
+
+        if shares_out <= 0 {
+            Self::release_lock(&env);
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        // Mint shares to caller.
+        let new_balance = Self::read_balance(&env, &caller) + shares_out;
+        Self::write_balance(&env, &caller, new_balance);
+        Self::write_supply(&env, total_shares + shares_out);
+
+        Self::release_lock(&env);
+        events::emit_deposit(&env, &caller, assets, shares_out);
+        Ok(shares_out)
+    }
+
     /// Unwrap `wrapped_amount` of wrapped tokens back to the underlying token.
     ///
     /// Burns `wrapped_amount` of wrapped tokens from `caller` and transfers the
@@ -498,6 +622,23 @@ impl WrapperContract {
         Self::read_supply(&env)
     }
 
+    /// Returns `user`'s vault share balance.
+    ///
+    /// @notice A vault share is minted 1:1 with the wrapper token on `wrap`
+    ///         and burned 1:1 on `unwrap`/`withdraw`/`burn`/`burn_from`, so
+    ///         this reads the same persistent `Balance` entry as the
+    ///         `TokenInterface::balance` getter — exposed here under vault
+    ///         vocabulary for callers reasoning about shares rather than
+    ///         raw token units. Returns 0 for an address that has never held
+    ///         shares.
+    /// @param env The Soroban environment.
+    /// @param user The address to query.
+    /// @return The number of vault shares `user` currently holds.
+    pub fn share_balance(env: Env, user: Address) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_balance(&env, &user)
+    }
+
     /// Pause all wrap/unwrap and transfer operations. Requires Pauser role.
     pub fn pause(env: Env) -> Result<(), WrapperError> {
         let current_admin = Self::read_admin(&env)?;
@@ -556,7 +697,8 @@ impl WrapperContract {
     /// # Errors
     /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
     /// * Returns [`WrapperError::ContractPaused`] if operations are paused.
-    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive.
+    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive, or if
+    ///   syncing `pending_rewards` would overflow `i128`.
     pub fn distribute_rewards(env: Env, caller: Address, amount: i128) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
@@ -580,6 +722,20 @@ impl WrapperContract {
             &amount,
         );
 
+        // Track this distribution as not-yet-compounded (#718). Nothing reads
+        // this back into the exchange rate yet — `total_assets`/`calculate_share_price`
+        // already reflect the transfer above via the underlying token balance;
+        // this is a parallel running total for whatever later compounding step
+        // the epic adds.
+        let pending_rewards = match Self::read_pending_rewards(&env).checked_add(amount) {
+            Some(v) => v,
+            None => {
+                Self::release_lock(&env);
+                return Err(WrapperError::InvalidAmount);
+            }
+        };
+        Self::write_pending_rewards(&env, pending_rewards);
+
         Self::release_lock(&env);
         events::emit_distribute_rewards(&env, &caller, amount);
         Ok(())
@@ -589,6 +745,18 @@ impl WrapperContract {
     pub fn total_assets(env: Env) -> i128 {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_total_assets(&env)
+    }
+
+    /// Returns the cumulative underlying tokens distributed via
+    /// [`WrapperContract::distribute_rewards`] that have not yet been compounded.
+    ///
+    /// @notice This is a running total incremented on every `distribute_rewards`
+    ///         call; nothing in this contract consumes or resets it yet.
+    /// @param env The Soroban environment.
+    /// @return The pending (not-yet-compounded) reward amount, in underlying tokens.
+    pub fn pending_rewards(env: Env) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_pending_rewards(&env)
     }
 
     /// Calculates the current vault share price: `total_assets / total_shares`.

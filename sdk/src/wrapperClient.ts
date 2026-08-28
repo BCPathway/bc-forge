@@ -72,6 +72,19 @@ export class WrapperClient {
   }
 
   /**
+   * Get an address's vault share balance.
+   *
+   * A vault share is minted 1:1 with the wrapped token on `wrap()` and burned
+   * 1:1 on `unwrap()`/`withdraw()`/`burn()`, so this returns the same value as
+   * {@link getBalance} — exposed under vault vocabulary for callers reasoning
+   * about shares rather than raw token units.
+   */
+  async getShareBalance(address: string): Promise<bigint> {
+    const result = await this.queryContract('share_balance', [addressToScVal(address)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Get the total wrapped token supply.
    */
   async getTotalSupply(): Promise<bigint> {
@@ -84,6 +97,18 @@ export class WrapperClient {
    */
   async getTotalAssets(): Promise<bigint> {
     const result = await this.queryContract('total_assets', []);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Get the cumulative underlying tokens distributed via `distributeRewards`
+   * that have not yet been compounded.
+   *
+   * This is a running total incremented on every `distributeRewards` call;
+   * nothing on the contract consumes or resets it yet.
+   */
+  async getPendingRewards(): Promise<bigint> {
+    const result = await this.queryContract('pending_rewards', []);
     return BigInt(scValToNative(result) as string | number | bigint);
   }
 
