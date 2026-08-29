@@ -17,6 +17,7 @@ CLI deployment orchestrator and management toolkit for **bc-forge** Soroban smar
   - [`verify-hash`](#verify-hash)
   - [`smoke-test`](#smoke-test)
   - [`generate-bindings`](#generate-bindings)
+  - [`export-deployments`](#export-deployments)
 - [Workflow Examples](#workflow-examples)
   - [Deploy & Status Check](#1-deploy--status-check)
   - [Contract WASM Upgrade](#2-contract-wasm-upgrade)
@@ -269,6 +270,36 @@ bc-forge generate-bindings \
 bc-forge generate-bindings \
   --wasm target/wasm32-unknown-unknown/release/bc_forge_token.wasm \
   --language rust
+```
+
+---
+
+### `export-deployments`
+
+Exports deployed Contract IDs and transaction hashes to `deployments.json` safely using atomic file overwriting.
+
+```bash
+bc-forge export-deployments [options]
+```
+
+#### Options
+
+- `-o, --out <path>`: Target output JSON file path (default: `deployments.json`).
+- `-c, --config <file>`: Deployment configuration file to load contract entries from (default: `.bc-forge.json`).
+- `--vault-id <id>`: Vault contract ID override.
+- `--fee-id <id>`: Fee contract ID override.
+- `--tx-hash <hash>`: Transaction hash to include in the output.
+- `--network <name>`: Stellar network name (e.g. `testnet`, `mainnet`).
+
+#### Example
+
+```bash
+bc-forge export-deployments \
+  --out deployments.json \
+  --vault-id CDEX...123 \
+  --fee-id CFEE...456 \
+  --tx-hash 0xabc...123 \
+  --network testnet
 ```
 
 ---

@@ -5,6 +5,7 @@ import { createCheckStatusCommand } from "./commands/check-status.js";
 import { createVerifyHashCommand } from "./commands/verify-hash.js";
 import { createGenerateBindingsCommand } from "./commands/generate-bindings.js";
 import { createDeployCommand } from "./commands/deploy.js";
+import { createExportDeploymentsCommand } from "./commands/export-deployments.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 
 const VERSION = "0.1.0";
@@ -32,7 +33,8 @@ export function buildProgram(): Command {
     .addCommand(createCheckStatusCommand())
     .addCommand(createVerifyHashCommand())
     .addCommand(createGenerateBindingsCommand())
-    .addCommand(createDeployCommand());
+    .addCommand(createDeployCommand())
+    .addCommand(createExportDeploymentsCommand());
 
   return program;
 }

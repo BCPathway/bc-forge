@@ -30,7 +30,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -59,7 +59,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -88,7 +88,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -117,7 +117,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -146,7 +146,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -175,7 +175,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -204,7 +204,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -233,7 +233,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -262,7 +262,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -377,7 +377,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -422,7 +422,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -467,7 +467,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -512,7 +512,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -557,7 +557,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -602,7 +602,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -647,7 +647,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -692,7 +692,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -737,7 +737,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 2
                 }
               }
             },
@@ -1132,7 +1132,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
