@@ -109,10 +109,7 @@ function buildSimTx(
   method: string,
   ...args: xdr.ScVal[]
 ): ReturnType<TransactionBuilder['build']> {
-  const dummyAccount = new Account(
-    'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-    '0',
-  );
+  const dummyAccount = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
   return new TransactionBuilder(dummyAccount, {
     fee: '100',
     networkPassphrase,
@@ -163,7 +160,7 @@ async function simulateI128(
     if (i64 !== undefined && i64 !== null) return BigInt(i64.toString());
 
     return null;
-  } catch (err) {
+  } catch {
     return null;
   }
 }
@@ -186,8 +183,7 @@ async function readSnapshot(
   const assets = totalAssets ?? 0n;
   const shares = totalShares ?? 0n;
 
-  const sharePrice =
-    shares > 0n ? Number(assets) / Number(shares) : null;
+  const sharePrice = shares > 0n ? Number(assets) / Number(shares) : null;
 
   return {
     ledger: ledgerSequence,
@@ -259,8 +255,7 @@ export async function calculateApy(options: ApyOptions): Promise<ApyResult | nul
   //      growth  = (P1 - P0) / P0
   //      periods = LEDGERS_PER_YEAR / windowLedgers
   //      APY     = (1 + growth) ^ periods  - 1
-  const growth =
-    (current.sharePrice - historical.sharePrice) / historical.sharePrice;
+  const growth = (current.sharePrice - historical.sharePrice) / historical.sharePrice;
 
   const periods = LEDGERS_PER_YEAR / actualWindow;
   const apy = Math.pow(1 + growth, periods) - 1;

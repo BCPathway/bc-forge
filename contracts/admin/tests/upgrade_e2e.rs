@@ -4,6 +4,11 @@ use bc_forge_admin::{AdminError, Role, TIMELOCK_DELAY_SECS};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{contract, contractimpl, vec, Address, BytesN, Env, String};
 
+fn upload_upgrade_wasm(env: &Env) -> BytesN<32> {
+    let wasm = include_bytes!("../testdata/contract.wasm");
+    env.deployer().upload_contract_wasm(wasm.as_slice())
+}
+
 #[contract]
 pub struct AdminContract;
 
@@ -77,6 +82,15 @@ impl AdminContract {
         wasm_hash: BytesN<32>,
     ) -> Result<(), AdminError> {
         bc_forge_admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+    }
+
+    pub fn emergency_execute_upgrade(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        wasm_hash: BytesN<32>,
+    ) -> Result<(), AdminError> {
+        bc_forge_admin::emergency_execute_upgrade(&env, executor, proposal_id, wasm_hash)
     }
 
     pub fn migrate_admin(env: Env) {
