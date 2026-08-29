@@ -53,7 +53,7 @@ pub fn pause(env: Env, caller: Address) {
 /// # Panics
 /// Panics if the contract is not paused.
 pub fn unpause(env: Env, caller: Address) {
-    admin::require_role(&env, admin::Role::Pauser, &caller);
+    admin::require_pauser(&env, &caller);
     if !is_paused(&env) {
         panic!("contract is not paused");
     }
@@ -82,6 +82,16 @@ pub fn require_not_paused(env: &Env) {
     if is_paused(env) {
         panic!("contract is paused");
     }
+}
+
+/// Sets the paused state directly without performing auth checks.
+///
+/// This helper is intended to be called by a parent contract (e.g., the
+/// token contract) after it has already validated that the caller is
+/// authorized to change the pause state.
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&LifecycleKey::Paused, &paused);
+    extend_instance_ttl(env);
 }
 
 #[cfg(test)]
@@ -187,5 +197,41 @@ mod tests {
         env.ledger().set(ledger_info);
 
         assert!(client.is_paused());
+    }
+
+    #[test]
+    fn test_pauser_role_can_unpause() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin) = setup(&env);
+        let pauser = Address::generate(&env);
+
+        env.as_contract(&client.address, || {
+            admin::grant_role(&env, &admin, admin::Role::Pauser, &pauser);
+        });
+
+        // Pause system
+        client.pause(&admin);
+        assert!(client.is_paused());
+
+        // Switch context to Pauser address and unpause system
+        client.unpause(&pauser);
+
+        // Verify state returns to active
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "HostError")]
+    fn test_non_pauser_cannot_unpause() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin) = setup(&env);
+        let stranger = Address::generate(&env);
+
+        client.pause(&admin);
+        assert!(client.is_paused());
+
+        client.unpause(&stranger);
     }
 }

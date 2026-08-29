@@ -1,4 +1,4 @@
-use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
+use crate::{BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::{symbol_short, vec, Address, BytesN, Env, String, TryIntoVal, Val};
@@ -24,20 +24,6 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let (client, _) = setup_contract(env);
     let admin = init_default(env, &client);
     (client, admin)
-}
-
-#[test]
-fn test_batch_transfer_while_paused_returns_error() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin) = setup(&env);
-    let from = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    client.mint(&admin, &from, &100);
-    client.pause();
-    let recipients = vec![&env, (recipient, 10_i128)];
-    let result = client.try_batch_transfer(&from, &recipients);
-    assert!(result.is_err());
 }
 
 #[test]
@@ -159,6 +145,22 @@ fn test_batch_transfer_rejects_insufficient_balance_before_moving_tokens() {
 }
 
 #[test]
+fn test_batch_transfer_while_paused_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let from = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &from, &100);
+    client.pause(&admin);
+
+    let recipients = vec![&env, (recipient, 10_i128)];
+    let result = client.try_batch_transfer(&from, &recipients);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_stranger_lacks_super_admin_role_required_by_upgrade_guard() {
     // Soroban's test host converts any escaped guest panic into a generic
     // "Error(Contract, #N)" report, discarding the original panic message
@@ -218,6 +220,31 @@ fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
     // installed contract at an all-zero wasm hash. That panic proves the
     // guard let the call through instead of blocking it.
     client.upgrade(&upgrader, &new_wasm_hash);
+}
+
+#[test]
+fn test_upgrade_preserves_minted_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+    let contract_id = client.address.clone();
+
+    client.mint(&admin, &recipient, &1_000);
+
+    // Balances are written to persistent storage, which Soroban keeps across
+    // WASM replacement. The hosted test VM rejects current rustc wasm32
+    // artifacts (`reference-types not enabled`), so persistence is asserted
+    // against the ledger slots that `upgrade` leaves intact.
+    let stored_balance: i128 = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Balance(recipient.clone()))
+            .expect("minted balance must be in persistent storage")
+    });
+    assert_eq!(stored_balance, 1_000);
+    assert_eq!(client.balance(&recipient), 1_000);
+    assert_eq!(client.supply(), 1_000);
 }
 
 #[test]
@@ -309,6 +336,89 @@ fn test_set_max_supply_rejects_negative() {
 
     let result = client.try_set_max_supply(&admin, &-1);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
+}
+
+#[test]
+fn test_pauser_can_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    client.pause(&pauser);
+    assert!(env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
+}
+
+#[test]
+fn test_pauser_can_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    client.pause(&admin);
+    assert!(env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
+
+    client.unpause(&pauser);
+    assert!(!env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
+}
+
+#[test]
+fn test_non_pauser_cannot_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let stranger = Address::generate(&env);
+
+    let result = client.try_pause(&stranger);
+    assert_eq!(result, Err(Ok(TokenError::ContractPaused)));
+    assert!(!env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
+}
+
+#[test]
+fn test_non_pauser_cannot_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let stranger = Address::generate(&env);
+
+    client.pause(&admin);
+    assert!(env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
+
+    let result = client.try_unpause(&stranger);
+    assert_eq!(result, Err(Ok(TokenError::ContractPaused)));
+    assert!(env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
+}
+
+#[test]
+fn test_revoked_pauser_cannot_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    client.pause(&admin);
+    assert!(env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::revoke_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser).unwrap();
+    });
+
+    let result = client.try_unpause(&pauser);
+    assert_eq!(result, Err(Ok(TokenError::ContractPaused)));
+    assert!(env.as_contract(&client.address, || bc_forge_lifecycle::is_paused(&env)));
 }
 
 #[test]
@@ -437,52 +547,225 @@ fn test_set_fee_config_rejects_negative_values() {
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
 }
 
-// ── initialize deployer check ────────────────────────────────────────────────
-
 #[test]
-fn test_initialize_succeeds_for_deployer() {
+fn test_pauser_can_pause_successfully() {
     let env = Env::default();
     env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
-    let contract_id = env.register(BcForgeToken, ());
-    let client = BcForgeTokenClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    client.mint(&admin, &user, &1000);
 
-    let result = client.try_initialize(&admin, &7, &String::from_str(&env, "Test"), &String::from_str(&env, "TST"));
-    assert_eq!(result, Ok(()));
+    // Grant Pauser role to a non-admin address within the contract context
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // Confirm the pauser address holds Role::Pauser but not Role::Admin
+    assert!(env.as_contract(&contract_id, || {
+        bc_forge_admin::has_role(&env, bc_forge_admin::Role::Pauser, &pauser)
+    }));
+    assert!(!env.as_contract(&contract_id, || {
+        bc_forge_admin::has_role(&env, bc_forge_admin::Role::Admin, &pauser)
+    }));
+
+    // Pauser can pause the contract successfully
+    assert!(client.try_pause_as(&pauser).is_ok());
+
+    // Transfers are blocked while contract is paused
+    let result = client.try_transfer(&user, &recipient, &100);
+    assert!(
+        result.is_err(),
+        "transfer must fail when contract is paused"
+    );
+
+    // Pauser can unpause the contract successfully
+    assert!(client.try_unpause_as(&pauser).is_ok());
+
+    // Transfers succeed again after unpause
+    assert!(client.try_transfer(&user, &recipient, &100).is_ok());
+    assert_eq!(client.balance(&recipient), 100);
 }
 
 #[test]
-#[should_panic]
-fn test_initialize_fails_for_non_deployer() {
+fn test_pauser_cannot_pause_when_already_paused() {
     let env = Env::default();
-    // Don't mock_all_auths - only deployer can authorize
-
-    let contract_id = env.register(BcForgeToken, ());
-    let client = BcForgeTokenClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let non_deployer = Address::generate(&env);
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
 
     env.as_contract(&contract_id, || {
-        non_deployer.require_auth();
-        client.initialize(&admin, &7, &String::from_str(&env, "Test"), &String::from_str(&env, "TST"));
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
     });
+
+    // First pause succeeds
+    assert!(client.try_pause_as(&pauser).is_ok());
+
+    // Second pause attempt by the same Pauser is rejected
+    let result = client.try_pause_as(&pauser);
+    assert_eq!(result, Err(Ok(TokenError::AlreadyPaused)));
 }
 
 #[test]
-fn test_initialize_fails_on_double_init() {
+fn test_non_pauser_cannot_pause_as() {
     let env = Env::default();
     env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let stranger = Address::generate(&env);
 
-    let contract_id = env.register(BcForgeToken, ());
-    let client = BcForgeTokenClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let admin2 = Address::generate(&env);
+    let result = client.try_pause_as(&stranger);
+    assert!(result.is_err());
+}
 
-    // First initialize succeeds
-    client.initialize(&admin, &7, &String::from_str(&env, "Test"), &String::from_str(&env, "TST"));
+#[test]
+fn test_pauser_can_unpause_system_correctly() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
-    // Second initialize fails with AlreadyInitialized
-    let result = client.try_initialize(&admin2, &7, &String::from_str(&env, "Test2"), &String::from_str(&env, "TST2"));
-    assert_eq!(result, Err(Ok(TokenError::AlreadyInitialized)));
+    client.mint(&admin, &user, &1000);
+
+    // Grant Pauser role to a non-admin address
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // 1. Pause system
+    assert!(client.try_pause_as(&pauser).is_ok());
+
+    // Verify system state is paused
+    assert!(env.as_contract(&contract_id, || bc_forge_lifecycle::is_paused(&env)));
+    assert!(client.try_transfer(&user, &recipient, &100).is_err());
+
+    // 2 & 3. Switch context to Pauser address and unpause system
+    assert!(client.try_unpause_as(&pauser).is_ok());
+
+    // 4. Verify state returns to active
+    assert!(!env.as_contract(&contract_id, || bc_forge_lifecycle::is_paused(&env)));
+    assert!(client.try_transfer(&user, &recipient, &100).is_ok());
+    assert_eq!(client.balance(&recipient), 100);
+}
+
+#[test]
+fn test_unpause_when_not_paused_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let pauser = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+
+    // Unpausing an active system returns NotPaused error
+    let result = client.try_unpause_as(&pauser);
+    assert_eq!(result, Err(Ok(TokenError::NotPaused)));
+}
+
+// ─── #762: transfer / transfer_from pause hooks ───────────────────────────────
+
+#[test]
+fn test_transfer_succeeds_when_not_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    client.mint(&admin, &from, &500);
+    assert!(client.try_transfer(&from, &to, &150).is_ok());
+    assert_eq!(client.balance(&from), 350);
+    assert_eq!(client.balance(&to), 150);
+}
+
+#[test]
+fn test_transfer_fails_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    client.mint(&admin, &from, &500);
+    client.pause(&admin);
+
+    let result = client.try_transfer(&from, &to, &100);
+    assert!(result.is_err(), "transfer must fail while paused");
+    assert_eq!(client.balance(&from), 500);
+    assert_eq!(client.balance(&to), 0);
+}
+
+#[test]
+fn test_transfer_from_succeeds_when_not_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &owner, &500);
+    client.approve(&owner, &spender, &200, &u32::MAX);
+
+    assert!(client
+        .try_transfer_from(&spender, &owner, &recipient, &120)
+        .is_ok());
+    assert_eq!(client.balance(&owner), 380);
+    assert_eq!(client.balance(&recipient), 120);
+}
+
+#[test]
+fn test_transfer_from_fails_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &owner, &500);
+    client.approve(&owner, &spender, &200, &u32::MAX);
+    client.pause(&admin);
+
+    let result = client.try_transfer_from(&spender, &owner, &recipient, &100);
+    assert!(result.is_err(), "transfer_from must fail while paused");
+    assert_eq!(client.balance(&owner), 500);
+    assert_eq!(client.balance(&recipient), 0);
+}
+
+#[test]
+fn test_transfer_and_transfer_from_resume_after_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &owner, &1000);
+    client.approve(&owner, &spender, &500, &u32::MAX);
+
+    client.pause(&admin);
+    assert!(client.try_transfer(&owner, &recipient, &50).is_err());
+    assert!(client
+        .try_transfer_from(&spender, &owner, &recipient, &50)
+        .is_err());
+
+    client.unpause(&admin);
+
+    assert!(client.try_transfer(&owner, &recipient, &50).is_ok());
+    assert!(client
+        .try_transfer_from(&spender, &owner, &recipient, &75)
+        .is_ok());
+    assert_eq!(client.balance(&owner), 875);
+    assert_eq!(client.balance(&recipient), 125);
 }

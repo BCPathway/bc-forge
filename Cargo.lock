@@ -191,6 +191,7 @@ name = "bc-forge-admin"
 version = "0.1.0"
 dependencies = [
  "bc-forge-ttl",
+ "proptest",
  "soroban-sdk",
 ]
 
@@ -199,6 +200,7 @@ name = "bc-forge-e2e-tests"
 version = "0.1.0"
 dependencies = [
  "bc-forge-token",
+ "bc-forge-wrapper",
  "soroban-sdk",
  "tokio",
 ]
