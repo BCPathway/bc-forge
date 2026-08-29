@@ -4,6 +4,7 @@ use bc_forge_admin::{AdminError, Role, TIMELOCK_DELAY_SECS};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{contract, contractimpl, vec, Address, BytesN, Env, String};
 
+#[allow(dead_code)]
 fn upload_upgrade_wasm(env: &Env) -> BytesN<32> {
     let wasm = include_bytes!("../testdata/contract.wasm");
     env.deployer().upload_contract_wasm(wasm.as_slice())
