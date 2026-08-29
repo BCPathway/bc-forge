@@ -245,6 +245,8 @@ pub enum AdminError {
     /// the requested operation. Distinct from [`AdminError::UnauthorizedRole`],
     /// which is specific to a role-guard failure.
     Unauthorized = 20,
+    /// The target address already holds the role being granted (#768).
+    RoleAlreadyGranted = 21,
 }
 
 /// Storage keys for the access-control layer.
@@ -822,8 +824,9 @@ pub fn has_admin(env: &Env) -> bool {
 ///
 /// @notice Grants `role` to `address`. Only a super-admin may call this function.
 /// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and
-///      unrecognized role variants, then emits `role_grnt`. Granting an already-held role
-///      is idempotent: the bitmask is ORed, so no state change occurs beyond the event.
+///      unrecognized role variants, then emits `role_grnt`. Granting a role the target
+///      already holds fails with [`AdminError::RoleAlreadyGranted`] (#768), so callers
+///      never mistake a no-op for a fresh assignment.
 /// @param env The Soroban environment.
 /// @param caller The address performing the grant; must be a super-admin.
 /// @param role The role to grant (one of [`Role::Admin`], [`Role::Minter`], [`Role::SuperAdmin`], [`Role::Pauser`]).
@@ -832,6 +835,7 @@ pub fn has_admin(env: &Env) -> bool {
 /// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
 /// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
 /// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleAlreadyGranted`] — `address` already holds `role`.
 /// # Events
 /// Emits `role_grnt` with data `(caller, role, address)`.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
@@ -847,8 +851,8 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @dev Intentionally private. Callers must perform authorization before delegating here.
 ///      Rejects the zero address. The assignment is a single load / bitwise-OR /
 ///      store on the address's `AdminKey::RoleMask(address)` entry, so a grant
-///      never disturbs the address's other roles. Granting an already-held role is
-///      idempotent.
+///      never disturbs the address's other roles. Granting a role the address
+///      already holds panics with [`AdminError::RoleAlreadyGranted`] (#768).
 /// @param env The Soroban environment.
 /// @param admin The address recorded as the granting caller in the emitted event.
 /// @param role The role to assign.
@@ -856,6 +860,7 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @errors
 /// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
 /// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleAlreadyGranted`] — `address` already holds `role`.
 /// # Events
 /// Emits `role_grnt` with data `(admin, role, address)`.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
@@ -865,6 +870,12 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
         None => soroban_sdk::panic_with_error!(env, AdminError::InvalidRole),
     };
     let mask = load_role_mask(env, address);
+    // A role that is already held must fail loudly rather than silently
+    // no-op: callers that rely on the grant having *changed* something would
+    // otherwise get a false sense of a fresh assignment (#768).
+    if mask & bit != 0 {
+        soroban_sdk::panic_with_error!(env, AdminError::RoleAlreadyGranted);
+    }
     persist_role_mask(env, address, mask | bit);
     events::emit_role_granted(env, admin, role, address);
 }

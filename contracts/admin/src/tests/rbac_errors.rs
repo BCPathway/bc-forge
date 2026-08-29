@@ -4,6 +4,17 @@
 use super::*;
 use soroban_sdk::InvokeError;
 
+/// Minimal client harness: registers `AdminContract`, sets an admin, and
+/// returns the client plus the admin address.
+fn setup(env: &Env) -> (AdminContractClient<'_>, Address) {
+    env.mock_all_auths();
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(env, &contract_id);
+    let admin = Address::generate(env);
+    client.set_admin(&admin);
+    (client, admin)
+}
+
 /// Asserts that the module-level documentation table and the code-level
 /// discriminants agree on the standardized PascalCase error names (#751).
 #[test]
@@ -52,7 +63,8 @@ fn test_admin_error_variants_are_pascal_case_and_unique() {
     check_variant!(ProposalNotPending = 18);
     check_variant!(DuplicateVote = 19);
     check_variant!(Unauthorized = 20);
-    assert_eq!(count, 20, "expected all 20 standardized error variants");
+    check_variant!(RoleAlreadyGranted = 21);
+    assert_eq!(count, 21, "expected all 21 standardized error variants");
 }
 
 /// The `Unauthorized` variant (#752) must exist and convert into a Soroban
@@ -109,6 +121,42 @@ fn test_mask_without_role_bitwise_and_not() {
 
     // Clearing an already-clear bit is a no-op.
     assert_eq!(mask_without_role(cleared, Role::Minter), cleared);
+}
+
+/// #761 — every recognized role discriminant passes grant_role's validation.
+/// The public `Role` type is a `#[contracttype]` enum (name-encoded), so the
+/// type system already excludes unknown discriminants; this test locks in that
+/// each valid role is accepted end-to-end and mapped to its bitmask bit.
+#[test]
+fn test_grant_role_accepts_every_recognized_role() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    for role in [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser] {
+        let holder = Address::generate(&env);
+        client.grant_role(&admin, &role, &holder);
+        assert!(client.has_role(&role, &holder));
+        // Role bit is the power-of-two bound the issue's "valid bitmask" step
+        // checks (#761): exactly one bit is set for each recognized role.
+        assert_eq!(role_bit(role), Some(mask_with_role(0, role)));
+    }
+}
+
+/// #768 — granting a role the target already holds fails with
+/// `RoleAlreadyGranted`, not a silent no-op.
+#[test]
+fn test_grant_role_already_granted_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    client.grant_role(&admin, &Role::Minter, &holder);
+    assert!(client.has_role(&Role::Minter, &holder));
+
+    let result = client.try_grant_role(&admin, &Role::Minter, &holder);
+    assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(21))));
 }
 
 /// The four role bits are exactly 1, 2, 4, 8 (#753: bitwise values 1, 2, 4, 8).
