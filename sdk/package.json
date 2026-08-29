@@ -8,8 +8,10 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js --passWithNoTests",
-    "lint": "eslint 'src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'",
+    "lint": "eslint src",
+    "format": "prettier --write src",
+
+
     "clean": "rm -rf dist"
   },
   "keywords": [
