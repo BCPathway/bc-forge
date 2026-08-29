@@ -51,6 +51,7 @@ fn seed_upgrade_proposal(env: &Env, contract_id: &Address, id: u64, proposer: &A
         quorum: 2,
         status: ProposalStatus::Pending,
         expires_at: u64::MAX,
+        timelock_expires_at: None,
     };
     env.as_contract(contract_id, || {
         env.storage()

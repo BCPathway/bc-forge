@@ -38,8 +38,14 @@ function makeSimError(): object {
 // network calls; instead we mock the server constructor inline via jest.
 import { rpc as SorobanRpc } from '@stellar/stellar-sdk';
 
-const mockSimulateTransaction = jest.spyOn(SorobanRpc.Server.prototype, 'simulateTransaction') as unknown as jest.Mock;
-const mockGetLatestLedger = jest.spyOn(SorobanRpc.Server.prototype, 'getLatestLedger') as unknown as jest.Mock;
+const mockSimulateTransaction = jest.spyOn(
+  SorobanRpc.Server.prototype,
+  'simulateTransaction',
+) as unknown as jest.Mock;
+const mockGetLatestLedger = jest.spyOn(
+  SorobanRpc.Server.prototype,
+  'getLatestLedger',
+) as unknown as jest.Mock;
 
 // ─── Import subject after mock setup ─────────────────────────────────────────
 
