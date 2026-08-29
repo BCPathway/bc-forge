@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CLI deploy command tests (#746)
  *
  * Tests for deployVault() and the createDeployCommand() factory.
@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { deployVault, createDeployCommand, type DeployVaultOptions } from '../commands/deploy.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -156,6 +157,22 @@ describe('CLI deploy command (#746)', () => {
       expect(result.success).toBe(false);
       expect(result.message).toMatch(/Deployment failed/);
     });
+
+    it('exports deployment artifacts JSON when out option is specified', async () => {
+      spawnMock
+        .mockReturnValueOnce(fakeSpawn('hash_vault_wasm'))
+        .mockReturnValueOnce(fakeSpawn('CVAULT_EXPORT_TEST'))
+        .mockReturnValueOnce(fakeSpawn(''));
+
+      const outPath = '/tmp/test-deployments-out.json';
+      const result = await deployVault({
+        ...COMMON_OPTS,
+        out: outPath,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.outPath).toBe(path.resolve(outPath));
+    });
   });
 
   describe('createDeployCommand', () => {
@@ -175,10 +192,11 @@ describe('CLI deploy command (#746)', () => {
       expect(optionNames).toContain('--symbol');
     });
 
-    it('has optional --fee-wasm and --dry-run options', () => {
+    it('has optional --fee-wasm, --out, and --dry-run options', () => {
       const cmd = createDeployCommand();
       const optionNames = cmd.options.map((o) => o.long);
       expect(optionNames).toContain('--fee-wasm');
+      expect(optionNames).toContain('--out');
       expect(optionNames).toContain('--dry-run');
     });
   });

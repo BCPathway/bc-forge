@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -50,7 +50,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -79,12 +79,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 }
               ]
             }
@@ -162,7 +162,7 @@
                   "symbol": "RoleMask"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 }
               ]
             },
@@ -182,13 +182,13 @@
                       "symbol": "RoleMask"
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                     }
                   ]
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 4
                 }
               }
             },
@@ -385,12 +385,12 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
                 {
-                  "bool": true
+                  "bool": false
                 }
               ]
             }
