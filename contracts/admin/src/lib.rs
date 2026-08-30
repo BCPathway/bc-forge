@@ -954,7 +954,11 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
 /// # Errors
 /// Returns [`AdminError::RoleAlreadyGranted`] if the role is already held by the address.
 /// Returns [`AdminError::InvalidRole`] if the role variant is not recognized.
-pub fn validate_role_not_granted(env: &Env, role: Role, address: &Address) -> Result<(), AdminError> {
+pub fn validate_role_not_granted(
+    env: &Env,
+    role: Role,
+    address: &Address,
+) -> Result<(), AdminError> {
     require_non_zero_address(env, address);
     if !is_valid_role(role) {
         return Err(AdminError::InvalidRole);
@@ -1026,7 +1030,10 @@ pub fn get_roles_bitmask(env: &Env, address: &Address) -> u32 {
 
     // Check if Admin role is set - if so, it implies all other roles
     if (role_mask & ROLE_BIT_ADMIN) != 0 {
-        return RoleFlags::Admin.bits() | RoleFlags::Minter.bits() | RoleFlags::SuperAdmin.bits() | RoleFlags::Pauser.bits();
+        return RoleFlags::Admin.bits()
+            | RoleFlags::Minter.bits()
+            | RoleFlags::SuperAdmin.bits()
+            | RoleFlags::Pauser.bits();
     }
 
     let mut mask = 0u32;
@@ -2099,11 +2106,20 @@ mod tests {
             super::init_storage(&env, &admin)
         }
 
-        pub fn grant_role_checked(env: Env, caller: Address, role: Role, address: Address) -> Result<(), AdminError> {
+        pub fn grant_role_checked(
+            env: Env,
+            caller: Address,
+            role: Role,
+            address: Address,
+        ) -> Result<(), AdminError> {
             super::grant_role_checked(&env, &caller, role, &address)
         }
 
-        pub fn validate_role_not_granted(env: Env, role: Role, address: Address) -> Result<(), AdminError> {
+        pub fn validate_role_not_granted(
+            env: Env,
+            role: Role,
+            address: Address,
+        ) -> Result<(), AdminError> {
             super::validate_role_not_granted(&env, role, &address)
         }
 
@@ -5286,7 +5302,10 @@ mod tests {
 
         let mask = client.get_roles_bitmask(&user);
         // Admin role implies all other roles, so all bits should be set
-        let expected = RoleFlags::Admin.bits() | RoleFlags::Minter.bits() | RoleFlags::SuperAdmin.bits() | RoleFlags::Pauser.bits();
+        let expected = RoleFlags::Admin.bits()
+            | RoleFlags::Minter.bits()
+            | RoleFlags::SuperAdmin.bits()
+            | RoleFlags::Pauser.bits();
         assert_eq!(mask, expected);
     }
 
@@ -5368,4 +5387,3 @@ mod tests {
         client.require_deployer();
     }
 }
-
