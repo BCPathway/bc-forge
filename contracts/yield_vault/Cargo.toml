@@ -3,7 +3,10 @@ name = "bc-forge-yield-vault"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Yield vault contract for bc-forge"
+description = "Yield vault for bc-forge contracts (work in progress)"
+license = "MIT"
+repository = "https://github.com/BCPathway/bc-forge"
+homepage = "https://github.com/BCPathway/bc-forge"
 
 [lib]
 crate-type = ["rlib"]

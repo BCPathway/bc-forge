@@ -25,6 +25,31 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
 };
 
+// ─── Storage Structs ─────────────────────────────────────────────────────────
+
+/// Vault state storing core yield-bearing vault parameters, deposit limits,
+/// exchange rate, and fee accumulation metrics.
+///
+/// @title VaultState
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct VaultState {
+    /// Protocol/management fee rate represented in basis points (e.g. 100 = 1%, max 10000 = 100%).
+    pub fee_rate_bps: u32,
+    /// Address designated to receive collected vault fees.
+    pub fee_receiver: Address,
+    /// Minimum deposit limit per operation.
+    pub min_deposit: i128,
+    /// Maximum deposit cap per operation or total vault capacity.
+    pub max_deposit: i128,
+    /// Current exchange rate between wrapper shares and underlying asset.
+    pub exchange_rate: i128,
+    /// Accumulated undistributed/collected fees pending harvest or distribution.
+    pub accumulated_fees: i128,
+    /// Timestamp (ledger time) of the last fee accumulation or exchange rate update.
+    pub last_update_timestamp: u64,
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -59,6 +84,8 @@ pub enum DataKey {
     AllowanceExp(Address, Address),
     /// Reentrancy lock flag.
     Lock,
+    /// Vault state parameters (fee rate, limits, exchange rate, fee accumulation).
+    VaultState,
     /// Per-user deposit unlock timestamp (seconds since epoch): while the
     /// current ledger timestamp is before this value the user's deposit is
     /// time-locked and withdrawals revert via the `require_unlocked` guard.
@@ -88,6 +115,10 @@ pub enum WrapperError {
     TokensLocked = 11,
     /// Share price cannot be computed: there are no outstanding vault shares.
     ZeroShares = 12,
+    /// Vault state has not been configured.
+    VaultStateNotSet = 13,
+    /// Provided vault state parameters are invalid.
+    InvalidVaultState = 14,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -170,6 +201,17 @@ impl WrapperContract {
             .instance()
             .get(&DataKey::UnderlyingToken)
             .expect("underlying token not set")
+    }
+
+    fn read_vault_state(env: &Env) -> Result<VaultState, WrapperError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::VaultState)
+            .ok_or(WrapperError::VaultStateNotSet)
+    }
+
+    fn write_vault_state(env: &Env, state: &VaultState) {
+        env.storage().instance().set(&DataKey::VaultState, state);
     }
 
     fn read_balance(env: &Env, id: &Address) -> i128 {
@@ -434,6 +476,107 @@ impl WrapperContract {
         Ok(())
     }
 
+    /// Deposit `assets` of the underlying token and receive proportional vault shares.
+    ///
+    /// This is the vault-style entry point (analogous to ERC-4626 `deposit`). Unlike
+    /// [`WrapperContract::wrap`], which mints shares at a flat decimal-scaled 1:1 rate,
+    /// `deposit` always uses the **current share price** so that depositors entering after
+    /// rewards have been distributed receive the correct (lower) number of shares:
+    ///
+    /// ```text
+    /// shares_out = assets * total_shares / total_assets   (when total_shares > 0)
+    /// shares_out = assets                                   (first deposit: 1:1 bootstrap)
+    /// ```
+    ///
+    /// Rounding is in favour of the protocol (floor division), and the call reverts if the
+    /// computed share amount rounds down to zero.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address depositing underlying tokens; must have pre-approved this
+    ///              contract to spend `assets` of the underlying token.
+    /// * `assets` - Amount of underlying tokens to deposit. Must be positive.
+    ///
+    /// # Returns
+    /// The number of vault shares minted to `caller`.
+    ///
+    /// # Errors
+    /// * [`WrapperError::NotInitialized`] if the contract is uninitialized.
+    /// * [`WrapperError::ContractPaused`] if operations are paused.
+    /// * [`WrapperError::InvalidAmount`] if `assets` is non-positive, or if the share
+    ///   calculation overflows or rounds down to zero.
+    /// * [`WrapperError::Reentrant`] if a reentrant call is detected.
+    ///
+    /// # Security
+    /// Protected by a reentrancy guard. The caller must have pre-approved this
+    /// contract to spend `assets` of the underlying token.
+    pub fn deposit(env: Env, caller: Address, assets: i128) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if assets <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        Self::acquire_lock(&env)?;
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+
+        // Pull underlying tokens from caller into this contract.
+        underlying_client.transfer_from(
+            &env.current_contract_address(),
+            &caller,
+            &env.current_contract_address(),
+            &assets,
+        );
+
+        // Calculate shares to mint based on the current exchange rate:
+        //   shares = assets * total_shares / total_assets  (post-transfer, so total_assets
+        //   already includes the newly deposited tokens — we read it before the transfer to
+        //   get the pre-deposit total, which is the correct reference price).
+        let total_shares = Self::read_supply(&env);
+        let shares_out: i128 = if total_shares == 0 {
+            // First deposit — bootstrap at 1:1 (assets == shares).
+            assets
+        } else {
+            // total_assets includes the freshly transferred tokens; subtract them back to
+            // get the pre-deposit asset total so the exchange rate reflects the vault state
+            // before this deposit.
+            let total_assets_after = underlying_client.balance(&env.current_contract_address());
+            let total_assets_before = total_assets_after.checked_sub(assets).unwrap_or_else(|| {
+                soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
+            });
+
+            if total_assets_before <= 0 {
+                // Edge case: vault had zero assets but nonzero shares — treat like first deposit.
+                assets
+            } else {
+                assets
+                    .checked_mul(total_shares)
+                    .and_then(|product| product.checked_div(total_assets_before))
+                    .unwrap_or_else(|| {
+                        soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
+                    })
+            }
+        };
+
+        if shares_out <= 0 {
+            Self::release_lock(&env);
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        // Mint shares to caller.
+        let new_balance = Self::read_balance(&env, &caller) + shares_out;
+        Self::write_balance(&env, &caller, new_balance);
+        Self::write_supply(&env, total_shares + shares_out);
+
+        Self::release_lock(&env);
+        events::emit_deposit(&env, &caller, assets, shares_out);
+        Ok(shares_out)
+    }
+
     /// Unwrap `wrapped_amount` of wrapped tokens back to the underlying token.
     ///
     /// Burns `wrapped_amount` of wrapped tokens from `caller` and transfers the
@@ -502,6 +645,23 @@ impl WrapperContract {
     pub fn supply(env: Env) -> i128 {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_supply(&env)
+    }
+
+    /// Returns `user`'s vault share balance.
+    ///
+    /// @notice A vault share is minted 1:1 with the wrapper token on `wrap`
+    ///         and burned 1:1 on `unwrap`/`withdraw`/`burn`/`burn_from`, so
+    ///         this reads the same persistent `Balance` entry as the
+    ///         `TokenInterface::balance` getter — exposed here under vault
+    ///         vocabulary for callers reasoning about shares rather than
+    ///         raw token units. Returns 0 for an address that has never held
+    ///         shares.
+    /// @param env The Soroban environment.
+    /// @param user The address to query.
+    /// @return The number of vault shares `user` currently holds.
+    pub fn share_balance(env: Env, user: Address) -> i128 {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_balance(&env, &user)
     }
 
     /// Pause all wrap/unwrap and transfer operations. Requires Pauser role.
@@ -850,6 +1010,49 @@ impl WrapperContract {
     pub fn get_unlock_time(env: Env, user: Address) -> Option<u64> {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         Self::read_unlock_time(&env, &user)
+    }
+
+    /// Sets the vault parameters, deposit limits, exchange rate, and fee accumulation state.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address calling this function; must have Admin authorization.
+    /// * `state`  - The complete [`VaultState`] configuration.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::InvalidVaultState`] if `fee_rate_bps > 10_000`, `min_deposit < 0`,
+    ///   `max_deposit < min_deposit`, `exchange_rate <= 0`, or `accumulated_fees < 0`.
+    pub fn set_vault_state(
+        env: Env,
+        caller: Address,
+        state: VaultState,
+    ) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+
+        if state.fee_rate_bps > 10_000
+            || state.min_deposit < 0
+            || state.max_deposit < state.min_deposit
+            || state.exchange_rate <= 0
+            || state.accumulated_fees < 0
+        {
+            return Err(WrapperError::InvalidVaultState);
+        }
+
+        Self::write_vault_state(&env, &state);
+        events::emit_vault_state_set(&env, &caller, &state);
+        Ok(())
+    }
+
+    /// Returns the current vault parameters and accumulation state.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::VaultStateNotSet`] if the vault state has not been configured.
+    pub fn get_vault_state(env: Env) -> Result<VaultState, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_vault_state(&env)
     }
 
     /// Returns the contract version string.
