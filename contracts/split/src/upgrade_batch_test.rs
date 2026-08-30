@@ -8,7 +8,14 @@ use bc_forge_admin as admin;
 use bc_forge_admin::AdminError;
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::Ledger;
 use soroban_sdk::{vec, Address, BytesN, Env, String};
+
+fn advance_past_timelock(env: &Env) {
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += admin::TIMELOCK_DELAY_SECS + 1;
+    env.ledger().set(ledger_info);
+}
 
 fn uploaded_wasm_hash(env: &Env) -> BytesN<32> {
     // Empty wasm is accepted by Soroban testutils and is enough to exercise
@@ -125,6 +132,7 @@ fn test_batch_token_and_split_upgrades_then_inter_contract_calls_succeed() {
 
     let token_wasm = uploaded_wasm_hash(&env);
     let split_wasm = uploaded_wasm_hash(&env);
+    advance_past_timelock(&env);
 
     // 2) Execute in sequence: token, then split
     token_client.execute_upgrade(&gov_a, &token_proposal, &token_wasm);
@@ -160,6 +168,7 @@ fn test_batch_upgrade_rejects_when_split_quorum_not_met() {
     assert!(!split_client.is_proposal_ready(&split_proposal));
 
     let wasm = uploaded_wasm_hash(&env);
+    advance_past_timelock(&env);
 
     token_client.execute_upgrade(&gov_a, &token_proposal, &wasm);
 
@@ -170,6 +179,7 @@ fn test_batch_upgrade_rejects_when_split_quorum_not_met() {
 
     // After the missing approval arrives, the split leg of the batch can finish.
     split_client.approve_proposal(&gov_b, &split_proposal);
+    advance_past_timelock(&env);
     split_client.execute_upgrade(&gov_a, &split_proposal, &wasm);
 }
 
@@ -198,6 +208,7 @@ fn test_batch_upgrade_rejects_non_pool_executor_on_either_contract() {
     );
 
     // Pool members can still complete the batch afterwards.
+    advance_past_timelock(&env);
     token_client.execute_upgrade(&gov_a, &token_proposal, &wasm);
     split_client.execute_upgrade(&gov_a, &split_proposal, &wasm);
 }

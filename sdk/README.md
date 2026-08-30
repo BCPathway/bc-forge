@@ -162,6 +162,33 @@ await client.initialize(
 console.log('Contract initialized');
 ```
 
+## RBAC Initialization (SuperAdmin)
+
+After `initialize`, run the `init_rbac` deployment step to bootstrap role-based
+access control and assign the initial `SuperAdmin`:
+
+```typescript
+import { bcForgeClient, Role } from '@bc-forge/sdk';
+
+const adminKeypair = Keypair.fromSecret('SXXX...SECRET');
+
+// One-time RBAC bootstrap: migrate_admin + grant SuperAdmin role
+const rbac = await client.initRbac(adminKeypair.publicKey(), adminKeypair);
+console.log('migrate_admin TX:', rbac.migrate.hash, 'Success:', rbac.migrate.success);
+console.log('grant_role TX:', rbac.grant.hash, 'Success:', rbac.grant.success);
+
+// Verify the assignment
+const isSuperAdmin = await client.hasRole(Role.SuperAdmin, adminKeypair.publicKey());
+console.log('Is SuperAdmin:', isSuperAdmin);
+```
+
+You can also assign or revoke the role independently:
+
+```typescript
+await client.grantSuperAdmin('GOTHER...ADMIN', adminKeypair);
+await client.revokeSuperAdmin('GOTHER...ADMIN', adminKeypair);
+```
+
 ## Batch Minting
 
 ```typescript
@@ -395,6 +422,7 @@ await client.unpause(adminKeypair);
 | `getVersion()` | `string` | Contract version |
 | `getBalances(addresses[], batchSize)` | `bigint[]` | Batch query multiple balances |
 | `getEvents(startLedger?)` | `any[]` | Get contract events |
+| `hasRole(role, address)` | `boolean` | Check whether an address holds a role |
 
 ### Write Methods (require Keypair)
 
@@ -439,6 +467,9 @@ When a `walletAdapter` is configured and connected, write methods may be invoked
 | `updateSymbol(newSymbol, source)` | Update token symbol (admin-only) |
 | `lockTokens(user, amount, unlockTime, source)` | Lock tokens for vesting |
 | `withdrawLocked(user, source)` | Withdraw matured locked tokens |
+| `initRbac(superAdmin, source)` | `init_rbac` step: migrate_admin + grant initial SuperAdmin |
+| `grantSuperAdmin(address, source)` | Grant the SuperAdmin role |
+| `revokeSuperAdmin(address, source)` | Revoke the SuperAdmin role |
 
 ### Offline Transaction Builders
 
@@ -458,6 +489,37 @@ When a `walletAdapter` is configured and connected, write methods may be invoked
 | `simulateMint(to, amount, sourcePublicKey)` | `any` | Simulate mint operation |
 | `simulateTransfer(from, to, amount, sourcePublicKey)` | `any` | Simulate transfer operation |
 
+## Vault Client (`VaultClient`) (#744)
+
+The SDK provides `VaultClient` for interacting with yield-bearing fee vault contracts and wrapper contracts.
+
+```typescript
+import { VaultClient } from '@bc-forge/sdk';
+import { Keypair } from '@stellar/stellar-sdk';
+
+const vault = new VaultClient({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+  contractId: 'CVAULT...XYZ',
+});
+
+// Deposit underlying tokens to receive vault shares
+await vault.deposit('GUSER...', BigInt(1000_0000000), userKeypair);
+
+// Check share balance & underlying value
+const shares = await vault.getShareBalance('GUSER...');
+const totalAssets = await vault.getTotalAssets();
+const sharePrice = await vault.calculateSharePrice();
+const rewards = await vault.calculateRewards(shares);
+
+// Compound protocol fees into vault assets
+await vault.compound('GADMIN...', adminKeypair);
+
+// Withdraw shares and receive underlying tokens + accrued yield
+await vault.withdraw('GUSER...', shares, userKeypair);
+```
+
 ## License
 
 MIT
+
