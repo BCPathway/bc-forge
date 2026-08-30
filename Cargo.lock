@@ -196,26 +196,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "bc-forge-compound-fees"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "bc-forge-e2e-tests"
 version = "0.1.0"
 dependencies = [
  "bc-forge-token",
  "soroban-sdk",
  "tokio",
-]
-
-[[package]]
-name = "bc-forge-flash-loan-guard"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
 ]
 
 [[package]]
@@ -280,13 +266,6 @@ dependencies = [
  "bc-forge-admin",
  "bc-forge-lifecycle",
  "bc-forge-token",
- "soroban-sdk",
-]
-
-[[package]]
-name = "bc-forge-yield-vault"
-version = "0.1.0"
-dependencies = [
  "soroban-sdk",
 ]
 
