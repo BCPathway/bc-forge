@@ -257,7 +257,11 @@ impl YieldVaultContract {
         }
 
         // Mint shares to caller.
-        Self::write_balance(&env, &caller, Self::read_balance(&env, &caller) + shares_out);
+        Self::write_balance(
+            &env,
+            &caller,
+            Self::read_balance(&env, &caller) + shares_out,
+        );
         Self::write_supply(&env, total_shares + shares_out);
 
         events::emit_deposit(&env, &caller, assets, shares_out);

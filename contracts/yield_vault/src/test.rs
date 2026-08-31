@@ -13,7 +13,14 @@ use soroban_sdk::{Address, Env, String};
 
 /// Register an underlying token + yield vault, returning both clients plus the
 /// admin and vault contract id.
-fn setup(env: &Env) -> (YieldVaultContractClient<'_>, BcForgeTokenClient<'_>, Address, Address) {
+fn setup(
+    env: &Env,
+) -> (
+    YieldVaultContractClient<'_>,
+    BcForgeTokenClient<'_>,
+    Address,
+    Address,
+) {
     let admin = Address::generate(env);
 
     let underlying_id = env.register(BcForgeToken, ());

@@ -6,10 +6,8 @@ use soroban_sdk::{symbol_short, Address, Env};
 
 /// Emitted when the yield vault is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, token: &Address) {
-    env.events().publish(
-        (symbol_short!("init"),),
-        (admin.clone(), token.clone()),
-    );
+    env.events()
+        .publish((symbol_short!("init"),), (admin.clone(), token.clone()));
 }
 
 /// Emitted when assets are deposited and shares are minted.
@@ -29,13 +27,7 @@ pub fn emit_withdraw(env: &Env, caller: &Address, shares: i128, tokens_out: i128
 }
 
 /// Emitted when non-underlying tokens are rescued by an admin.
-pub fn emit_rescue_tokens(
-    env: &Env,
-    admin: &Address,
-    token: &Address,
-    to: &Address,
-    amount: i128,
-) {
+pub fn emit_rescue_tokens(env: &Env, admin: &Address, token: &Address, to: &Address, amount: i128) {
     env.events().publish(
         (symbol_short!("rescue"),),
         (admin.clone(), token.clone(), to.clone(), amount),
