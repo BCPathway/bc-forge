@@ -97,7 +97,7 @@ impl AdminContract {
 fn test_deposit_to_mint_ratio_initial_deposit_1_to_1() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     // First deposit: 1,000,000 assets → 1,000,000 shares (1:1 bootstrap).
     let shares = vault.deposit(&user, &1_000_000, &0);
@@ -307,7 +307,7 @@ fn test_rate_limit_enforced_before_amount_validation() {
 fn test_pause_blocks_deposit() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     // Pause the contract.
     bc_forge_lifecycle::set_paused(&env, true);
@@ -320,7 +320,7 @@ fn test_pause_blocks_deposit() {
 fn test_pause_allows_withdraw() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     // Deposit first while unpaused.
     vault.deposit(&user, &1_000_000, &0);
@@ -340,7 +340,7 @@ fn test_pause_allows_withdraw() {
 fn test_unpause_resumes_deposits() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     bc_forge_lifecycle::set_paused(&env, true);
 
@@ -360,7 +360,7 @@ fn test_unpause_resumes_deposits() {
 fn test_full_deposit_withdrawl_cycle_through_pause() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     vault.deposit(&user, &2_000_000, &0);
     assert_eq!(vault.supply(), 2_000_000);
@@ -384,7 +384,7 @@ fn test_full_deposit_withdrawl_cycle_through_pause() {
 fn test_withdraw_full_balance_while_paused() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     vault.deposit(&user, &1_000_000, &0);
 
@@ -424,8 +424,8 @@ fn test_rescue_tokens_transfers_non_underlying() {
     // Admin rescues the stuck tokens.
     vault.rescue_tokens(&admin, &stuck_id, &recipient, &500_000);
 
-    assert_eq!(stuck.balance(&recipient), &500_000);
-    assert_eq!(stuck.balance(&vault_id), &0);
+    assert_eq!(stuck.balance(&recipient), 500_000);
+    assert_eq!(stuck.balance(&vault_id), 0);
 }
 
 #[test]
@@ -549,7 +549,7 @@ fn test_rescue_tokens_preserves_vault_deposit_integrity() {
 fn test_deposit_slippage_revert() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     // Depositing 1000 assets → 1000 shares; requiring 1050 should fail.
     vault.deposit(&user, &1000, &1050);
@@ -559,7 +559,7 @@ fn test_deposit_slippage_revert() {
 fn test_deposit_slippage_success() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     let shares = vault.deposit(&user, &1000, &950);
     assert_eq!(shares, 1000);
@@ -570,7 +570,7 @@ fn test_deposit_slippage_success() {
 fn test_withdraw_slippage_revert() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     vault.deposit(&user, &1000, &0);
 
@@ -582,7 +582,7 @@ fn test_withdraw_slippage_revert() {
 fn test_withdraw_slippage_success() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     vault.deposit(&user, &1000, &0);
     let tokens = vault.withdraw(&user, &1000, &950);
@@ -595,7 +595,7 @@ fn test_withdraw_slippage_success() {
 fn test_deposit_zero_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     let res = vault.try_deposit(&user, &0, &0);
     assert_eq!(res, Err(Ok(VaultError::InvalidAmount)));
@@ -605,7 +605,7 @@ fn test_deposit_zero_fails() {
 fn test_deposit_negative_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     let res = vault.try_deposit(&user, &-100, &0);
     assert_eq!(res, Err(Ok(VaultError::InvalidAmount)));
@@ -615,7 +615,7 @@ fn test_deposit_negative_fails() {
 fn test_withdraw_insufficient_balance_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     let res = vault.try_withdraw(&user, &100, &0);
     assert_eq!(res, Err(Ok(VaultError::InsufficientBalance)));
@@ -637,7 +637,7 @@ fn test_uninitialized_deposit_fails() {
 fn test_underlying_token_query() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, underlying, _admin, _user, _vault_id) = setup(&env);
+    let (vault, underlying, _admin, _vault_id) = setup(&env);
 
     assert_eq!(vault.underlying_token().unwrap(), underlying.address);
 }
@@ -646,7 +646,7 @@ fn test_underlying_token_query() {
 fn test_initial_supply_is_zero() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, _user, _vault_id) = setup(&env);
+    let (vault, _underlying, _admin, _vault_id) = setup(&env);
 
     assert_eq!(vault.supply().unwrap(), 0);
 }
@@ -655,7 +655,7 @@ fn test_initial_supply_is_zero() {
 fn test_share_balance_zero_for_unknown_address() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, _user, _vault_id) = setup(&env);
+    let (vault, _underlying, _admin, _vault_id) = setup(&env);
     let stranger = Address::generate(&env);
 
     assert_eq!(vault.share_balance(&stranger).unwrap(), 0);
@@ -665,7 +665,7 @@ fn test_share_balance_zero_for_unknown_address() {
 fn test_multiple_deposits_accumulate_supply_and_balances() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, _underlying, _admin, user) = setup_and_fund(&env);
+    let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     vault.deposit(&user, &100_000, &0);
     vault.deposit(&user, &200_000, &0);
