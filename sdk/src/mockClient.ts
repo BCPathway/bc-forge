@@ -3,12 +3,7 @@
  *
  * Allows frontend devs to test logic without a live Soroban RPC.
  */
-import type {
-  BatchMintRecipient,
-  bcForgeClientConfig,
-  RbacInitResult,
-  TransactionResult,
-} from './client';
+import { Role, type BatchMintRecipient, type bcForgeClientConfig, type RbacInitResult, type TransactionResult } from './client';
 import { formatAtomicAmount } from './utils';
 
 interface AccountState {
@@ -23,6 +18,8 @@ export class MockBcForgeClient {
   private name: string = 'MockToken';
   private symbol: string = 'MOCK';
   private decimals: number = 7;
+  private adminAddress: string = 'GADMIN0000000000000000000000000000000000000000000000000000';
+  private linkedContracts: Record<string, string> = {};
 
   constructor(_config: bcForgeClientConfig) {}
 
@@ -48,6 +45,49 @@ export class MockBcForgeClient {
 
   async getAllowance(owner: string, spender: string): Promise<bigint> {
     return this.accounts[owner]?.allowances[spender] ?? 0n;
+  }
+
+  async getAdmin(): Promise<string> {
+    return this.adminAddress;
+  }
+
+  async setAdmin(admin: string): Promise<TransactionResult> {
+    this.adminAddress = admin;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async hasRole(role: Role | string, address: string): Promise<boolean> {
+    if (this.adminAddress === address) return true;
+    return this.roles[address]?.has(role) ?? false;
+  }
+
+  async verifySuperAdmin(address: string): Promise<boolean> {
+    return this.hasRole(Role.SuperAdmin, address);
+  }
+
+  async grantRole(role: Role | string, address: string): Promise<TransactionResult> {
+    if (!this.roles[address]) this.roles[address] = new Set();
+    this.roles[address].add(role);
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async revokeRole(role: Role | string, address: string): Promise<TransactionResult> {
+    this.roles[address]?.delete(role);
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async setAdminContract(adminContractId: string): Promise<TransactionResult> {
+    this.linkedContracts['admin'] = adminContractId;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async setDependentToken(tokenContractId: string): Promise<TransactionResult> {
+    this.linkedContracts['token'] = tokenContractId;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  getLinkedContracts(): Record<string, string> {
+    return { ...this.linkedContracts };
   }
 
   async mint(from: string, to: string, amount: bigint): Promise<TransactionResult> {
@@ -111,30 +151,23 @@ export class MockBcForgeClient {
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
-  async grantMinter(_address: string): Promise<TransactionResult> {
-    return { success: true, hash: 'mock-hash', returnValue: null };
+  async grantMinter(address: string): Promise<TransactionResult> {
+    return this.grantRole(Role.Minter, address);
   }
 
-  async revokeMinter(_address: string): Promise<TransactionResult> {
-    return { success: true, hash: 'mock-hash', returnValue: null };
+  async revokeMinter(address: string): Promise<TransactionResult> {
+    return this.revokeRole(Role.Minter, address);
   }
 
   async grantSuperAdmin(address: string): Promise<TransactionResult> {
-    if (!this.roles[address]) this.roles[address] = new Set();
-    this.roles[address].add('SuperAdmin');
-    return { success: true, hash: 'mock-hash', returnValue: null };
+    return this.grantRole(Role.SuperAdmin, address);
   }
 
   async revokeSuperAdmin(address: string): Promise<TransactionResult> {
-    if (!this.roles[address]?.has('SuperAdmin')) {
+    if (!this.roles[address]?.has(Role.SuperAdmin) && !this.roles[address]?.has('SuperAdmin')) {
       return { success: false, hash: 'mock-hash', returnValue: 'SuperAdmin role not held' };
     }
-    this.roles[address].delete('SuperAdmin');
-    return { success: true, hash: 'mock-hash', returnValue: null };
-  }
-
-  async hasRole(role: string, address: string): Promise<boolean> {
-    return this.roles[address]?.has(role) ?? false;
+    return this.revokeRole(Role.SuperAdmin, address);
   }
 
   async initRbac(superAdmin: string): Promise<RbacInitResult> {
