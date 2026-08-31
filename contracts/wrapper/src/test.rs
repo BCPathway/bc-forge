@@ -522,8 +522,10 @@ fn test_set_and_get_vault_state_success() {
 #[test]
 fn test_set_vault_state_unauthorized_fails() {
     let env = Env::default();
-    // Do NOT mock all auths so require_admin fails for non-admin caller
+    env.mock_all_auths();
     let (wrapper, _underlying, _admin, user, _wrapper_id) = setup(&env);
+    // Drop blanket auth mocks so require_admin fails for a non-admin caller.
+    env.mock_auths(&[]);
     let fee_receiver = Address::generate(&env);
 
     let state = VaultState {
