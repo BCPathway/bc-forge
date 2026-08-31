@@ -9,6 +9,7 @@ exclude = [
     "contracts/compound_fees",
     "contracts/flash_loan_guard",
     "contracts/yield_vault",
+
 ]
 default-members = ["contracts/*"]
 
