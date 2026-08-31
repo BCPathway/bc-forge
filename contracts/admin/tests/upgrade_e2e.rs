@@ -94,6 +94,10 @@ impl AdminContract {
         bc_forge_admin::emergency_execute_upgrade(&env, executor, proposal_id, wasm_hash)
     }
 
+    pub fn cancel_proposal(env: Env, caller: Address, proposal_id: u64) -> Result<(), AdminError> {
+        bc_forge_admin::cancel_proposal(&env, caller, proposal_id)
+    }
+
     pub fn migrate_admin(env: Env) {
         bc_forge_admin::migrate_admin(&env);
     }
