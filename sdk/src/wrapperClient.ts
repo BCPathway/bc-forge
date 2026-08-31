@@ -133,6 +133,46 @@ export class WrapperClient {
   }
 
   /**
+   * Converts underlying assets to vault shares, strictly rounding down (floor).
+   *
+   * @param assets - Amount of underlying assets
+   */
+  async convertToShares(assets: bigint): Promise<bigint> {
+    const result = await this.queryContract('convert_to_shares', [i128ToScVal(assets)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Converts vault shares to underlying assets, strictly rounding down (floor).
+   *
+   * @param shares - Amount of vault shares
+   */
+  async convertToAssets(shares: bigint): Promise<bigint> {
+    const result = await this.queryContract('convert_to_assets', [i128ToScVal(shares)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Simulates a deposit and returns the number of shares that would be minted, rounding down.
+   *
+   * @param assets - Amount of assets to deposit
+   */
+  async previewDeposit(assets: bigint): Promise<bigint> {
+    const result = await this.queryContract('preview_deposit', [i128ToScVal(assets)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
+   * Simulates a withdrawal and returns the number of assets that would be returned, rounding down.
+   *
+   * @param shares - Amount of shares to withdraw
+   */
+  async previewWithdraw(shares: bigint): Promise<bigint> {
+    const result = await this.queryContract('preview_withdraw', [i128ToScVal(shares)]);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
+  /**
    * Get the underlying SEP-41 token contract address being wrapped.
    */
   async getUnderlyingToken(): Promise<string> {
