@@ -1039,6 +1039,26 @@ export class bcForgeClient {
     return { migrate, grant };
   }
 
+  // ─── RBAC Migration ──────────────────────────────────────────────────────
+
+  /**
+   * Migrate the legacy admin address to the SuperAdmin role mapping.
+   *
+   * @remarks
+   * This is a one-shot, idempotent storage migration that copies the singular
+   * admin address from `AdminKey::Admin` (instance storage) to
+   * `AdminKey::SuperAdmin(admin)` (persistent storage). This enables the
+   * `require_super_admin` guard for legacy contracts without resetting state.
+   *
+   * Safe to call multiple times — subsequent calls are no-ops.
+   *
+   * @param source - Admin keypair (must be the contract admin to authorize migration)
+   * @returns TransactionResult with migration status
+   */
+  async migrateAdmin(source?: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('migrate_admin', [], source);
+  }
+
   // ─── Clawback / Regulatory ───────────────────────────────────────────────
 
   /**

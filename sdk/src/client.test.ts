@@ -156,6 +156,45 @@ describe('bcForgeClient Offline Transaction Builders', () => {
     });
   });
 
+  describe('migrateAdmin', () => {
+    it('should have migrateAdmin method', () => {
+      expect(typeof client.migrateAdmin).toBe('function');
+      expect(client.migrateAdmin.length).toBe(1); // 1 optional parameter
+    });
+
+    it('should invoke migrate_admin with no arguments', async () => {
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-migration-hash',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
+
+      await client.migrateAdmin(adminKeypair);
+
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, args, source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('migrate_admin');
+      expect(args).toHaveLength(0); // No arguments for migrate_admin
+      expect(source).toBe(adminKeypair);
+    });
+  });
+
+  describe('RBAC role management', () => {
+    it('should have grantMinter method', () => {
+      expect(typeof client.grantMinter).toBe('function');
+      expect(client.grantMinter.length).toBe(2); // 2 parameters
+    });
+
+    it('should have revokeMinter method', () => {
+      expect(typeof client.revokeMinter).toBe('function');
+      expect(client.revokeMinter.length).toBe(2); // 2 parameters
+    });
+  });
+
   describe('RBAC and Contract Connection Methods', () => {
     it('should invoke grantRole with correct parameters', async () => {
       const targetUser = Keypair.random().publicKey();
