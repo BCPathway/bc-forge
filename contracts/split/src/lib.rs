@@ -9,10 +9,18 @@ mod test;
 mod upgrade_batch_test;
 
 use bc_forge_admin as admin;
-use bc_forge_token::BcForgeTokenClient;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
+    contract, contractclient, contracterror, contractimpl, contracttype, Address, BytesN, Env,
+    String, Vec,
 };
+
+/// Minimal SEP-41 client so this crate does not link `bc-forge-token`'s WASM
+/// exports (those collide with this contract's upgrade-governance entry points).
+#[contractclient(name = "TokenClient")]
+pub trait TokenInterface {
+    fn balance(id: Address) -> i128;
+    fn transfer(from: Address, to: Address, amount: i128);
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -109,7 +117,7 @@ impl SplitContract {
         to: &Address,
         amount: i128,
     ) -> bool {
-        let client = BcForgeTokenClient::new(env, token_id);
+        let client = TokenClient::new(env, token_id);
         let from_balance = client.balance(from);
         if from_balance < amount || amount <= 0 {
             return false;

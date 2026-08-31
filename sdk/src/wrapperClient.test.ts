@@ -1,3 +1,4 @@
+import { describe, it, expect } from '@jest/globals';
 import { WrapperClient } from './wrapperClient';
 
 const MOCK_CONTRACT_ID = 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526';
