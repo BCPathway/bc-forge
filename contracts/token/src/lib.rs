@@ -614,17 +614,15 @@ impl BcForgeToken {
     /// @return `Ok(())` on success, or an error if the caller is unauthorized or already paused.
     pub fn pause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        let admin_address = admin::get_admin(&env);
 
-        if caller != admin_address && !admin::has_role(&env, admin::Role::Pauser, &caller) {
+        // #769: role-based check instead of the legacy address-equality
+        // comparison against `get_admin`. The admin always holds the `Admin`
+        // role bit, so an admin OR Pauser-role holder may pause; everyone else
+        // is rejected without panicking.
+        if !admin::is_admin_or_pauser(&env, &caller) {
             return Err(TokenError::ContractPaused);
         }
-
-        if caller == admin_address {
-            admin_address.require_auth();
-        } else {
-            caller.require_auth();
-        }
+        caller.require_auth();
 
         if bc_forge_lifecycle::is_paused(&env) {
             return Err(TokenError::AlreadyPaused);
@@ -643,17 +641,12 @@ impl BcForgeToken {
     /// @return `Ok(())` on success, or an error if the caller is unauthorized or not paused.
     pub fn unpause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        let admin_address = admin::get_admin(&env);
 
-        if caller != admin_address && !admin::has_role(&env, admin::Role::Pauser, &caller) {
+        // #769: role-based check, mirroring `pause` — admin or Pauser role.
+        if !admin::is_admin_or_pauser(&env, &caller) {
             return Err(TokenError::ContractPaused);
         }
-
-        if caller == admin_address {
-            admin_address.require_auth();
-        } else {
-            caller.require_auth();
-        }
+        caller.require_auth();
 
         if !bc_forge_lifecycle::is_paused(&env) {
             return Err(TokenError::NotPaused);
