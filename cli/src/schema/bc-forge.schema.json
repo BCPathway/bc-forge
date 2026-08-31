@@ -29,10 +29,10 @@
       "pattern": "^G[A-Z2-7]{55}$",
       "description": "Stellar G-address of the contract admin"
     },
-    "pauser": {
+    "superAdmin": {
       "type": "string",
       "pattern": "^G[A-Z2-7]{55}$",
-      "description": "Stellar G-address to receive the Pauser role (multisig)"
+      "description": "Stellar G-address assigned the initial SuperAdmin role during RBAC init"
     },
     "network": {
       "type": "string",
@@ -66,6 +66,18 @@
           },
           "deployer": {
             "type": "string"
+          },
+          "adminContractId": {
+            "type": "string"
+          },
+          "tokenContractId": {
+            "type": "string"
+          },
+          "linkedContracts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },

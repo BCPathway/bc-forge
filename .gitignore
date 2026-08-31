@@ -6,6 +6,8 @@
 # Soroban compiled output
 *.wasm
 *.d
+# Allow test fixture WASM binaries in testdata directories
+!contracts/*/testdata/*.wasm
 
 # Node / SDK
 node_modules/

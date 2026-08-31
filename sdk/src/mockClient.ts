@@ -3,7 +3,7 @@
  *
  * Allows frontend devs to test logic without a live Soroban RPC.
  */
-import type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
+import { Role, type BatchMintRecipient, type bcForgeClientConfig, type RbacInitResult, type TransactionResult } from './client';
 import { formatAtomicAmount } from './utils';
 
 interface AccountState {
@@ -13,10 +13,13 @@ interface AccountState {
 
 export class MockBcForgeClient {
   private accounts: Record<string, AccountState> = {};
+  private roles: Record<string, Set<string>> = {};
   private totalSupply: bigint = 0n;
   private name: string = 'MockToken';
   private symbol: string = 'MOCK';
   private decimals: number = 7;
+  private adminAddress: string = 'GADMIN0000000000000000000000000000000000000000000000000000';
+  private linkedContracts: Record<string, string> = {};
 
   constructor(_config: bcForgeClientConfig) {}
 
@@ -42,6 +45,49 @@ export class MockBcForgeClient {
 
   async getAllowance(owner: string, spender: string): Promise<bigint> {
     return this.accounts[owner]?.allowances[spender] ?? 0n;
+  }
+
+  async getAdmin(): Promise<string> {
+    return this.adminAddress;
+  }
+
+  async setAdmin(admin: string): Promise<TransactionResult> {
+    this.adminAddress = admin;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async hasRole(role: Role | string, address: string): Promise<boolean> {
+    if (this.adminAddress === address) return true;
+    return this.roles[address]?.has(role) ?? false;
+  }
+
+  async verifySuperAdmin(address: string): Promise<boolean> {
+    return this.hasRole(Role.SuperAdmin, address);
+  }
+
+  async grantRole(role: Role | string, address: string): Promise<TransactionResult> {
+    if (!this.roles[address]) this.roles[address] = new Set();
+    this.roles[address].add(role);
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async revokeRole(role: Role | string, address: string): Promise<TransactionResult> {
+    this.roles[address]?.delete(role);
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async setAdminContract(adminContractId: string): Promise<TransactionResult> {
+    this.linkedContracts['admin'] = adminContractId;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async setDependentToken(tokenContractId: string): Promise<TransactionResult> {
+    this.linkedContracts['token'] = tokenContractId;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  getLinkedContracts(): Record<string, string> {
+    return { ...this.linkedContracts };
   }
 
   async mint(from: string, to: string, amount: bigint): Promise<TransactionResult> {
@@ -105,12 +151,31 @@ export class MockBcForgeClient {
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
-  async grantMinter(_address: string): Promise<TransactionResult> {
-    return { success: true, hash: 'mock-hash', returnValue: null };
+  async grantMinter(address: string): Promise<TransactionResult> {
+    return this.grantRole(Role.Minter, address);
   }
 
-  async revokeMinter(_address: string): Promise<TransactionResult> {
-    return { success: true, hash: 'mock-hash', returnValue: null };
+  async revokeMinter(address: string): Promise<TransactionResult> {
+    return this.revokeRole(Role.Minter, address);
+  }
+
+  async grantSuperAdmin(address: string): Promise<TransactionResult> {
+    return this.grantRole(Role.SuperAdmin, address);
+  }
+
+  async revokeSuperAdmin(address: string): Promise<TransactionResult> {
+    if (!this.roles[address]?.has(Role.SuperAdmin) && !this.roles[address]?.has('SuperAdmin')) {
+      return { success: false, hash: 'mock-hash', returnValue: 'SuperAdmin role not held' };
+    }
+    return this.revokeRole(Role.SuperAdmin, address);
+  }
+
+  async initRbac(superAdmin: string): Promise<RbacInitResult> {
+    const grant = await this.grantSuperAdmin(superAdmin);
+    return {
+      migrate: { success: true, hash: 'mock-hash', returnValue: null },
+      grant,
+    };
   }
 
   async transferFrom(
@@ -130,6 +195,223 @@ export class MockBcForgeClient {
     this.accounts[owner].balance -= amount;
     this.accounts[to].balance += amount;
     this.accounts[owner].allowances[spender] -= amount;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+}
+
+export class MockVaultClient {
+  private shareBalances: Record<string, bigint> = {};
+  private allowances: Record<string, Record<string, bigint>> = {};
+  private totalShares: bigint = 0n;
+  private totalAssetsAmount: bigint = 0n;
+  private pendingRewardsAmount: bigint = 0n;
+  private underlyingTokenAddress: string =
+    'CDUMMYUNDERLYINGTOKENADDRESS0000000000000000000000000000';
+  private name: string = 'Mock Vault Share';
+  private symbol: string = 'mvSHARE';
+  private decimals: number = 7;
+
+  constructor(_config?: { rpcUrl?: string; networkPassphrase?: string; contractId?: string }) {}
+
+  async getBalance(address: string): Promise<bigint> {
+    return this.shareBalances[address] ?? 0n;
+  }
+
+  async getShareBalance(address: string): Promise<bigint> {
+    return this.shareBalances[address] ?? 0n;
+  }
+
+  async getTotalSupply(): Promise<bigint> {
+    return this.totalShares;
+  }
+
+  async getTotalAssets(): Promise<bigint> {
+    return this.totalAssetsAmount;
+  }
+
+  async getPendingRewards(): Promise<bigint> {
+    return this.pendingRewardsAmount;
+  }
+
+  async calculateSharePrice(): Promise<bigint> {
+    if (this.totalShares === 0n) {
+      throw new Error('ZeroShares: No shares outstanding');
+    }
+    return this.totalAssetsAmount / this.totalShares;
+  }
+
+  async calculateRewards(userShares: bigint): Promise<bigint> {
+    if (userShares < 0n) {
+      throw new Error('InvalidAmount: Negative shares');
+    }
+    if (this.totalShares === 0n) {
+      throw new Error('ZeroShares: No shares outstanding');
+    }
+    return (userShares * this.totalAssetsAmount) / this.totalShares;
+  }
+
+  async getUnderlyingToken(): Promise<string> {
+    return this.underlyingTokenAddress;
+  }
+
+  async getName(): Promise<string> {
+    return this.name;
+  }
+
+  async getSymbol(): Promise<string> {
+    return this.symbol;
+  }
+
+  async getDecimals(): Promise<number> {
+    return this.decimals;
+  }
+
+  async getAllowance(owner: string, spender: string): Promise<bigint> {
+    return this.allowances[owner]?.[spender] ?? 0n;
+  }
+
+  async deposit(
+    caller: string,
+    amount: bigint,
+    _source?: unknown,
+    minSharesOut: bigint = 0n,
+  ): Promise<TransactionResult> {
+    if (amount <= 0n) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'InvalidAmount: Amount must be positive',
+      };
+    }
+
+    const sharesOut =
+      this.totalShares === 0n ? amount : (amount * this.totalShares) / this.totalAssetsAmount;
+
+    if (sharesOut <= 0n) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'InvalidAmount: Calculated shares are zero',
+      };
+    }
+
+    if (sharesOut < minSharesOut) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'SlippageExceeded: Minted shares less than minSharesOut',
+      };
+    }
+
+    this.shareBalances[caller] = (this.shareBalances[caller] ?? 0n) + sharesOut;
+    this.totalShares += sharesOut;
+    this.totalAssetsAmount += amount;
+
+    return { success: true, hash: 'mock-hash', returnValue: sharesOut };
+  }
+
+  async withdraw(
+    caller: string,
+    shares: bigint,
+    _source?: unknown,
+    minTokensOut: bigint = 0n,
+  ): Promise<TransactionResult> {
+    if (shares <= 0n) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'InvalidAmount: Shares must be positive',
+      };
+    }
+
+    const userBalance = this.shareBalances[caller] ?? 0n;
+    if (userBalance < shares) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'InsufficientBalance: Not enough shares',
+      };
+    }
+
+    if (this.totalShares === 0n) {
+      return { success: false, hash: 'mock-hash', returnValue: 'ZeroShares: No shares in vault' };
+    }
+
+    const tokensOut = (shares * this.totalAssetsAmount) / this.totalShares;
+
+    if (tokensOut <= 0n) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'InvalidAmount: Payout rounds down to zero',
+      };
+    }
+
+    if (tokensOut < minTokensOut) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'SlippageExceeded: Returned tokens less than minTokensOut',
+      };
+    }
+
+    this.shareBalances[caller] = userBalance - shares;
+    this.totalShares -= shares;
+    this.totalAssetsAmount -= tokensOut;
+
+    return { success: true, hash: 'mock-hash', returnValue: tokensOut };
+  }
+
+  async distributeRewards(
+    _caller: string,
+    amount: bigint,
+    _source?: unknown,
+  ): Promise<TransactionResult> {
+    if (amount <= 0n) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'InvalidAmount: Reward amount must be positive',
+      };
+    }
+    this.totalAssetsAmount += amount;
+    this.pendingRewardsAmount += amount;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async compound(_caller: string, _source?: unknown): Promise<TransactionResult> {
+    this.pendingRewardsAmount = 0n;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async compoundFees(caller: string, source?: unknown): Promise<TransactionResult> {
+    return this.compound(caller, source);
+  }
+
+  async transfer(
+    from: string,
+    to: string,
+    amount: bigint,
+    _source?: unknown,
+  ): Promise<TransactionResult> {
+    const fromBalance = this.shareBalances[from] ?? 0n;
+    if (fromBalance < amount) {
+      return { success: false, hash: 'mock-hash', returnValue: 'InsufficientBalance' };
+    }
+    this.shareBalances[from] = fromBalance - amount;
+    this.shareBalances[to] = (this.shareBalances[to] ?? 0n) + amount;
+    return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async approve(
+    from: string,
+    spender: string,
+    amount: bigint,
+    _exp?: number,
+    _source?: unknown,
+  ): Promise<TransactionResult> {
+    if (!this.allowances[from]) this.allowances[from] = {};
+    this.allowances[from][spender] = amount;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 }
