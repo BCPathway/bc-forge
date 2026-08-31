@@ -55,6 +55,7 @@
 //! | `15` | `NotProposer` | `cancel_proposal` when `caller` did not submit the proposal |
 //! | `16` | `ProposalNotCancellable` | `cancel_proposal` on a `Cancelled` or `Expired` proposal |
 //! | `20` | `Unauthorized` | general authorization failure (caller not permitted) |
+//! | `22` | `RoleAlreadyGranted` | `grant_role` on a role the address already holds |
 //! | `21` | `BatchLengthMismatch` | `execute_upgrade_batch` given unequal id/hash vectors |
 //!
 //! ## Event Emissions
@@ -257,6 +258,8 @@ pub enum AdminError {
     /// `execute_upgrade_batch` was called with proposal ID and WASM hash vectors
     /// of unequal length.
     BatchLengthMismatch = 21,
+    /// `grant_role` was called for a role the address already holds (#768).
+    RoleAlreadyGranted = 22,
 }
 
 /// Storage keys for the access-control layer.
@@ -836,7 +839,8 @@ pub fn has_admin(env: &Env) -> bool {
 /// @notice Grants `role` to `address`. Only a super-admin may call this function.
 /// @dev Requires the caller to hold the `SuperAdmin` role. Rejects the zero address and
 ///      unrecognized role variants, then emits `role_grnt`. Granting an already-held role
-///      is idempotent: the bitmask is ORed, so no state change occurs beyond the event.
+///      is rejected with [`AdminError::RoleAlreadyGranted`] (#768) so a grant is
+///      unambiguous: either the address gains the role, or the call reverts.
 /// @param env The Soroban environment.
 /// @param caller The address performing the grant; must be a super-admin.
 /// @param role The role to grant (one of [`Role::Admin`], [`Role::Minter`], [`Role::SuperAdmin`], [`Role::Pauser`]).
@@ -845,6 +849,7 @@ pub fn has_admin(env: &Env) -> bool {
 /// - [`AdminError::UnauthorizedRole`] — `caller` does not hold the `SuperAdmin` role.
 /// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
 /// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleAlreadyGranted`] — `address` already holds `role` (#768).
 /// # Events
 /// Emits `role_grnt` with data `(caller, role, address)`.
 pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
@@ -860,8 +865,9 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @dev Intentionally private. Callers must perform authorization before delegating here.
 ///      Rejects the zero address. The assignment is a single load / bitwise-OR /
 ///      store on the address's `AdminKey::RoleMask(address)` entry, so a grant
-///      never disturbs the address's other roles. Granting an already-held role is
-///      idempotent.
+///      never disturbs the address's other roles. Granting an already-held role
+///      reverts with [`AdminError::RoleAlreadyGranted`] (#768) instead of
+///      silently no-op'ing.
 /// @param env The Soroban environment.
 /// @param admin The address recorded as the granting caller in the emitted event.
 /// @param role The role to assign.
@@ -869,6 +875,7 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// @errors
 /// - [`AdminError::InvalidAddress`] — `address` is the canonical zero address.
 /// - [`AdminError::InvalidRole`] — `role` is not a recognized variant.
+/// - [`AdminError::RoleAlreadyGranted`] — `address` already holds `role` (#768).
 /// # Events
 /// Emits `role_grnt` with data `(admin, role, address)`.
 fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
@@ -878,6 +885,12 @@ fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
         None => soroban_sdk::panic_with_error!(env, AdminError::InvalidRole),
     };
     let mask = load_role_mask(env, address);
+    if mask & bit != 0 {
+        // #768: a grant must be unambiguous — either the address gains the
+        // role, or the call reverts. A silent no-op would let a caller believe
+        // a role was newly assigned when it was already held.
+        soroban_sdk::panic_with_error!(env, AdminError::RoleAlreadyGranted);
+    }
     persist_role_mask(env, address, mask | bit);
     events::emit_role_granted(env, admin, role, address);
 }
@@ -1089,6 +1102,22 @@ pub fn require_fee_admin(env: &Env, address: &Address) {
 #[inline(always)]
 pub fn require_pauser(env: &Env, address: &Address) {
     require_role_guard(env, Role::Pauser, address);
+}
+
+/// Returns true when `address` holds the `Admin` or `Pauser` role.
+///
+/// @notice Pure role-mask check for operations that are callable by either
+/// the contract admin or a delegated pauser (#769).
+/// @dev Replaces the legacy "caller == get_admin(address)" equality checks:
+/// the admin always holds the `Admin` role bit (set by `set_admin`), so
+/// role-based checks stay correct even if the admin entry ever changes.
+/// @param env The Soroban environment.
+/// @param address The address whose role mask should be inspected.
+/// @return `true` when `address` holds `Admin` or `Pauser`, `false` otherwise.
+#[inline(always)]
+pub fn is_admin_or_pauser(env: &Env, address: &Address) -> bool {
+    let mask = load_role_mask(env, address);
+    mask_has_role(mask, Role::Admin) || mask_has_role(mask, Role::Pauser)
 }
 
 /// Helper macro for role-based access control checking and authorization enforcement.
