@@ -34,6 +34,9 @@ fn setup(
     let vault_id = env.register(YieldVaultContract, ());
     let vault = YieldVaultContractClient::new(env, &vault_id);
     vault.initialize(&admin, &underlying_id);
+    env.as_contract(&vault_id, || {
+        bc_forge_lifecycle::set_paused(env, false);
+    });
 
     (vault, underlying, admin, vault_id)
 }
@@ -309,7 +312,9 @@ fn test_pause_blocks_deposit() {
     let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     // Pause the contract.
-    bc_forge_lifecycle::set_paused(&env, true);
+    env.as_contract(&vault.address, || {
+        bc_forge_lifecycle::set_paused(&env, true);
+    });
 
     // Deposit should revert.
     vault.deposit(&user, &1_000_000, &0);
@@ -326,7 +331,9 @@ fn test_pause_allows_withdraw() {
     assert_eq!(vault.supply(), 1_000_000);
 
     // Pause the contract.
-    bc_forge_lifecycle::set_paused(&env, true);
+    env.as_contract(&vault.address, || {
+        bc_forge_lifecycle::set_paused(&env, true);
+    });
 
     // Withdraw should still work — users can always exit.
     let tokens = vault.withdraw(&user, &500_000, &0);
@@ -341,14 +348,18 @@ fn test_unpause_resumes_deposits() {
     env.mock_all_auths();
     let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
-    bc_forge_lifecycle::set_paused(&env, true);
+    env.as_contract(&vault.address, || {
+        bc_forge_lifecycle::set_paused(&env, true);
+    });
 
     // Pause blocks deposits.
     let res = vault.try_deposit(&user, &1000, &0);
     assert_eq!(res, Err(Ok(VaultError::ContractPaused)));
 
     // Unpause.
-    bc_forge_lifecycle::set_paused(&env, false);
+    env.as_contract(&vault.address, || {
+        bc_forge_lifecycle::set_paused(&env, false);
+    });
 
     // Deposit succeeds again.
     let shares = vault.deposit(&user, &1000, &0);
@@ -365,7 +376,9 @@ fn test_full_deposit_withdrawl_cycle_through_pause() {
     assert_eq!(vault.supply(), 2_000_000);
 
     // Pause — deposit blocked.
-    bc_forge_lifecycle::set_paused(&env, true);
+    env.as_contract(&vault.address, || {
+        bc_forge_lifecycle::set_paused(&env, true);
+    });
     assert!(vault.try_deposit(&user, &100, &0).is_err());
 
     // But full withdraw works.
@@ -374,7 +387,9 @@ fn test_full_deposit_withdrawl_cycle_through_pause() {
     assert_eq!(vault.supply(), 0);
 
     // Unpause and deposit again.
-    bc_forge_lifecycle::set_paused(&env, false);
+    env.as_contract(&vault.address, || {
+        bc_forge_lifecycle::set_paused(&env, false);
+    });
     vault.deposit(&user, &500_000, &0);
     assert_eq!(vault.supply(), 500_000);
 }
@@ -388,7 +403,9 @@ fn test_withdraw_full_balance_while_paused() {
     vault.deposit(&user, &1_000_000, &0);
 
     // Pause.
-    bc_forge_lifecycle::set_paused(&env, true);
+    env.as_contract(&vault.address, || {
+        bc_forge_lifecycle::set_paused(&env, true);
+    });
 
     // Full withdrawal still works.
     let tokens = vault.withdraw(&user, &1_000_000, &0);
