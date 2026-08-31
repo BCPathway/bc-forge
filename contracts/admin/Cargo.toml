@@ -17,7 +17,6 @@ crate-type = ["rlib"]
 [dependencies]
 soroban-sdk = "22.0.11"
 bc-forge-ttl = { path = "../ttl" }
-bitflags = "2.5"
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.11", features = ["testutils"] }

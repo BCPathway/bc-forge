@@ -143,7 +143,7 @@ fn test_multiple_schedules_per_beneficiary_release_together() {
     assert_eq!(token.balance(&vesting_id), 500);
 }
 
-// ── initialize deployer check ────────────────────────────────────────────────
+// ── initialize deployer check ────────────────────────────────────────────
 
 #[test]
 fn test_initialize_succeeds_for_deployer() {
@@ -164,7 +164,7 @@ fn test_initialize_succeeds_for_deployer() {
     let vesting = VestingContractClient::new(&env, &vesting_id);
 
     let result = vesting.try_initialize(&admin, &token_id);
-    assert_eq!(result, Ok(()));
+    assert_eq!(result, Ok(Ok(())));
 }
 
 #[test]
