@@ -55,6 +55,7 @@
 //! | `15` | `NotProposer` | `cancel_proposal` when `caller` did not submit the proposal |
 //! | `16` | `ProposalNotCancellable` | `cancel_proposal` on a `Cancelled` or `Expired` proposal |
 //! | `20` | `Unauthorized` | general authorization failure (caller not permitted) |
+//! | `21` | `BatchLengthMismatch` | `execute_upgrade_batch` given unequal id/hash vectors |
 //!
 //! ## Event Emissions
 //!
@@ -160,6 +161,8 @@
 //!   [`require_timelock_expired`], reverting with [`AdminError::TimelockActive`]
 //!   while `env.ledger().timestamp() < timelock_expires_at`, giving pool members
 //!   a mandatory review window between quorum and code execution.
+//! - [`execute_upgrade_batch`] runs several [`execute_upgrade`] calls in sequence
+//!   on the current contract; the first failure aborts the remainder.
 //!
 //! ### Cancellation
 //! - [`cancel_proposal`] (#662) lets the proposer of an [`UpgradeProposal`]
@@ -251,6 +254,9 @@ pub enum AdminError {
     /// the requested operation. Distinct from [`AdminError::UnauthorizedRole`],
     /// which is specific to a role-guard failure.
     Unauthorized = 20,
+    /// `execute_upgrade_batch` was called with proposal ID and WASM hash vectors
+    /// of unequal length.
+    BatchLengthMismatch = 21,
 }
 
 /// Storage keys for the access-control layer.
@@ -1456,6 +1462,37 @@ pub fn execute_upgrade(
     Ok(())
 }
 
+/// Executes multiple quorum-approved WASM upgrades in sequence on the current contract.
+///
+/// Each `(proposal_ids[i], wasm_hashes[i])` pair is passed to [`execute_upgrade`] in order.
+/// The first failure aborts the remainder of the batch (no partial rollback of earlier
+/// successful upgrades — callers should size batches carefully).
+///
+/// @notice Runs a sequential batch of `execute_upgrade` calls for the current contract.
+/// @dev `proposal_ids` and `wasm_hashes` must have equal length.
+/// @param env The Soroban environment.
+/// @param executor The pool member authorizing every upgrade in the batch.
+/// @param proposal_ids Proposal IDs to execute, in order.
+/// @param wasm_hashes WASM hashes paired 1:1 with `proposal_ids`.
+/// @return `Ok(())` if every item succeeds, or the first [`AdminError`] encountered.
+pub fn execute_upgrade_batch(
+    env: &Env,
+    executor: Address,
+    proposal_ids: Vec<u64>,
+    wasm_hashes: Vec<soroban_sdk::BytesN<32>>,
+) -> Result<(), AdminError> {
+    if proposal_ids.len() != wasm_hashes.len() {
+        return Err(AdminError::BatchLengthMismatch);
+    }
+
+    for i in 0..proposal_ids.len() {
+        let proposal_id = proposal_ids.get(i).expect("index in range");
+        let wasm_hash = wasm_hashes.get(i).expect("index in range");
+        execute_upgrade(env, executor.clone(), proposal_id, wasm_hash)?;
+    }
+    Ok(())
+}
+
 /// Casts `voter`'s approval on a pending [`UpgradeProposal`]. Resolves issue
 /// #654.
 ///
@@ -1914,6 +1951,15 @@ mod tests {
             wasm_hash: soroban_sdk::BytesN<32>,
         ) -> Result<(), AdminError> {
             super::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+        }
+
+        pub fn execute_upgrade_batch(
+            env: Env,
+            executor: Address,
+            proposal_ids: Vec<u64>,
+            wasm_hashes: Vec<soroban_sdk::BytesN<32>>,
+        ) -> Result<(), AdminError> {
+            super::execute_upgrade_batch(&env, executor, proposal_ids, wasm_hashes)
         }
 
         pub fn emergency_execute_upgrade(
