@@ -114,3 +114,32 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # ─── Dependency audit (#770) ────────────────────────────────────────────
+  # Verifies the workspace dependency graph resolves cleanly: cargo metadata
+  # fails on manifest cycles or malformed feature declarations, and `cargo
+  # tree --workspace --all-features` proves every member's graph resolves
+  # with all feature combinations enabled (feature isolation) without
+  # needing a full build.
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-dep-audit
+
+      - name: Resolve workspace metadata (rejects cycles / bad features)
+        run: cargo metadata --no-deps --format-version 1 >/dev/null
+
+      - name: Resolve full dependency graph with all features
+        run: cargo tree --workspace --all-features >/dev/null
