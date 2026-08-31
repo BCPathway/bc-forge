@@ -2372,10 +2372,36 @@ mod tests {
         let contract_id = env.register(AdminContract, ());
         let client = AdminContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
+        let zero = zero_address(&env);
 
         client.set_admin(&admin);
-        let result = client.try_grant_role(&admin, &Role::Minter, &zero_address(&env));
+        let role_grants_before = env
+            .events()
+            .all()
+            .iter()
+            .filter(|(_, topics, _)| {
+                let topic0: soroban_sdk::Symbol =
+                    topics.get(0).unwrap().try_into_val(&env).unwrap();
+                topic0 == soroban_sdk::symbol_short!("role_grnt")
+            })
+            .count();
+
+        // A zero-address grantee must be rejected before any role state or
+        // RoleGranted event can be written.
+        let result = client.try_grant_role(&admin, &Role::Minter, &zero);
         assert_eq!(result, Err(Ok(soroban_sdk::Error::from_contract_error(4))));
+        assert!(!client.has_role(&Role::Minter, &zero));
+        let role_grants_after = env
+            .events()
+            .all()
+            .iter()
+            .filter(|(_, topics, _)| {
+                let topic0: soroban_sdk::Symbol =
+                    topics.get(0).unwrap().try_into_val(&env).unwrap();
+                topic0 == soroban_sdk::symbol_short!("role_grnt")
+            })
+            .count();
+        assert_eq!(role_grants_after, role_grants_before);
     }
 
     #[test]
