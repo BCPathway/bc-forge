@@ -138,6 +138,10 @@ fn test_e2e_v1_to_v2_admin_upgrade_and_rbac_lifecycle() {
     assert!(client.has_role(&Role::SuperAdmin, &admin));
     assert!(client.has_role(&Role::Admin, &admin));
 
+    // Verify the admin can still be retrieved after migration
+    assert!(client.has_admin());
+    assert_eq!(client.get_role_admin(&Role::Admin), admin);
+
     // 5. Verify post-upgrade RBAC enforcement and role-gated actions
     // Admin (holding SuperAdmin/Admin) grants Minter role to user_a and Pauser role to user_b
     client.grant_role(&admin, &Role::Minter, &user_a);
@@ -155,6 +159,23 @@ fn test_e2e_v1_to_v2_admin_upgrade_and_rbac_lifecycle() {
     // Assert unauthorized user cannot grant roles post-upgrade
     let post_upgrade_unauth = client.try_grant_role(&user_a, &Role::Pauser, &user_a);
     assert!(post_upgrade_unauth.is_err());
+
+    // 6. Verify that the admin can still grant SuperAdmin to other addresses
+    let super_admin = Address::generate(&env);
+    client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
+    assert!(client.has_role(&Role::SuperAdmin, &super_admin));
+
+    // 7. Verify that the new SuperAdmin can also grant roles
+    let new_minter = Address::generate(&env);
+    client.grant_role(&super_admin, &Role::Minter, &new_minter);
+    assert!(client.has_role(&Role::Minter, &new_minter));
+    assert!(!client.has_role(&Role::Minter, &user_b));
+
+    // 8. Verify that revoking roles works correctly post-migration
+    client.revoke_role(&admin, &Role::Minter, &user_a);
+    assert!(!client.has_role(&Role::Minter, &user_a));
+    // Pauser role should be unaffected
+    assert!(client.has_role(&Role::Pauser, &user_b));
 }
 
 /// Negative case: upgrading with an unauthorized caller must fail.
@@ -206,6 +227,15 @@ fn test_migrate_admin_idempotency() {
 
     // Verify SuperAdmin status remains valid and uncorrupted
     assert!(client.has_role(&Role::SuperAdmin, &admin));
+
+    // Verify original admin entry is still intact
+    assert!(client.has_admin());
+    assert_eq!(client.get_role_admin(&Role::Admin), admin);
+
+    // Verify that the admin can still perform RBAC operations after multiple migrations
+    let user = Address::generate(&env);
+    client.grant_role(&admin, &Role::Minter, &user);
+    assert!(client.has_role(&Role::Minter, &user));
 }
 
 /// Boundary case: verify no stale permissions allow ungranted roles post-upgrade.
@@ -238,6 +268,37 @@ fn test_double_vote_reverts() {
 
     let contract_id = env.register(AdminContract, ());
     let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let pauser = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
+
+    // Initialize with admin
+    let init_result = client.try_init_storage(&admin);
+    assert!(init_result.is_ok());
+
+    // Migrate to RBAC
+    client.migrate_admin();
+
+    // Admin has SuperAdmin role
+    assert!(client.has_role(&Role::SuperAdmin, &admin));
+    assert!(client.has_role(&Role::Admin, &admin));
+
+    // Grant Minter and Pauser roles
+    client.grant_role(&admin, &Role::Minter, &minter);
+    client.grant_role(&admin, &Role::Pauser, &pauser);
+
+    // Verify RBAC enforcement:
+    // - Minter can pass require_minter
+    client.require_minter(&minter);
+    // - Pauser can pass require_pauser
+    client.require_pauser(&pauser);
+    // - Unauthorized user cannot pass require_minter
+    let unauth_result = client.try_require_minter(&unauthorized);
+    assert!(unauth_result.is_err());
+    // - Unauthorized user cannot pass require_pauser
+    let unauth_pauser_result = client.try_require_pauser(&unauthorized);
+    assert!(unauth_pauser_result.is_err());
 
     let admin = Address::generate(&env);
     let member = Address::generate(&env);
