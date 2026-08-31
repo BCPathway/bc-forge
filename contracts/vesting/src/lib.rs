@@ -223,6 +223,9 @@ impl VestingContract {
         admin_address: Address,
         token: Address,
     ) -> Result<(), VestingError> {
+        // Ensure only the deployer can initialize the contract
+        env.current_contract_address().require_auth();
+
         if admin::has_admin(&env) {
             return Err(VestingError::AlreadyInitialized);
         }
