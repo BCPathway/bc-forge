@@ -1175,31 +1175,6 @@ export class bcForgeClient {
     );
   }
 
-  /**
-   * Get the contract admin address.
-   *
-   * @returns The admin address
-   */
-  async getAdmin(): Promise<string> {
-    const result = await this.queryContract('admin', []);
-    return scValToNative(result) as string;
-  }
-
-  /**
-   * Check if an address holds a specific role.
-   *
-   * @param role - The role to check for
-   * @param address - The address to check
-   * @returns Whether the address holds the role
-   */
-  async hasRole(role: Role, address: string): Promise<boolean> {
-    const result = await this.queryContract('has_role', [
-      nativeToScVal(role),
-      addressToScVal(address),
-    ]);
-    return scValToNative(result) as boolean;
-  }
-
   // ─── Clawback / Regulatory ───────────────────────────────────────────────
 
   /**
