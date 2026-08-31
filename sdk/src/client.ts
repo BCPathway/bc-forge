@@ -5,6 +5,35 @@
  * token contracts on the Stellar/Soroban network.
  */
 
+/**
+ * The canonical zero-address sentinel: an ed25519 public key whose 32-byte
+ * payload is all zeros. No private key can ever produce a signature for it.
+ * This constant is used for zero-address validation across the SDK.
+ */
+export const ZERO_ADDRESS =
+  'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+
+/**
+ * Returns `true` if the given address is the canonical zero-address sentinel.
+ *
+ * The zero address ("GAAAA…WHF") is an ed25519 public key whose 32-byte
+ * payload is all zeros. No private key can ever produce a signature for it,
+ * so holding a role there would be unrecoverable.
+ *
+ * @param address - Stellar public key (G... address) to check
+ * @returns `true` if the address equals the zero-address sentinel, `false` otherwise
+ *
+ * @example
+ * ```typescript
+ * if (isZeroAddress(someAddress)) {
+ *   throw new Error('Invalid address: zero address is not allowed');
+ * }
+ * ```
+ */
+export function isZeroAddress(address: string): boolean {
+  return address === ZERO_ADDRESS;
+}
+
 import {
   rpc as SorobanRpc,
   Contract,
