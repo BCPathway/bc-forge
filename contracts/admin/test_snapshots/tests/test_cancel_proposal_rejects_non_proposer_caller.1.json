@@ -106,6 +106,12 @@
                     },
                     {
                       "key": {
+                        "symbol": "timelock_expires_at"
+                      },
+                      "val": "void"
+                    },
+                    {
+                      "key": {
                         "symbol": "votes"
                       },
                       "val": {
