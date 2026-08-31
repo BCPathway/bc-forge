@@ -806,6 +806,50 @@ impl BcForgeToken {
         events::emit_fee_exemption_removed(&env, &caller, &address);
         Ok(())
     }
+
+    /// Creates a multi-sig governance proposal (used to gate WASM upgrades).
+    ///
+    /// @notice Creates an upgrade/governance proposal authored by `creator`.
+    /// @dev Thin wrapper over [`admin::create_proposal`]; creator must be an admin-pool member.
+    pub fn create_proposal(env: Env, creator: Address, description: String) -> u64 {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::create_proposal(&env, creator, description)
+    }
+
+    /// Approves a multi-sig governance proposal.
+    ///
+    /// @notice Records `admin`'s approval for `proposal_id`.
+    /// @dev Thin wrapper over [`admin::approve_proposal`].
+    pub fn approve_proposal(env: Env, admin: Address, proposal_id: u64) {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::approve_proposal(&env, admin, proposal_id);
+    }
+
+    /// Returns whether a governance proposal has met its approval quorum.
+    pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::is_proposal_ready(&env, proposal_id)
+    }
+
+    /// Configures the multi-sig admin pool and approval threshold for upgrades.
+    pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::set_admin_pool(&env, pool, threshold);
+    }
+
+    /// Executes a quorum-approved WASM upgrade on this token contract.
+    ///
+    /// @notice Applies `wasm_hash` after the referenced proposal meets quorum.
+    /// @dev Delegates to [`admin::execute_upgrade`].
+    pub fn execute_upgrade(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        wasm_hash: BytesN<32>,
+    ) -> Result<(), admin::AdminError> {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+    }
 }
 
 #[contractimpl]
