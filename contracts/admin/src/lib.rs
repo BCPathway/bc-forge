@@ -193,6 +193,9 @@
 
 mod events;
 
+#[cfg(test)]
+mod fuzz_roles;
+
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, Map, String, Vec};
 
@@ -1869,6 +1872,7 @@ pub fn emergency_execute_upgrade(
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
@@ -1884,7 +1888,7 @@ mod tests {
     mod rbac_errors;
 
     #[contract]
-    struct AdminContract;
+    pub struct AdminContract;
 
     #[contractimpl]
     impl AdminContract {
