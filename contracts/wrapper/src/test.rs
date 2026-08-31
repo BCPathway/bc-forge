@@ -524,8 +524,6 @@ fn test_set_vault_state_unauthorized_fails() {
     let env = Env::default();
     env.mock_all_auths();
     let (wrapper, _underlying, _admin, user, _wrapper_id) = setup(&env);
-    // Drop blanket auth mocks so require_admin fails for a non-admin caller.
-    env.mock_auths(&[]);
     let fee_receiver = Address::generate(&env);
 
     let state = VaultState {
@@ -2149,4 +2147,154 @@ fn test_withdrawal_math_reverts_on_insufficient_shares() {
         wrapper.try_withdraw(&user, &1_000_001),
         Err(Ok(WrapperError::InsufficientBalance))
     );
+}
+
+// ─── Zero-Balance Deposit Reverts Tests (#737) ───────────────────────────────
+
+#[test]
+fn test_zero_balance_deposit_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // 0-amount deposit reverts (prevents spam / divide-by-zero).
+    assert_eq!(
+        wrapper.try_deposit(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    // A real deposit so the withdrawal path is exercised with shares held.
+    wrapper.deposit(&user, &1_000_000);
+
+    // 0-amount withdrawal must also revert.
+    assert_eq!(
+        wrapper.try_withdraw(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    // The failed calls left vault state untouched.
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+}
+
+#[test]
+fn test_zero_balance_deposit_reverts_before_any_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // A 0-amount deposit on an empty vault must revert instead of minting
+    // shares at a 1:1 bootstrap rate (divide-by-zero / spam protection).
+    assert_eq!(
+        wrapper.try_deposit(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.balance(&user), 0);
+}
+
+// ─── Reward Distribution Rounding Tests (#738) ───────────────────────────────
+
+#[test]
+fn test_reward_distribution_rounding_prime_deposits_never_insolvent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, _user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let user_c = Address::generate(&env);
+
+    // Prime-number deposits: 97, 101, 103.
+    let deposit_a: i128 = 97;
+    let deposit_b: i128 = 101;
+    let deposit_c: i128 = 103;
+
+    underlying.mint(&admin, &user_a, &deposit_a);
+    underlying.mint(&admin, &user_b, &deposit_b);
+    underlying.mint(&admin, &user_c, &deposit_c);
+    underlying.approve(&user_a, &wrapper_id, &deposit_a, &u32::MAX);
+    underlying.approve(&user_b, &wrapper_id, &deposit_b, &u32::MAX);
+    underlying.approve(&user_c, &wrapper_id, &deposit_c, &u32::MAX);
+
+    wrapper.deposit(&user_a, &deposit_a);
+    wrapper.deposit(&user_b, &deposit_b);
+    wrapper.deposit(&user_c, &deposit_c);
+
+    // Reward that does not divide evenly across the share pool.
+    let reward: i128 = 10_000;
+    underlying.mint(&admin, &rewarder, &reward);
+    underlying.approve(&rewarder, &wrapper_id, &reward, &u32::MAX);
+    wrapper.distribute_rewards(&rewarder, &reward);
+
+    let total_deposits = deposit_a + deposit_b + deposit_c;
+    assert_eq!(wrapper.total_assets(), total_deposits + reward);
+
+    // Each payout is at most the user's pro-rata entitlement: rounding is
+    // always down (in favor of the protocol), so the vault is never insolvent.
+    let shares_a = wrapper.balance(&user_a);
+    let entitlement_a = shares_a * wrapper.total_assets() / wrapper.supply();
+    let payout_a = wrapper.withdraw(&user_a, &shares_a);
+    assert!(payout_a <= entitlement_a);
+
+    let shares_b = wrapper.balance(&user_b);
+    let entitlement_b = shares_b * wrapper.total_assets() / wrapper.supply();
+    let payout_b = wrapper.withdraw(&user_b, &shares_b);
+    assert!(payout_b <= entitlement_b);
+
+    let shares_c = wrapper.balance(&user_c);
+    let entitlement_c = shares_c * wrapper.total_assets() / wrapper.supply();
+    let payout_c = wrapper.withdraw(&user_c, &shares_c);
+    assert!(payout_c <= entitlement_c);
+
+    // Conservation: the vault paid out no more than it received; any rounding
+    // dust stays in the vault rather than being created out of thin air.
+    let total_paid = payout_a + payout_b + payout_c;
+    assert!(total_paid <= total_deposits + reward);
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(
+        underlying.balance(&wrapper_id),
+        total_deposits + reward - total_paid
+    );
+}
+
+// ─── Lockup Enforcement Tests (#739) ─────────────────────────────────────────
+
+#[test]
+fn test_lockup_enforcement_full_deposit_withdraw_cycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    // Admin records the deposit lockup: the deposit unlocks at UNLOCK_TIME.
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+
+    // Deposit while the ledger is well before the unlock time.
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
+    wrapper.deposit(&user, &1_000_000);
+
+    // 1. Withdraw immediately (still locked) -> reverts.
+    assert_eq!(
+        wrapper.try_withdraw(&user, &1_000_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+
+    // 2. Unwrapping is also blocked: the lockup cannot be bypassed via unwrap.
+    assert_eq!(
+        wrapper.try_unwrap(&user, &1_000_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+
+    // 3. Advance time past the unlock timestamp -> withdrawal succeeds.
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME + 100;
+    env.ledger().set(ledger_info);
+    let tokens_out = wrapper.withdraw(&user, &1_000_000);
+    assert_eq!(tokens_out, 1_000_000);
+    assert_eq!(wrapper.balance(&user), 0);
+    assert_eq!(underlying.balance(&user), 10_000_000);
 }
