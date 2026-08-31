@@ -88,3 +88,19 @@ pub fn emit_proposal_cancelled(env: &Env, caller: &Address, proposal_id: u64) {
     env.events()
         .publish((symbol_short!("prop_cncl"),), (caller.clone(), proposal_id));
 }
+
+/// Emitted when a multi-sig WASM upgrade proposal is submitted.
+///
+/// Topics: `upg_prop`
+/// Data:   `(proposal_id, submitter, new_wasm_hash)`
+pub fn emit_upgrade_proposal_submitted(
+    env: &Env,
+    submitter: &Address,
+    proposal_id: u64,
+    new_wasm_hash: &BytesN<32>,
+) {
+    env.events().publish(
+        (symbol_short!("upg_prop"),),
+        (proposal_id, submitter.clone(), new_wasm_hash.clone()),
+    );
+}
