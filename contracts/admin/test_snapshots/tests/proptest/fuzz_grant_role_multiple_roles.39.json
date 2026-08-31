@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -101,7 +101,14 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "RoleMask"
+                  "symbol": "Role"
+                },
+                {
+                  "vec": [
+                    {
+                      "symbol": "Pauser"
+                    }
+                  ]
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -121,7 +128,14 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "RoleMask"
+                      "symbol": "Role"
+                    },
+                    {
+                      "vec": [
+                        {
+                          "symbol": "Pauser"
+                        }
+                      ]
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -130,7 +144,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "bool": true
                 }
               }
             },
@@ -266,7 +280,7 @@
                   ]
                 },
                 {
-                  "bool": false
+                  "bool": true
                 }
               ]
             }
