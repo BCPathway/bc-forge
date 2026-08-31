@@ -5,7 +5,7 @@ extern crate std;
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::{Events, Ledger};
-use soroban_sdk::{vec, Address, BytesN, Env, Map, String, TryIntoVal, Vec};
+use soroban_sdk::{vec, Address, BytesN, Env, InvokeError, Map, String, TryIntoVal, Vec};
 
 use super::{AdminContract, AdminContractClient, Role};
 use crate::{AdminError, AdminKey, ProposalStatus, UpgradeProposal};
@@ -85,18 +85,26 @@ proptest! {
         prop_assert!(client.has_role(&role, &holder));
     }
 
-    /// Fuzz: granting the same role to the same address N times is idempotent.
+    /// Fuzz (#768): the first grant succeeds and every repeat grant of the
+    /// same role to the same address reverts with `RoleAlreadyGranted`.
     #[test]
-    fn fuzz_grant_role_idempotent(role_idx in 0u32..4, count in 1..20u32) {
+    fn fuzz_grant_role_rejects_repeat_grant(role_idx in 0u32..4, count in 1..20u32) {
         let role = role_for_idx(role_idx);
         let env = Env::default();
         let (client, admin) = setup(&env);
         let holder = Address::generate(&env);
 
-        for _ in 0..count {
-            client.grant_role(&admin, &role, &holder);
-        }
+        client.grant_role(&admin, &role, &holder);
+        prop_assert!(client.has_role(&role, &holder));
 
+        for _ in 1..count {
+            let res = client.try_grant_role(&admin, &role, &holder);
+            prop_assert_eq!(
+                res,
+                Err(InvokeError::ContractError(AdminError::RoleAlreadyGranted as u32)),
+                "repeat grant of an already-held role must revert with RoleAlreadyGranted"
+            );
+        }
         prop_assert!(client.has_role(&role, &holder));
     }
 

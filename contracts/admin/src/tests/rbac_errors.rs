@@ -52,7 +52,9 @@ fn test_admin_error_variants_are_pascal_case_and_unique() {
     check_variant!(ProposalNotPending = 18);
     check_variant!(DuplicateVote = 19);
     check_variant!(Unauthorized = 20);
-    assert_eq!(count, 20, "expected all 20 standardized error variants");
+    check_variant!(BatchLengthMismatch = 21);
+    check_variant!(RoleAlreadyGranted = 22);
+    assert_eq!(count, 22, "expected all 22 standardized error variants");
 }
 
 /// The `Unauthorized` variant (#752) must exist and convert into a Soroban
@@ -72,6 +74,59 @@ fn test_unauthorized_is_distinct_from_role_specific_error() {
     assert_ne!(general, role_specific);
     assert_eq!(general, 20);
     assert_eq!(role_specific, 3);
+}
+
+/// #761: unrecognized role inputs are rejected, not silently accepted.
+///
+/// `Role` is a `#[contracttype]` enum whose wire format is the variant's case
+/// name (a `Symbol`), so a discriminant outside the defined set fails to
+/// decode in `try_from_val` before the contract's own `require_valid_role`
+/// guard is ever reached. This test locks that boundary in: every defined
+/// variant round-trips, and an unknown case name is a conversion error.
+#[test]
+fn test_invalid_role_discriminant_is_rejected_at_decode() {
+    let env = Env::default();
+
+    for role in [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser] {
+        let val: Val = role.to_val();
+        assert_eq!(Role::try_from_val(&env, &val), Ok(role));
+    }
+
+    // A role name outside the defined set must not decode.
+    let unknown = Symbol::new(&env, "RoleThatDoesNotExist");
+    let bad_val: Val = soroban_sdk::vec![&env, unknown.to_val()].into_val(&env);
+    let decoded: Result<Role, soroban_sdk::ConversionError> = Role::try_from_val(&env, &bad_val);
+    assert!(
+        decoded.is_err(),
+        "unrecognized role discriminant must not decode into a Role"
+    );
+}
+
+/// #769: the role system separates concerns that the legacy monolithic admin
+/// check blurred — an Admin holder is not a Pauser and vice versa, so
+/// role-scoped operations (pause/unpause) can be gated independently of
+/// admin-level operations.
+#[test]
+fn test_pauser_role_is_distinct_from_admin_role() {
+    let env = Env::default();
+    let admin_mask = ROLE_BIT_ADMIN;
+    let pauser_mask = ROLE_BIT_PAUSER;
+
+    assert!(mask_has_role(admin_mask, Role::Admin));
+    assert!(!mask_has_role(admin_mask, Role::Pauser));
+    assert!(mask_has_role(pauser_mask, Role::Pauser));
+    assert!(!mask_has_role(pauser_mask, Role::Admin));
+
+    // A single address can hold both, and each bit stays independently
+    // addressable — the separation that lets Pauser-gated ops run without
+    // full admin privileges.
+    let combined = mask_with_role(admin_mask, Role::Pauser);
+    assert!(mask_has_role(combined, Role::Admin));
+    assert!(mask_has_role(combined, Role::Pauser));
+    assert_eq!(
+        mask_without_role(combined, Role::Pauser),
+        ROLE_BIT_ADMIN
+    );
 }
 
 /// Bitwise-AND helper: `mask_has_role` reports role presence per bit (#753).
