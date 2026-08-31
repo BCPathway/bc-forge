@@ -6,7 +6,6 @@
 use crate::{VaultError, YieldVaultContract, YieldVaultContractClient};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::Ledger;
 use soroban_sdk::{Address, Env, String};
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
@@ -514,7 +513,7 @@ fn test_rescue_tokens_requires_admin() {
 fn test_rescue_tokens_preserves_vault_deposit_integrity() {
     let env = Env::default();
     env.mock_all_auths();
-    let (vault, underlying, admin, user, vault_id) = setup_and_fund(&env);
+    let (vault, _underlying, admin, user, vault_id) = setup_and_fund(&env);
 
     let stuck_id = env.register(BcForgeToken, ());
     let stuck = BcForgeTokenClient::new(&env, &stuck_id);
@@ -639,7 +638,7 @@ fn test_underlying_token_query() {
     env.mock_all_auths();
     let (vault, underlying, _admin, _vault_id) = setup(&env);
 
-    assert_eq!(vault.underlying_token().unwrap(), underlying.address);
+    assert_eq!(vault.underlying_token(), underlying.address);
 }
 
 #[test]
@@ -648,7 +647,7 @@ fn test_initial_supply_is_zero() {
     env.mock_all_auths();
     let (vault, _underlying, _admin, _vault_id) = setup(&env);
 
-    assert_eq!(vault.supply().unwrap(), 0);
+    assert_eq!(vault.supply(), 0);
 }
 
 #[test]
@@ -658,7 +657,7 @@ fn test_share_balance_zero_for_unknown_address() {
     let (vault, _underlying, _admin, _vault_id) = setup(&env);
     let stranger = Address::generate(&env);
 
-    assert_eq!(vault.share_balance(&stranger).unwrap(), 0);
+    assert_eq!(vault.share_balance(&stranger), 0);
 }
 
 #[test]
