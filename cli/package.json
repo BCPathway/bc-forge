@@ -22,10 +22,10 @@
     "commander": "^12.1.0",
     "@stellar/stellar-sdk": "^12.3.0",
     "ajv": "^8.17.0",
-    "conf": "^10.2.0",
-    "dotenv": "^16.4.0",
+    "conf": "^15.1.0",
+    "dotenv": "^17.4.2",
     "winston": "^3.17.0",
-    "chalk": "^5.4.0"
+    "chalk": "^6.0.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
