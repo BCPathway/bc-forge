@@ -3,9 +3,8 @@
 extern crate std;
 
 use proptest::prelude::*;
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::{Events, Ledger};
-use soroban_sdk::{vec, Address, BytesN, Env, Map, String, TryIntoVal, Vec};
+use soroban_sdk::testutils::{Address as _, Events, Ledger};
+use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Map, String, TryIntoVal, Vec};
 
 use super::{AdminContract, AdminContractClient, Role};
 use crate::{AdminError, AdminKey, ProposalStatus, UpgradeProposal};
@@ -510,6 +509,72 @@ proptest! {
         let stored_b = read_upgrade_proposal(&env, &contract_id, id_b);
         prop_assert_eq!(stored_a.proposer, proposer_a);
         prop_assert_eq!(stored_b.proposer, proposer_b);
+    }
+
+    /// Fuzz: grant_role with boundary addresses (empty bytes and strings)
+    #[test]
+    fn fuzz_grant_role_boundary_addresses(invalid_bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+        let contract_id = client.address.clone();
+
+        let bytes_val = soroban_sdk::Bytes::from_slice(&env, &invalid_bytes);
+
+        let args_bytes = soroban_sdk::vec![
+            &env,
+            admin.to_val(),
+            Role::Minter.into_val(&env),
+            bytes_val.to_val()
+        ];
+
+        let res_bytes = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
+            &contract_id,
+            &soroban_sdk::Symbol::new(&env, "grant_role"),
+            args_bytes
+        );
+        prop_assert!(res_bytes.is_err(), "grant_role should fail decoding invalid bytes");
+
+        if let Ok(s) = std::str::from_utf8(&invalid_bytes) {
+            let string_val = soroban_sdk::String::from_str(&env, s);
+            let args_str = soroban_sdk::vec![
+                &env,
+                admin.to_val(),
+                Role::Minter.into_val(&env),
+                string_val.to_val()
+            ];
+            let res_str = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
+                &contract_id,
+                &soroban_sdk::Symbol::new(&env, "grant_role"),
+                args_str
+            );
+            prop_assert!(res_str.is_err(), "grant_role should fail decoding invalid string");
+        }
+    }
+
+    /// Fuzz: grant_role with explicitly empty and extremely long strings
+    #[test]
+    fn fuzz_grant_role_empty_and_max_length(length in prop::sample::select(std::vec![0usize, 10000usize])) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+        let contract_id = client.address.clone();
+
+        // Generate a string of 'A's of the given length.
+        // For length=0, it's empty bytes/string. For 10000, it's max-length.
+        let s = std::string::String::from_utf8(std::vec![b'A'; length]).unwrap();
+
+        let string_val = soroban_sdk::String::from_str(&env, &s);
+        let args_str = soroban_sdk::vec![
+            &env,
+            admin.to_val(),
+            Role::Minter.into_val(&env),
+            string_val.to_val()
+        ];
+        let res_str = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
+            &contract_id,
+            &soroban_sdk::Symbol::new(&env, "grant_role"),
+            args_str
+        );
+        prop_assert!(res_str.is_err(), "grant_role should fail decoding empty/max-length string");
     }
 }
 
