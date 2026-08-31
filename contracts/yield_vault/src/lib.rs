@@ -110,13 +110,6 @@ impl YieldVaultContract {
         }
     }
 
-    fn read_admin(env: &Env) -> Result<Address, VaultError> {
-        if bc_forge_admin::has_admin(env) {
-            Ok(bc_forge_admin::get_admin(env))
-        } else {
-            Err(VaultError::NotInitialized)
-        }
-    }
 
     fn read_underlying(env: &Env) -> Address {
         env.storage()
