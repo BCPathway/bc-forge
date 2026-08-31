@@ -2148,3 +2148,47 @@ fn test_withdrawal_math_reverts_on_insufficient_shares() {
         Err(Ok(WrapperError::InsufficientBalance))
     );
 }
+
+// ─── Zero-Balance Deposit Reverts Tests (#737) ───────────────────────────────
+
+#[test]
+fn test_zero_balance_deposit_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // 0-amount deposit reverts (prevents spam / divide-by-zero).
+    assert_eq!(
+        wrapper.try_deposit(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    // A real deposit so the withdrawal path is exercised with shares held.
+    wrapper.deposit(&user, &1_000_000);
+
+    // 0-amount withdrawal must also revert.
+    assert_eq!(
+        wrapper.try_withdraw(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    // The failed calls left vault state untouched.
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+}
+
+#[test]
+fn test_zero_balance_deposit_reverts_before_any_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // A 0-amount deposit on an empty vault must revert instead of minting
+    // shares at a 1:1 bootstrap rate (divide-by-zero / spam protection).
+    assert_eq!(
+        wrapper.try_deposit(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.balance(&user), 0);
+}
