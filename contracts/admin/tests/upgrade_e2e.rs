@@ -4,6 +4,12 @@ use bc_forge_admin::{AdminError, Role, TIMELOCK_DELAY_SECS};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{contract, contractimpl, vec, Address, BytesN, Env, String};
 
+#[allow(dead_code)]
+fn upload_upgrade_wasm(env: &Env) -> BytesN<32> {
+    let wasm = include_bytes!("../testdata/contract.wasm");
+    env.deployer().upload_contract_wasm(wasm.as_slice())
+}
+
 #[contract]
 pub struct AdminContract;
 
@@ -66,6 +72,10 @@ impl AdminContract {
         bc_forge_admin::approve_proposal(&env, admin, proposal_id);
     }
 
+    pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+        bc_forge_admin::is_proposal_ready(&env, proposal_id)
+    }
+
     pub fn execute_upgrade(
         env: Env,
         executor: Address,
@@ -73,6 +83,19 @@ impl AdminContract {
         wasm_hash: BytesN<32>,
     ) -> Result<(), AdminError> {
         bc_forge_admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+    }
+
+    pub fn emergency_execute_upgrade(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        wasm_hash: BytesN<32>,
+    ) -> Result<(), AdminError> {
+        bc_forge_admin::emergency_execute_upgrade(&env, executor, proposal_id, wasm_hash)
+    }
+
+    pub fn cancel_proposal(env: Env, caller: Address, proposal_id: u64) -> Result<(), AdminError> {
+        bc_forge_admin::cancel_proposal(&env, caller, proposal_id)
     }
 
     pub fn migrate_admin(env: Env) {
@@ -205,4 +228,38 @@ fn test_unauthorized_user_cannot_grant_roles_post_upgrade() {
     let res = client.try_grant_role(&user_a, &Role::Minter, &user_b);
     assert!(res.is_err());
     assert!(!client.has_role(&Role::Minter, &user_b));
+}
+
+/// Unit test preventing duplicate votes (double vote reverts with ProposalAlreadyApproved / AlreadyVoted error).
+#[test]
+fn test_double_vote_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let member = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+    let proposal_id =
+        client.create_proposal(&admin, &String::from_str(&env, "WASM upgrade proposal"));
+
+    // 1. Signer approves (first vote)
+    client.approve_proposal(&member, &proposal_id);
+    assert!(client.is_proposal_ready(&proposal_id));
+
+    // 2. Signer approves again (double vote attempt)
+    let res = client.try_approve_proposal(&member, &proposal_id);
+
+    // 3. Assert ProposalAlreadyApproved error (AlreadyVoted error code 10)
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::ProposalAlreadyApproved as u32
+        )))
+    );
 }

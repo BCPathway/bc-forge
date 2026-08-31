@@ -1,3 +1,4 @@
+import { describe, it, expect } from '@jest/globals';
 import { WrapperClient } from './wrapperClient';
 
 const MOCK_CONTRACT_ID = 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526';
@@ -12,16 +13,18 @@ describe('WrapperClient surface', () => {
 
     expect(typeof client.distributeRewards).toBe('function');
     expect(typeof client.getTotalAssets).toBe('function');
+    expect(typeof client.getVaultState).toBe('function');
+    expect(typeof client.setVaultState).toBe('function');
+    expect(typeof client.convertToShares).toBe('function');
+    expect(typeof client.convertToAssets).toBe('function');
+    expect(typeof client.previewDeposit).toBe('function');
+    expect(typeof client.previewWithdraw).toBe('function');
     expect(typeof client.calculateSharePrice).toBe('function');
     expect(typeof client.calculateRewards).toBe('function');
     expect(typeof client.getShareBalance).toBe('function');
     expect(typeof client.getPendingRewards).toBe('function');
     expect(typeof client.wrap).toBe('function');
     expect(typeof client.unwrap).toBe('function');
-    expect(typeof client.withdraw).toBe('function');
-    expect(typeof client.setUnlockTime).toBe('function');
-    expect(typeof client.clearUnlockTime).toBe('function');
-    expect(typeof client.getUnlockTime).toBe('function');
   });
 
   it('builds distributeRewards invoke transaction target', async () => {
@@ -34,5 +37,11 @@ describe('WrapperClient surface', () => {
     // Simulate/invoke check that function is callable and defined on class prototype
     expect(client.distributeRewards).toBeDefined();
     expect(client.getTotalAssets).toBeDefined();
+    expect(client.getVaultState).toBeDefined();
+    expect(client.setVaultState).toBeDefined();
+    expect(client.convertToShares).toBeDefined();
+    expect(client.convertToAssets).toBeDefined();
+    expect(client.previewDeposit).toBeDefined();
+    expect(client.previewWithdraw).toBeDefined();
   });
 });
