@@ -739,6 +739,212 @@ fn test_vault_state_storage_isolation_and_updates() {
 }
 
 #[test]
+fn test_deposit_rounds_shares_down_with_exchange_rate() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Set exchange rate to 1.5 (15_000_000 in fixed-point)
+    // 1 share = 1.5 underlying assets
+    let vault_state = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 100_000_000,
+        exchange_rate: 15_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    wrapper.set_vault_state(&admin, &vault_state);
+
+    // Deposit 100 assets:
+    // Expected shares: floor(100 * 10_000_000 / 15_000_000) = floor(66.6666...) = 66
+    let preview_shares = wrapper.preview_deposit(&100);
+    assert_eq!(preview_shares, 66);
+    assert_eq!(wrapper.convert_to_shares(&100), 66);
+
+    // Fund user and wrap 100
+    underlying.mint(&admin, &user, &100);
+    wrapper.wrap(&user, &100);
+
+    // Verified user receives exactly 66 shares, leaving fractional 0.666... in vault
+    assert_eq!(wrapper.balance(&user), 66);
+    assert_eq!(wrapper.supply(), 66);
+}
+
+#[test]
+fn test_withdraw_rounds_tokens_down_with_exchange_rate() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Set exchange rate to 1.3333333 (13_333_333)
+    let vault_state = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 100_000_000,
+        exchange_rate: 13_333_333,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    wrapper.set_vault_state(&admin, &vault_state);
+
+    // 10 shares:
+    // Expected assets: floor(10 * 13_333_333 / 10_000_000) = floor(13.333333) = 13
+    let preview_assets = wrapper.preview_withdraw(&10);
+    assert_eq!(preview_assets, 13);
+    assert_eq!(wrapper.convert_to_assets(&10), 13);
+
+    // User gets 100 shares directly and unwraps 10 shares
+    // Wrap at exchange rate 1.3333333: deposit 134 assets -> floor(134 * 10^7 / 13_333_333) = 100 shares
+    underlying.mint(&admin, &user, &1000);
+    wrapper.wrap(&user, &134);
+    assert_eq!(wrapper.balance(&user), 100);
+
+    let balance_before = underlying.balance(&user);
+    wrapper.unwrap(&user, &10);
+
+    let balance_after = underlying.balance(&user);
+    assert_eq!(balance_after - balance_before, 13);
+    assert_eq!(wrapper.balance(&user), 90);
+}
+
+#[test]
+fn test_sub_unit_deposit_rounding_to_zero_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let fee_receiver = Address::generate(&env);
+
+    // Set high exchange rate: 1 share = 10 underlying assets (exchange_rate = 100_000_000)
+    let vault_state = VaultState {
+        fee_rate_bps: 100,
+        fee_receiver,
+        min_deposit: 0,
+        max_deposit: 100_000_000,
+        exchange_rate: 100_000_000,
+        accumulated_fees: 0,
+        last_update_timestamp: 100,
+    };
+    wrapper.set_vault_state(&admin, &vault_state);
+
+    // 5 assets -> floor(5 * 10^7 / 10^8) = 0 shares
+    assert_eq!(wrapper.convert_to_shares(&5), 0);
+    assert_eq!(wrapper.preview_deposit(&5), 0);
+
+    // Attempting to wrap 5 assets fails because shares round down to 0 (no free 0-share deposit)
+    underlying.mint(&admin, &user, &5);
+    assert_eq!(
+        wrapper.try_wrap(&user, &5),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_decimal_downscaling_rounds_shares_down() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    // Underlying token has 9 decimals
+    let underlying_id = env.register(BcForgeToken, ());
+    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
+    underlying.initialize(
+        &admin,
+        &9,
+        &String::from_str(&env, "High Precision Token"),
+        &String::from_str(&env, "HPT"),
+    );
+
+    // Wrapper vault has 7 decimals
+    let wrapper_id = env.register(WrapperContract, ());
+    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
+    wrapper.initialize(
+        &admin,
+        &underlying_id,
+        &7,
+        &String::from_str(&env, "Vault High Precision"),
+        &String::from_str(&env, "vHPT"),
+    );
+
+    underlying.mint(&admin, &user, &10_000_000_000);
+    underlying.approve(&user, &wrapper_id, &10_000_000_000, &u32::MAX);
+
+    // Deposit 199 underlying units (9 decimals) into 7 decimals:
+    // Scale factor = 10^(9-7) = 100.
+    // 199 / 100 = 1.99 -> rounds down to 1 share (not 2)
+    assert_eq!(wrapper.preview_deposit(&199), 1);
+    assert_eq!(wrapper.convert_to_shares(&199), 1);
+
+    wrapper.wrap(&user, &199);
+    assert_eq!(wrapper.balance(&user), 1);
+
+    // Deposit 99 units (< 100) -> rounds down to 0 -> fails with InvalidAmount
+    assert_eq!(
+        wrapper.try_wrap(&user, &99),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_sub_unit_withdraw_rounding_to_zero_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    // Underlying token has 5 decimals
+    let underlying_id = env.register(BcForgeToken, ());
+    let underlying = BcForgeTokenClient::new(&env, &underlying_id);
+    underlying.initialize(
+        &admin,
+        &5,
+        &String::from_str(&env, "Low Precision Token"),
+        &String::from_str(&env, "LPT"),
+    );
+
+    // Wrapper vault has 7 decimals
+    let wrapper_id = env.register(WrapperContract, ());
+    let wrapper = WrapperContractClient::new(&env, &wrapper_id);
+    wrapper.initialize(
+        &admin,
+        &underlying_id,
+        &7,
+        &String::from_str(&env, "Vault Low Precision"),
+        &String::from_str(&env, "vLPT"),
+    );
+
+    // 1 underlying unit (5 decimals) = 100 wrapper shares (7 decimals)
+    underlying.mint(&admin, &user, &100);
+    underlying.approve(&user, &wrapper_id, &100, &u32::MAX);
+    wrapper.wrap(&user, &100);
+    assert_eq!(wrapper.balance(&user), 10_000);
+
+    // 50 shares (< 100 shares = 1 underlying unit) rounds down to 0 underlying units:
+    assert_eq!(wrapper.convert_to_assets(&50), 0);
+    assert_eq!(wrapper.preview_withdraw(&50), 0);
+
+    // Attempting to unwrap 50 shares fails because assets round down to 0 (vault asset protection)
+    assert_eq!(
+        wrapper.try_unwrap(&user, &50),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    // Unwrapping 199 shares rounds down to 1 underlying unit (not 2 units):
+    assert_eq!(wrapper.preview_withdraw(&199), 1);
+    assert_eq!(wrapper.convert_to_assets(&199), 1);
+
+    let before = underlying.balance(&user);
+    wrapper.unwrap(&user, &199);
+    let after = underlying.balance(&user);
+    assert_eq!(after - before, 1);
+}
+
+#[test]
 fn test_supply_accumulates_across_multiple_wraps() {
     let env = Env::default();
     env.mock_all_auths();
