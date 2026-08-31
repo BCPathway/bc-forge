@@ -819,6 +819,85 @@ export class bcForgeClient {
   // ─── RBAC / Role Management ────────────────────────────────────────────────
 
   /**
+   * Get the current contract admin address on-chain.
+   */
+  async getAdmin(): Promise<string> {
+    try {
+      const result = await this.queryContract('admin', []);
+      return scValToNative(result) as string;
+    } catch {
+      // Fallback for contracts with get_admin entrypoint
+      const result = await this.queryContract('get_admin', []);
+      return scValToNative(result) as string;
+    }
+  }
+
+  /**
+   * Check whether an address holds a specific role on-chain.
+   *
+   * @param role    - The role to check (e.g. Role.SuperAdmin, Role.Admin, Role.Minter)
+   * @param address - Stellar public key or contract address
+   */
+  async hasRole(role: Role, address: string): Promise<boolean> {
+    try {
+      const result = await this.queryContract('has_role', [
+        roleToScVal(role),
+        addressToScVal(address),
+      ]);
+      return Boolean(scValToNative(result));
+    } catch {
+      // Fallback if role is verified via admin check (Admin implicitly satisfies all roles)
+      const admin = await this.getAdmin().catch(() => undefined);
+      if (admin && admin === address) {
+        return true;
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Verify that an address holds the SuperAdmin role on-chain.
+   *
+   * @param address - Address to verify
+   */
+  async verifySuperAdmin(address: string): Promise<boolean> {
+    const isSuperAdmin = await this.hasRole(Role.SuperAdmin, address).catch(() => false);
+    if (isSuperAdmin) return true;
+    const admin = await this.getAdmin().catch(() => undefined);
+    return admin === address;
+  }
+
+  /**
+   * Grant any role to an address. SuperAdmin/Admin-only.
+   *
+   * @param role    - Role to grant
+   * @param address - Address to receive the role
+   * @param source  - SuperAdmin/Admin keypair
+   */
+  async grantRole(role: Role, address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'grant_role',
+      [addressToScVal(source.publicKey()), roleToScVal(role), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Revoke any role from an address. SuperAdmin/Admin-only.
+   *
+   * @param role    - Role to revoke
+   * @param address - Address to revoke the role from
+   * @param source  - SuperAdmin/Admin keypair
+   */
+  async revokeRole(role: Role, address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'revoke_role',
+      [addressToScVal(source.publicKey()), roleToScVal(role), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
    * Grant the Minter role to an address. Admin-only.
    *
    * @remarks
@@ -835,11 +914,7 @@ export class bcForgeClient {
    * @throws {ContractError} If the role variant is unrecognized (`InvalidRole`)
    */
   async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'grant_role',
-      [addressToScVal(source.publicKey()), roleToScVal(Role.Minter), addressToScVal(address)],
-      source,
-    );
+    return this.grantRole(Role.Minter, address, source);
   }
 
   /**
@@ -859,9 +934,33 @@ export class bcForgeClient {
    * @throws {ContractError} If the address does not hold the Minter role (`RoleNotHeld`)
    */
   async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.revokeRole(Role.Minter, address, source);
+  }
+
+  /**
+   * Connect an Admin Contract ID to the Token Contract. Admin-only.
+   *
+   * @param adminContractId - The deployed Admin Contract ID
+   * @param source          - Admin keypair
+   */
+  async setAdminContract(adminContractId: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
-      'revoke_role',
-      [addressToScVal(source.publicKey()), roleToScVal(Role.Minter), addressToScVal(address)],
+      'set_admin_contract',
+      [addressToScVal(source.publicKey()), addressToScVal(adminContractId)],
+      source,
+    );
+  }
+
+  /**
+   * Connect a Token Contract ID to a dependent contract (e.g. Vesting or Wrapper). Admin-only.
+   *
+   * @param tokenContractId - The deployed Token Contract ID
+   * @param source          - Admin keypair
+   */
+  async setDependentToken(tokenContractId: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'set_token',
+      [addressToScVal(source.publicKey()), addressToScVal(tokenContractId)],
       source,
     );
   }
@@ -907,26 +1006,6 @@ export class bcForgeClient {
       [addressToScVal(source.publicKey()), roleToScVal(Role.SuperAdmin), addressToScVal(address)],
       source,
     );
-  }
-
-  /**
-   * Query whether an address holds a role.
-   *
-   * @remarks
-   * Read-only view call against the contract's `has_role` entrypoint. The
-   * configured admin implicitly holds every role, so this returns `true` for
-   * the admin even when no explicit assignment exists.
-   *
-   * @param role    - Role to check (`Role.Admin`, `Role.SuperAdmin`, `Role.Minter`, `Role.Pauser`)
-   * @param address - Address to check
-   * @returns `true` if the address holds the role (directly or via `Admin`)
-   */
-  async hasRole(role: Role, address: string): Promise<boolean> {
-    const result = await this.queryContract('has_role', [
-      roleToScVal(role),
-      addressToScVal(address),
-    ]);
-    return scValToNative(result) as boolean;
   }
 
   /**
