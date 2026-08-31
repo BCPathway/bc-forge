@@ -5162,4 +5162,202 @@ mod tests {
         let result = client.try_cancel_proposal(&proposer, &7);
         assert_eq!(result, Err(Ok(AdminError::ProposalNotCancellable)));
     }
+
+    // ── execute_upgrade (#668) ──────────────────────────────────────────────
+
+    fn uploaded_wasm_hash(env: &Env) -> BytesN<32> {
+        // The Soroban host accepts a zero-byte contract upload under test
+        // utilities, which is enough for `wasm_exists` to pass so that
+        // `update_current_contract_wasm` succeeds inside the test sandbox.
+        env.deployer()
+            .upload_contract_wasm(soroban_sdk::Bytes::from_slice(env, &[]))
+    }
+
+    fn advance_past_timelock(env: &Env) {
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+        env.ledger().set(ledger_info);
+    }
+
+    #[test]
+    fn test_execute_upgrade_applies_wasm_after_quorum_met() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let id = client.create_proposal(&admin, &String::from_str(&env, "upgrade wasm"));
+        client.approve_proposal(&member, &id);
+        assert!(client.is_proposal_ready(&id));
+        advance_past_timelock(&env);
+
+        let wasm_hash = uploaded_wasm_hash(&env);
+        client.execute_upgrade(&admin, &id, &wasm_hash);
+
+        // The upgrade is one-shot per proposal: a second execution attempt must
+        // report ProposalAlreadyExecuted rather than re-running the upgrade.
+        assert_eq!(
+            client.try_execute_upgrade(&member, &id, &wasm_hash),
+            Err(Ok(AdminError::ProposalAlreadyExecuted))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_works_with_fallback_pool_and_default_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        // No explicit pool/threshold configured: get_admin_pool falls back to
+        // [admin] and get_threshold defaults to 1, so the creator's automatic
+        // approval already satisfies quorum.
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "single-admin upgrade"));
+        advance_past_timelock(&env);
+
+        let wasm_hash = uploaded_wasm_hash(&env);
+        client.execute_upgrade(&admin, &id, &wasm_hash);
+
+        assert_eq!(
+            client.try_execute_upgrade(&admin, &id, &wasm_hash),
+            Err(Ok(AdminError::ProposalAlreadyExecuted))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_emits_upgraded_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "upgrade"));
+        advance_past_timelock(&env);
+
+        let wasm_hash = uploaded_wasm_hash(&env);
+        client.execute_upgrade(&admin, &id, &wasm_hash);
+
+        let events = env.events().all();
+        let (emitter, topics, data) = events.get(events.len() - 1).unwrap();
+        assert_eq!(emitter, contract_id);
+
+        assert_eq!(
+            topics.len(),
+            1,
+            "topics should contain only the upgraded symbol"
+        );
+        let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic0, soroban_sdk::symbol_short!("upgraded"));
+
+        let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
+        let event_executor: Address = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
+        let event_proposal_id: u64 = data_vec.get(1).unwrap().try_into_val(&env).unwrap();
+        let event_wasm_hash: BytesN<32> = data_vec.get(2).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(event_executor, admin);
+        assert_eq!(event_proposal_id, id);
+        assert_eq!(event_wasm_hash, wasm_hash);
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_quorum_not_met() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        // Only the creator's automatic approval exists; quorum (2) is not met.
+        let id = client.create_proposal(&admin, &String::from_str(&env, "needs approvals"));
+        let wasm_hash = uploaded_wasm_hash(&env);
+
+        assert_eq!(
+            client.try_execute_upgrade(&admin, &id, &wasm_hash),
+            Err(Ok(AdminError::QuorumNotMet))
+        );
+
+        // The failed execution must leave the proposal open: after the missing
+        // approval arrives, the very same proposal can still be executed.
+        client.approve_proposal(&member, &id);
+        advance_past_timelock(&env);
+        client.execute_upgrade(&admin, &id, &wasm_hash);
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_nonexistent_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let wasm_hash = uploaded_wasm_hash(&env);
+
+        assert_eq!(
+            client.try_execute_upgrade(&admin, &9999, &wasm_hash),
+            Err(Ok(AdminError::ProposalNotFound))
+        );
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_non_pool_member() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let id = client.create_proposal(&admin, &String::from_str(&env, "ready proposal"));
+        assert!(client.is_proposal_ready(&id));
+
+        // Even a quorum-ready proposal cannot be executed by an address that
+        // is not an admin-pool member.
+        let wasm_hash = uploaded_wasm_hash(&env);
+        assert_eq!(
+            client.try_execute_upgrade(&stranger, &id, &wasm_hash),
+            Err(Ok(AdminError::UnauthorizedRole))
+        );
+
+        // A pool member can still execute it afterwards, proving the rejection
+        // was scoped to the unauthorized caller and did not consume the proposal.
+        advance_past_timelock(&env);
+        client.execute_upgrade(&admin, &id, &wasm_hash);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Auth, InvalidAction)")]
+    fn test_execute_upgrade_requires_executor_authorization() {
+        let env = Env::default();
+        // Note: no mock_all_auths, so require_auth for the executor fails.
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        env.as_contract(&contract_id, || set_admin(&env, &admin));
+        let id = env.as_contract(&contract_id, || {
+            create_proposal(
+                &env,
+                admin.clone(),
+                String::from_str(&env, "unauthorized exec"),
+            )
+        });
+        let wasm_hash = uploaded_wasm_hash(&env);
+
+        client.execute_upgrade(&admin, &id, &wasm_hash);
+    }
 }
