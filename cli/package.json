@@ -18,6 +18,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@bc-forge/sdk": "*",
     "commander": "^12.1.0",
     "@stellar/stellar-sdk": "^12.3.0",
     "ajv": "^8.17.0",

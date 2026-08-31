@@ -53,6 +53,13 @@ export interface TransactionResult {
   returnValue?: unknown;
 }
 
+export interface RbacInitResult {
+  /** Result of the `migrate_admin` bootstrap transaction */
+  migrate: TransactionResult;
+  /** Result of the `grant_role` transaction assigning the initial SuperAdmin */
+  grant: TransactionResult;
+}
+
 export interface BatchMintRecipient {
   /** Recipient Stellar public key (G... address) */
   to: string;
@@ -86,6 +93,17 @@ export enum Role {
   SuperAdmin = 'SuperAdmin',
   Minter = 'Minter',
   Pauser = 'Pauser',
+}
+
+/**
+ * Serialize a {@link Role} to the symbol ScVal the contract expects.
+ *
+ * The contract encodes `Role` as a symbol (`SuperAdmin`, `Minter`, …), so
+ * plain-string `nativeToScVal` (which produces `scvString`) is not ABI
+ * compatible with `grant_role` / `revoke_role` / `has_role`.
+ */
+function roleToScVal(role: Role): xdr.ScVal {
+  return xdr.ScVal.scvSymbol(role);
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
@@ -909,6 +927,85 @@ export class bcForgeClient {
   // ─── RBAC / Role Management ────────────────────────────────────────────────
 
   /**
+   * Get the current contract admin address on-chain.
+   */
+  async getAdmin(): Promise<string> {
+    try {
+      const result = await this.queryContract('admin', []);
+      return scValToNative(result) as string;
+    } catch {
+      // Fallback for contracts with get_admin entrypoint
+      const result = await this.queryContract('get_admin', []);
+      return scValToNative(result) as string;
+    }
+  }
+
+  /**
+   * Check whether an address holds a specific role on-chain.
+   *
+   * @param role    - The role to check (e.g. Role.SuperAdmin, Role.Admin, Role.Minter)
+   * @param address - Stellar public key or contract address
+   */
+  async hasRole(role: Role, address: string): Promise<boolean> {
+    try {
+      const result = await this.queryContract('has_role', [
+        roleToScVal(role),
+        addressToScVal(address),
+      ]);
+      return Boolean(scValToNative(result));
+    } catch {
+      // Fallback if role is verified via admin check (Admin implicitly satisfies all roles)
+      const admin = await this.getAdmin().catch(() => undefined);
+      if (admin && admin === address) {
+        return true;
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Verify that an address holds the SuperAdmin role on-chain.
+   *
+   * @param address - Address to verify
+   */
+  async verifySuperAdmin(address: string): Promise<boolean> {
+    const isSuperAdmin = await this.hasRole(Role.SuperAdmin, address).catch(() => false);
+    if (isSuperAdmin) return true;
+    const admin = await this.getAdmin().catch(() => undefined);
+    return admin === address;
+  }
+
+  /**
+   * Grant any role to an address. SuperAdmin/Admin-only.
+   *
+   * @param role    - Role to grant
+   * @param address - Address to receive the role
+   * @param source  - SuperAdmin/Admin keypair
+   */
+  async grantRole(role: Role, address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'grant_role',
+      [addressToScVal(source.publicKey()), roleToScVal(role), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Revoke any role from an address. SuperAdmin/Admin-only.
+   *
+   * @param role    - Role to revoke
+   * @param address - Address to revoke the role from
+   * @param source  - SuperAdmin/Admin keypair
+   */
+  async revokeRole(role: Role, address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'revoke_role',
+      [addressToScVal(source.publicKey()), roleToScVal(role), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
    * Grant the Minter role to an address. Admin-only.
    *
    * @remarks
@@ -925,11 +1022,7 @@ export class bcForgeClient {
    * @throws {ContractError} If the role variant is unrecognized (`InvalidRole`)
    */
   async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'grant_role',
-      [addressToScVal(source.publicKey()), nativeToScVal(Role.Minter), addressToScVal(address)],
-      source,
-    );
+    return this.grantRole(Role.Minter, address, source);
   }
 
   /**
@@ -949,11 +1042,109 @@ export class bcForgeClient {
    * @throws {ContractError} If the address does not hold the Minter role (`RoleNotHeld`)
    */
   async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.revokeRole(Role.Minter, address, source);
+  }
+
+  /**
+   * Connect an Admin Contract ID to the Token Contract. Admin-only.
+   *
+   * @param adminContractId - The deployed Admin Contract ID
+   * @param source          - Admin keypair
+   */
+  async setAdminContract(adminContractId: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
-      'revoke_role',
-      [addressToScVal(source.publicKey()), nativeToScVal(Role.Minter), addressToScVal(address)],
+      'set_admin_contract',
+      [addressToScVal(source.publicKey()), addressToScVal(adminContractId)],
       source,
     );
+  }
+
+  /**
+   * Connect a Token Contract ID to a dependent contract (e.g. Vesting or Wrapper). Admin-only.
+   *
+   * @param tokenContractId - The deployed Token Contract ID
+   * @param source          - Admin keypair
+   */
+  async setDependentToken(tokenContractId: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'set_token',
+      [addressToScVal(source.publicKey()), addressToScVal(tokenContractId)],
+      source,
+    );
+  }
+
+  /**
+   * Grant the SuperAdmin role to an address. Admin/SuperAdmin-only.
+   *
+   * @remarks
+   * This is the RBAC initialization step that assigns the initial `SuperAdmin`.
+   * The caller (`source`) must hold the `SuperAdmin` role — the configured
+   * contract admin implicitly satisfies this, so the admin keypair can bootstrap
+   * the role hierarchy right after `initialize`.
+   *
+   * @param address - Address to grant the SuperAdmin role to
+   * @param source  - Admin keypair (must hold SuperAdmin role)
+   * @throws {ContractError} If the caller lacks SuperAdmin role (`UnauthorizedRole`)
+   * @throws {ContractError} If the address is the zero address (`InvalidAddress`)
+   * @throws {ContractError} If the role variant is unrecognized (`InvalidRole`)
+   */
+  async grantSuperAdmin(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'grant_role',
+      [addressToScVal(source.publicKey()), roleToScVal(Role.SuperAdmin), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Revoke the SuperAdmin role from an address. Admin/SuperAdmin-only.
+   *
+   * @remarks
+   * The caller (`source`) must hold the `SuperAdmin` role. Returns an error
+   * (rather than panicking) if the address does not hold the SuperAdmin role.
+   *
+   * @param address - Address to revoke the SuperAdmin role from
+   * @param source  - Admin keypair (must hold SuperAdmin role)
+   * @throws {ContractError} If the caller lacks SuperAdmin role (`UnauthorizedRole`)
+   * @throws {ContractError} If the address does not hold the SuperAdmin role (`RoleNotHeld`)
+   */
+  async revokeSuperAdmin(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'revoke_role',
+      [addressToScVal(source.publicKey()), roleToScVal(Role.SuperAdmin), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Initialize role-based access control for a freshly deployed contract.
+   *
+   * @remarks
+   * The `init_rbac` deployment step. Runs two sequential transactions:
+   *
+   * 1. `migrate_admin` — bootstraps the persistent `SuperAdmin(admin)` mapping
+   *    from the configured contract admin (idempotent, safe on new contracts).
+   * 2. `grant_role(SuperAdmin, superAdmin)` — assigns the initial `SuperAdmin`
+   *    role to the designated address, so it can grant/revoke roles going forward.
+   *
+   * Call this immediately after `initialize` during deployment.
+   *
+   * @param superAdmin - Address to assign the initial SuperAdmin role to
+   * @param source     - Admin keypair that signs both transactions
+   * @returns Results of both the `migrate_admin` and `grant_role` transactions
+   */
+  async initRbac(superAdmin: string, source: Keypair): Promise<RbacInitResult> {
+    const migrate = await this.invokeContract('migrate_admin', [], source);
+    const grant = await this.invokeContract(
+      'grant_role',
+      [
+        addressToScVal(source.publicKey()),
+        roleToScVal(Role.SuperAdmin),
+        addressToScVal(superAdmin),
+      ],
+      source,
+    );
+    return { migrate, grant };
   }
 
   /**
