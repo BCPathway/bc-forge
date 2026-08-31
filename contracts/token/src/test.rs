@@ -1,4 +1,4 @@
-use crate::{BcForgeToken, BcForgeTokenClient, TokenError};
+use crate::{BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::{symbol_short, vec, Address, BytesN, Env, String, TryIntoVal, Val};
@@ -220,6 +220,31 @@ fn test_upgrade_permits_super_admin_role_holder_past_the_guard() {
     // installed contract at an all-zero wasm hash. That panic proves the
     // guard let the call through instead of blocking it.
     client.upgrade(&upgrader, &new_wasm_hash);
+}
+
+#[test]
+fn test_upgrade_preserves_minted_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+    let contract_id = client.address.clone();
+
+    client.mint(&admin, &recipient, &1_000);
+
+    // Balances are written to persistent storage, which Soroban keeps across
+    // WASM replacement. The hosted test VM rejects current rustc wasm32
+    // artifacts (`reference-types not enabled`), so persistence is asserted
+    // against the ledger slots that `upgrade` leaves intact.
+    let stored_balance: i128 = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Balance(recipient.clone()))
+            .expect("minted balance must be in persistent storage")
+    });
+    assert_eq!(stored_balance, 1_000);
+    assert_eq!(client.balance(&recipient), 1_000);
+    assert_eq!(client.supply(), 1_000);
 }
 
 #[test]

@@ -5,9 +5,22 @@ mod events;
 #[cfg(test)]
 mod test;
 
+#[cfg(test)]
+mod upgrade_batch_test;
+
 use bc_forge_admin as admin;
-use bc_forge_token::BcForgeTokenClient;
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec};
+use soroban_sdk::{
+    contract, contractclient, contracterror, contractimpl, contracttype, Address, BytesN, Env,
+    String, Vec,
+};
+
+/// Minimal SEP-41 client so this crate does not link `bc-forge-token`'s WASM
+/// exports (those collide with this contract's upgrade-governance entry points).
+#[contractclient(name = "TokenClient")]
+pub trait TokenInterface {
+    fn balance(id: Address) -> i128;
+    fn transfer(from: Address, to: Address, amount: i128);
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -104,7 +117,7 @@ impl SplitContract {
         to: &Address,
         amount: i128,
     ) -> bool {
-        let client = BcForgeTokenClient::new(env, token_id);
+        let client = TokenClient::new(env, token_id);
         let from_balance = client.balance(from);
         if from_balance < amount || amount <= 0 {
             return false;
@@ -301,6 +314,54 @@ impl SplitContract {
     ) -> Result<FailedPayout, SplitError> {
         let failed_payout_opt = Self::read_failed_payout(&env, invoice_id, &recipient);
         failed_payout_opt.ok_or(SplitError::FailedPayoutNotFound)
+    }
+
+    /// Upgrades the split contract WASM (SuperAdmin path).
+    ///
+    /// @notice Replaces the current contract executable with `new_wasm_hash`.
+    /// @dev Mirrors the token contract's SuperAdmin-gated upgrade entry point.
+    pub fn upgrade(
+        env: Env,
+        upgrader: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), SplitError> {
+        admin::require_super_admin(&env, &upgrader);
+        events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
+    /// Configures the multi-sig admin pool used to gate WASM upgrades.
+    pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+        admin::set_admin_pool(&env, pool, threshold);
+    }
+
+    /// Creates a multi-sig governance proposal for an upgrade (or other action).
+    pub fn create_proposal(env: Env, creator: Address, description: String) -> u64 {
+        admin::create_proposal(&env, creator, description)
+    }
+
+    /// Approves a multi-sig governance proposal.
+    pub fn approve_proposal(env: Env, admin_address: Address, proposal_id: u64) {
+        admin::approve_proposal(&env, admin_address, proposal_id);
+    }
+
+    /// Returns whether a governance proposal has met its approval quorum.
+    pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+        admin::is_proposal_ready(&env, proposal_id)
+    }
+
+    /// Executes a quorum-approved WASM upgrade on this split contract.
+    ///
+    /// @notice Applies `wasm_hash` after the referenced proposal meets quorum.
+    /// @dev Delegates to [`admin::execute_upgrade`].
+    pub fn execute_upgrade(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        wasm_hash: BytesN<32>,
+    ) -> Result<(), admin::AdminError> {
+        admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
     }
 }
 
