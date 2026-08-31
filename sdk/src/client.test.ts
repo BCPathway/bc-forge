@@ -3,7 +3,7 @@
  */
 
 import { jest } from '@jest/globals';
-import { bcForgeClient, Role } from './client';
+import { bcForgeClient, Role, ZERO_ADDRESS, isZeroAddress } from './client';
 import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
 
 // Mock data for testing
@@ -283,5 +283,28 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(method).toBe('set_token');
       expect(source).toBe(adminKeypair);
     });
+  });
+});
+
+describe('isZeroAddress', () => {
+  it('should return true for the zero address', () => {
+    expect(isZeroAddress(ZERO_ADDRESS)).toBe(true);
+  });
+
+  it('should return false for a valid address', () => {
+    const validAddress = Keypair.random().publicKey();
+    expect(isZeroAddress(validAddress)).toBe(false);
+  });
+
+  it('should return false for an empty string', () => {
+    expect(isZeroAddress('')).toBe(false);
+  });
+
+  it('should return false for a different address', () => {
+    expect(isZeroAddress('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')).toBe(false);
+  });
+
+  it('should export the ZERO_ADDRESS constant', () => {
+    expect(ZERO_ADDRESS).toBe('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
   });
 });
