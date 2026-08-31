@@ -407,6 +407,9 @@ impl WrapperContract {
         name: String,
         symbol: String,
     ) -> Result<(), WrapperError> {
+        // Ensure only the deployer can initialize the contract
+        env.current_contract_address().require_auth();
+
         if admin::has_admin(&env) {
             return Err(WrapperError::AlreadyInitialized);
         }
