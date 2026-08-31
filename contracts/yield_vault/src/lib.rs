@@ -110,7 +110,6 @@ impl YieldVaultContract {
         }
     }
 
-
     fn read_underlying(env: &Env) -> Address {
         env.storage()
             .instance()
