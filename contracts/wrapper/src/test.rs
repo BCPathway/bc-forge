@@ -2259,3 +2259,42 @@ fn test_reward_distribution_rounding_prime_deposits_never_insolvent() {
         total_deposits + reward - total_paid
     );
 }
+
+// ─── Lockup Enforcement Tests (#739) ─────────────────────────────────────────
+
+#[test]
+fn test_lockup_enforcement_full_deposit_withdraw_cycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    // Admin records the deposit lockup: the deposit unlocks at UNLOCK_TIME.
+    wrapper.set_unlock_time(&admin, &user, &UNLOCK_TIME);
+
+    // Deposit while the ledger is well before the unlock time.
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME - 100;
+    env.ledger().set(ledger_info);
+    wrapper.deposit(&user, &1_000_000);
+
+    // 1. Withdraw immediately (still locked) -> reverts.
+    assert_eq!(
+        wrapper.try_withdraw(&user, &1_000_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+
+    // 2. Unwrapping is also blocked: the lockup cannot be bypassed via unwrap.
+    assert_eq!(
+        wrapper.try_unwrap(&user, &1_000_000),
+        Err(Ok(WrapperError::TokensLocked))
+    );
+
+    // 3. Advance time past the unlock timestamp -> withdrawal succeeds.
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = UNLOCK_TIME + 100;
+    env.ledger().set(ledger_info);
+    let tokens_out = wrapper.withdraw(&user, &1_000_000);
+    assert_eq!(tokens_out, 1_000_000);
+    assert_eq!(wrapper.balance(&user), 0);
+    assert_eq!(underlying.balance(&user), 10_000_000);
+}
