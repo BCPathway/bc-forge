@@ -1,0 +1,12 @@
+{
+  "tokenContractId": "CAISXSQVXT6M4VK3DKROKJEMHHVJ3XZYFI3MBLQSA3QHIB456N76J6P5",
+  "adminAddress": "GC7SIJZI42QGNVIE2TEY4FUO4LTV5M5VKVY24XON5GFIP3QMBFBWSRET",
+  "tokenName": "BCForge Token",
+  "tokenSymbol": "BCF",
+  "tokenDecimals": 7,
+  "wasmSha256": "8156c9ccb76a56925c98424364ea583e603efc4664b2d8adddf80c21c13d3feb",
+  "wasmSizeBytes": 26972,
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "deployedAt": "2026-06-25T10:00:22Z"
+}
