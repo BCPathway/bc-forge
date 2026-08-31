@@ -4,6 +4,11 @@ import { createSmokeTestCommand } from "./commands/smoke-test.js";
 import { createCheckStatusCommand } from "./commands/check-status.js";
 import { createVerifyHashCommand } from "./commands/verify-hash.js";
 import { createGenerateBindingsCommand } from "./commands/generate-bindings.js";
+import {
+  createInitSuperAdminCommand,
+  createConnectCommand,
+  createOrchestrateCommand,
+} from "./commands/orchestrator.js";
 import { createDeployCommand } from "./commands/deploy.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 
@@ -32,7 +37,10 @@ export function buildProgram(): Command {
     .addCommand(createCheckStatusCommand())
     .addCommand(createVerifyHashCommand())
     .addCommand(createGenerateBindingsCommand())
-    .addCommand(createDeployCommand());
+    .addCommand(createDeployCommand())
+    .addCommand(createInitSuperAdminCommand())
+    .addCommand(createConnectCommand())
+    .addCommand(createOrchestrateCommand());
 
   return program;
 }

@@ -489,6 +489,37 @@ When a `walletAdapter` is configured and connected, write methods may be invoked
 | `simulateMint(to, amount, sourcePublicKey)` | `any` | Simulate mint operation |
 | `simulateTransfer(from, to, amount, sourcePublicKey)` | `any` | Simulate transfer operation |
 
+## Vault Client (`VaultClient`) (#744)
+
+The SDK provides `VaultClient` for interacting with yield-bearing fee vault contracts and wrapper contracts.
+
+```typescript
+import { VaultClient } from '@bc-forge/sdk';
+import { Keypair } from '@stellar/stellar-sdk';
+
+const vault = new VaultClient({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+  contractId: 'CVAULT...XYZ',
+});
+
+// Deposit underlying tokens to receive vault shares
+await vault.deposit('GUSER...', BigInt(1000_0000000), userKeypair);
+
+// Check share balance & underlying value
+const shares = await vault.getShareBalance('GUSER...');
+const totalAssets = await vault.getTotalAssets();
+const sharePrice = await vault.calculateSharePrice();
+const rewards = await vault.calculateRewards(shares);
+
+// Compound protocol fees into vault assets
+await vault.compound('GADMIN...', adminKeypair);
+
+// Withdraw shares and receive underlying tokens + accrued yield
+await vault.withdraw('GUSER...', shares, userKeypair);
+```
+
 ## License
 
 MIT
+
