@@ -51,4 +51,4 @@ impl YieldVaultContract {
 
 #[cfg(test)]
 mod test;
-}
+
