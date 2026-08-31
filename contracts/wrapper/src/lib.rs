@@ -15,6 +15,7 @@
 #![no_std]
 
 mod events;
+pub mod math;
 
 #[cfg(test)]
 mod test;
@@ -24,6 +25,31 @@ use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
 };
+
+// ─── Storage Structs ─────────────────────────────────────────────────────────
+
+/// Vault state storing core yield-bearing vault parameters, deposit limits,
+/// exchange rate, and fee accumulation metrics.
+///
+/// @title VaultState
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct VaultState {
+    /// Protocol/management fee rate represented in basis points (e.g. 100 = 1%, max 10000 = 100%).
+    pub fee_rate_bps: u32,
+    /// Address designated to receive collected vault fees.
+    pub fee_receiver: Address,
+    /// Minimum deposit limit per operation.
+    pub min_deposit: i128,
+    /// Maximum deposit cap per operation or total vault capacity.
+    pub max_deposit: i128,
+    /// Current exchange rate between wrapper shares and underlying asset.
+    pub exchange_rate: i128,
+    /// Accumulated undistributed/collected fees pending harvest or distribution.
+    pub accumulated_fees: i128,
+    /// Timestamp (ledger time) of the last fee accumulation or exchange rate update.
+    pub last_update_timestamp: u64,
+}
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
@@ -59,6 +85,8 @@ pub enum DataKey {
     AllowanceExp(Address, Address),
     /// Reentrancy lock flag.
     Lock,
+    /// Vault state parameters (fee rate, limits, exchange rate, fee accumulation).
+    VaultState,
     /// Per-user deposit unlock timestamp (seconds since epoch): while the
     /// current ledger timestamp is before this value the user's deposit is
     /// time-locked and withdrawals revert via the `require_unlocked` guard.
@@ -88,6 +116,10 @@ pub enum WrapperError {
     TokensLocked = 11,
     /// Share price cannot be computed: there are no outstanding vault shares.
     ZeroShares = 12,
+    /// Vault state has not been configured.
+    VaultStateNotSet = 13,
+    /// Provided vault state parameters are invalid.
+    InvalidVaultState = 14,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -170,6 +202,17 @@ impl WrapperContract {
             .instance()
             .get(&DataKey::UnderlyingToken)
             .expect("underlying token not set")
+    }
+
+    fn read_vault_state(env: &Env) -> Result<VaultState, WrapperError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::VaultState)
+            .ok_or(WrapperError::VaultStateNotSet)
+    }
+
+    fn write_vault_state(env: &Env, state: &VaultState) {
+        env.storage().instance().set(&DataKey::VaultState, state);
     }
 
     fn read_balance(env: &Env, id: &Address) -> i128 {
@@ -290,7 +333,7 @@ impl WrapperContract {
         Ok(())
     }
 
-    // ── Decimal Scaling ──────────────────────────────────────────────────────
+    // ── Decimal Scaling & Rounding Math ─────────────────────────────────────
 
     /// Returns the wrapper's own decimal precision.
     fn wrapper_decimals(env: &Env) -> u32 {
@@ -300,48 +343,65 @@ impl WrapperContract {
             .unwrap_or(7)
     }
 
-    /// Scales `amount` from underlying decimals to wrapper decimals.
-    /// Returns `None` on overflow.
+    /// Scales `amount` from underlying decimals to wrapper decimals, strictly rounding down.
     fn scale_to_wrapper(
         underlying_decimals: u32,
         wrapper_decimals: u32,
         amount: i128,
     ) -> Option<i128> {
-        if amount < 0 {
-            return None;
-        }
-
-        let amount = amount as u128;
-        if wrapper_decimals >= underlying_decimals {
-            let factor = 10u128.checked_pow(wrapper_decimals - underlying_decimals)?;
-            let scaled = amount.checked_mul(factor)?;
-            i128::try_from(scaled).ok()
-        } else {
-            let factor = 10u128.checked_pow(underlying_decimals - wrapper_decimals)?;
-            i128::try_from(amount / factor).ok()
-        }
+        math::scale_decimals_down(amount, underlying_decimals, wrapper_decimals)
     }
 
-    /// Scales `amount` from wrapper decimals back to underlying decimals.
-    /// Returns `None` on overflow.
+    /// Scales `amount` from wrapper decimals back to underlying decimals, strictly rounding down.
     fn scale_to_underlying(
         underlying_decimals: u32,
         wrapper_decimals: u32,
         amount: i128,
     ) -> Option<i128> {
-        if amount < 0 {
+        math::scale_decimals_down(amount, wrapper_decimals, underlying_decimals)
+    }
+
+    /// Calculates shares for a given amount of underlying assets, strictly rounding down (floor)
+    /// in favor of the protocol to mitigate rounding error inflation.
+    fn calc_shares_for_assets(env: &Env, underlying_decimals: u32, assets: i128) -> Option<i128> {
+        if assets <= 0 {
             return None;
         }
+        let wrapper_decimals = Self::wrapper_decimals(env);
+        let scaled_assets = Self::scale_to_wrapper(underlying_decimals, wrapper_decimals, assets)?;
 
-        let amount = amount as u128;
-        if underlying_decimals >= wrapper_decimals {
-            let factor = 10u128.checked_pow(underlying_decimals - wrapper_decimals)?;
-            let scaled = amount.checked_mul(factor)?;
-            i128::try_from(scaled).ok()
-        } else {
-            let factor = 10u128.checked_pow(wrapper_decimals - underlying_decimals)?;
-            i128::try_from(amount / factor).ok()
+        if let Ok(vault_state) = Self::read_vault_state(env) {
+            if vault_state.exchange_rate > 0 {
+                return math::mul_div_down(
+                    scaled_assets,
+                    math::SCALING_FACTOR,
+                    vault_state.exchange_rate,
+                );
+            }
         }
+
+        Some(scaled_assets)
+    }
+
+    /// Calculates underlying assets returned for a given amount of shares, strictly rounding down (floor)
+    /// in favor of the protocol to mitigate reserve asset leakage.
+    fn calc_assets_for_shares(env: &Env, underlying_decimals: u32, shares: i128) -> Option<i128> {
+        if shares <= 0 {
+            return None;
+        }
+        let wrapper_decimals = Self::wrapper_decimals(env);
+
+        let scaled_shares = if let Ok(vault_state) = Self::read_vault_state(env) {
+            if vault_state.exchange_rate > 0 {
+                math::mul_div_down(shares, vault_state.exchange_rate, math::SCALING_FACTOR)?
+            } else {
+                shares
+            }
+        } else {
+            shares
+        };
+
+        Self::scale_to_underlying(underlying_decimals, wrapper_decimals, scaled_shares)
     }
 }
 
@@ -365,6 +425,9 @@ impl WrapperContract {
         name: String,
         symbol: String,
     ) -> Result<(), WrapperError> {
+        // Ensure only the deployer can initialize the contract
+        env.current_contract_address().require_auth();
+
         if admin::has_admin(&env) {
             return Err(WrapperError::AlreadyInitialized);
         }
@@ -413,10 +476,9 @@ impl WrapperContract {
             &amount,
         );
 
-        // Scale amount to wrapper decimals
+        // Scale amount to wrapper shares, rounding down
         let underlying_decimals = underlying_client.decimals();
-        let wrapper_decimals = Self::wrapper_decimals(&env);
-        let wrapped_amount = Self::scale_to_wrapper(underlying_decimals, wrapper_decimals, amount)
+        let wrapped_amount = Self::calc_shares_for_assets(&env, underlying_decimals, amount)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount));
 
         if wrapped_amount <= 0 {
@@ -538,7 +600,8 @@ impl WrapperContract {
     /// Unwrap `wrapped_amount` of wrapped tokens back to the underlying token.
     ///
     /// Burns `wrapped_amount` of wrapped tokens from `caller` and transfers the
-    /// equivalent underlying tokens back to `caller`, scaling for any decimal mismatch.
+    /// equivalent underlying tokens back to `caller`, scaling and rounding down
+    /// in favor of the protocol.
     ///
     /// # Security
     /// Protected by a reentrancy guard.
@@ -561,14 +624,12 @@ impl WrapperContract {
         let underlying_id = Self::read_underlying(&env);
         let underlying_client = TokenClient::new(&env, &underlying_id);
 
-        // Scale back to underlying decimals
+        // Scale back to underlying tokens, rounding down
         let underlying_decimals = underlying_client.decimals();
-        let wrapper_decimals = Self::wrapper_decimals(&env);
         let underlying_amount =
-            Self::scale_to_underlying(underlying_decimals, wrapper_decimals, wrapped_amount)
-                .unwrap_or_else(|| {
-                    soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
-                });
+            Self::calc_assets_for_shares(&env, underlying_decimals, wrapped_amount).unwrap_or_else(
+                || soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount),
+            );
 
         if underlying_amount <= 0 {
             Self::release_lock(&env);
@@ -970,9 +1031,96 @@ impl WrapperContract {
         Self::read_unlock_time(&env, &user)
     }
 
+    /// Sets the vault parameters, deposit limits, exchange rate, and fee accumulation state.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment.
+    /// * `caller` - Address calling this function; must have Admin authorization.
+    /// * `state`  - The complete [`VaultState`] configuration.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::InvalidVaultState`] if `fee_rate_bps > 10_000`, `min_deposit < 0`,
+    ///   `max_deposit < min_deposit`, `exchange_rate <= 0`, or `accumulated_fees < 0`.
+    pub fn set_vault_state(
+        env: Env,
+        caller: Address,
+        state: VaultState,
+    ) -> Result<(), WrapperError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+
+        if state.fee_rate_bps > 10_000
+            || state.min_deposit < 0
+            || state.max_deposit < state.min_deposit
+            || state.exchange_rate <= 0
+            || state.accumulated_fees < 0
+        {
+            return Err(WrapperError::InvalidVaultState);
+        }
+
+        Self::write_vault_state(&env, &state);
+        events::emit_vault_state_set(&env, &caller, &state);
+        Ok(())
+    }
+
+    /// Returns the current vault parameters and accumulation state.
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::VaultStateNotSet`] if the vault state has not been configured.
+    pub fn get_vault_state(env: Env) -> Result<VaultState, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::read_vault_state(&env)
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, "1.0.0")
+    }
+
+    /// Converts underlying assets to vault shares, strictly rounding down (floor).
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive or overflows.
+    pub fn convert_to_shares(env: Env, assets: i128) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        if assets <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+        let underlying_decimals = underlying_client.decimals();
+        Self::calc_shares_for_assets(&env, underlying_decimals, assets)
+            .ok_or(WrapperError::InvalidAmount)
+    }
+
+    /// Converts vault shares to underlying assets, strictly rounding down (floor).
+    ///
+    /// # Errors
+    /// * Returns [`WrapperError::NotInitialized`] if contract is uninitialized.
+    /// * Returns [`WrapperError::InvalidAmount`] if amount is non-positive or overflows.
+    pub fn convert_to_assets(env: Env, shares: i128) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        if shares <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+        let underlying_decimals = underlying_client.decimals();
+        Self::calc_assets_for_shares(&env, underlying_decimals, shares)
+            .ok_or(WrapperError::InvalidAmount)
+    }
+
+    /// Simulates a deposit and returns the number of shares that would be minted, rounding down.
+    pub fn preview_deposit(env: Env, assets: i128) -> Result<i128, WrapperError> {
+        Self::convert_to_shares(env, assets)
+    }
+
+    /// Simulates a withdrawal and returns the number of assets that would be returned, rounding down.
+    pub fn preview_withdraw(env: Env, shares: i128) -> Result<i128, WrapperError> {
+        Self::convert_to_assets(env, shares)
     }
 }
 

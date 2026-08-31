@@ -477,6 +477,39 @@ describe('.bc-forge.json Config Parser & Schema Validation (#686)', () => {
       expect(fs.existsSync(savePath)).toBe(false);
     });
 
+    it('should validate and save configuration with deployed and linked contracts', () => {
+      const savePath = path.join(tmpDir, '.bc-forge.json');
+      const configWithContracts: BcForgeConfig = {
+        name: 'Linked Token',
+        symbol: 'LTK',
+        contracts: {
+          token: {
+            contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2',
+            adminContractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1',
+            linkedContracts: {
+              admin: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1',
+            },
+          },
+          vesting: {
+            contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3',
+            tokenContractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2',
+          },
+        },
+      };
+
+      const result = saveConfigFile(configWithContracts, savePath);
+      expect(result.success).toBe(true);
+
+      const loaded = loadConfigFile(savePath);
+      expect(loaded.success).toBe(true);
+      expect(loaded.config?.contracts?.token?.adminContractId).toBe(
+        'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1',
+      );
+      expect(loaded.config?.contracts?.vesting?.tokenContractId).toBe(
+        'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2',
+      );
+    });
+
     it('should reject saving config with invalid type in decimals', () => {
       const savePath = path.join(tmpDir, '.bc-forge.json');
       const invalidConfig = {

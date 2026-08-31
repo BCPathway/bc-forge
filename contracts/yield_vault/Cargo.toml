@@ -5,11 +5,8 @@ edition = "2021"
 publish = false
 description = "Yield vault helpers for slippage and share-balance guards"
 license = "MIT"
-description = "Yield vault for bc-forge contracts (work in progress)"
-license = "MIT"
 repository = "https://github.com/BCPathway/bc-forge"
 homepage = "https://github.com/BCPathway/bc-forge"
-
 
 [lib]
 crate-type = ["rlib"]

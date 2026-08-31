@@ -48,3 +48,27 @@ fn test_withdraw_insufficient_shares_revert() {
 
     client.withdraw(&user, &1500, &0);
 }
+
+#[test]
+fn test_withdraw_slippage_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(YieldVaultContract, ());
+    let client = YieldVaultContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    let tokens_out = client.withdraw(&user, &1000, &950);
+    assert_eq!(tokens_out, 1000);
+}
+
+#[test]
+#[should_panic(expected = "SlippageExceeded")]
+fn test_withdraw_slippage_revert() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(YieldVaultContract, ());
+    let client = YieldVaultContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    client.withdraw(&user, &1000, &1050);
+}
