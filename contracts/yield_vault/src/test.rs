@@ -68,7 +68,7 @@ fn set_vault_rate_limit(env: &Env, vault_id: &Address, limit: u64, window_second
     let op = String::from_str(env, "deposit");
     env.as_contract(vault_id, || {
         bc_forge_rate_limit::BcForgeRateLimit::internal_set_global_rate_limit(
-            &env,
+            env,
             &op,
             limit,
             window_seconds,
