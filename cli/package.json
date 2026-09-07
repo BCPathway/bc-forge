@@ -19,8 +19,8 @@
   },
   "dependencies": {
     "@bc-forge/sdk": "*",
-    "commander": "^12.1.0",
-    "@stellar/stellar-sdk": "^12.3.0",
+    "commander": "^15.0.0",
+    "@stellar/stellar-sdk": "^17.0.1",
     "ajv": "^8.17.0",
     "conf": "^15.1.0",
     "dotenv": "^17.4.2",
@@ -28,8 +28,8 @@
     "chalk": "^6.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0",
+    "@types/node": "^26.4.1"
   }
 }
