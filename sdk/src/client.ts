@@ -5,6 +5,35 @@
  * token contracts on the Stellar/Soroban network.
  */
 
+/**
+ * The canonical zero-address sentinel: an ed25519 public key whose 32-byte
+ * payload is all zeros. No private key can ever produce a signature for it.
+ * This constant is used for zero-address validation across the SDK.
+ */
+export const ZERO_ADDRESS =
+  'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+
+/**
+ * Returns `true` if the given address is the canonical zero-address sentinel.
+ *
+ * The zero address ("GAAAA…WHF") is an ed25519 public key whose 32-byte
+ * payload is all zeros. No private key can ever produce a signature for it,
+ * so holding a role there would be unrecoverable.
+ *
+ * @param address - Stellar public key (G... address) to check
+ * @returns `true` if the address equals the zero-address sentinel, `false` otherwise
+ *
+ * @example
+ * ```typescript
+ * if (isZeroAddress(someAddress)) {
+ *   throw new Error('Invalid address: zero address is not allowed');
+ * }
+ * ```
+ */
+export function isZeroAddress(address: string): boolean {
+  return address === ZERO_ADDRESS;
+}
+
 import {
   rpc as SorobanRpc,
   Contract,
@@ -65,6 +94,26 @@ export interface BatchMintRecipient {
   to: string;
   /** Number of tokens to mint */
   amount: bigint;
+}
+
+/** Result of on-chain state verification after initialization */
+export interface InitVerificationResult {
+  /** Whether all checks passed */
+  valid: boolean;
+  /** Admin address from contract */
+  admin?: string;
+  /** Token name from contract */
+  name?: string;
+  /** Token symbol from contract */
+  symbol?: string;
+  /** Token decimals from contract */
+  decimals?: number;
+  /** Total token supply */
+  totalSupply?: bigint;
+  /** Whether the Pauser role was granted to the expected address */
+  pauserGranted?: boolean;
+  /** List of verification errors (empty if valid) */
+  errors: string[];
 }
 
 /** Role for role-based access control */
@@ -187,6 +236,94 @@ export class bcForgeClient {
   async getVersion(): Promise<string> {
     const result = await this.queryContract('version', []);
     return scValToNative(result) as string;
+  }
+
+  // ─── Initialization Verification ──────────────────────────────────────────
+
+  /**
+   * Verify the on-chain state matches expected values after initialization.
+   *
+   * Queries the contract for its current state and compares against the
+   * expected values provided during initialization.
+   *
+   * @param expectedAdmin - The expected admin address
+   * @param expectedName - The expected token name
+   * @param expectedSymbol - The expected token symbol
+   * @param expectedDecimals - The expected number of decimals
+   * @param expectedPauser - Optional pauser address to verify role grant
+   * @returns Verification result with any mismatches
+   */
+  async verifyInitializedState(
+    expectedAdmin: string,
+    expectedName: string,
+    expectedSymbol: string,
+    expectedDecimals: number,
+    expectedPauser?: string,
+  ): Promise<InitVerificationResult> {
+    const errors: string[] = [];
+    const result: InitVerificationResult = { valid: false, errors };
+
+    try {
+      const onChainAdmin = await this.getAdmin();
+      result.admin = onChainAdmin;
+      if (onChainAdmin !== expectedAdmin) {
+        errors.push(`Admin mismatch: expected ${expectedAdmin}, got ${onChainAdmin}`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query admin: ${err.message}`);
+    }
+
+    try {
+      const onChainName = await this.getName();
+      result.name = onChainName;
+      if (onChainName !== expectedName) {
+        errors.push(`Name mismatch: expected "${expectedName}", got "${onChainName}"`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query name: ${err.message}`);
+    }
+
+    try {
+      const onChainSymbol = await this.getSymbol();
+      result.symbol = onChainSymbol;
+      if (onChainSymbol !== expectedSymbol) {
+        errors.push(`Symbol mismatch: expected "${expectedSymbol}", got "${onChainSymbol}"`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query symbol: ${err.message}`);
+    }
+
+    try {
+      const onChainDecimals = await this.getDecimals();
+      result.decimals = onChainDecimals;
+      if (onChainDecimals !== expectedDecimals) {
+        errors.push(`Decimals mismatch: expected ${expectedDecimals}, got ${onChainDecimals}`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query decimals: ${err.message}`);
+    }
+
+    try {
+      const totalSupply = await this.getTotalSupply();
+      result.totalSupply = totalSupply;
+    } catch (err: any) {
+      errors.push(`Failed to query total supply: ${err.message}`);
+    }
+
+    if (expectedPauser) {
+      try {
+        const hasPauserRole = await this.hasRole(Role.Pauser, expectedPauser);
+        result.pauserGranted = hasPauserRole;
+        if (!hasPauserRole) {
+          errors.push(`Pauser role not granted to ${expectedPauser}`);
+        }
+      } catch (err: any) {
+        errors.push(`Failed to check Pauser role: ${err.message}`);
+      }
+    }
+
+    result.valid = errors.length === 0;
+    return result;
   }
 
   // ─── Batch Queries ───────────────────────────────────────────────────────
@@ -819,6 +956,85 @@ export class bcForgeClient {
   // ─── RBAC / Role Management ────────────────────────────────────────────────
 
   /**
+   * Get the current contract admin address on-chain.
+   */
+  async getAdmin(): Promise<string> {
+    try {
+      const result = await this.queryContract('admin', []);
+      return scValToNative(result) as string;
+    } catch {
+      // Fallback for contracts with get_admin entrypoint
+      const result = await this.queryContract('get_admin', []);
+      return scValToNative(result) as string;
+    }
+  }
+
+  /**
+   * Check whether an address holds a specific role on-chain.
+   *
+   * @param role    - The role to check (e.g. Role.SuperAdmin, Role.Admin, Role.Minter)
+   * @param address - Stellar public key or contract address
+   */
+  async hasRole(role: Role, address: string): Promise<boolean> {
+    try {
+      const result = await this.queryContract('has_role', [
+        roleToScVal(role),
+        addressToScVal(address),
+      ]);
+      return Boolean(scValToNative(result));
+    } catch {
+      // Fallback if role is verified via admin check (Admin implicitly satisfies all roles)
+      const admin = await this.getAdmin().catch(() => undefined);
+      if (admin && admin === address) {
+        return true;
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Verify that an address holds the SuperAdmin role on-chain.
+   *
+   * @param address - Address to verify
+   */
+  async verifySuperAdmin(address: string): Promise<boolean> {
+    const isSuperAdmin = await this.hasRole(Role.SuperAdmin, address).catch(() => false);
+    if (isSuperAdmin) return true;
+    const admin = await this.getAdmin().catch(() => undefined);
+    return admin === address;
+  }
+
+  /**
+   * Grant any role to an address. SuperAdmin/Admin-only.
+   *
+   * @param role    - Role to grant
+   * @param address - Address to receive the role
+   * @param source  - SuperAdmin/Admin keypair
+   */
+  async grantRole(role: Role, address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'grant_role',
+      [addressToScVal(source.publicKey()), roleToScVal(role), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
+   * Revoke any role from an address. SuperAdmin/Admin-only.
+   *
+   * @param role    - Role to revoke
+   * @param address - Address to revoke the role from
+   * @param source  - SuperAdmin/Admin keypair
+   */
+  async revokeRole(role: Role, address: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'revoke_role',
+      [addressToScVal(source.publicKey()), roleToScVal(role), addressToScVal(address)],
+      source,
+    );
+  }
+
+  /**
    * Grant the Minter role to an address. Admin-only.
    *
    * @remarks
@@ -835,11 +1051,7 @@ export class bcForgeClient {
    * @throws {ContractError} If the role variant is unrecognized (`InvalidRole`)
    */
   async grantMinter(address: string, source: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'grant_role',
-      [addressToScVal(source.publicKey()), roleToScVal(Role.Minter), addressToScVal(address)],
-      source,
-    );
+    return this.grantRole(Role.Minter, address, source);
   }
 
   /**
@@ -859,9 +1071,33 @@ export class bcForgeClient {
    * @throws {ContractError} If the address does not hold the Minter role (`RoleNotHeld`)
    */
   async revokeMinter(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.revokeRole(Role.Minter, address, source);
+  }
+
+  /**
+   * Connect an Admin Contract ID to the Token Contract. Admin-only.
+   *
+   * @param adminContractId - The deployed Admin Contract ID
+   * @param source          - Admin keypair
+   */
+  async setAdminContract(adminContractId: string, source: Keypair): Promise<TransactionResult> {
     return this.invokeContract(
-      'revoke_role',
-      [addressToScVal(source.publicKey()), roleToScVal(Role.Minter), addressToScVal(address)],
+      'set_admin_contract',
+      [addressToScVal(source.publicKey()), addressToScVal(adminContractId)],
+      source,
+    );
+  }
+
+  /**
+   * Connect a Token Contract ID to a dependent contract (e.g. Vesting or Wrapper). Admin-only.
+   *
+   * @param tokenContractId - The deployed Token Contract ID
+   * @param source          - Admin keypair
+   */
+  async setDependentToken(tokenContractId: string, source: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'set_token',
+      [addressToScVal(source.publicKey()), addressToScVal(tokenContractId)],
       source,
     );
   }
@@ -910,26 +1146,6 @@ export class bcForgeClient {
   }
 
   /**
-   * Query whether an address holds a role.
-   *
-   * @remarks
-   * Read-only view call against the contract's `has_role` entrypoint. The
-   * configured admin implicitly holds every role, so this returns `true` for
-   * the admin even when no explicit assignment exists.
-   *
-   * @param role    - Role to check (`Role.Admin`, `Role.SuperAdmin`, `Role.Minter`, `Role.Pauser`)
-   * @param address - Address to check
-   * @returns `true` if the address holds the role (directly or via `Admin`)
-   */
-  async hasRole(role: Role, address: string): Promise<boolean> {
-    const result = await this.queryContract('has_role', [
-      roleToScVal(role),
-      addressToScVal(address),
-    ]);
-    return scValToNative(result) as boolean;
-  }
-
-  /**
    * Initialize role-based access control for a freshly deployed contract.
    *
    * @remarks
@@ -958,6 +1174,46 @@ export class bcForgeClient {
       source,
     );
     return { migrate, grant };
+  }
+
+  /**
+   * Grant the Pauser role to an address. Admin-only.
+   *
+   * @param address - Address to grant the Pauser role to
+   * @param source  - Admin keypair
+   */
+  async grantPauser(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.grantRole(Role.Pauser, address, source);
+  }
+
+  /**
+   * Revoke the Pauser role from an address. Admin-only.
+   *
+   * @param address - Address to revoke the Pauser role from
+   * @param source  - Admin keypair
+   */
+  async revokePauser(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.revokeRole(Role.Pauser, address, source);
+  }
+
+  // ─── RBAC Migration ──────────────────────────────────────────────────────
+
+  /**
+   * Migrate the legacy admin address to the SuperAdmin role mapping.
+   *
+   * @remarks
+   * This is a one-shot, idempotent storage migration that copies the singular
+   * admin address from `AdminKey::Admin` (instance storage) to
+   * `AdminKey::SuperAdmin(admin)` (persistent storage). This enables the
+   * `require_super_admin` guard for legacy contracts without resetting state.
+   *
+   * Safe to call multiple times — subsequent calls are no-ops.
+   *
+   * @param source - Admin keypair (must be the contract admin to authorize migration)
+   * @returns TransactionResult with migration status
+   */
+  async migrateAdmin(source?: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('migrate_admin', [], source);
   }
 
   // ─── Clawback / Regulatory ───────────────────────────────────────────────
