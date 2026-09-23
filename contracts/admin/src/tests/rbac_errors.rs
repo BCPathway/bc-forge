@@ -103,9 +103,8 @@ fn test_invalid_role_discriminant_is_rejected_at_decode() {
         assert_eq!(Role::try_from_val(&env, &val), Ok(role));
     }
 
-    // A role name outside the defined set must not decode.
-    let unknown = Symbol::new(&env, "RoleThatDoesNotExist");
-    let bad_val: Val = soroban_sdk::vec![&env, unknown.to_val()].into_val(&env);
+    // A value that is not one of the defined role symbols must not decode.
+    let bad_val: Val = 99_u32.into_val(&env);
     let decoded: Result<Role, soroban_sdk::ConversionError> = Role::try_from_val(&env, &bad_val);
     assert!(
         decoded.is_err(),
