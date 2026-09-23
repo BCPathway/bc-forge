@@ -88,7 +88,7 @@ fn test_invalid_role_discriminant_is_rejected_at_decode() {
     let env = Env::default();
 
     for role in [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser] {
-        let val: Val = role.to_val();
+        let val: Val = role.into_val(&env);
         assert_eq!(Role::try_from_val(&env, &val), Ok(role));
     }
 
