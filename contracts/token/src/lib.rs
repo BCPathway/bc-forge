@@ -394,10 +394,12 @@ impl BcForgeToken {
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
+    /// Configures default rate limits for mint, transfer, transfer_from, burn, and burn_from operations.
     /// Emits the `init` event. Can only be called once.
     ///
     /// @notice Initializes the token contract with the given admin, decimals, name, and symbol.
     /// @dev This function can only be called once. Subsequent calls will revert with `AlreadyInitialized`.
+    ///      Default rate limits are set to 1000 operations per 60-second window for each operation type.
     /// @param env The Soroban environment.
     /// @param admin_address The address to set as the contract admin.
     /// @param decimal The number of decimal places for the token.
@@ -424,6 +426,7 @@ impl BcForgeToken {
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
         Self::write_max_supply(&env, i128::MAX);
+
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
     }
