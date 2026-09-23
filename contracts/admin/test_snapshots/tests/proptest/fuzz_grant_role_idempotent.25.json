@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -157,7 +157,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 1
+                  "u32": 8
                 }
               }
             },
@@ -321,7 +321,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Admin"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
