@@ -99,10 +99,7 @@ proptest! {
         // Every subsequent grant of the same role must fail loudly.
         for _ in 0..count {
             let result = client.try_grant_role(&admin, &role, &holder);
-            prop_assert_eq!(
-                result,
-                Err(Ok(soroban_sdk::Error::from_contract_error(21)))
-            );
+            prop_assert_eq!(result, Err(Ok(AdminError::RoleAlreadyGranted)));
         }
     }
 
@@ -201,10 +198,7 @@ proptest! {
         if role == Role::SuperAdmin {
             // #768: a role the address already holds cannot be re-granted.
             let result = client.try_grant_role(&super_admin, &role, &super_admin);
-            prop_assert_eq!(
-                result,
-                Err(Ok(soroban_sdk::Error::from_contract_error(21)))
-            );
+            prop_assert_eq!(result, Err(Ok(AdminError::RoleAlreadyGranted)));
         } else {
             client.grant_role(&super_admin, &role, &super_admin);
         }
