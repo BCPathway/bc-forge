@@ -254,7 +254,8 @@ contract's `Role` enum.
 
 - **Admin is a superset.** Any address holding `Admin` passes every role check.
 - **Zero-address rejection.** `GAAAA…WHF` can never hold a role; all guards
-  reject it before storage writes.
+  reject it before storage writes. Use [`is_zero_address`] and
+  [`require_non_zero_address`] for validation in consuming contracts.
 - **Storage slot isolation.** Each `AdminKey` variant uses a unique enum
   discriminant. Domain separation (`instance` vs `persistent`) provides an
   additional layer.
@@ -262,6 +263,51 @@ contract's `Role` enum.
   guarded operation also calls `Address::require_auth`.
 - **Idempotent proposals.** Duplicate approvals and double-execution are
   rejected at the contract level.
+
+## Zero-address validation helpers
+
+The admin module exports two public helpers for zero-address validation:
+
+| Function | Signature | Description |
+| --- | --- | --- |
+| `is_zero_address` | `pub fn is_zero_address(env: &Env, address: &Address) -> bool` | Returns `true` if `address` is the zero-address sentinel |
+| `require_non_zero_address` | `pub fn require_non_zero_address(env: &Env, address: &Address)` | Panics with `InvalidAddress` if `address` is the zero address |
+| `ZERO_ADDRESS_STRKEY` | `pub const ZERO_ADDRESS_STRKEY: &str` | The Stellar zero address constant |
+
+These are used throughout the admin module in:
+- `set_admin` — rejects zero address before storing
+- `grant_role` — rejects zero address before role assignment
+- `_grant_role` — rejects zero address before storage write
+- `revoke_role` — rejects zero address before role removal
+- `_revoke_role` — rejects zero address before storage mutation
+- `has_role` — short-circuits to `false` for zero address
+- `set_admin_pool` — rejects zero addresses in the pool
+
+### Usage in consuming contracts
+
+```rust,ignore
+use bc_forge_admin::{is_zero_address, require_non_zero_address};
+
+// Check without panicking
+if is_zero_address(env, &some_address) {
+    // Handle the zero address case
+}
+
+// Guard before a storage write
+require_non_zero_address(env, &new_address);
+```
+
+### TypeScript SDK
+
+The SDK exports a client-side `isZeroAddress` helper:
+
+```typescript
+import { isZeroAddress, ZERO_ADDRESS } from '@bc-forge/sdk';
+
+if (isZeroAddress(someAddress)) {
+    throw new Error('Invalid address: zero address is not allowed');
+}
+```
 
 ## Source of truth
 
