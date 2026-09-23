@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -51,7 +51,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -277,7 +277,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
