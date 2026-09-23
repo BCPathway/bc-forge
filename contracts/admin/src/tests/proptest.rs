@@ -4,7 +4,7 @@ extern crate std;
 
 use proptest::prelude::*;
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, InvokeError, Map, String, TryIntoVal, Vec};
+use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Map, String, TryIntoVal, Vec};
 
 use super::{AdminContract, AdminContractClient, Role};
 use crate::{AdminError, AdminKey, ProposalStatus, UpgradeProposal};
@@ -100,7 +100,9 @@ proptest! {
             let res = client.try_grant_role(&admin, &role, &holder);
             prop_assert_eq!(
                 res,
-                Err(InvokeError::ContractError(AdminError::RoleAlreadyGranted as u32)),
+                Err(Ok(soroban_sdk::Error::from_contract_error(
+                    AdminError::RoleAlreadyGranted as u32
+                ))),
                 "repeat grant of an already-held role must revert with RoleAlreadyGranted"
             );
         }
