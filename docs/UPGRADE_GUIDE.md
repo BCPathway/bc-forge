@@ -255,6 +255,8 @@ If you have an existing contract that was deployed before the `SuperAdmin`
 role was introduced, use `migrate_admin` to enable `SuperAdmin`-based guards
 without resetting state.
 
+### Option 1: CLI
+
 ```bash
 stellar contract invoke \
   --id <CONTRACT_ID> \
@@ -263,8 +265,55 @@ stellar contract invoke \
   migrate_admin
 ```
 
+### Option 2: TypeScript SDK
+
+```typescript
+import { bcForgeClient } from '@bc-forge/sdk';
+import { Keypair } from '@stellar/stellar-sdk';
+
+const client = new bcForgeClient({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+  contractId: '<CONTRACT_ID>',
+});
+
+const adminKeypair = Keypair.fromSecret(process.env.ADMIN_SECRET!);
+const result = await client.migrateAdmin(adminKeypair);
+console.log('Migration TX:', result.hash);
+```
+
+### Option 3: Standalone migration script
+
+A standalone migration script is available at `migrations/rbac-migration.ts`.
+It provides a complete migration workflow with verification:
+
+```bash
+# Dry-run (simulate without submitting)
+npx ts-node migrations/rbac-migration.ts \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --contract-id <CONTRACT_ID> \
+  --admin-secret <ADMIN_SECRET> \
+  --dry-run
+
+# Execute migration
+npx ts-node migrations/rbac-migration.ts \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --contract-id <CONTRACT_ID> \
+  --admin-secret <ADMIN_SECRET>
+```
+
+The script performs the following steps:
+1. Verifies the contract has an admin set
+2. Checks if migration is already complete (idempotent)
+3. Executes the migration transaction
+4. Verifies the admin now has the SuperAdmin role
+
+### Storage migration process
+
 This is a one-shot, idempotent operation:
-- Reads the current admin from instance storage.
+- Reads the current admin from instance storage (`AdminKey::Admin`).
 - Creates a persistent `SuperAdmin(admin)` entry.
 - Safe to call multiple times (no-op on subsequent calls).
 
