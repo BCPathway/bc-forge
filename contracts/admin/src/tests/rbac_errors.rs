@@ -156,7 +156,12 @@ fn test_grant_role_already_granted_fails() {
     assert!(client.has_role(&Role::Minter, &holder));
 
     let result = client.try_grant_role(&admin, &Role::Minter, &holder);
-    assert_eq!(result, Err(Ok(AdminError::RoleAlreadyGranted)));
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::RoleAlreadyGranted as u32
+        )))
+    );
 }
 
 /// The four role bits are exactly 1, 2, 4, 8 (#753: bitwise values 1, 2, 4, 8).
