@@ -604,7 +604,8 @@ impl WrapperContract {
     /// in favor of the protocol.
     ///
     /// # Security
-    /// Protected by a reentrancy guard.
+    /// Protected by a reentrancy guard, and enforces the deposit time lockup so
+    /// a locked deposit cannot be exited early via `unwrap` either.
     pub fn unwrap(env: Env, caller: Address, wrapped_amount: i128) -> Result<(), WrapperError> {
         Self::ensure_initialized(&env)?;
         Self::ensure_not_paused(&env)?;
@@ -613,6 +614,10 @@ impl WrapperContract {
         if wrapped_amount <= 0 {
             return Err(WrapperError::InvalidAmount);
         }
+
+        // #739 – enforce the deposit time lockup like `withdraw` does; without
+        // this guard, `unwrap` would let a time-locked depositor exit early.
+        Self::require_unlocked(&env, &caller)?;
 
         let balance = Self::read_balance(&env, &caller);
         if balance < wrapped_amount {

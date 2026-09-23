@@ -50,7 +50,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -159,7 +159,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 6
+                  "u32": 10
                 }
               }
             },
@@ -328,7 +328,7 @@
                   ]
                 },
                 {
-                  "bool": false
+                  "bool": true
                 }
               ]
             }
