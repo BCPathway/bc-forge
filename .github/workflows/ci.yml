@@ -39,6 +39,9 @@ jobs:
       - name: Run tests
         run: cargo test --all
 
+      - name: Check for circular crate dependencies (#770)
+        run: python3 scripts/check_crate_cycles.py
+
       - name: Run multi-sig tests
         if: github.event_name == 'pull_request'
         run: cargo test -p bc-forge-admin
