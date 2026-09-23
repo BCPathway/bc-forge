@@ -66,6 +66,18 @@
           },
           "deployer": {
             "type": "string"
+          },
+          "adminContractId": {
+            "type": "string"
+          },
+          "tokenContractId": {
+            "type": "string"
+          },
+          "linkedContracts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },
