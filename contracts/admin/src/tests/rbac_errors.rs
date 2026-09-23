@@ -108,7 +108,6 @@ fn test_invalid_role_discriminant_is_rejected_at_decode() {
 /// admin-level operations.
 #[test]
 fn test_pauser_role_is_distinct_from_admin_role() {
-    let env = Env::default();
     let admin_mask = ROLE_BIT_ADMIN;
     let pauser_mask = ROLE_BIT_PAUSER;
 
