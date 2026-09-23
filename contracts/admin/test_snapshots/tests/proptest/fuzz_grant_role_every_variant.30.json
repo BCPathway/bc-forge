@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Admin"
                     }
                   ]
                 },
@@ -128,7 +128,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 4
+                  "u32": 1
                 }
               }
             },
@@ -259,7 +259,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Admin"
                     }
                   ]
                 },

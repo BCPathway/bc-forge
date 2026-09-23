@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -50,7 +50,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -79,7 +79,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -108,7 +108,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -137,7 +137,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -166,7 +166,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -195,7 +195,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -224,7 +224,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -253,7 +253,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -282,7 +282,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },
@@ -389,7 +389,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 2
+                  "u32": 8
                 }
               }
             },
@@ -817,7 +817,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Minter"
+                      "symbol": "Pauser"
                     }
                   ]
                 },

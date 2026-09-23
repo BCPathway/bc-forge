@@ -30,7 +30,7 @@
                   "symbol": "UpgradeProposal"
                 },
                 {
-                  "u64": 2548558607101041463
+                  "u64": 486454021253610807
                 }
               ]
             },
@@ -50,7 +50,7 @@
                       "symbol": "UpgradeProposal"
                     },
                     {
-                      "u64": 2548558607101041463
+                      "u64": 486454021253610807
                     }
                   ]
                 },
@@ -103,6 +103,12 @@
                     },
                     {
                       "key": {
+                        "symbol": "timelock_expires_at"
+                      },
+                      "val": "void"
+                    },
+                    {
+                      "key": {
                         "symbol": "votes"
                       },
                       "val": {
@@ -137,7 +143,7 @@
                   "symbol": "UpgradeProposal"
                 },
                 {
-                  "u64": 2548558607101046895
+                  "u64": 486454021253617253
                 }
               ]
             },
@@ -157,7 +163,7 @@
                       "symbol": "UpgradeProposal"
                     },
                     {
-                      "u64": 2548558607101046895
+                      "u64": 486454021253617253
                     }
                   ]
                 },
@@ -207,6 +213,12 @@
                       "val": {
                         "vec": []
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "timelock_expires_at"
+                      },
+                      "val": "void"
                     },
                     {
                       "key": {
