@@ -39,10 +39,10 @@ export function buildProgram(): Command {
     .addCommand(createVerifyHashCommand())
     .addCommand(createGenerateBindingsCommand())
     .addCommand(createDeployCommand())
-    .addCommand(createExportDeploymentsCommand())
     .addCommand(createInitSuperAdminCommand())
     .addCommand(createConnectCommand())
-    .addCommand(createOrchestrateCommand());
+    .addCommand(createOrchestrateCommand())
+    .addCommand(createExportDeploymentsCommand());
 
   return program;
 }

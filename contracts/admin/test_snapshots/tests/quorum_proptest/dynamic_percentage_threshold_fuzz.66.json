@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 23,
+    "address": 21,
     "nonce": 0
   },
   "auth": [
@@ -73,17 +73,11 @@
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
                     }
                   ]
                 },
                 {
-                  "u32": 21
+                  "u32": 10
                 }
               ]
             }
@@ -272,12 +266,6 @@
                             },
                             {
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
-                            },
-                            {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
-                            },
-                            {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
                             }
                           ]
                         }
@@ -355,7 +343,7 @@
                           ]
                         },
                         "val": {
-                          "u32": 21
+                          "u32": 10
                         }
                       }
                     ]

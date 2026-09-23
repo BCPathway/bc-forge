@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 64,
+    "address": 50,
     "nonce": 0
   },
   "auth": [

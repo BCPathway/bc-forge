@@ -3,9 +3,8 @@
 extern crate std;
 
 use proptest::prelude::*;
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::{Events, Ledger};
-use soroban_sdk::{vec, Address, BytesN, Env, Map, String, TryIntoVal, Vec};
+use soroban_sdk::testutils::{Address as _, Events, Ledger};
+use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Map, String, TryIntoVal, Vec};
 
 use super::{AdminContract, AdminContractClient, Role};
 use crate::{AdminError, AdminKey, ProposalStatus, UpgradeProposal};
@@ -85,19 +84,28 @@ proptest! {
         prop_assert!(client.has_role(&role, &holder));
     }
 
-    /// Fuzz: granting the same role to the same address N times is idempotent.
+    /// Fuzz: granting the same role to the same address twice fails with
+    /// `RoleAlreadyGranted`; the first grant always succeeds (#768).
     #[test]
-    fn fuzz_grant_role_idempotent(role_idx in 0u32..4, count in 1..20u32) {
+    fn fuzz_grant_role_already_granted(role_idx in 0u32..4, count in 1..5u32) {
         let role = role_for_idx(role_idx);
         let env = Env::default();
         let (client, admin) = setup(&env);
         let holder = Address::generate(&env);
 
-        for _ in 0..count {
-            client.grant_role(&admin, &role, &holder);
-        }
-
+        client.grant_role(&admin, &role, &holder);
         prop_assert!(client.has_role(&role, &holder));
+
+        // Every subsequent grant of the same role must fail loudly.
+        for _ in 0..count {
+            let result = client.try_grant_role(&admin, &role, &holder);
+            prop_assert_eq!(
+                result,
+                Err(Ok(soroban_sdk::Error::from_contract_error(
+                    AdminError::RoleAlreadyGranted as u32
+                )))
+            );
+        }
     }
 
     /// Fuzz: any subset of roles can be granted to the same address.
@@ -192,7 +200,18 @@ proptest! {
         let super_admin = Address::generate(&env);
 
         client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
-        client.grant_role(&super_admin, &role, &super_admin);
+        if role == Role::SuperAdmin {
+            // #768: a role the address already holds cannot be re-granted.
+            let result = client.try_grant_role(&super_admin, &role, &super_admin);
+            prop_assert_eq!(
+                result,
+                Err(Ok(soroban_sdk::Error::from_contract_error(
+                    AdminError::RoleAlreadyGranted as u32
+                )))
+            );
+        } else {
+            client.grant_role(&super_admin, &role, &super_admin);
+        }
         prop_assert!(client.has_role(&role, &super_admin));
     }
 
@@ -510,6 +529,72 @@ proptest! {
         let stored_b = read_upgrade_proposal(&env, &contract_id, id_b);
         prop_assert_eq!(stored_a.proposer, proposer_a);
         prop_assert_eq!(stored_b.proposer, proposer_b);
+    }
+
+    /// Fuzz: grant_role with boundary addresses (empty bytes and strings)
+    #[test]
+    fn fuzz_grant_role_boundary_addresses(invalid_bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+        let contract_id = client.address.clone();
+
+        let bytes_val = soroban_sdk::Bytes::from_slice(&env, &invalid_bytes);
+
+        let args_bytes = soroban_sdk::vec![
+            &env,
+            admin.to_val(),
+            Role::Minter.into_val(&env),
+            bytes_val.to_val()
+        ];
+
+        let res_bytes = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
+            &contract_id,
+            &soroban_sdk::Symbol::new(&env, "grant_role"),
+            args_bytes
+        );
+        prop_assert!(res_bytes.is_err(), "grant_role should fail decoding invalid bytes");
+
+        if let Ok(s) = std::str::from_utf8(&invalid_bytes) {
+            let string_val = soroban_sdk::String::from_str(&env, s);
+            let args_str = soroban_sdk::vec![
+                &env,
+                admin.to_val(),
+                Role::Minter.into_val(&env),
+                string_val.to_val()
+            ];
+            let res_str = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
+                &contract_id,
+                &soroban_sdk::Symbol::new(&env, "grant_role"),
+                args_str
+            );
+            prop_assert!(res_str.is_err(), "grant_role should fail decoding invalid string");
+        }
+    }
+
+    /// Fuzz: grant_role with explicitly empty and extremely long strings
+    #[test]
+    fn fuzz_grant_role_empty_and_max_length(length in prop::sample::select(std::vec![0usize, 10000usize])) {
+        let env = Env::default();
+        let (client, admin) = setup(&env);
+        let contract_id = client.address.clone();
+
+        // Generate a string of 'A's of the given length.
+        // For length=0, it's empty bytes/string. For 10000, it's max-length.
+        let s = std::string::String::from_utf8(std::vec![b'A'; length]).unwrap();
+
+        let string_val = soroban_sdk::String::from_str(&env, &s);
+        let args_str = soroban_sdk::vec![
+            &env,
+            admin.to_val(),
+            Role::Minter.into_val(&env),
+            string_val.to_val()
+        ];
+        let res_str = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
+            &contract_id,
+            &soroban_sdk::Symbol::new(&env, "grant_role"),
+            args_str
+        );
+        prop_assert!(res_str.is_err(), "grant_role should fail decoding empty/max-length string");
     }
 }
 
