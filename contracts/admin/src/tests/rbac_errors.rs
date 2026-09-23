@@ -4,6 +4,17 @@
 use super::*;
 use soroban_sdk::InvokeError;
 
+/// Minimal client harness: registers `AdminContract`, sets an admin, and
+/// returns the client plus the admin address.
+fn setup(env: &Env) -> (AdminContractClient<'_>, Address) {
+    env.mock_all_auths();
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(env, &contract_id);
+    let admin = Address::generate(env);
+    client.set_admin(&admin);
+    (client, admin)
+}
+
 /// Asserts that the module-level documentation table and the code-level
 /// discriminants agree on the standardized PascalCase error names (#751).
 #[test]
@@ -52,7 +63,9 @@ fn test_admin_error_variants_are_pascal_case_and_unique() {
     check_variant!(ProposalNotPending = 18);
     check_variant!(DuplicateVote = 19);
     check_variant!(Unauthorized = 20);
-    assert_eq!(count, 20, "expected all 20 standardized error variants");
+    check_variant!(BatchLengthMismatch = 21);
+    check_variant!(RoleAlreadyGranted = 22);
+    assert_eq!(count, 22, "expected all 22 standardized error variants");
 }
 
 /// The `Unauthorized` variant (#752) must exist and convert into a Soroban
@@ -72,6 +85,54 @@ fn test_unauthorized_is_distinct_from_role_specific_error() {
     assert_ne!(general, role_specific);
     assert_eq!(general, 20);
     assert_eq!(role_specific, 3);
+}
+
+/// #761: unrecognized role inputs are rejected, not silently accepted.
+///
+/// `Role` is a `#[contracttype]` enum whose wire format is the variant's case
+/// name (a `Symbol`), so a discriminant outside the defined set fails to
+/// decode in `try_from_val` before the contract's own `require_valid_role`
+/// guard is ever reached. This test locks that boundary in: every defined
+/// variant round-trips, and an unknown case name is a conversion error.
+#[test]
+fn test_invalid_role_discriminant_is_rejected_at_decode() {
+    let env = Env::default();
+
+    for role in [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser] {
+        let val: Val = role.into_val(&env);
+        assert_eq!(Role::try_from_val(&env, &val), Ok(role));
+    }
+
+    // A value that is not one of the defined role symbols must not decode.
+    let bad_val: Val = 99_u32.into_val(&env);
+    let decoded: Result<Role, soroban_sdk::ConversionError> = Role::try_from_val(&env, &bad_val);
+    assert!(
+        decoded.is_err(),
+        "unrecognized role discriminant must not decode into a Role"
+    );
+}
+
+/// #769: the role system separates concerns that the legacy monolithic admin
+/// check blurred — an Admin holder is not a Pauser and vice versa, so
+/// role-scoped operations (pause/unpause) can be gated independently of
+/// admin-level operations.
+#[test]
+fn test_pauser_role_is_distinct_from_admin_role() {
+    let admin_mask = ROLE_BIT_ADMIN;
+    let pauser_mask = ROLE_BIT_PAUSER;
+
+    assert!(mask_has_role(admin_mask, Role::Admin));
+    assert!(!mask_has_role(admin_mask, Role::Pauser));
+    assert!(mask_has_role(pauser_mask, Role::Pauser));
+    assert!(!mask_has_role(pauser_mask, Role::Admin));
+
+    // A single address can hold both, and each bit stays independently
+    // addressable — the separation that lets Pauser-gated ops run without
+    // full admin privileges.
+    let combined = mask_with_role(admin_mask, Role::Pauser);
+    assert!(mask_has_role(combined, Role::Admin));
+    assert!(mask_has_role(combined, Role::Pauser));
+    assert_eq!(mask_without_role(combined, Role::Pauser), ROLE_BIT_ADMIN);
 }
 
 /// Bitwise-AND helper: `mask_has_role` reports role presence per bit (#753).
@@ -109,6 +170,47 @@ fn test_mask_without_role_bitwise_and_not() {
 
     // Clearing an already-clear bit is a no-op.
     assert_eq!(mask_without_role(cleared, Role::Minter), cleared);
+}
+
+/// #761 — every recognized role discriminant passes grant_role's validation.
+/// The public `Role` type is a `#[contracttype]` enum (name-encoded), so the
+/// type system already excludes unknown discriminants; this test locks in that
+/// each valid role is accepted end-to-end and mapped to its bitmask bit.
+#[test]
+fn test_grant_role_accepts_every_recognized_role() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    for role in [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser] {
+        let holder = Address::generate(&env);
+        client.grant_role(&admin, &role, &holder);
+        assert!(client.has_role(&role, &holder));
+        // Role bit is the power-of-two bound the issue's "valid bitmask" step
+        // checks (#761): exactly one bit is set for each recognized role.
+        assert_eq!(role_bit(role), Some(mask_with_role(0, role)));
+    }
+}
+
+/// #768 — granting a role the target already holds fails with
+/// `RoleAlreadyGranted`, not a silent no-op.
+#[test]
+fn test_grant_role_already_granted_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    client.grant_role(&admin, &Role::Minter, &holder);
+    assert!(client.has_role(&Role::Minter, &holder));
+
+    let result = client.try_grant_role(&admin, &Role::Minter, &holder);
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::RoleAlreadyGranted as u32
+        )))
+    );
 }
 
 /// The four role bits are exactly 1, 2, 4, 8 (#753: bitwise values 1, 2, 4, 8).
