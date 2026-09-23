@@ -123,10 +123,7 @@ fn test_pauser_role_is_distinct_from_admin_role() {
     let combined = mask_with_role(admin_mask, Role::Pauser);
     assert!(mask_has_role(combined, Role::Admin));
     assert!(mask_has_role(combined, Role::Pauser));
-    assert_eq!(
-        mask_without_role(combined, Role::Pauser),
-        ROLE_BIT_ADMIN
-    );
+    assert_eq!(mask_without_role(combined, Role::Pauser), ROLE_BIT_ADMIN);
 }
 
 /// Bitwise-AND helper: `mask_has_role` reports role presence per bit (#753).
