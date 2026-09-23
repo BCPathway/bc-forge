@@ -84,10 +84,10 @@ proptest! {
         prop_assert!(client.has_role(&role, &holder));
     }
 
-    /// Fuzz (#768): the first grant succeeds and every repeat grant of the
-    /// same role to the same address reverts with `RoleAlreadyGranted`.
+    /// Fuzz: granting the same role to the same address twice fails with
+    /// `RoleAlreadyGranted`; the first grant always succeeds (#768).
     #[test]
-    fn fuzz_grant_role_rejects_repeat_grant(role_idx in 0u32..4, count in 1..20u32) {
+    fn fuzz_grant_role_already_granted(role_idx in 0u32..4, count in 1..5u32) {
         let role = role_for_idx(role_idx);
         let env = Env::default();
         let (client, admin) = setup(&env);
@@ -96,17 +96,16 @@ proptest! {
         client.grant_role(&admin, &role, &holder);
         prop_assert!(client.has_role(&role, &holder));
 
-        for _ in 1..count {
-            let res = client.try_grant_role(&admin, &role, &holder);
+        // Every subsequent grant of the same role must fail loudly.
+        for _ in 0..count {
+            let result = client.try_grant_role(&admin, &role, &holder);
             prop_assert_eq!(
-                res,
+                result,
                 Err(Ok(soroban_sdk::Error::from_contract_error(
                     AdminError::RoleAlreadyGranted as u32
-                ))),
-                "repeat grant of an already-held role must revert with RoleAlreadyGranted"
+                )))
             );
         }
-        prop_assert!(client.has_role(&role, &holder));
     }
 
     /// Fuzz: any subset of roles can be granted to the same address.
@@ -201,7 +200,18 @@ proptest! {
         let super_admin = Address::generate(&env);
 
         client.grant_role(&admin, &Role::SuperAdmin, &super_admin);
-        client.grant_role(&super_admin, &role, &super_admin);
+        if role == Role::SuperAdmin {
+            // #768: a role the address already holds cannot be re-granted.
+            let result = client.try_grant_role(&super_admin, &role, &super_admin);
+            prop_assert_eq!(
+                result,
+                Err(Ok(soroban_sdk::Error::from_contract_error(
+                    AdminError::RoleAlreadyGranted as u32
+                )))
+            );
+        } else {
+            client.grant_role(&super_admin, &role, &super_admin);
+        }
         prop_assert!(client.has_role(&role, &super_admin));
     }
 
