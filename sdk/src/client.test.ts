@@ -3,7 +3,7 @@
  */
 
 import { jest } from '@jest/globals';
-import { bcForgeClient } from './client';
+import { bcForgeClient, Role, ZERO_ADDRESS, isZeroAddress } from './client';
 import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
 
 // Mock data for testing
@@ -154,5 +154,157 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(typeof client.simulateBurnFrom).toBe('function');
       expect(client.simulateBurnFrom.length).toBe(4); // 4 parameters
     });
+  });
+
+  describe('migrateAdmin', () => {
+    it('should have migrateAdmin method', () => {
+      expect(typeof client.migrateAdmin).toBe('function');
+      expect(client.migrateAdmin.length).toBe(1); // 1 optional parameter
+    });
+
+    it('should invoke migrate_admin with no arguments', async () => {
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-migration-hash',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
+
+      await client.migrateAdmin(adminKeypair);
+
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, args, source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('migrate_admin');
+      expect(args).toHaveLength(0); // No arguments for migrate_admin
+      expect(source).toBe(adminKeypair);
+    });
+  });
+
+  describe('RBAC role management', () => {
+    it('should have grantMinter method', () => {
+      expect(typeof client.grantMinter).toBe('function');
+      expect(client.grantMinter.length).toBe(2); // 2 parameters
+    });
+
+    it('should have revokeMinter method', () => {
+      expect(typeof client.revokeMinter).toBe('function');
+      expect(client.revokeMinter.length).toBe(2); // 2 parameters
+    });
+  });
+
+  describe('RBAC and Contract Connection Methods', () => {
+    it('should invoke grantRole with correct parameters', async () => {
+      const targetUser = Keypair.random().publicKey();
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-grant',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.grantRole(
+        Role.SuperAdmin,
+        targetUser,
+        adminKeypair,
+      );
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('grant_role');
+      expect(source).toBe(adminKeypair);
+    });
+
+    it('should invoke revokeRole with correct parameters', async () => {
+      const targetUser = Keypair.random().publicKey();
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-revoke',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.revokeRole(
+        Role.Minter,
+        targetUser,
+        adminKeypair,
+      );
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('revoke_role');
+      expect(source).toBe(adminKeypair);
+    });
+
+    it('should invoke setAdminContract with correct parameters', async () => {
+      const adminContractId = MOCK_CONTRACT_ID;
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-link',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.setAdminContract(adminContractId, adminKeypair);
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('set_admin_contract');
+      expect(source).toBe(adminKeypair);
+    });
+
+    it('should invoke setDependentToken with correct parameters', async () => {
+      const tokenContractId = MOCK_CONTRACT_ID;
+      const invokeContract = jest.fn(
+        async (_method: string, _args: unknown[], _source: Keypair) => ({
+          success: true,
+          hash: 'mock-hash-token-link',
+          returnValue: null,
+        }),
+      );
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+
+      const result = await client.setDependentToken(tokenContractId, adminKeypair);
+
+      expect(result.success).toBe(true);
+      expect(invokeContract).toHaveBeenCalledTimes(1);
+      const [method, , source] = invokeContract.mock.calls[0] as [string, unknown[], Keypair];
+      expect(method).toBe('set_token');
+      expect(source).toBe(adminKeypair);
+    });
+  });
+});
+
+describe('isZeroAddress', () => {
+  it('should return true for the zero address', () => {
+    expect(isZeroAddress(ZERO_ADDRESS)).toBe(true);
+  });
+
+  it('should return false for a valid address', () => {
+    const validAddress = Keypair.random().publicKey();
+    expect(isZeroAddress(validAddress)).toBe(false);
+  });
+
+  it('should return false for an empty string', () => {
+    expect(isZeroAddress('')).toBe(false);
+  });
+
+  it('should return false for a different address', () => {
+    expect(isZeroAddress('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')).toBe(false);
+  });
+
+  it('should export the ZERO_ADDRESS constant', () => {
+    expect(ZERO_ADDRESS).toBe('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
   });
 });

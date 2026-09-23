@@ -394,10 +394,12 @@ impl BcForgeToken {
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
+    /// Configures default rate limits for mint, transfer, transfer_from, burn, and burn_from operations.
     /// Emits the `init` event. Can only be called once.
     ///
     /// @notice Initializes the token contract with the given admin, decimals, name, and symbol.
     /// @dev This function can only be called once. Subsequent calls will revert with `AlreadyInitialized`.
+    ///      Default rate limits are set to 1000 operations per 60-second window for each operation type.
     /// @param env The Soroban environment.
     /// @param admin_address The address to set as the contract admin.
     /// @param decimal The number of decimal places for the token.
@@ -411,6 +413,9 @@ impl BcForgeToken {
         name: String,
         symbol: String,
     ) -> Result<(), TokenError> {
+        // Ensure only the deployer can initialize the contract
+        env.current_contract_address().require_auth();
+
         if admin::has_admin(&env) {
             return Err(TokenError::AlreadyInitialized);
         }
@@ -421,6 +426,7 @@ impl BcForgeToken {
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
         Self::write_max_supply(&env, i128::MAX);
+
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
     }
@@ -805,6 +811,50 @@ impl BcForgeToken {
         Self::delete_fee_exemption(&env, &address);
         events::emit_fee_exemption_removed(&env, &caller, &address);
         Ok(())
+    }
+
+    /// Creates a multi-sig governance proposal (used to gate WASM upgrades).
+    ///
+    /// @notice Creates an upgrade/governance proposal authored by `creator`.
+    /// @dev Thin wrapper over [`admin::create_proposal`]; creator must be an admin-pool member.
+    pub fn create_proposal(env: Env, creator: Address, description: String) -> u64 {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::create_proposal(&env, creator, description)
+    }
+
+    /// Approves a multi-sig governance proposal.
+    ///
+    /// @notice Records `admin`'s approval for `proposal_id`.
+    /// @dev Thin wrapper over [`admin::approve_proposal`].
+    pub fn approve_proposal(env: Env, admin: Address, proposal_id: u64) {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::approve_proposal(&env, admin, proposal_id);
+    }
+
+    /// Returns whether a governance proposal has met its approval quorum.
+    pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::is_proposal_ready(&env, proposal_id)
+    }
+
+    /// Configures the multi-sig admin pool and approval threshold for upgrades.
+    pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::set_admin_pool(&env, pool, threshold);
+    }
+
+    /// Executes a quorum-approved WASM upgrade on this token contract.
+    ///
+    /// @notice Applies `wasm_hash` after the referenced proposal meets quorum.
+    /// @dev Delegates to [`admin::execute_upgrade`].
+    pub fn execute_upgrade(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        wasm_hash: BytesN<32>,
+    ) -> Result<(), admin::AdminError> {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
     }
 }
 
