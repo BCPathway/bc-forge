@@ -13,7 +13,6 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "baseUrl": ".",
     "paths": {
       "@bc-forge/sdk": ["./src/test-shims/bc-forge-sdk.ts"]
     }

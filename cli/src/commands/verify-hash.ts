@@ -39,15 +39,15 @@ export function hashLocalWasm(wasmPath: string): string {
  * Returns undefined for Stellar-asset contracts, which have no uploaded WASM.
  */
 export function extractOnChainHash(entryData: xdr.LedgerEntryData): string | undefined {
-  if (entryData.switch().name !== 'contractData') return undefined;
+  if (entryData.type !== 'contractData') return undefined;
 
-  const val = entryData.contractData().val();
-  if (val.switch().name !== 'scvContractInstance') return undefined;
+  const val = entryData.contractData.val;
+  if (val.type !== 'scvContractInstance') return undefined;
 
-  const executable = val.instance().executable();
-  if (executable.switch().name !== 'contractExecutableWasm') return undefined;
+  const executable = val.instance.executable;
+  if (executable.type !== 'contractExecutableWasm') return undefined;
 
-  return executable.wasmHash().toString('hex');
+  return Buffer.from(executable.wasmHash.toBytes()).toString('hex');
 }
 
 /**
