@@ -26,6 +26,13 @@ When reporting, please include:
 
 We follow responsible disclosure practices and will work with you to understand and resolve the issue before public disclosure.
 
+## Bug Bounty
+
+Rewards for security reports are described in [docs/BUG_BOUNTY.md](docs/BUG_BOUNTY.md).
+That page copies the scope and out-of-scope lists below, and records whether a
+hosted bounty program is live. Read it before reporting if you want to know how
+a reward is assessed.
+
 ## Scope
 
 The following types of issues are in scope for security rewards and coordinated disclosure:

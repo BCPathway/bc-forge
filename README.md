@@ -425,6 +425,8 @@ Security is our top priority. If you discover a security vulnerability in bc-for
 
 For more details about our vulnerability disclosure process, supported versions, scope, and response timeline, please review the [SECURITY.md](SECURITY.md) file.
 
+How security reports are rewarded, and whether a hosted bounty program is live, is tracked in [docs/BUG_BOUNTY.md](docs/BUG_BOUNTY.md).
+
 ## License
 
 [MIT](LICENSE) — Free for personal and commercial use.
