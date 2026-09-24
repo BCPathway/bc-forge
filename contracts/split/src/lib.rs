@@ -1,6 +1,7 @@
 #![no_std]
 
 mod events;
+mod reentrancy_guard;
 
 #[cfg(test)]
 mod test;
@@ -289,8 +290,10 @@ impl SplitContract {
         invoice_id: u64,
         admin_address: Address,
     ) -> Result<(), SplitError> {
-        admin::require_super_admin(&env, &admin_address);
-        Self::release_payment_inner(&env, invoice_id)
+        reentrancy_guard!(&env, "release_payment", {
+            admin::require_super_admin(&env, &admin_address);
+            Self::release_payment_inner(&env, invoice_id)
+        })
     }
 
     pub fn retry_failed_payout(
@@ -299,8 +302,10 @@ impl SplitContract {
         recipient: Address,
         admin_address: Address,
     ) -> Result<(), SplitError> {
-        admin::require_super_admin(&env, &admin_address);
-        Self::retry_failed_payout_inner(&env, invoice_id, &recipient)
+        reentrancy_guard!(&env, "retry_failed_payout", {
+            admin::require_super_admin(&env, &admin_address);
+            Self::retry_failed_payout_inner(&env, invoice_id, &recipient)
+        })
     }
 
     pub fn get_invoice(env: Env, invoice_id: u64) -> Result<Invoice, SplitError> {
