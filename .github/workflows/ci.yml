@@ -118,6 +118,38 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # ─── React Package CI (#896) ────────────────────────────────────────────
+  # @bc-forge/react wraps @bc-forge/sdk, so the workspace SDK is built first
+  # to provide the type declarations the react build consumes.
+  react:
+    name: React Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: react
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SDK dependency
+        run: npm run build --workspace @bc-forge/sdk
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   # ─── Dependency audit (#770) ────────────────────────────────────────────
   # Verifies the workspace dependency graph resolves cleanly: cargo metadata
   # fails on manifest cycles or malformed feature declarations, and `cargo
