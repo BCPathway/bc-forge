@@ -187,13 +187,15 @@
 //!   [`require_super_admin`] guard for legacy contracts without resetting state.
 //!
 //! ### Reentrancy
-//! - This module does **not** implement reentrancy guards. Callers wrapping
-//!   multi-step operations (e.g., create → approve → execute proposal) should
-//!   protect those flows at a higher level.
+//! - Proposal lifecycle entry points share a persistent RAII guard. The guard
+//!   is entered before authorization callbacks and remains held through WASM
+//!   deployment, preventing callbacks from creating, changing, cancelling, or
+//!   executing proposals while a lifecycle operation is active.
 
 #![no_std]
 
 mod events;
+mod reentrancy_guard;
 
 use bc_forge_ttl as ttl;
 use soroban_sdk::{contracterror, contracttype, vec, Address, BytesN, Env, Map, String, Vec};
@@ -1432,6 +1434,7 @@ pub fn get_threshold(env: &Env) -> u32 {
 /// @param description Human-readable description of the proposal.
 /// @return The identifier assigned to the new proposal.
 pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     creator.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&creator) {
@@ -1471,6 +1474,7 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
 /// @param admin The address of the admin approving the proposal.
 /// @param proposal_id The ID of the proposal to approve.
 pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     admin.require_auth();
     let pool = get_admin_pool(env);
     if !pool.contains(&admin) {
@@ -1524,6 +1528,7 @@ pub fn is_proposal_ready(env: &Env, proposal_id: u64) -> bool {
 /// @param env The Soroban environment.
 /// @param proposal_id The ID of the proposal to mark as executed.
 pub fn mark_executed(env: &Env, proposal_id: u64) {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     let admin = get_admin(env);
     admin.require_auth();
 
@@ -1688,6 +1693,16 @@ pub fn execute_upgrade(
     proposal_id: u64,
     wasm_hash: soroban_sdk::BytesN<32>,
 ) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
+    execute_upgrade_inner(env, executor, proposal_id, wasm_hash)
+}
+
+fn execute_upgrade_inner(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+    wasm_hash: soroban_sdk::BytesN<32>,
+) -> Result<(), AdminError> {
     executor.require_auth();
 
     let pool = get_admin_pool(env);
@@ -1746,6 +1761,7 @@ pub fn execute_upgrade_batch(
     proposal_ids: Vec<u64>,
     wasm_hashes: Vec<soroban_sdk::BytesN<32>>,
 ) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     if proposal_ids.len() != wasm_hashes.len() {
         return Err(AdminError::BatchLengthMismatch);
     }
@@ -1753,7 +1769,7 @@ pub fn execute_upgrade_batch(
     for i in 0..proposal_ids.len() {
         let proposal_id = proposal_ids.get(i).expect("index in range");
         let wasm_hash = wasm_hashes.get(i).expect("index in range");
-        execute_upgrade(env, executor.clone(), proposal_id, wasm_hash)?;
+        execute_upgrade_inner(env, executor.clone(), proposal_id, wasm_hash)?;
     }
     Ok(())
 }
@@ -1792,6 +1808,7 @@ pub fn execute_upgrade_batch(
 /// @param proposal_id The ID of the upgrade proposal to vote on.
 /// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
 pub fn approve_upgrade(env: &Env, voter: Address, proposal_id: u64) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     voter.require_auth();
 
     let pool = get_admin_pool(env);
@@ -1890,6 +1907,7 @@ pub fn require_upgrade_quorum_met(proposal: &UpgradeProposal) -> Result<(), Admi
 /// @param proposal_id The ID of the upgrade proposal to cancel.
 /// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
 pub fn cancel_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     caller.require_auth();
 
     let key = AdminKey::UpgradeProposal(proposal_id);
@@ -1988,6 +2006,7 @@ pub fn submit_upgrade_proposal(
     new_wasm_hash: BytesN<32>,
     _description: String,
 ) -> Result<u64, AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     submitter.require_auth();
 
     let pool = get_admin_pool(env);
@@ -2084,6 +2103,7 @@ pub fn emergency_execute_upgrade(
     proposal_id: u64,
     wasm_hash: soroban_sdk::BytesN<32>,
 ) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
     executor.require_auth();
 
     let pool = get_admin_pool(env);
@@ -5553,6 +5573,27 @@ mod tests {
             client.try_execute_upgrade(&member, &id, &wasm_hash),
             Err(Ok(AdminError::ProposalAlreadyExecuted))
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "Reentrancy detected: admin proposal flow is active")]
+    fn test_execute_upgrade_rejects_reentry_during_external_interaction() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+        let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "upgrade"));
+        advance_past_timelock(&env);
+        let wasm_hash = uploaded_wasm_hash(&env);
+
+        env.as_contract(&contract_id, || {
+            let _guard = reentrancy_guard::enter(&env);
+            execute_upgrade(&env, admin, proposal_id, wasm_hash)
+                .expect("re-entry should be blocked before execution");
+        });
     }
 
     #[test]
