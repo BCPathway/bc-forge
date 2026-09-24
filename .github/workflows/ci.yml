@@ -63,6 +63,9 @@ jobs:
           CARGO_INCREMENTAL: 0
         run: cargo build --workspace --exclude bc-forge-e2e-tests --target wasm32-unknown-unknown --release
 
+      - name: Check WASM size budgets (#956)
+        run: python3 scripts/check_wasm_size.py
+
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────
   sdk:
     name: TypeScript SDK
