@@ -100,7 +100,7 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
 
     // 3. Build the upgrade transaction
     const contract = new Contract(opts.contractId);
-    const wasmHash = hash(wasmBytes).toString("hex");
+    const wasmHash = Buffer.from(hash(wasmBytes)).toString("hex");
 
     const upgradeOp = contract.call(
       "upgrade",

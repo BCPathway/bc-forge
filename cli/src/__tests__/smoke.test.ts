@@ -20,23 +20,29 @@ vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
 
   return {
     ...actual,
-    Contract: vi.fn().mockImplementation(() => ({
-      call: vi.fn().mockReturnValue({ toXDR: () => "mock-op" }),
-    })),
+    Contract: vi.fn(function () {
+      return {
+        call: vi.fn().mockReturnValue({ toXDR: () => "mock-op" }),
+      };
+    }),
     Address: {
       fromString: vi.fn().mockReturnValue({
         toScVal: vi.fn().mockReturnValue({ _scValType: 0 }),
       }),
     },
     nativeToScVal: vi.fn().mockReturnValue({ _scValType: 0 }),
-    TransactionBuilder: vi.fn().mockImplementation(() => ({
-      addOperation: vi.fn().mockReturnThis(),
-      setTimeout: vi.fn().mockReturnThis(),
-      build: vi.fn().mockReturnValue({ toXDR: () => "mock-xdr", sign: vi.fn() }),
-    })),
+    TransactionBuilder: vi.fn(function () {
+      return {
+        addOperation: vi.fn().mockReturnThis(),
+        setTimeout: vi.fn().mockReturnThis(),
+        build: vi.fn().mockReturnValue({ toXDR: () => "mock-xdr", sign: vi.fn() }),
+      };
+    }),
     rpc: {
       ...actual.rpc,
-      Server: vi.fn().mockImplementation(() => createMockServer()),
+      Server: vi.fn(function () {
+        return createMockServer();
+      }),
     },
     Keypair: {
       ...actual.Keypair,
@@ -160,7 +166,9 @@ describe("Smoke Test Command (#704, #706)", () => {
       const opts = baseOpts();
       const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
       vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
-        () => createMockServer({ simulationError: "resource limit exceeded" }) as any
+        function () {
+          return createMockServer({ simulationError: "resource limit exceeded" }) as any;
+        }
       );
 
       const result = await runSmokeTest(opts);
@@ -173,7 +181,9 @@ describe("Smoke Test Command (#704, #706)", () => {
       const opts = baseOpts();
       const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
       vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
-        () => createMockServer({ pendingPollsBeforeSuccess: 2 }) as any
+        function () {
+          return createMockServer({ pendingPollsBeforeSuccess: 2 }) as any;
+        }
       );
 
       const result = await runSmokeTest(opts);
@@ -186,7 +196,9 @@ describe("Smoke Test Command (#704, #706)", () => {
       opts.timeout = "5";
       const { rpc: SorobanRpcNs } = await import("@stellar/stellar-sdk");
       vi.mocked(SorobanRpcNs.Server).mockImplementationOnce(
-        () => createMockServer({ pendingPollsBeforeSuccess: 1000 }) as any
+        function () {
+          return createMockServer({ pendingPollsBeforeSuccess: 1000 }) as any;
+        }
       );
 
       const result = await runSmokeTest(opts);
