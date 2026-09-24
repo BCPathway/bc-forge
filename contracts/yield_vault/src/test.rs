@@ -148,8 +148,9 @@ fn test_deposit_to_mint_ratio_after_reward_distribution() {
     vault.deposit(&user_a, &2_000_000, &0);
     assert_eq!(vault.total_assets(), 2_000_000);
 
-    // Simulate reward: directly transfer underlying tokens into the vault.
+    // Simulate reward: mint underlying to the admin, then transfer it into the vault.
     // This increases total_assets without changing total_shares.
+    underlying.mint(&admin, &admin, &1_000_000);
     underlying.transfer(&admin, &vault_id, &1_000_000);
     assert_eq!(vault.total_assets(), 3_000_000);
 
@@ -202,6 +203,7 @@ fn test_deposit_to_mint_ratio_three_users_pro_rata() {
     vault.deposit(&user_a, &1_000_000, &0);
 
     // Add reward to create yield.
+    underlying.mint(&admin, &admin, &1_000_000);
     underlying.transfer(&admin, &vault_id, &1_000_000);
     // total_assets = 2,000,000, total_shares = 1,000,000
 
@@ -221,7 +223,6 @@ fn test_deposit_to_mint_ratio_three_users_pro_rata() {
 // ─── #732: Rate-limit deposits ───────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "RateLimited")]
 fn test_rate_limit_blocks_second_deposit_when_limit_is_one() {
     let env = Env::default();
     env.mock_all_auths();
@@ -234,7 +235,8 @@ fn test_rate_limit_blocks_second_deposit_when_limit_is_one() {
     vault.deposit(&user, &1_000_000, &0);
 
     // Second deposit exceeds the limit of 1 → RateLimited.
-    vault.deposit(&user, &500, &0);
+    let res = vault.try_deposit(&user, &500, &0);
+    assert_eq!(res, Err(Ok(VaultError::RateLimited)));
 }
 
 #[test]
@@ -254,7 +256,6 @@ fn test_rate_limit_allows_deposits_within_limit() {
 }
 
 #[test]
-#[should_panic(expected = "RateLimited")]
 fn test_rate_limit_blocks_fourth_when_limit_is_three() {
     let env = Env::default();
     env.mock_all_auths();
@@ -267,7 +268,8 @@ fn test_rate_limit_blocks_fourth_when_limit_is_three() {
     vault.deposit(&user, &100, &0);
 
     // Fourth deposit exceeds limit of 3.
-    vault.deposit(&user, &100, &0);
+    let res = vault.try_deposit(&user, &100, &0);
+    assert_eq!(res, Err(Ok(VaultError::RateLimited)));
 }
 
 #[test]
@@ -305,7 +307,6 @@ fn test_rate_limit_enforced_before_amount_validation() {
 // ─── #733: Pause vault deposits ──────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
 fn test_pause_blocks_deposit() {
     let env = Env::default();
     env.mock_all_auths();
@@ -317,7 +318,8 @@ fn test_pause_blocks_deposit() {
     });
 
     // Deposit should revert.
-    vault.deposit(&user, &1_000_000, &0);
+    let res = vault.try_deposit(&user, &1_000_000, &0);
+    assert_eq!(res, Err(Ok(VaultError::ContractPaused)));
 }
 
 #[test]
@@ -445,7 +447,6 @@ fn test_rescue_tokens_transfers_non_underlying() {
 }
 
 #[test]
-#[should_panic(expected = "CannotRescueUnderlying")]
 fn test_rescue_tokens_reverts_for_underlying() {
     let env = Env::default();
     env.mock_all_auths();
@@ -456,11 +457,11 @@ fn test_rescue_tokens_reverts_for_underlying() {
     let recipient = Address::generate(&env);
 
     // Attempting to rescue the underlying token should revert.
-    vault.rescue_tokens(&admin, &underlying.address, &recipient, &100_000);
+    let res = vault.try_rescue_tokens(&admin, &underlying.address, &recipient, &100_000);
+    assert_eq!(res, Err(Ok(VaultError::CannotRescueUnderlying)));
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
 fn test_rescue_tokens_reverts_for_zero_amount() {
     let env = Env::default();
     env.mock_all_auths();
@@ -477,11 +478,11 @@ fn test_rescue_tokens_reverts_for_zero_amount() {
     stuck.mint(&admin, &vault_id, &500_000);
 
     let recipient = Address::generate(&env);
-    vault.rescue_tokens(&admin, &stuck_id, &recipient, &0);
+    let res = vault.try_rescue_tokens(&admin, &stuck_id, &recipient, &0);
+    assert_eq!(res, Err(Ok(VaultError::InvalidAmount)));
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
 fn test_rescue_tokens_reverts_for_negative_amount() {
     let env = Env::default();
     env.mock_all_auths();
@@ -498,7 +499,8 @@ fn test_rescue_tokens_reverts_for_negative_amount() {
     stuck.mint(&admin, &vault_id, &500_000);
 
     let recipient = Address::generate(&env);
-    vault.rescue_tokens(&admin, &stuck_id, &recipient, &-100);
+    let res = vault.try_rescue_tokens(&admin, &stuck_id, &recipient, &-100);
+    assert_eq!(res, Err(Ok(VaultError::InvalidAmount)));
 }
 
 #[test]
@@ -561,14 +563,14 @@ fn test_rescue_tokens_preserves_vault_deposit_integrity() {
 // ─── Slippage tests ──────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
 fn test_deposit_slippage_revert() {
     let env = Env::default();
     env.mock_all_auths();
     let (vault, _underlying, _admin, user, _) = setup_and_fund(&env);
 
     // Depositing 1000 assets → 1000 shares; requiring 1050 should fail.
-    vault.deposit(&user, &1000, &1050);
+    let res = vault.try_deposit(&user, &1000, &1050);
+    assert_eq!(res, Err(Ok(VaultError::InvalidAmount)));
 }
 
 #[test]
@@ -582,7 +584,6 @@ fn test_deposit_slippage_success() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
 fn test_withdraw_slippage_revert() {
     let env = Env::default();
     env.mock_all_auths();
@@ -591,7 +592,8 @@ fn test_withdraw_slippage_revert() {
     vault.deposit(&user, &1000, &0);
 
     // Withdrawing 1000 shares → 1000 tokens; requiring 1050 should fail.
-    vault.withdraw(&user, &1000, &1050);
+    let res = vault.try_withdraw(&user, &1000, &1050);
+    assert_eq!(res, Err(Ok(VaultError::InvalidAmount)));
 }
 
 #[test]
