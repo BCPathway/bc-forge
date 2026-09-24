@@ -1,6 +1,7 @@
 #![no_std]
 
 mod events;
+mod reentrancy_guard;
 
 #[cfg(test)]
 mod test;
@@ -246,106 +247,112 @@ impl VestingContract {
         duration: u32,
         revocable: bool,
     ) -> Result<u64, VestingError> {
-        Self::ensure_initialized(&env)?;
-        let admin_address = Self::read_admin(&env);
-        admin::require_admin(&env, &admin_address);
+        reentrancy_guard!(&env, "create_vesting", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
 
-        if amount <= 0 {
-            return Err(VestingError::InvalidAmount);
-        }
-        if duration == 0 {
-            return Err(VestingError::InvalidDuration);
-        }
-        if cliff > duration {
-            return Err(VestingError::CliffAfterEnd);
-        }
+            if amount <= 0 {
+                return Err(VestingError::InvalidAmount);
+            }
+            if duration == 0 {
+                return Err(VestingError::InvalidDuration);
+            }
+            if cliff > duration {
+                return Err(VestingError::CliffAfterEnd);
+            }
 
-        let start_ledger = env.ledger().sequence();
-        let schedule_id = Self::next_schedule_id(&env);
-        let cliff_ledger = start_ledger + cliff;
-        let end_ledger = start_ledger + duration;
+            let start_ledger = env.ledger().sequence();
+            let schedule_id = Self::next_schedule_id(&env);
+            let cliff_ledger = start_ledger + cliff;
+            let end_ledger = start_ledger + duration;
 
-        Self::mint_into_vault(&env, amount);
+            Self::mint_into_vault(&env, amount);
 
-        let schedule = StoredVestingSchedule {
-            schedule: VestingSchedule {
-                beneficiary: beneficiary.clone(),
-                total_amount: amount,
+            let schedule = StoredVestingSchedule {
+                schedule: VestingSchedule {
+                    beneficiary: beneficiary.clone(),
+                    total_amount: amount,
+                    cliff_ledger,
+                    end_ledger,
+                    released_amount: 0,
+                    revocable,
+                },
+                start_ledger,
+                revoked_at_ledger: None,
+            };
+            Self::write_schedule(&env, schedule_id, &schedule);
+
+            let mut schedule_ids = Self::beneficiary_schedule_ids(&env, &beneficiary);
+            schedule_ids.push_back(schedule_id);
+            Self::write_beneficiary_schedule_ids(&env, &beneficiary, &schedule_ids);
+
+            events::emit_vesting_created(
+                &env,
+                schedule_id,
+                &beneficiary,
+                amount,
                 cliff_ledger,
                 end_ledger,
-                released_amount: 0,
                 revocable,
-            },
-            start_ledger,
-            revoked_at_ledger: None,
-        };
-        Self::write_schedule(&env, schedule_id, &schedule);
-
-        let mut schedule_ids = Self::beneficiary_schedule_ids(&env, &beneficiary);
-        schedule_ids.push_back(schedule_id);
-        Self::write_beneficiary_schedule_ids(&env, &beneficiary, &schedule_ids);
-
-        events::emit_vesting_created(
-            &env,
-            schedule_id,
-            &beneficiary,
-            amount,
-            cliff_ledger,
-            end_ledger,
-            revocable,
-        );
-        Ok(schedule_id)
+            );
+            Ok(schedule_id)
+        })
     }
 
     pub fn release(env: Env, beneficiary: Address) -> Result<i128, VestingError> {
-        Self::ensure_initialized(&env)?;
-        beneficiary.require_auth();
+        reentrancy_guard!(&env, "release", {
+            Self::ensure_initialized(&env)?;
+            beneficiary.require_auth();
 
-        let current_ledger = env.ledger().sequence();
-        let schedule_ids = Self::beneficiary_schedule_ids(&env, &beneficiary);
-        let mut total_to_release = 0i128;
+            let current_ledger = env.ledger().sequence();
+            let schedule_ids = Self::beneficiary_schedule_ids(&env, &beneficiary);
+            let mut total_to_release = 0i128;
 
-        for index in 0..schedule_ids.len() {
-            let schedule_id = schedule_ids.get(index).expect("schedule id should exist");
-            let mut stored = Self::read_schedule(&env, schedule_id)?;
-            let claimable = Self::claimable_amount(&stored, current_ledger);
-            if claimable > 0 {
-                stored.schedule.released_amount += claimable;
-                total_to_release += claimable;
-                Self::write_schedule(&env, schedule_id, &stored);
+            for index in 0..schedule_ids.len() {
+                let schedule_id = schedule_ids.get(index).expect("schedule id should exist");
+                let mut stored = Self::read_schedule(&env, schedule_id)?;
+                let claimable = Self::claimable_amount(&stored, current_ledger);
+                if claimable > 0 {
+                    stored.schedule.released_amount += claimable;
+                    total_to_release += claimable;
+                    Self::write_schedule(&env, schedule_id, &stored);
+                }
             }
-        }
 
-        Self::transfer_from_vault(&env, &beneficiary, total_to_release);
-        if total_to_release > 0 {
-            events::emit_tokens_released(&env, &beneficiary, total_to_release);
-        }
-        Ok(total_to_release)
+            Self::transfer_from_vault(&env, &beneficiary, total_to_release);
+            if total_to_release > 0 {
+                events::emit_tokens_released(&env, &beneficiary, total_to_release);
+            }
+            Ok(total_to_release)
+        })
     }
 
     pub fn revoke(env: Env, schedule_id: u64) -> Result<i128, VestingError> {
-        Self::ensure_initialized(&env)?;
-        let admin_address = Self::read_admin(&env);
-        admin::require_admin(&env, &admin_address);
+        reentrancy_guard!(&env, "revoke", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
 
-        let current_ledger = env.ledger().sequence();
-        let mut stored = Self::read_schedule(&env, schedule_id)?;
+            let current_ledger = env.ledger().sequence();
+            let mut stored = Self::read_schedule(&env, schedule_id)?;
 
-        if !stored.schedule.revocable {
-            return Err(VestingError::NotRevocable);
-        }
-        if stored.revoked_at_ledger.is_some() {
-            return Err(VestingError::AlreadyRevoked);
-        }
+            if !stored.schedule.revocable {
+                return Err(VestingError::NotRevocable);
+            }
+            if stored.revoked_at_ledger.is_some() {
+                return Err(VestingError::AlreadyRevoked);
+            }
 
-        let vested = Self::vested_amount(&stored, current_ledger);
-        let unvested = stored.schedule.total_amount - vested;
-        stored.revoked_at_ledger = Some(current_ledger);
-        Self::write_schedule(&env, schedule_id, &stored);
+            let vested = Self::vested_amount(&stored, current_ledger);
+            let unvested = stored.schedule.total_amount - vested;
+            stored.revoked_at_ledger = Some(current_ledger);
+            Self::write_schedule(&env, schedule_id, &stored);
 
-        Self::transfer_from_vault(&env, &admin_address, unvested);
-        events::emit_vesting_revoked(&env, schedule_id, &stored.schedule.beneficiary, unvested);
-        Ok(unvested)
+            Self::transfer_from_vault(&env, &admin_address, unvested);
+            events::emit_vesting_revoked(&env, schedule_id, &stored.schedule.beneficiary, unvested);
+            Ok(unvested)
+        })
     }
 
     pub fn get_vesting_info(env: Env, beneficiary: Address) -> Vec<VestingInfo> {

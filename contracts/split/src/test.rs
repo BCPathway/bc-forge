@@ -240,3 +240,74 @@ fn test_get_failed_payout_no_invoice() {
     let result = split_client.try_get_failed_payout(&1u64, &Address::generate(&env));
     assert!(result.is_err());
 }
+
+#[soroban_sdk::contract]
+pub struct ReenteringTokenContract;
+
+#[soroban_sdk::contractimpl]
+impl ReenteringTokenContract {
+    pub fn balance(_env: Env, _id: Address) -> i128 {
+        1_000_000
+    }
+
+    pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
+        let split_id = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&soroban_sdk::Symbol::new(&env, "split"))
+            .unwrap();
+        let admin = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&soroban_sdk::Symbol::new(&env, "admin"))
+            .unwrap();
+
+        let split_client = SplitContractClient::new(&env, &split_id);
+        split_client.release_payment(&1u64, &admin);
+    }
+}
+
+#[test]
+fn test_reentrancy_on_split_release_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let split_id = env.register(SplitContract, ());
+    let split_client = SplitContractClient::new(&env, &split_id);
+    let split_admin = Address::generate(&env);
+
+    env.as_contract(&split_id, || {
+        admin::set_admin(&env, &split_admin);
+    });
+
+    let reentering_token_id = env.register(ReenteringTokenContract, ());
+
+    env.as_contract(&reentering_token_id, || {
+        env.storage()
+            .instance()
+            .set(&soroban_sdk::Symbol::new(&env, "split"), &split_id);
+        env.storage()
+            .instance()
+            .set(&soroban_sdk::Symbol::new(&env, "admin"), &split_admin);
+    });
+
+    let recipient = Address::generate(&env);
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: recipient,
+            amount: 100,
+        },
+    ];
+
+    split_client.create_invoice(
+        &split_admin,
+        &1u64,
+        &100i128,
+        &recipients,
+        &reentering_token_id,
+    );
+
+    let result = split_client.try_release_payment(&1u64, &split_admin);
+    assert!(result.is_err());
+}
