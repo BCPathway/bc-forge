@@ -35,7 +35,7 @@ git clone https://github.com/YOUR_USERNAME/bc-forge.git
 cd bc-forge
 
 # Add upstream remote
-git remote add upstream https://github.com/p3ris0n/bc-forge.git
+git remote add upstream https://github.com/BCPathway/bc-forge.git
 
 # Install Rust dependencies
 rustup target add wasm32-unknown-unknown
@@ -49,6 +49,26 @@ cd sdk
 npm install
 npm run build
 ```
+
+### Keeping Your Fork in Sync & Resetting Local Clones
+
+If upstream history is updated or rewritten:
+
+```bash
+# Fetch latest upstream changes
+git fetch upstream
+
+# Reset your local main branch cleanly onto upstream main
+git checkout main
+git reset --hard upstream/main
+
+# If you have an active feature branch, rebase it onto the updated main:
+git checkout <your-branch>
+git rebase upstream/main
+```
+
+> **Note on Test Snapshots**: Soroban test snapshots (`contracts/admin/test_snapshots/`) are generated test artifacts. They are ignored in `.gitignore` and must never be committed to git history.
+
 
 ## 📋 Workflow
 

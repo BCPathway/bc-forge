@@ -1,1 +1,41 @@
-(empty)
+# Rust
+/target/
+target/
+**/*.rs.bk
+# Cargo.lock is tracked for reproducible WASM builds (Soroban/Stellar requirement)
+
+# Soroban compiled output
+*.wasm
+*.d
+
+# Soroban test snapshots
+contracts/admin/test_snapshots/
+**/test_snapshots/
+
+# Node / SDK
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+sdk/*.tgz
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PR text
+issue_pr.txt
+.opencode
