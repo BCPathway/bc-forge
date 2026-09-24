@@ -18,6 +18,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Ensure admin test snapshots are untracked
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tracked_snapshots="$(git ls-files -- 'contracts/admin/test_snapshots/')"
+          if [[ -n "$tracked_snapshots" ]]; then
+            echo "::error::Files under contracts/admin/test_snapshots/ must not be tracked"
+            printf '%s\n' "$tracked_snapshots"
+            exit 1
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

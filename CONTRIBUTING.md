@@ -138,6 +138,8 @@ cargo test --tests
 cd sdk && npm run build
 ```
 
+Running `cargo test -p bc-forge-admin` regenerates `contracts/admin/test_snapshots/` locally; these Soroban snapshots are generated outputs and must remain untracked.
+
 ### 5. Pull Request Process
 
 1. **Push your branch** to your fork
