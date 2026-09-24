@@ -394,10 +394,12 @@ impl BcForgeToken {
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
+    /// Configures default rate limits for mint, transfer, transfer_from, burn, and burn_from operations.
     /// Emits the `init` event. Can only be called once.
     ///
     /// @notice Initializes the token contract with the given admin, decimals, name, and symbol.
     /// @dev This function can only be called once. Subsequent calls will revert with `AlreadyInitialized`.
+    ///      Default rate limits are set to 1000 operations per 60-second window for each operation type.
     /// @param env The Soroban environment.
     /// @param admin_address The address to set as the contract admin.
     /// @param decimal The number of decimal places for the token.
@@ -424,6 +426,7 @@ impl BcForgeToken {
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
         Self::write_max_supply(&env, i128::MAX);
+
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
     }
@@ -614,17 +617,15 @@ impl BcForgeToken {
     /// @return `Ok(())` on success, or an error if the caller is unauthorized or already paused.
     pub fn pause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        let admin_address = admin::get_admin(&env);
 
-        if caller != admin_address && !admin::has_role(&env, admin::Role::Pauser, &caller) {
+        // #769: role-based check instead of the legacy address-equality
+        // comparison against `get_admin`. The admin always holds the `Admin`
+        // role bit, so an admin OR Pauser-role holder may pause; everyone else
+        // is rejected without panicking.
+        if !admin::is_admin_or_pauser(&env, &caller) {
             return Err(TokenError::ContractPaused);
         }
-
-        if caller == admin_address {
-            admin_address.require_auth();
-        } else {
-            caller.require_auth();
-        }
+        caller.require_auth();
 
         if bc_forge_lifecycle::is_paused(&env) {
             return Err(TokenError::AlreadyPaused);
@@ -643,17 +644,12 @@ impl BcForgeToken {
     /// @return `Ok(())` on success, or an error if the caller is unauthorized or not paused.
     pub fn unpause(env: Env, caller: Address) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
-        let admin_address = admin::get_admin(&env);
 
-        if caller != admin_address && !admin::has_role(&env, admin::Role::Pauser, &caller) {
+        // #769: role-based check, mirroring `pause` — admin or Pauser role.
+        if !admin::is_admin_or_pauser(&env, &caller) {
             return Err(TokenError::ContractPaused);
         }
-
-        if caller == admin_address {
-            admin_address.require_auth();
-        } else {
-            caller.require_auth();
-        }
+        caller.require_auth();
 
         if !bc_forge_lifecycle::is_paused(&env) {
             return Err(TokenError::NotPaused);

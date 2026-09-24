@@ -21,7 +21,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -50,7 +50,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Pauser"
+                      "symbol": "SuperAdmin"
                     }
                   ]
                 },
@@ -79,7 +79,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "SuperAdmin"
+                      "symbol": "Minter"
                     }
                   ]
                 },
@@ -188,7 +188,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "u32": 8
+                  "u32": 4
                 }
               }
             },
@@ -390,7 +390,7 @@
                   ]
                 },
                 {
-                  "bool": true
+                  "bool": false
                 }
               ]
             }

@@ -997,6 +997,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "PendingRewards"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 500000
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Supply"
                             }
                           ]

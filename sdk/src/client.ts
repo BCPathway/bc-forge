@@ -5,6 +5,35 @@
  * token contracts on the Stellar/Soroban network.
  */
 
+/**
+ * The canonical zero-address sentinel: an ed25519 public key whose 32-byte
+ * payload is all zeros. No private key can ever produce a signature for it.
+ * This constant is used for zero-address validation across the SDK.
+ */
+export const ZERO_ADDRESS =
+  'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+
+/**
+ * Returns `true` if the given address is the canonical zero-address sentinel.
+ *
+ * The zero address ("GAAAA…WHF") is an ed25519 public key whose 32-byte
+ * payload is all zeros. No private key can ever produce a signature for it,
+ * so holding a role there would be unrecoverable.
+ *
+ * @param address - Stellar public key (G... address) to check
+ * @returns `true` if the address equals the zero-address sentinel, `false` otherwise
+ *
+ * @example
+ * ```typescript
+ * if (isZeroAddress(someAddress)) {
+ *   throw new Error('Invalid address: zero address is not allowed');
+ * }
+ * ```
+ */
+export function isZeroAddress(address: string): boolean {
+  return address === ZERO_ADDRESS;
+}
+
 import {
   rpc as SorobanRpc,
   Contract,
@@ -65,6 +94,26 @@ export interface BatchMintRecipient {
   to: string;
   /** Number of tokens to mint */
   amount: bigint;
+}
+
+/** Result of on-chain state verification after initialization */
+export interface InitVerificationResult {
+  /** Whether all checks passed */
+  valid: boolean;
+  /** Admin address from contract */
+  admin?: string;
+  /** Token name from contract */
+  name?: string;
+  /** Token symbol from contract */
+  symbol?: string;
+  /** Token decimals from contract */
+  decimals?: number;
+  /** Total token supply */
+  totalSupply?: bigint;
+  /** Whether the Pauser role was granted to the expected address */
+  pauserGranted?: boolean;
+  /** List of verification errors (empty if valid) */
+  errors: string[];
 }
 
 /** Role for role-based access control */
@@ -187,6 +236,94 @@ export class bcForgeClient {
   async getVersion(): Promise<string> {
     const result = await this.queryContract('version', []);
     return scValToNative(result) as string;
+  }
+
+  // ─── Initialization Verification ──────────────────────────────────────────
+
+  /**
+   * Verify the on-chain state matches expected values after initialization.
+   *
+   * Queries the contract for its current state and compares against the
+   * expected values provided during initialization.
+   *
+   * @param expectedAdmin - The expected admin address
+   * @param expectedName - The expected token name
+   * @param expectedSymbol - The expected token symbol
+   * @param expectedDecimals - The expected number of decimals
+   * @param expectedPauser - Optional pauser address to verify role grant
+   * @returns Verification result with any mismatches
+   */
+  async verifyInitializedState(
+    expectedAdmin: string,
+    expectedName: string,
+    expectedSymbol: string,
+    expectedDecimals: number,
+    expectedPauser?: string,
+  ): Promise<InitVerificationResult> {
+    const errors: string[] = [];
+    const result: InitVerificationResult = { valid: false, errors };
+
+    try {
+      const onChainAdmin = await this.getAdmin();
+      result.admin = onChainAdmin;
+      if (onChainAdmin !== expectedAdmin) {
+        errors.push(`Admin mismatch: expected ${expectedAdmin}, got ${onChainAdmin}`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query admin: ${err.message}`);
+    }
+
+    try {
+      const onChainName = await this.getName();
+      result.name = onChainName;
+      if (onChainName !== expectedName) {
+        errors.push(`Name mismatch: expected "${expectedName}", got "${onChainName}"`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query name: ${err.message}`);
+    }
+
+    try {
+      const onChainSymbol = await this.getSymbol();
+      result.symbol = onChainSymbol;
+      if (onChainSymbol !== expectedSymbol) {
+        errors.push(`Symbol mismatch: expected "${expectedSymbol}", got "${onChainSymbol}"`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query symbol: ${err.message}`);
+    }
+
+    try {
+      const onChainDecimals = await this.getDecimals();
+      result.decimals = onChainDecimals;
+      if (onChainDecimals !== expectedDecimals) {
+        errors.push(`Decimals mismatch: expected ${expectedDecimals}, got ${onChainDecimals}`);
+      }
+    } catch (err: any) {
+      errors.push(`Failed to query decimals: ${err.message}`);
+    }
+
+    try {
+      const totalSupply = await this.getTotalSupply();
+      result.totalSupply = totalSupply;
+    } catch (err: any) {
+      errors.push(`Failed to query total supply: ${err.message}`);
+    }
+
+    if (expectedPauser) {
+      try {
+        const hasPauserRole = await this.hasRole(Role.Pauser, expectedPauser);
+        result.pauserGranted = hasPauserRole;
+        if (!hasPauserRole) {
+          errors.push(`Pauser role not granted to ${expectedPauser}`);
+        }
+      } catch (err: any) {
+        errors.push(`Failed to check Pauser role: ${err.message}`);
+      }
+    }
+
+    result.valid = errors.length === 0;
+    return result;
   }
 
   // ─── Batch Queries ───────────────────────────────────────────────────────
@@ -1037,6 +1174,46 @@ export class bcForgeClient {
       source,
     );
     return { migrate, grant };
+  }
+
+  /**
+   * Grant the Pauser role to an address. Admin-only.
+   *
+   * @param address - Address to grant the Pauser role to
+   * @param source  - Admin keypair
+   */
+  async grantPauser(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.grantRole(Role.Pauser, address, source);
+  }
+
+  /**
+   * Revoke the Pauser role from an address. Admin-only.
+   *
+   * @param address - Address to revoke the Pauser role from
+   * @param source  - Admin keypair
+   */
+  async revokePauser(address: string, source: Keypair): Promise<TransactionResult> {
+    return this.revokeRole(Role.Pauser, address, source);
+  }
+
+  // ─── RBAC Migration ──────────────────────────────────────────────────────
+
+  /**
+   * Migrate the legacy admin address to the SuperAdmin role mapping.
+   *
+   * @remarks
+   * This is a one-shot, idempotent storage migration that copies the singular
+   * admin address from `AdminKey::Admin` (instance storage) to
+   * `AdminKey::SuperAdmin(admin)` (persistent storage). This enables the
+   * `require_super_admin` guard for legacy contracts without resetting state.
+   *
+   * Safe to call multiple times — subsequent calls are no-ops.
+   *
+   * @param source - Admin keypair (must be the contract admin to authorize migration)
+   * @returns TransactionResult with migration status
+   */
+  async migrateAdmin(source?: Keypair): Promise<TransactionResult> {
+    return this.invokeContract('migrate_admin', [], source);
   }
 
   // ─── Clawback / Regulatory ───────────────────────────────────────────────
