@@ -417,6 +417,12 @@ docs/<issue-number>-<description>        # Documentation
 test/<issue-number>-<description>        # Test improvements
 ```
 
+## Experimental contracts
+
+The following contracts are experimental, untested, or incomplete. **Do not deploy them in a production environment.**
+
+- `contracts/yield_vault`: A yield vault that holds or routes token balances. High risk if deployed with unchecked sources.
+
 ## Security
 
 Security is our top priority. If you discover a security vulnerability in bc-forge, please report it responsibly following our [Security Policy](SECURITY.md).
