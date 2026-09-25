@@ -255,6 +255,66 @@ test('a throwing handler returns 500 with a JSON body and logs one JSON line', a
   useMockLists({});
 });
 
+test('a non-Error rejection still returns 500 JSON with one scrubbed log line', async () => {
+  setPrismaClientFactoryForTests(
+    () =>
+      ({
+        mint: {
+          // Non-Error rejection carrying secrets in the value.
+          findMany: async () => {
+            throw 'connection failed: postgresql://user:pw@host/db with Bearer abc-def-123';
+          },
+          count: async () => 0,
+        },
+        transfer: { findMany: async () => [], count: async () => 0 },
+        burn: { findMany: async () => [], count: async () => 0 },
+      }) as never,
+  );
+
+  const chunks: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: unknown, ...args: unknown[]) => {
+    chunks.push(String(chunk));
+    return (originalWrite as (...a: unknown[]) => boolean)(chunk, ...args);
+  }) as typeof process.stdout.write;
+
+  try {
+    await withServer(async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/api/v1/mints`, {
+        headers: { authorization: `Bearer ${API_TOKEN}` },
+      });
+      assert.equal(res.status, 500);
+      assert.deepEqual(await res.json(), { error: 'internal_error' });
+    });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  const lines = chunks
+    .flatMap((chunk) => chunk.split('\n'))
+    .filter((line) => {
+      if (!line.startsWith('{')) {
+        return false;
+      }
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        return typeof parsed.level === 'string' && typeof parsed.message === 'string';
+      } catch {
+        return false;
+      }
+    });
+  assert.equal(lines.length, 1, 'non-Error failure should log exactly one JSON line');
+  const serialized = lines[0];
+  assert.ok(!serialized.includes('pw@host'), 'connection string must not be logged');
+  assert.ok(!serialized.includes('abc-def-123'), 'bearer token must not be logged');
+  assert.ok(!serialized.includes(API_TOKEN), 'request bearer token must not be logged');
+  const logged = JSON.parse(serialized) as Record<string, unknown>;
+  assert.equal(logged.level, 'error');
+  assert.equal(logged.method, 'GET');
+
+  useMockLists({});
+});
+
 test('list endpoints default to 50 rows per page', async () => {
   const mints = makeRows(60, 'mint');
   const transfers = makeRows(60, 'transfer');
