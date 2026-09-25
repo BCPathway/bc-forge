@@ -20,3 +20,16 @@ Requests with a missing or incorrect token receive HTTP `401` with
 `{ "error": "Unauthorized" }`. The token value is never logged. `GET /health`
 is registered outside the authenticated router and stays public so uptime
 probes keep working.
+
+## Health/readiness probe
+
+`GET /health` is a database readiness check. It runs a `SELECT 1` through the
+shared Prisma client on every request:
+
+- `200 { "status": "ok" }` — the database answered the ping.
+- `503 { "status": "error" }` — the ping failed (wrong `DATABASE_URL`,
+  database down, etc.). Hosting probes should treat this as unhealthy.
+
+The route needs no bearer token. The response body is always a fixed literal,
+so no driver error text, database URL, or credential can leak to the client;
+failures are logged server-side with credentials scrubbed.

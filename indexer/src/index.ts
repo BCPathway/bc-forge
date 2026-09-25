@@ -1,6 +1,7 @@
 import express from 'express';
 import { runIndexer } from './indexer';
 import apiRouter, { jsonErrorHandler } from './api';
+import { healthHandler } from './health';
 import { disconnectPrismaClient } from './lib/prisma';
 import { logFatalIndexerError, logShutdown, logStartup } from './lib/lifecycle';
 import dotenv from 'dotenv';
@@ -15,9 +16,10 @@ app.use(express.json());
 // API Layer
 app.use('/api/v1', apiRouter);
 
-// Health check
+// Health/readiness probe — outside the /api/v1 router and unauthenticated
+// so hosting probes never need the API token.
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  void healthHandler(req, res);
 });
 
 // JSON error handler (registered after all routes).
