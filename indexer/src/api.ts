@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { getPrismaClient } from './lib/prisma';
+import { logger } from './lib/logger';
 
 /**
  * Authenticated indexer read API.
@@ -148,58 +149,101 @@ async function handlePaginatedList(
 }
 
 /**
+ * Wrap an async route handler so rejected promises reach Express error
+ * middleware via `next(err)` instead of becoming unhandled rejections
+ * (Express 4 does not forward async errors on its own). Works for any
+ * thrown value, including non-Error rejections.
+ */
+function asyncHandler(
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
+): (req: Request, res: Response, next: NextFunction) => void {
+  return (req, res, next) => {
+    void fn(req, res, next).catch(next);
+  };
+}
+
+/**
+ * Shared JSON error handler. Register after the API router (and any other
+ * routes) so every forwarded error lands here.
+ *
+ * Logs one structured JSON line with the request method and path, then
+ * responds with HTTP 500 and a fixed body. Stack traces and error details
+ * stay in the server logs and are never sent to the client. Authorization
+ * headers and connection strings are never logged.
+ */
+export function jsonErrorHandler(
+  err: unknown,
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  logger.error('request failed', {
+    method: req.method,
+    path: req.path,
+    error: err instanceof Error ? err.message : String(err),
+  });
+
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  res.status(500).json({ error: 'internal_error' });
+}
+
+/**
  * GET /mints
  * Retrieve mint logs (paginated).
  */
-router.get('/mints', async (req, res, next) => {
-  try {
+router.get(
+  '/mints',
+  asyncHandler(async (req, res) => {
     await handlePaginatedList(req, res, getPrismaClient().mint);
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 /**
  * GET /transfers
  * Retrieve transfer logs (paginated).
  */
-router.get('/transfers', async (req, res, next) => {
-  try {
+router.get(
+  '/transfers',
+  asyncHandler(async (req, res) => {
     await handlePaginatedList(req, res, getPrismaClient().transfer);
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 /**
  * GET /burns
  * Retrieve burn logs (paginated).
  */
-router.get('/burns', async (req, res, next) => {
-  try {
+router.get(
+  '/burns',
+  asyncHandler(async (req, res) => {
     await handlePaginatedList(req, res, getPrismaClient().burn);
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 /**
  * GET /stats
  * Retrieve basic token operation stats.
  */
-router.get('/stats', async (req, res) => {
-  const prisma = getPrismaClient();
-  const [mintCount, transferCount, burnCount] = await Promise.all([
-    prisma.mint.count(),
-    prisma.transfer.count(),
-    prisma.burn.count(),
-  ]);
+router.get(
+  '/stats',
+  asyncHandler(async (req, res) => {
+    const prisma = getPrismaClient();
+    const [mintCount, transferCount, burnCount] = await Promise.all([
+      prisma.mint.count(),
+      prisma.transfer.count(),
+      prisma.burn.count(),
+    ]);
 
-  res.json({
-    mintCount,
-    transferCount,
-    burnCount,
-  });
-});
+    res.json({
+      mintCount,
+      transferCount,
+      burnCount,
+    });
+  }),
+);
 
 export default router;
