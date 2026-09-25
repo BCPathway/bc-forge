@@ -48,10 +48,30 @@ export function buildProgram(): Command {
 }
 
 /**
- * Parse CLI arguments and execute the matched command.
- * Returns the parsed options or throws on parse error.
+ * Parse CLI arguments, execute the matched command, and return the options
+ * that command resolved.
+ *
+ * The return value is what the matched subcommand's action received as its
+ * options object, taken from the command Commander actually invoked. It is
+ * `undefined` when no subcommand ran — for example `--help`, `--version`, or
+ * a bare invocation — because there are no command options to report. A parse
+ * error is thrown, not returned.
  */
-export async function parseArgs(argv: string[] = process.argv): Promise<any> {
+export async function parseArgs(
+  argv: string[] = process.argv,
+): Promise<Record<string, unknown> | undefined> {
   const program = buildProgram();
   await program.parseAsync(argv);
+
+  const [invokedName] = program.args;
+  if (!invokedName) {
+    return undefined;
+  }
+
+  const invoked = program.commands.find(
+    (candidate) =>
+      candidate.name() === invokedName || candidate.aliases().includes(invokedName),
+  );
+
+  return invoked ? (invoked.opts() as Record<string, unknown>) : undefined;
 }
