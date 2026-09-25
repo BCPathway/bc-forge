@@ -784,7 +784,12 @@ fn test_expired_allowance_cannot_transfer() {
 
     assert_eq!(client.allowance(&owner, &spender), 0);
     let result = client.try_transfer_from(&spender, &owner, &recipient, &1);
-    assert_eq!(result, Err(Ok(TokenError::InsufficientAllowance)));
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientAllowance as u32
+        )))
+    );
 }
 
 #[test]
