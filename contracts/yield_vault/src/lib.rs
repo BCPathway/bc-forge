@@ -1,5 +1,7 @@
 //! # bc-forge Yield Vault Contract
 //!
+//! **WARNING: This contract is EXPERIMENTAL and NOT fully tested. DO NOT DEPLOY in a production environment.**
+//!
 //! A yield-bearing vault that accepts SEP-41 underlying token deposits in
 //! exchange for proportional vault shares. Implements three guard layers:
 //!
