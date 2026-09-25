@@ -90,6 +90,30 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # ─── Indexer CI ─────────────────────────────────────────────────────────
+  indexer:
+    name: Indexer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: indexer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: indexer/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
   # ─── TypeScript CLI CI ──────────────────────────────────────────────────
   cli:
     name: TypeScript CLI
