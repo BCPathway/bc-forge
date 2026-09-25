@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { createUpgradeCommand } from "./commands/upgrade.js";
 import { createSmokeTestCommand } from "./commands/smoke-test.js";
 import { createCheckStatusCommand } from "./commands/check-status.js";
+import { createDoctorCommand } from "./commands/doctor.js";
 import { createVerifyHashCommand } from "./commands/verify-hash.js";
 import { createGenerateBindingsCommand } from "./commands/generate-bindings.js";
 import {
@@ -36,6 +37,7 @@ export function buildProgram(): Command {
     .addCommand(createUpgradeCommand())
     .addCommand(createSmokeTestCommand())
     .addCommand(createCheckStatusCommand())
+    .addCommand(createDoctorCommand())
     .addCommand(createVerifyHashCommand())
     .addCommand(createGenerateBindingsCommand())
     .addCommand(createDeployCommand())

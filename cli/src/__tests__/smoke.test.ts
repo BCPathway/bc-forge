@@ -7,7 +7,7 @@ import {
   MOCK_NETWORK_PASSPHRASE,
   TEST_KEYS,
 } from "./mocks.js";
-import { runSmokeTest } from "../commands/smoke-test.js";
+import { runSmokeTest, watchSmokeTest } from "../commands/smoke-test.js";
 
 // ─── Mocking ────────────────────────────────────────────────────────────────────
 
@@ -204,6 +204,77 @@ describe("Smoke Test Command (#704, #706)", () => {
       const result = await runSmokeTest(opts);
       expect(result.success).toBe(false);
       expect(result.message).toContain("timed out");
+    });
+  });
+
+  describe("watch mode (#940)", () => {
+    const pass = {
+      success: true,
+      sequence: ["mint_ok"],
+      message: "Smoke test passed",
+    };
+    const fail = {
+      success: false,
+      sequence: ["mint_start"],
+      message: "Mint failed: simulation failed: boom",
+    };
+
+    it("repeats until interrupted and reports every pass", async () => {
+      const iterations: number[] = [];
+      const reported: boolean[] = [];
+      const sleeps: number[] = [];
+      const once = vi.fn(async (i: number) => {
+        iterations.push(i);
+        return i === 2 ? fail : pass;
+      });
+      const sleep = vi.fn(async (ms: number) => {
+        sleeps.push(ms);
+      });
+
+      await watchSmokeTest({
+        intervalMs: 15000,
+        once,
+        sleep,
+        shouldContinue: (i) => i < 3,
+        onResult: (result) => {
+          reported.push(result.success);
+        },
+      });
+
+      expect(iterations).toEqual([1, 2, 3]);
+      expect(reported).toEqual([true, false, true]);
+      expect(sleeps).toEqual([15000, 15000]);
+      expect(once).toHaveBeenCalledTimes(3);
+    });
+
+    it("runs the interval delay after every pass, including failures", async () => {
+      const once = vi.fn(async () => fail);
+      const sleep = vi.fn(async () => {});
+
+      await watchSmokeTest({
+        intervalMs: 500,
+        once,
+        sleep,
+        shouldContinue: (i) => i < 2,
+      });
+
+      expect(sleep).toHaveBeenCalledTimes(1);
+      expect(sleep).toHaveBeenCalledWith(500);
+    });
+
+    it("runs a single pass when interrupted before the first wait", async () => {
+      const once = vi.fn(async () => pass);
+      const sleep = vi.fn(async () => {});
+
+      await watchSmokeTest({
+        intervalMs: 15000,
+        once,
+        sleep,
+        shouldContinue: () => false,
+      });
+
+      expect(once).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
     });
   });
 });
