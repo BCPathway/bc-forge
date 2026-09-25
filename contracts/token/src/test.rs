@@ -778,6 +778,7 @@ fn test_expired_allowance_cannot_transfer() {
     let recipient = Address::generate(&env);
 
     client.mint(&admin, &owner, &1_000);
+    env.ledger().set_sequence_number(10);
     let exp_ledger = env.ledger().sequence();
     write_legacy_allowance(&env, &contract_id, &owner, &spender, 500, exp_ledger);
     env.ledger().set_sequence_number(exp_ledger + 1);
