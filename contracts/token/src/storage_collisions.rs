@@ -26,7 +26,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 14] = [
+const DATA_KEY_SLOT_NAMES: [&str; 15] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -37,6 +37,7 @@ const DATA_KEY_SLOT_NAMES: [&str; 14] = [
     "Lockup",
     "MaxSupply",
     "Name",
+    "Nonce",
     "PendingAdmin",
     "Supply",
     "Symbol",
@@ -92,10 +93,11 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::Treasury => "Treasury",
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
+        DataKey::Nonce(_) => "Nonce",
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 14] {
+fn all_data_keys(env: &Env) -> [DataKey; 15] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -112,7 +114,8 @@ fn all_data_keys(env: &Env) -> [DataKey; 14] {
         DataKey::MaxSupply,
         DataKey::Treasury,
         DataKey::FeeConfig,
-        DataKey::FeeExemption(owner),
+        DataKey::FeeExemption(owner.clone()),
+        DataKey::Nonce(owner),
     ]
 }
 
