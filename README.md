@@ -13,7 +13,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **Pausable Lifecycle** — Emergency pause/unpause to halt all operations
 - **Ownership Transfer** — Securely hand over admin rights
 - **Total Supply Tracking** — Accurate supply updated on every mint/burn
-- **TypeScript SDK** — High-level client for all contract interactions
+- **TypeScript SDK** — High-level client for all operations
 - **Modular Architecture** — Separate crates for admin, lifecycle, and token logic
 - **Reentrancy Protection** — Comprehensive reentrancy guards for all state-modifying functions
 - **Rate Limiting** — Configurable global and per-address rate limits for mint and transfer operations
@@ -444,6 +444,22 @@ See the [Vault Integration Guide](docs/VAULTS.md) for details on yield-bearing f
 │  └──────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────┘
 ```
+
+## Community & first contribution
+
+New here? Follow the [contributor walkthrough](docs/WALKTHROUGH.md) for a
+start-to-finish example of setting up the repository, making a small change,
+running checks, and opening a pull request.
+
+The project does not currently publish verified Discord or Telegram invite URLs
+in the repository. Maintainers can enable the badges below after adding the
+official invites; contributors should not invent or copy unverified invite
+links.
+
+<!--
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](MAINTAINER_DISCORD_INVITE_URL)
+[![Telegram](https://img.shields.io/badge/Telegram-Join-26A5E4?logo=telegram&logoColor=white)](MAINTAINER_TELEGRAM_INVITE_URL)
+-->
 
 ## Contributing
 
