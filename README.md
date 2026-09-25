@@ -13,7 +13,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **Pausable Lifecycle** — Emergency pause/unpause to halt all operations
 - **Ownership Transfer** — Securely hand over admin rights
 - **Total Supply Tracking** — Accurate supply updated on every mint/burn
-- **TypeScript SDK** — High-level client for all operations
+- **TypeScript SDK** — High-level client for all contract interactions
 - **Modular Architecture** — Separate crates for admin, lifecycle, and token logic
 - **Reentrancy Protection** — Comprehensive reentrancy guards for all state-modifying functions
 - **Rate Limiting** — Configurable global and per-address rate limits for mint and transfer operations
