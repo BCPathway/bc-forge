@@ -35,7 +35,7 @@ git clone https://github.com/YOUR_USERNAME/bc-forge.git
 cd bc-forge
 
 # Add upstream remote
-git remote add upstream https://github.com/p3ris0n/bc-forge.git
+git remote add upstream https://github.com/BCPathway/bc-forge.git
 
 # Install Rust dependencies
 rustup target add wasm32-unknown-unknown
@@ -54,7 +54,7 @@ npm run build
 
 ### 1. Find an Issue
 
-- Check the [Issues](https://github.com/p3ris0n/bc-forge/issues) tab
+- Check the [Issues](https://github.com/BCPathway/bc-forge/issues) tab
 - Look for labels:
   - `good-first-issue` — Perfect for newcomers
   - `smart-contract` — Rust/Soroban contract work
@@ -178,9 +178,9 @@ cd sdk && npm run build
 
 ## ❓ Questions?
 
-- Open a [Discussion](https://github.com/p3ris0n/bc-forge/discussions)
+- Open a [Discussion](https://github.com/BCPathway/bc-forge/discussions)
 - Check [Soroban docs](https://soroban.stellar.org/docs)
-- Review existing [closed issues](https://github.com/p3ris0n/bc-forge/issues?q=is%3Aclosed) for solutions
+- Review existing [closed issues](https://github.com/BCPathway/bc-forge/issues?q=is%3Aclosed) for solutions
 
 ---
 
