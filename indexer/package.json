@@ -8,7 +8,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "node --test --import tsx src/lib/prisma.test.ts src/lib/logger.test.ts src/lib/lifecycle.test.ts src/api.test.ts",
+    "test": "node --test --import tsx src/lib/prisma.test.ts src/lib/logger.test.ts src/lib/lifecycle.test.ts src/api.test.ts src/health.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
