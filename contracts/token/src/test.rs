@@ -1,4 +1,4 @@
-use crate::{AllowanceData, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
+use crate::{AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger as _;
