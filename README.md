@@ -59,9 +59,10 @@ bc-forge/
 └── README.md                      # This file
 ```
 
-> `contracts/compound_fees` and `contracts/flash_loan_guard` are listed in the
-> `exclude` array of the root `Cargo.toml`. They are not part of the built
-> workspace and are not shipped; treat them as experimental.
+> `contracts/yield_vault` is listed in the `exclude` array of the root
+> `Cargo.toml`. It is not part of the built workspace and is not shipped;
+> treat it as experimental. (#923 removed the excluded `compound_fees` stub
+> and promoted `flash_loan_guard` into the workspace — see below.)
 
 ### Architecture
 
@@ -472,8 +473,17 @@ test/<issue-number>-<description>        # Test improvements
 The following contracts are experimental, untested, or incomplete. **Do not deploy them in a production environment.**
 
 - `contracts/yield_vault`: A yield vault that holds or routes token balances. High risk if deployed with unchecked sources.
-- `contracts/compound_fees`: A fee-compounding vault placeholder with no implementation yet. Excluded from the Cargo workspace, so it is not built or tested in CI.
-- `contracts/flash_loan_guard`: A same-ledger deposit/withdraw guard. Excluded from the Cargo workspace, so it is not built or tested in CI.
+
+### Crate outcomes (#923)
+
+- `contracts/compound_fees` — **removed.** It was a placeholder with no implementation (no contract entry points and no compiled tests), so it was deleted instead of shipping an empty crate. Restore it from git history if a fee-compounding vault is implemented later.
+- `contracts/flash_loan_guard` — **finished and added to the workspace.** See [Flash Loan Guard](#flash-loan-guard-contractsflash_loan_guard) below.
+
+### Flash Loan Guard (`contracts/flash_loan_guard`)
+
+- **Purpose:** a same-ledger reentrancy guard for deposit/withdraw flows. It records the ledger sequence of a user's most recent `deposit` and rejects any `withdraw` attempted in the same ledger block, cutting off flash-loan-funded withdrawal loops.
+- **Who may call it:** any authenticated user — both entry points (`deposit(user)`, `withdraw(user)`) require the authorization of the user address they act on, and the contract holds no admin or privileged role.
+- **CI:** the crate is now part of the Cargo workspace, so `cargo test -p bc-forge-flash-loan-guard` and clippy cover it in CI like every other contract.
 
 ## Security
 

@@ -1,8 +1,24 @@
 //! # bc-forge Wrapper Events
 //!
 //! Structured event emission for all wrapper contract operations.
+//!
+//! # Event data layout & schema version (#924)
+//!
+//! The vault `deposit` and `withdraw` event data tuples **end with a
+//! `version: u32` field** (`EVENT_SCHEMA_VERSION`, currently `1`). Existing
+//! fields keep their order and meaning; the version is appended last so
+//! positional parsers of the previous layout keep working. Consumers must
+//! read the version from the last element before interpreting the data.
+//!
+//! Layout reference (v1):
+//! - `deposit`: `(caller, assets, shares, version)`
+//! - `withdrw`: `(caller, shares, underlying_amount, version)`
 
 use soroban_sdk::{symbol_short, Address, Env};
+
+/// Schema version appended to the vault `deposit` and `withdraw` event data
+/// tuples. Bump when their field layout changes (#924).
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
 
 /// Emitted when the wrapper contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, token_contract_id: &Address) {
@@ -29,7 +45,7 @@ pub fn emit_wrap(env: &Env, caller: &Address, amount: i128, wrapped_amount: i128
 pub fn emit_deposit(env: &Env, caller: &Address, assets: i128, shares: i128) {
     env.events().publish(
         (symbol_short!("deposit"),),
-        (caller.clone(), assets, shares),
+        (caller.clone(), assets, shares, EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -121,7 +137,12 @@ pub fn emit_vault_state_set(env: &Env, caller: &Address, state: &crate::VaultSta
 pub fn emit_withdraw(env: &Env, caller: &Address, shares: i128, underlying_amount: i128) {
     env.events().publish(
         (symbol_short!("withdrw"),),
-        (caller.clone(), shares, underlying_amount),
+        (
+            caller.clone(),
+            shares,
+            underlying_amount,
+            EVENT_SCHEMA_VERSION,
+        ),
     );
 }
 

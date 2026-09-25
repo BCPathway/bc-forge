@@ -1,10 +1,13 @@
 //! # bc-forge Flash Loan Guard Contract
 //!
-//! **EXPERIMENTAL — DO NOT DEPLOY.** This crate is excluded from the Cargo
-//! workspace (`exclude` in the root `Cargo.toml`), so it is not built or
-//! tested in CI. It must not be deployed to any network until it is
-//! finished, re-included in the workspace, and held to the same
-//! test/clippy bar as the other contracts.
+//! Same-ledger deposit/withdraw reentrancy guard (#923).
+//!
+//! The contract tracks the ledger sequence of a user's most recent deposit
+//! and rejects withdrawals attempted in the same ledger block, blocking
+//! flash-loan-funded withdrawal loops. It holds no admin: every call is
+//! authorized by the user whose address is passed in.
+
+#![no_std]
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 
@@ -49,3 +52,6 @@ impl FlashLoanGuardContract {
             .remove(&DataKey::DepositBlock(user));
     }
 }
+
+#[cfg(test)]
+mod test;
