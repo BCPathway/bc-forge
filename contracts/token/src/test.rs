@@ -69,12 +69,16 @@ fn test_initialize_emits_expected_events() {
     let data_vec: soroban_sdk::Vec<Val> = data.try_into_val(&env).unwrap();
     assert_eq!(
         data_vec.len(),
-        3,
-        "data should have 3 elements (decimal, name, symbol), confirming admin is in topics"
+        4,
+        "data should have 4 elements (decimal, name, symbol, version), confirming admin is in topics"
     );
 
     let decimal: u32 = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(decimal, 7);
+
+    // #924 — every event data tuple ends with the schema version.
+    let version: u32 = data_vec.get(3).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(version, 1, "init event must carry schema version 1");
 }
 
 #[test]

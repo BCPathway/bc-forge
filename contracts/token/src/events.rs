@@ -2,8 +2,40 @@
 //!
 //! @title Token Events
 //! @author bc-forge contributors
+//!
+//! # Event data layout & schema version (#924)
+//!
+//! Every event data tuple emitted by this contract **ends with a `version:
+//! u32` field** (`EVENT_SCHEMA_VERSION`, currently `1`). Existing fields keep
+//! their original order and meaning; the version is appended as the last
+//! element so positional parsers of the previous layout keep working.
+//!
+//! Consumers (SDK decoders, `indexer/`) must read the version from the last
+//! element of the data tuple and branch on it before interpreting the other
+//! fields whenever a future change adds, removes, or reorders fields.
+//!
+//! Layout reference (v1):
+//! - `init`:    `(decimals, name, symbol, version)`
+//! - `mint`:    `(admin, to, amount, new_balance, new_supply, version)`
+//! - `burn`:    `(from, amount, new_balance, new_supply, version)`
+//! - `xfer`:    `(from, to, amount, version)`
+//! - `xfer_frm`: `(spender, from, to, amount, remaining_allowance, version)`
+//! - `approve`: `(from, spender, amount, expiration, version)`
+//! - `own_xfer`: `(old_admin, new_admin, version)`
+//! - `paused`:  `(admin, version)`
+//! - `unpause`: `(admin, version)`
+//! - `upgraded`: `(upgrader, new_wasm_hash, version)`
+//! - `max_sup`: `(caller, new_max_supply, version)`
+//! - `fee_cfg`: `(caller, base_fee, complexity_multiplier, max_fee, enabled, version)`
+//! - `fee_tres`: `(caller, treasury, version)`
+//! - `fee_exm`: `(caller, address, exemption_type, version)`
+//! - `fee_rmv`: `(caller, address, version)`
 
 use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
+
+/// Schema version appended to every event data tuple emitted by this
+/// contract. Bump when the event field layout changes (#924).
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
 
 /// Emits the `init` event when the token contract is initialized.
 ///
@@ -17,7 +49,7 @@ use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
 pub fn emit_initialized(env: &Env, admin: &Address, decimals: u32, name: &String, symbol: &String) {
     env.events().publish(
         (symbol_short!("init"), admin.clone()),
-        (decimals, name.clone(), symbol.clone()),
+        (decimals, name.clone(), symbol.clone(), EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -41,7 +73,14 @@ pub fn emit_mint(
 ) {
     env.events().publish(
         (symbol_short!("mint"),),
-        (admin.clone(), to.clone(), amount, new_balance, new_supply),
+        (
+            admin.clone(),
+            to.clone(),
+            amount,
+            new_balance,
+            new_supply,
+            EVENT_SCHEMA_VERSION,
+        ),
     );
 }
 
@@ -57,7 +96,13 @@ pub fn emit_mint(
 pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new_supply: i128) {
     env.events().publish(
         (symbol_short!("burn"),),
-        (from.clone(), amount, new_balance, new_supply),
+        (
+            from.clone(),
+            amount,
+            new_balance,
+            new_supply,
+            EVENT_SCHEMA_VERSION,
+        ),
     );
 }
 
@@ -71,7 +116,7 @@ pub fn emit_burn(env: &Env, from: &Address, amount: i128, new_balance: i128, new
 /// @param amount The amount transferred.
 pub fn emit_transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
     env.events()
-        .publish((symbol_short!("xfer"),), (from.clone(), to.clone(), amount));
+        .publish((symbol_short!("xfer"),), (from.clone(), to.clone(), amount, EVENT_SCHEMA_VERSION));
 }
 
 /// Emits the `xfer_frm` event when tokens are transferred using allowance.
@@ -100,6 +145,7 @@ pub fn emit_transfer_from(
             to.clone(),
             amount,
             remaining_allowance,
+            EVENT_SCHEMA_VERSION,
         ),
     );
 }
@@ -116,7 +162,7 @@ pub fn emit_transfer_from(
 pub fn emit_approve(env: &Env, from: &Address, spender: &Address, amount: i128, expiration: u32) {
     env.events().publish(
         (symbol_short!("approve"),),
-        (from.clone(), spender.clone(), amount, expiration),
+        (from.clone(), spender.clone(), amount, expiration, EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -130,7 +176,7 @@ pub fn emit_approve(env: &Env, from: &Address, spender: &Address, amount: i128, 
 pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Address) {
     env.events().publish(
         (symbol_short!("own_xfer"),),
-        (old_admin.clone(), new_admin.clone()),
+        (old_admin.clone(), new_admin.clone(), EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -142,7 +188,7 @@ pub fn emit_ownership_transferred(env: &Env, old_admin: &Address, new_admin: &Ad
 /// @param admin The admin address that paused the contract.
 pub fn emit_paused(env: &Env, admin: &Address) {
     env.events()
-        .publish((symbol_short!("paused"),), (admin.clone(),));
+        .publish((symbol_short!("paused"),), (admin.clone(), EVENT_SCHEMA_VERSION));
 }
 
 /// Emits the `unpause` event when the contract is unpaused.
@@ -153,7 +199,7 @@ pub fn emit_paused(env: &Env, admin: &Address) {
 /// @param admin The admin address that unpaused the contract.
 pub fn emit_unpaused(env: &Env, admin: &Address) {
     env.events()
-        .publish((symbol_short!("unpause"),), (admin.clone(),));
+        .publish((symbol_short!("unpause"),), (admin.clone(), EVENT_SCHEMA_VERSION));
 }
 
 /// Emits the `upgraded` event when the contract is upgraded.
@@ -166,7 +212,7 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
 pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) {
     env.events().publish(
         (symbol_short!("upgraded"),),
-        (upgrader.clone(), new_wasm_hash.clone()),
+        (upgrader.clone(), new_wasm_hash.clone(), EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -180,7 +226,7 @@ pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) 
 pub fn emit_max_supply_changed(env: &Env, caller: &Address, new_max_supply: i128) {
     env.events().publish(
         (symbol_short!("max_sup"),),
-        (caller.clone(), new_max_supply),
+        (caller.clone(), new_max_supply, EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -200,6 +246,7 @@ pub fn emit_fee_config_set(env: &Env, caller: &Address, config: &crate::FeeConfi
             config.complexity_multiplier,
             config.max_fee,
             config.enabled,
+            EVENT_SCHEMA_VERSION,
         ),
     );
 }
@@ -214,7 +261,7 @@ pub fn emit_fee_config_set(env: &Env, caller: &Address, config: &crate::FeeConfi
 pub fn emit_treasury_set(env: &Env, caller: &Address, treasury: &Address) {
     env.events().publish(
         (symbol_short!("fee_tres"),),
-        (caller.clone(), treasury.clone()),
+        (caller.clone(), treasury.clone(), EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -234,7 +281,12 @@ pub fn emit_fee_exemption_set(
 ) {
     env.events().publish(
         (symbol_short!("fee_exm"),),
-        (caller.clone(), address.clone(), exemption.exemption_type),
+        (
+            caller.clone(),
+            address.clone(),
+            exemption.exemption_type,
+            EVENT_SCHEMA_VERSION,
+        ),
     );
 }
 
@@ -248,6 +300,6 @@ pub fn emit_fee_exemption_set(
 pub fn emit_fee_exemption_removed(env: &Env, caller: &Address, address: &Address) {
     env.events().publish(
         (symbol_short!("fee_rmv"),),
-        (caller.clone(), address.clone()),
+        (caller.clone(), address.clone(), EVENT_SCHEMA_VERSION),
     );
 }

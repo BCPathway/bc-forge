@@ -77,10 +77,17 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
   const data = event.value as any;
 
   try {
+    // Event schema version (#924): as of schema version 1, every token event
+    // data tuple ends with a trailing `version: u32` field (currently 1).
+    // This parser reads fixed indices only, so appended fields do not shift
+    // the positions below and decoding `version` here is not required.
+    // FOLLOW-UP: if a future schema version adds, removes, or reorders
+    // fields, switch on the trailing `version` in these cases before
+    // interpreting the other elements.
     switch (topic) {
       case 'mint': {
         const decoded = scValToNative(data as any);
-        // (admin, to, amount, new_balance, new_supply)
+        // (admin, to, amount, new_balance, new_supply, version)
         await prisma.mint.create({
           data: {
             to: decoded[1],
@@ -93,7 +100,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
       }
       case 'burn': {
         const decoded = scValToNative(data as any);
-        // (from, amount, new_balance, new_supply)
+        // (from, amount, new_balance, new_supply, version)
         await prisma.burn.create({
           data: {
             from: decoded[0],
@@ -106,7 +113,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
       }
       case 'xfer': {
         const decoded = scValToNative(data as any);
-        // (from, to, amount)
+        // (from, to, amount, version)
         await prisma.transfer.create({
           data: {
             from: decoded[0],
@@ -120,7 +127,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
       }
       case 'xfer_frm': {
         const decoded = scValToNative(data as any);
-        // (spender, from, to, amount, remaining_allowance)
+        // (spender, from, to, amount, remaining_allowance, version)
         await prisma.transfer.create({
           data: {
             from: decoded[1],
