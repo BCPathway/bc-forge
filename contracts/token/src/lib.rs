@@ -27,7 +27,8 @@ use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, TryIntoVal,
+    Val, Vec,
 };
 
 /// A mint recipient with an amount.
@@ -261,18 +262,17 @@ impl BcForgeToken {
         let allowance_key = DataKey::Allowance(from.clone(), spender.clone());
         let exp_key = DataKey::AllowanceExp(from.clone(), spender.clone());
 
-        if let Some(data) = env
-            .storage()
-            .persistent()
-            .get::<_, AllowanceData>(&allowance_key)
-        {
-            if env.storage().persistent().has(&exp_key) {
-                Self::remove_legacy_allowance_exp(env, from, spender);
+        let allowance_value = env.storage().persistent().get::<_, Val>(&allowance_key);
+        if let Some(value) = allowance_value.as_ref() {
+            if let Ok(data) = value.try_into_val(env) {
+                if env.storage().persistent().has(&exp_key) {
+                    Self::remove_legacy_allowance_exp(env, from, spender);
+                }
+                return data;
             }
-            return data;
         }
 
-        let legacy_amount = env.storage().persistent().get::<_, i128>(&allowance_key);
+        let legacy_amount = allowance_value.and_then(|value| value.try_into_val(env).ok());
         let legacy_exp = env
             .storage()
             .persistent()
