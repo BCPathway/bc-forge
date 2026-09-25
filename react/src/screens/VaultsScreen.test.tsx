@@ -5,13 +5,10 @@ import { VaultClient, calculateApy } from '@bc-forge/sdk';
 import type { WalletAdapter } from '@bc-forge/sdk';
 import { VaultsScreen, EMPTY_STATE_APY_MESSAGE } from './VaultsScreen';
 
-jest.mock('@bc-forge/sdk', () => {
-  const actual = jest.requireActual('@bc-forge/sdk');
-  return {
-    ...actual,
-    calculateApy: jest.fn(),
-  };
-});
+jest.mock('@bc-forge/sdk', () => ({
+  VaultClient: jest.fn(),
+  calculateApy: jest.fn(),
+}));
 
 describe('VaultsScreen', () => {
   let mockClient: jest.Mocked<VaultClient>;
