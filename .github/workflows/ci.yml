@@ -93,6 +93,59 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # ─── SDK Bindings Staleness Check (#926) ─────────────────────────────────
+  # Ensures the committed generated bindings match a fresh run of
+  # `stellar contract bindings typescript` against the latest WASM.
+  sdk-bindings:
+    name: SDK Bindings Staleness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-contracts
+
+      - name: Install Stellar CLI system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libudev-dev \
+            pkg-config
+
+      - name: Install Stellar CLI
+        run: cargo install stellar-cli --locked || cargo install soroban-cli --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install SDK dependencies
+        run: npm ci
+        working-directory: sdk
+
+      - name: Generate bindings from fresh WASM
+        run: bash scripts/generate-sdk-bindings.sh
+
+      - name: Fail if committed bindings are stale
+        run: |
+          if ! git diff --exit-code sdk/src/generated/; then
+            echo "::error::SDK bindings are stale. Run 'npm run generate:bindings' in sdk/ and commit the result."
+            exit 1
+          fi
+
   # ─── Indexer CI ─────────────────────────────────────────────────────────
   indexer:
     name: Indexer

@@ -10,7 +10,9 @@
     "test": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js --passWithNoTests",
     "lint": "eslint src",
     "format": "prettier --write src",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "generate:bindings": "bash ../scripts/generate-sdk-bindings.sh",
+    "check:bindings": "bash ../scripts/generate-sdk-bindings.sh && git diff --exit-code src/generated/"
   },
   "keywords": [
     "stellar",

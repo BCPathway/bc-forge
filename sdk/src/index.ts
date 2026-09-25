@@ -44,3 +44,17 @@ export type { WrapperClientConfig } from './wrapperClient';
 // ─── APY helpers (#745) ──────────────────────────────────────────────────────
 export { calculateApy } from './apy';
 export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
+
+// ─── Generated Contract Bindings (#926) ──────────────────────────────────────
+// Auto-generated TypeScript bindings from `stellar contract bindings typescript`.
+// Re-run with: npm run generate:bindings
+export * as generatedToken from './generated';
+export { BcForgeTokenClient } from './generated';
+export type {
+  ClientOptions as GeneratedClientOptions,
+  Recipient as GeneratedRecipient,
+  FeeConfig as GeneratedFeeConfig,
+  FeeExemption as GeneratedFeeExemption,
+  LockupState as GeneratedLockupState,
+} from './generated';
+export { TokenError } from './generated';
