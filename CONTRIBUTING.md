@@ -176,6 +176,26 @@ cd sdk && npm run build
 - **Read-only methods** — Use simulation (no transaction needed)
 - **Write methods** — Build, simulate, sign, submit, poll
 
+### Generated Contract Bindings (#926)
+
+The SDK includes auto-generated TypeScript bindings in `sdk/src/generated/`
+produced by `stellar contract bindings typescript`. These must be regenerated
+whenever the Rust token contract changes:
+
+```bash
+# From the sdk/ directory
+npm run generate:bindings
+
+# Or from the repo root
+bash scripts/generate-sdk-bindings.sh
+```
+
+**Prerequisites:** Rust toolchain with `wasm32-unknown-unknown` target and
+[Stellar CLI 22.0+](https://developers.stellar.org/docs/tools/cli).
+
+CI will fail if the committed bindings are stale. Always regenerate and commit
+after contract changes.
+
 ## ❓ Questions?
 
 - Open a [Discussion](https://github.com/BCPathway/bc-forge/discussions)

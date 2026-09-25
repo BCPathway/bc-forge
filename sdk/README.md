@@ -519,6 +519,60 @@ await vault.compound('GADMIN...', adminKeypair);
 await vault.withdraw('GUSER...', shares, userKeypair);
 ```
 
+## Generated Contract Bindings (#926)
+
+The SDK includes auto-generated TypeScript bindings produced by `stellar contract bindings typescript`. These provide an ABI-accurate client surface that stays in lock-step with the Rust token contract, eliminating drift from hand-maintained methods.
+
+### Regenerating Bindings
+
+Prerequisites:
+- Rust toolchain with `wasm32-unknown-unknown` target
+- [Stellar CLI 22.0+](https://developers.stellar.org/docs/tools/cli)
+
+```bash
+# From the sdk/ directory:
+npm run generate:bindings
+
+# Or from the repo root:
+bash scripts/generate-sdk-bindings.sh
+```
+
+This will:
+1. Build the `bc-forge-token` contract WASM (`cargo build -p bc-forge-token --target wasm32-unknown-unknown --release`)
+2. Run `stellar contract bindings typescript --wasm <path> --output-dir sdk/src/generated --overwrite`
+3. Overwrite `sdk/src/generated/` with the fresh output
+
+### CI Staleness Check
+
+CI runs a dedicated **SDK Bindings Staleness** job that regenerates bindings from a fresh WASM build and fails if the committed `sdk/src/generated/` directory differs. Always re-run `npm run generate:bindings` after contract changes and commit the result.
+
+### Using the Generated Client
+
+```typescript
+import { BcForgeTokenClient, generatedToken } from '@bc-forge/sdk';
+
+// The generated client provides ABI-accurate entry point specs
+const client = new BcForgeTokenClient({
+  contractId: 'CABC...XYZ',
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+});
+
+// Access all entry point names
+console.log(BcForgeTokenClient.entryPoints);
+// ['initialize', 'admin', 'mint', 'batch_mint', ...]
+
+// The generated types are also available
+const config: generatedToken.FeeConfig = {
+  base_fee: BigInt(100),
+  complexity_multiplier: 2,
+  max_fee: BigInt(1000),
+  enabled: true,
+};
+```
+
+> **Note:** The existing `bcForgeClient` remains the recommended high-level client for most use cases. The generated `BcForgeTokenClient` is the low-level, ABI-accurate surface for advanced consumers and tooling.
+
 ## License
 
 MIT
