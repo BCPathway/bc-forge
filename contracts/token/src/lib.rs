@@ -104,7 +104,7 @@ pub struct FeeExemption {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-struct AllowanceData {
+pub(crate) struct AllowanceData {
     amount: i128,
     expiration_ledger: u32,
 }
@@ -219,14 +219,66 @@ impl BcForgeToken {
         ttl::extend_instance_ttl(env);
     }
 
+    fn remove_legacy_allowance_exp(env: &Env, from: &Address, spender: &Address) {
+        let exp_key = DataKey::AllowanceExp(from.clone(), spender.clone());
+        if env.storage().persistent().has(&exp_key) {
+            env.storage().persistent().remove(&exp_key);
+        }
+    }
+
+    fn persist_allowance_data(
+        env: &Env,
+        from: &Address,
+        spender: &Address,
+        data: &AllowanceData,
+    ) {
+        env.storage().persistent().set(
+            &DataKey::Allowance(from.clone(), spender.clone()),
+            data,
+        );
+        Self::remove_legacy_allowance_exp(env, from, spender);
+    }
+
+    /// Reads allowance state, migrating legacy `(Allowance: i128, AllowanceExp: u32)`
+    /// storage into a single [`AllowanceData`] entry when needed.
     fn read_allowance_data(env: &Env, from: &Address, spender: &Address) -> AllowanceData {
-        env.storage()
+        let allowance_key = DataKey::Allowance(from.clone(), spender.clone());
+        let exp_key = DataKey::AllowanceExp(from.clone(), spender.clone());
+
+        if let Some(data) = env
+            .storage()
             .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(AllowanceData {
+            .get::<_, AllowanceData>(&allowance_key)
+        {
+            if env.storage().persistent().has(&exp_key) {
+                Self::remove_legacy_allowance_exp(env, from, spender);
+            }
+            return data;
+        }
+
+        let legacy_amount = env
+            .storage()
+            .persistent()
+            .get::<_, i128>(&allowance_key);
+        let legacy_exp = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&exp_key)
+            .unwrap_or(0);
+        let has_legacy = legacy_amount.is_some() || env.storage().persistent().has(&exp_key);
+        if !has_legacy {
+            return AllowanceData {
                 amount: 0,
                 expiration_ledger: 0,
-            })
+            };
+        }
+
+        let data = AllowanceData {
+            amount: legacy_amount.unwrap_or(0),
+            expiration_ledger: legacy_exp,
+        };
+        Self::persist_allowance_data(env, from, spender, &data);
+        data
     }
 
     fn allowance_amount(env: &Env, from: &Address, spender: &Address) -> i128 {
@@ -247,9 +299,7 @@ impl BcForgeToken {
             amount,
             expiration_ledger: exp,
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &data);
+        Self::persist_allowance_data(env, from, spender, &data);
     }
 
     fn move_balance(
