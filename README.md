@@ -472,6 +472,8 @@ test/<issue-number>-<description>        # Test improvements
 The following contracts are experimental, untested, or incomplete. **Do not deploy them in a production environment.**
 
 - `contracts/yield_vault`: A yield vault that holds or routes token balances. High risk if deployed with unchecked sources.
+- `contracts/compound_fees`: A fee-compounding vault placeholder with no implementation yet. Excluded from the Cargo workspace, so it is not built or tested in CI.
+- `contracts/flash_loan_guard`: A same-ledger deposit/withdraw guard. Excluded from the Cargo workspace, so it is not built or tested in CI.
 
 ## Security
 
