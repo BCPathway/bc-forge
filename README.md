@@ -26,52 +26,102 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 
 ```
 bc-forge/
-├── contracts/                    # Soroban smart contracts (Rust)
-│   ├── admin/                    # Admin access control module
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   ├── lifecycle/                # Pause/unpause lifecycle module
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   ├── rate-limit/             # Rate limiting module
-│   ├── split/                   # Batch payout with per-recipient failure isolation
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs            # Split contract implementation
-│   │       ├── events.rs         # Structured event emissions
-│   │       └── test.rs           # Unit tests
-│   ├── ttl/                      # Shared storage TTL helpers
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   └── token/                    # Core SEP-41 token contract
-│       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs            # Token contract implementation
-│           ├── events.rs         # Structured event emissions
-│           ├── proptest.rs       # Property-based fuzz testing
-│           ├── reentrancy_guard.rs # Reentrancy protection
-│           ├── rate_limit.rs     # Rate limit integration
-│           └── test.rs           # Unit tests
-├── e2e/                          # End-to-end integration tests
-│   ├── Cargo.toml              # E2E test dependencies
-│   ├── integration_test.rs     # Integration test suite
-│   └── README.md               # E2E test documentation
-├── sdk/                          # TypeScript SDK
-│   ├── src/
-│   │   ├── index.ts              # Entry point
-│   │   ├── client.ts             # bcForgeClient class
-│   │   └── utils.ts              # Transaction helpers
-│   ├── package.json
-│   └── tsconfig.json
+├── contracts/                     # Soroban smart contracts (Rust)
+│   ├── admin/                     # Admin access control, proposals, multisig pool
+│   ├── lifecycle/                 # Pause/unpause lifecycle module
+│   ├── rate-limit/                # Rate limiting module
+│   ├── split/                     # Batch payout with per-recipient failure isolation
+│   ├── token/                     # Core SEP-41 token contract
+│   ├── ttl/                       # Shared storage TTL helpers
+│   ├── vesting/                   # Vesting schedules
+│   ├── wrapper/                   # Wrapper vault
+│   └── yield_vault/               # Yield-bearing vault with share accounting
+├── cli/                           # TypeScript CLI (deploy, upgrade, multisig flows)
+├── sdk/                           # TypeScript SDK consumed by dApps and the CLI
+├── react/                         # React hooks and components for the SDK
+├── indexer/                       # Event indexer and query API
+├── e2e/                           # End-to-end integration tests
+├── docs/                          # Long-form docs (architecture, vaults, upgrades)
+├── deployments/                   # Recorded deployment addresses per network
+├── migrations/                    # Database migrations for the indexer
+├── scripts/                       # Repo maintenance and CI helper scripts
 ├── .github/
-│   ├── ISSUE_TEMPLATE/           # Bug, Feature, Contract Improvement
+│   ├── ISSUE_TEMPLATE/            # Bug, Feature, Contract Improvement
 │   ├── PULL_REQUEST_TEMPLATE.md
-│   └── workflows/ci.yml         # CI pipeline
-├── Cargo.toml                    # Workspace manifest
-├── CONTRIBUTING.md               # Contributor guide (drips.network)
-├── LICENSE                       # MIT
-└── README.md                     # This file
+│   └── workflows/ci.yml           # CI pipeline
+├── Cargo.toml                     # Rust workspace manifest
+├── package.json                   # Root Node workspace manifest
+├── config.example.json            # Example CLI/indexer configuration
+├── CONTRIBUTING.md                # Contributor guide (drips.network)
+├── SECURITY.md                    # Security policy and disclosure
+├── VAULTS.md                      # Vault integration guide
+├── LICENSE                        # MIT
+└── README.md                      # This file
 ```
+
+> `contracts/compound_fees` and `contracts/flash_loan_guard` are listed in the
+> `exclude` array of the root `Cargo.toml`. They are not part of the built
+> workspace and are not shipped; treat them as experimental.
+
+### Architecture
+
+```mermaid
+flowchart TD
+    subgraph Clients
+        DApp[dApp / Frontend]
+        CLI[cli - TypeScript CLI]
+        React[react - hooks and components]
+    end
+
+    subgraph TypeScript
+        SDK[sdk - bcForgeClient]
+        Indexer[indexer - event indexer and query API]
+    end
+
+    subgraph Contracts[Soroban contracts]
+        Token[token - SEP-41 token]
+        Admin[admin - access control and multisig pool]
+        Lifecycle[lifecycle - pause / unpause]
+        RateLimit[rate-limit]
+        Vesting[vesting]
+        Split[split - batch payout]
+        Wrapper[wrapper - wrapper vault]
+        YieldVault[yield_vault - share accounting]
+        TTL[ttl - shared storage TTL helpers]
+    end
+
+    Ledger[(Stellar ledger)]
+
+    DApp --> SDK
+    React --> SDK
+    CLI --> SDK
+    SDK --> Token
+    SDK --> Admin
+    CLI --> Token
+    CLI --> Admin
+    Token --> TTL
+    Admin --> TTL
+    Lifecycle --> TTL
+    Split --> TTL
+    Wrapper --> TTL
+    YieldVault --> TTL
+    Wrapper --> Token
+    YieldVault --> Token
+    Split --> Token
+    Admin -.governs.-> Token
+    Admin -.governs.-> Lifecycle
+    Admin -.governs.-> YieldVault
+    Token --> Ledger
+    Wrapper --> Ledger
+    YieldVault --> Ledger
+    Ledger -.events.-> Indexer
+    Indexer --> SDK
+```
+
+The contracts share the `ttl` helper crate so that instance and persistent
+storage entries stay live. `admin` holds the multisig pool that governs
+upgrades and privileged operations on the value-bearing contracts.
+
 
 ## Storage TTL Strategy
 
