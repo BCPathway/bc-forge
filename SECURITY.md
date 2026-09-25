@@ -2,6 +2,8 @@
 
 This document outlines how security issues should be reported and handled for the bc-forge project.
 
+For third-party audit information, please refer to the [Audit Readiness Checklist](docs/AUDIT_READINESS.md).
+
 ## Supported Versions
 
 The following versions of bc-forge are currently supported for security updates:
