@@ -55,37 +55,132 @@ const router = express.Router();
 
 router.use(requireApiToken);
 
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+
+type PaginatedDelegate = {
+  findMany: (args: Record<string, unknown>) => Promise<Array<{ id: string }>>;
+};
+
+/**
+ * Parse the `limit` query param.
+ *
+ * Returns the effective limit (capped at MAX_LIMIT) or `null` when the
+ * caller supplied a non-integer or a value below 1.
+ */
+function parseLimit(query: Request['query']): number | null {
+  const raw = query.limit;
+  if (raw === undefined) {
+    return DEFAULT_LIMIT;
+  }
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return null;
+  }
+  return Math.min(parsed, MAX_LIMIT);
+}
+
+/**
+ * Extract the `cursor` query param (the id of the last row from the
+ * previous page). Empty or missing values mean "first page".
+ */
+function parseCursor(query: Request['query']): string | undefined {
+  const raw = query.cursor;
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string' || value.length === 0) {
+    return undefined;
+  }
+  return value;
+}
+
+/**
+ * Shared cursor-paginated list handler.
+ *
+ * Ordering is `createdAt DESC, id DESC` so pages stay stable when several
+ * rows share the same timestamp. We fetch `limit + 1` rows to detect
+ * whether another page exists without ever returning more than `limit`
+ * rows to the caller.
+ */
+async function handlePaginatedList(
+  req: Request,
+  res: Response,
+  delegate: PaginatedDelegate,
+): Promise<void> {
+  const limit = parseLimit(req.query);
+  if (limit === null) {
+    res.status(400).json({ error: 'Invalid limit: must be an integer >= 1' });
+    return;
+  }
+  const cursor = parseCursor(req.query);
+
+  let rows: Array<{ id: string }>;
+  try {
+    rows = await delegate.findMany({
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+  } catch (err: unknown) {
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      (err as { code?: string }).code === 'P2025'
+    ) {
+      res.status(400).json({ error: 'Invalid cursor' });
+      return;
+    }
+    throw err;
+  }
+
+  const hasNextPage = rows.length > limit;
+  const data = hasNextPage ? rows.slice(0, limit) : rows;
+  res.json({
+    data,
+    nextCursor: hasNextPage && data.length > 0 ? data[data.length - 1].id : null,
+  });
+}
+
 /**
  * GET /mints
- * Retrieve mint logs.
+ * Retrieve mint logs (paginated).
  */
-router.get('/mints', async (req, res) => {
-  const mints = await getPrismaClient().mint.findMany({
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json(mints);
+router.get('/mints', async (req, res, next) => {
+  try {
+    await handlePaginatedList(req, res, getPrismaClient().mint);
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
  * GET /transfers
- * Retrieve transfer logs.
+ * Retrieve transfer logs (paginated).
  */
-router.get('/transfers', async (req, res) => {
-  const transfers = await getPrismaClient().transfer.findMany({
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json(transfers);
+router.get('/transfers', async (req, res, next) => {
+  try {
+    await handlePaginatedList(req, res, getPrismaClient().transfer);
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
  * GET /burns
- * Retrieve burn logs.
+ * Retrieve burn logs (paginated).
  */
-router.get('/burns', async (req, res) => {
-  const burns = await getPrismaClient().burn.findMany({
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json(burns);
+router.get('/burns', async (req, res, next) => {
+  try {
+    await handlePaginatedList(req, res, getPrismaClient().burn);
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
