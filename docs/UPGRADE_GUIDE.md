@@ -399,6 +399,85 @@ release note.
 - **Storage:** Stored under `AdminKey::ProposalTimelock(proposal_id)` in
   instance storage.
 
+## Rolling back a bad upgrade
+
+The CLI maintains a local upgrade history file so that a bad upgrade can be
+rolled back in one step.
+
+### How history is recorded
+
+Every time `bc-forge upgrade` submits a **confirmed** on-chain upgrade (not
+a dry-run or estimate), the CLI appends an entry to:
+
+```
+~/.bc-forge/upgrade-history.json
+```
+
+Each entry stores the **previous** and **new** WASM hashes along with the
+transaction hash and a timestamp. No secrets are ever written.
+
+You can override the history file location by setting the
+`BC_FORGE_UPGRADE_HISTORY` environment variable.
+
+### Proposing a rollback with `--to-last-good`
+
+```bash
+bc-forge upgrade \
+  --contract-id <CONTRACT_ID> \
+  --source $ADMIN_SECRET \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --to-last-good
+```
+
+This reads the previous WASM hash from the local history file and starts the
+same multisig propose/approve/execute flow as a normal upgrade — the only
+difference is that the WASM hash is read from history instead of compiled from
+source.
+
+The command fails with a clear error message when:
+
+- No history exists for the given contract ID.
+- The history file is missing or unreadable.
+
+### Dry-run a rollback
+
+```bash
+bc-forge upgrade \
+  --contract-id <CONTRACT_ID> \
+  --source $ADMIN_SECRET \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --to-last-good \
+  --dry-run
+```
+
+### Verifying the stored history
+
+Inspect the history file directly:
+
+```bash
+cat ~/.bc-forge/upgrade-history.json
+```
+
+The file is human-readable JSON. Example:
+
+```json
+{
+  "CABC…XYZ": [
+    {
+      "previousHash": "aabb…",
+      "newHash": "ccdd…",
+      "txHash": "eeef…",
+      "recordedAt": "2026-09-25T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+> **Note:** The `--to-last-good` flag proposes the `previousHash` from the
+> **most recent** entry. Keep the history file safe between deployments.
+
 ## Source of truth
 
 - Upgrade entrypoints:
@@ -409,3 +488,5 @@ release note.
   [`deployments/deploy-wrapper-testnet.sh`](../deployments/deploy-wrapper-testnet.sh)
 - SDK upgrade method:
   [`sdk/src/client.ts`](../sdk/src/client.ts)
+- Upgrade history utility:
+  [`cli/src/utils/upgrade-history.ts`](../cli/src/utils/upgrade-history.ts)
