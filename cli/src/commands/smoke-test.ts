@@ -9,6 +9,10 @@ import {
 } from "@stellar/stellar-sdk";
 import { addNetworkOptions } from "../network.js";
 import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/soroban-tx.js";
+import logger from "../utils/logger.js";
+
+/** Default delay between passes in --watch mode (#940). */
+export const DEFAULT_WATCH_INTERVAL_MS = 15000;
 
 function describeSubmitOutcome(outcome: PrepareSignSubmitResult): string {
   switch (outcome.outcome) {
@@ -57,15 +61,29 @@ export function createSmokeTestCommand(): Command {
     .requiredOption("--source <secret>", "Admin/source account secret key")
     .option("--recipient <address>", "Recipient address (auto-generated if omitted)")
     .option("--amount <amount>", "Amount to mint and transfer (default: 1)", "1")
-    .option(
-      "--timeout <ms>",
-      "Timeout in milliseconds for the full sequence",
-      "30000"
-    );
+  .option(
+    "--timeout <ms>",
+    "Timeout in milliseconds for the full sequence",
+    "30000"
+  )
+  .option("--watch", "Repeat the smoke test until interrupted", false)
+  .option(
+    "--interval <ms>",
+    "Delay between smoke test passes in --watch mode",
+    "15000"
+  );
 
   addNetworkOptions(cmd);
 
   cmd.action(async (opts) => {
+    if (opts.watch) {
+      await watchSmokeTest({
+        intervalMs: Number(opts.interval) || DEFAULT_WATCH_INTERVAL_MS,
+        once: () => runSmokeTest(opts),
+        onResult: reportSmokeTestResult,
+      });
+      return;
+    }
     await runSmokeTest(opts);
   });
 
@@ -222,5 +240,53 @@ export async function runSmokeTest(
       sequence,
       message: `Smoke test error: ${err instanceof Error ? err.message : String(err)}`,
     };
+  }
+}
+
+export interface WatchLoopOptions {
+  /** Delay between smoke test passes, in milliseconds. */
+  intervalMs: number;
+  /** Runs one smoke test pass. Injected so tests never need a live network. */
+  once: (iteration: number) => Promise<SmokeTestResult>;
+  /** Defaults to a real timer sleep. */
+  sleep?: (ms: number) => Promise<void>;
+  /**
+   * Called after every pass; return false to stop the loop. The real CLI
+   * never stops early — it repeats until the operator interrupts with Ctrl-C,
+   * which terminates the process by default SIGINT handling.
+   */
+  shouldContinue?: (iteration: number) => boolean;
+  /** Invoked with every pass result (pass or fail). */
+  onResult?: (result: SmokeTestResult, iteration: number) => void;
+}
+
+/**
+ * Repeats a smoke test on an interval until interrupted (#940).
+ *
+ * Runs one pass immediately, reports it, waits `intervalMs`, then repeats.
+ * Every pass — success or failure — is reported before continuing.
+ */
+export async function watchSmokeTest(options: WatchLoopOptions): Promise<void> {
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const shouldContinue = options.shouldContinue ?? (() => true);
+
+  let iteration = 1;
+  while (true) {
+    const result = await options.once(iteration);
+    options.onResult?.(result, iteration);
+    if (!shouldContinue(iteration)) {
+      return;
+    }
+    await sleep(options.intervalMs);
+    iteration += 1;
+  }
+}
+
+/** Prints one pass result in --watch mode. */
+function reportSmokeTestResult(result: SmokeTestResult, iteration: number): void {
+  if (result.success) {
+    logger.success(`watch pass ${iteration}: ${result.message}`);
+  } else {
+    logger.error(`watch pass ${iteration}: ${result.message}`);
   }
 }
