@@ -1,9 +1,12 @@
 /**
  * @bc-forge/sdk — TypeScript SDK for bc-forge Token Contracts
  *
- * Re-exports the main client and utility types.
+ * Re-exports the main client, utility types, and custom error classes.
  *
- * @example
+ * Supports read-only mode without a wallet or keypair (queries, balance checks, event polling)
+ * as well as write operations using a Keypair or connected WalletAdapter.
+ *
+ * @example Read-only mode:
  * ```typescript
  * import { bcForgeClient } from '@bc-forge/sdk';
  *
@@ -28,6 +31,7 @@ export type {
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
 export type { bcForgeEvent, SubscriptionOptions } from './events';
+export * from './errors';
 export * from './mockClient';
 
 export type { WalletAdapter } from './walletAdapter';
@@ -44,3 +48,4 @@ export type { WrapperClientConfig } from './wrapperClient';
 // ─── APY helpers (#745) ──────────────────────────────────────────────────────
 export { calculateApy } from './apy';
 export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
+
