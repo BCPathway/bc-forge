@@ -1,7 +1,8 @@
 import express from 'express';
 import { runIndexer } from './indexer';
-import apiRouter from './api';
+import apiRouter, { jsonErrorHandler } from './api';
 import { disconnectPrismaClient } from './lib/prisma';
+import { logger } from './lib/logger';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -19,18 +20,23 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// JSON error handler (registered after all routes).
+app.use(jsonErrorHandler);
+
 app.listen(PORT, () => {
-  console.log(`Indexer microservice API listening on port ${PORT}`);
-  
+  logger.info('indexer microservice API listening', { port: PORT });
+
   // Start the indexer background process
   runIndexer().catch(err => {
-    console.error('Fatal indexer error:', err);
+    logger.error('fatal indexer error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     process.exit(1);
   });
 });
 
 async function shutdown(signal: string): Promise<void> {
-  console.log(`Received ${signal}, disconnecting Prisma client...`);
+  logger.info('shutting down, disconnecting Prisma client', { signal });
   await disconnectPrismaClient();
   process.exit(0);
 }

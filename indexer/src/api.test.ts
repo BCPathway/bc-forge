@@ -2,7 +2,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
-import apiRouter from './api';
+import apiRouter, { jsonErrorHandler } from './api';
 import { setPrismaClientFactoryForTests } from './lib/prisma';
 
 const API_TOKEN = 'test-indexer-api-token';
@@ -29,6 +29,8 @@ const readRoutes = ['/api/v1/mints', '/api/v1/transfers', '/api/v1/burns', '/api
 async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
   const app = express();
   app.use('/api/v1', apiRouter);
+  // Same position as in index.ts: after all routes.
+  app.use(jsonErrorHandler);
 
   const server = app.listen(0);
   await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -86,6 +88,79 @@ test('read routes return handler JSON with the configured bearer token', async (
       burnCount: burnRows.length,
     });
   });
+});
+
+test('a throwing handler returns 500 with a JSON body and logs one JSON line', async () => {
+  setPrismaClientFactoryForTests(
+    () =>
+      ({
+        mint: {
+          findMany: async () => {
+            throw new Error('boom');
+          },
+          count: async () => 0,
+        },
+        transfer: { findMany: async () => transferRows, count: async () => transferRows.length },
+        burn: { findMany: async () => burnRows, count: async () => burnRows.length },
+      }) as never,
+  );
+
+  const chunks: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: unknown, ...args: unknown[]) => {
+    chunks.push(String(chunk));
+    return (originalWrite as (...a: unknown[]) => boolean)(chunk, ...args);
+  }) as typeof process.stdout.write;
+
+  try {
+    await withServer(async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/api/v1/mints`, {
+        headers: { authorization: `Bearer ${API_TOKEN}` },
+      });
+      assert.equal(res.status, 500);
+      const body = (await res.json()) as Record<string, unknown>;
+      assert.deepEqual(body, { error: 'internal_error' });
+      assert.ok(!JSON.stringify(body).includes('boom'), 'stack/message must not leak to client');
+    });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  // node --test TAP progress (and any harness framing bytes) share stdout;
+  // only lines that parse as structured log records come from the logger.
+  const lines = chunks
+    .flatMap((chunk) => chunk.split('\n'))
+    .filter((line) => {
+      if (!line.startsWith('{')) {
+        return false;
+      }
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        return typeof parsed.level === 'string' && typeof parsed.message === 'string';
+      } catch {
+        return false;
+      }
+    });
+  assert.equal(lines.length, 1, 'request failure should log exactly one JSON line');
+  const logged = JSON.parse(lines[0]) as Record<string, unknown>;
+  assert.equal(logged.level, 'error');
+  assert.equal(logged.method, 'GET');
+  assert.equal(logged.path, '/api/v1/mints');
+  assert.ok(typeof logged.time === 'string');
+  assert.ok(!JSON.stringify(logged).includes(API_TOKEN), 'logs must omit bearer tokens');
+  assert.ok(
+    !JSON.stringify(logged).includes('DATABASE_URL'),
+    'logs must omit database URLs',
+  );
+
+  setPrismaClientFactoryForTests(
+    () =>
+      ({
+        mint: { findMany: async () => mintRows, count: async () => mintRows.length },
+        transfer: { findMany: async () => transferRows, count: async () => transferRows.length },
+        burn: { findMany: async () => burnRows, count: async () => burnRows.length },
+      }) as never,
+  );
 });
 
 after(() => {
