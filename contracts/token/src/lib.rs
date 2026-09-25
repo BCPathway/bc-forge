@@ -226,16 +226,10 @@ impl BcForgeToken {
         }
     }
 
-    fn persist_allowance_data(
-        env: &Env,
-        from: &Address,
-        spender: &Address,
-        data: &AllowanceData,
-    ) {
-        env.storage().persistent().set(
-            &DataKey::Allowance(from.clone(), spender.clone()),
-            data,
-        );
+    fn persist_allowance_data(env: &Env, from: &Address, spender: &Address, data: &AllowanceData) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Allowance(from.clone(), spender.clone()), data);
         Self::remove_legacy_allowance_exp(env, from, spender);
     }
 
@@ -256,10 +250,7 @@ impl BcForgeToken {
             return data;
         }
 
-        let legacy_amount = env
-            .storage()
-            .persistent()
-            .get::<_, i128>(&allowance_key);
+        let legacy_amount = env.storage().persistent().get::<_, i128>(&allowance_key);
         let legacy_exp = env
             .storage()
             .persistent()

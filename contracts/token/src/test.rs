@@ -683,10 +683,9 @@ fn write_legacy_allowance(
     expiration_ledger: u32,
 ) {
     env.as_contract(contract_id, || {
-        env.storage().persistent().set(
-            &DataKey::Allowance(owner.clone(), spender.clone()),
-            &amount,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::Allowance(owner.clone(), spender.clone()), &amount);
         if expiration_ledger > 0 {
             env.storage().persistent().set(
                 &DataKey::AllowanceExp(owner.clone(), spender.clone()),
@@ -716,9 +715,9 @@ fn read_allowance_struct(
     spender: &Address,
 ) -> Option<AllowanceData> {
     env.as_contract(contract_id, || {
-        env.storage().persistent().get::<_, AllowanceData>(
-            &DataKey::Allowance(owner.clone(), spender.clone()),
-        )
+        env.storage()
+            .persistent()
+            .get::<_, AllowanceData>(&DataKey::Allowance(owner.clone(), spender.clone()))
     })
 }
 
