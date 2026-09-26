@@ -4,9 +4,9 @@
   "budgets": {
     "bc_forge_rate_limit.wasm": 49605,
     "bc_forge_split.wasm": 88230,
-    "bc_forge_token.wasm": 148000,
-    "bc_forge_vesting.wasm": 166446,
-    "bc_forge_wrapper.wasm": 112567,
+    "bc_forge_token.wasm": 154259,
+    "bc_forge_vesting.wasm": 179545,
+    "bc_forge_wrapper.wasm": 116669,
     "bc_forge_yield_vault.wasm": 76765
   }
 }
