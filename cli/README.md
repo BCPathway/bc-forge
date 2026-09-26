@@ -367,7 +367,9 @@ bc-forge export-deployments \
 
 ## Development & Testing
 
-Run unit tests across all commands:
+The `@bc-forge/cli` package uses **Vitest** (`vitest.config.ts`) as its single test runner.
+
+Run unit tests across all CLI commands:
 
 ```bash
 npm --prefix cli test
