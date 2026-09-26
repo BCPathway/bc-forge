@@ -433,17 +433,12 @@ fn test_execute_upgrade_after_expiry_fails() {
     force_expiry(&env, &contract_id, proposal_id, 5);
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
-    ledger_info.sequence += 6;
+    ledger_info.sequence_number += 6;
     env.ledger().set(ledger_info);
 
     let res =
         client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[1u8; 32]));
-    assert_eq!(
-        res,
-        Err(Ok(soroban_sdk::Error::from_contract_error(
-            AdminError::ProposalExpired as u32
-        )))
-    );
+    assert_eq!(res, Err(Ok(AdminError::ProposalExpired)));
 }
 
 /// Issue #916: `execute_upgrade_batch` also respects the expiry window.
@@ -464,7 +459,7 @@ fn test_execute_upgrade_batch_after_expiry_fails() {
 
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
-    ledger_info.sequence += 6;
+    ledger_info.sequence_number += 6;
     env.ledger().set(ledger_info);
 
     let res = client.try_execute_upgrade_batch(
@@ -472,12 +467,7 @@ fn test_execute_upgrade_batch_after_expiry_fails() {
         &vec![&env, proposal_id],
         &vec![&env, BytesN::from_array(&env, &[2u8; 32])],
     );
-    assert_eq!(
-        res,
-        Err(Ok(soroban_sdk::Error::from_contract_error(
-            AdminError::ProposalExpired as u32
-        )))
-    );
+    assert_eq!(res, Err(Ok(AdminError::ProposalExpired)));
 }
 
 /// Issue #916: the creator can cancel their own proposal before execution.
@@ -518,12 +508,7 @@ fn test_creator_can_cancel_proposal() {
     env.ledger().set(ledger_info);
     let res =
         client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[3u8; 32]));
-    assert_eq!(
-        res,
-        Err(Ok(soroban_sdk::Error::from_contract_error(
-            AdminError::ProposalCancelled as u32
-        )))
-    );
+    assert_eq!(res, Err(Ok(AdminError::ProposalCancelled)));
 }
 
 /// Issue #916: only the creator may cancel.
@@ -545,21 +530,11 @@ fn test_non_creator_cannot_cancel_proposal() {
 
     // Another pool member may not cancel...
     let res = client.try_cancel_legacy_proposal(&member, &proposal_id);
-    assert_eq!(
-        res,
-        Err(Ok(soroban_sdk::Error::from_contract_error(
-            AdminError::Unauthorized as u32
-        )))
-    );
+    assert_eq!(res, Err(Ok(AdminError::Unauthorized)));
 
     // ...and neither may an address that is not even in the pool.
     let res = client.try_cancel_legacy_proposal(&outsider, &proposal_id);
-    assert_eq!(
-        res,
-        Err(Ok(soroban_sdk::Error::from_contract_error(
-            AdminError::Unauthorized as u32
-        )))
-    );
+    assert_eq!(res, Err(Ok(AdminError::Unauthorized)));
 
     // The proposal is untouched and can still execute normally.
     let proposal = read_proposal(&env, &contract_id, proposal_id);
@@ -590,21 +565,16 @@ fn test_executed_proposal_cannot_be_cancelled() {
 
     let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
 
-    let mut ledger_info = env.ledger().get();
-    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
-    env.ledger().set(ledger_info);
-
-    assert!(client
-        .try_execute_upgrade(&admin, &proposal_id, &upload_upgrade_wasm(&env))
-        .is_ok());
+    // Mark it executed without performing a real WASM upgrade: after
+    // update_current_contract_wasm the contract runs the uploaded wasm, whose
+    // exports are not this harness's, so a later call would abort rather than
+    // return the contract error under test.
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::mark_executed(&env, proposal_id);
+    });
 
     let res = client.try_cancel_legacy_proposal(&admin, &proposal_id);
-    assert_eq!(
-        res,
-        Err(Ok(soroban_sdk::Error::from_contract_error(
-            AdminError::ProposalAlreadyExecuted as u32
-        )))
-    );
+    assert_eq!(res, Err(Ok(AdminError::ProposalAlreadyExecuted)));
 }
 
 /// Issue #916: cancellation is also blocked once the expiry ledger has
@@ -625,14 +595,9 @@ fn test_expired_proposal_cannot_be_cancelled() {
     force_expiry(&env, &contract_id, proposal_id, 5);
 
     let mut ledger_info = env.ledger().get();
-    ledger_info.sequence += 6;
+    ledger_info.sequence_number += 6;
     env.ledger().set(ledger_info);
 
     let res = client.try_cancel_legacy_proposal(&admin, &proposal_id);
-    assert_eq!(
-        res,
-        Err(Ok(soroban_sdk::Error::from_contract_error(
-            AdminError::ProposalNotCancellable as u32
-        )))
-    );
+    assert_eq!(res, Err(Ok(AdminError::ProposalNotCancellable)));
 }
