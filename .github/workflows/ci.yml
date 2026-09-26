@@ -206,6 +206,13 @@ jobs:
       - name: Resolve full dependency graph with all features
         run: cargo tree --workspace --all-features >/dev/null
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # Fails the job when any crate in Cargo.lock matches a RustSec advisory.
+      - name: Audit Cargo.lock against RustSec advisories (#883)
+        run: cargo audit
+
   # ─── Documentation link check (#348) ─────────────────────────────────────
   docs-links:
     name: Documentation Links
