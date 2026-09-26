@@ -2298,3 +2298,117 @@ fn test_lockup_enforcement_full_deposit_withdraw_cycle() {
     assert_eq!(wrapper.balance(&user), 0);
     assert_eq!(underlying.balance(&user), 10_000_000);
 }
+
+// ─── rescue_tokens (#921) ────────────────────────────────────────────────────
+
+#[test]
+fn test_rescue_tokens_admin_recovers_foreign_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (wrapper, _underlying, admin, _user, _wrapper_id) = setup(&env);
+
+    // A foreign token nobody accounts for gets sent to the vault by mistake.
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign = BcForgeTokenClient::new(&env, &foreign_id);
+    let foreign_admin = Address::generate(&env);
+    foreign.initialize(
+        &foreign_admin,
+        &7,
+        &String::from_str(&env, "Foreign"),
+        &String::from_str(&env, "FRG"),
+    );
+    foreign.mint(&foreign_admin, &wrapper.address, &7_000);
+
+    let recovery = Address::generate(&env);
+
+    // Admin rescues the stranded balance.
+    wrapper.rescue_tokens(&admin, &foreign_id, &recovery, &7_000);
+
+    assert_eq!(foreign.balance(&wrapper.address), 0);
+    assert_eq!(foreign.balance(&recovery), 7_000);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_non_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign = BcForgeTokenClient::new(&env, &foreign_id);
+    let foreign_admin = Address::generate(&env);
+    foreign.initialize(
+        &foreign_admin,
+        &7,
+        &String::from_str(&env, "Foreign"),
+        &String::from_str(&env, "FRG"),
+    );
+    foreign.mint(&foreign_admin, &wrapper.address, &7_000);
+
+    let stranger = Address::generate(&env);
+    let recovery = Address::generate(&env);
+
+    let result = wrapper.try_rescue_tokens(&stranger, &foreign_id, &recovery, &7_000);
+    // The admin-crate UnauthorizedRole trap does not decode into WrapperError,
+    // so only the error-ness is asserted here.
+    assert!(result.is_err());
+
+    // Nothing moved.
+    assert_eq!(foreign.balance(&wrapper.address), 7_000);
+    assert_eq!(foreign.balance(&recovery), 0);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_underlying_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    // The user wraps, so the vault now holds accounted underlying assets:
+    // exactly the balance total_assets() reports and withdrawals draw from.
+    wrapper.wrap(&user, &1_000);
+    assert_eq!(wrapper.total_assets(), 1_000);
+
+    let recovery = Address::generate(&env);
+
+    // The underlying asset can never be rescued, even though the vault holds it.
+    let result = wrapper.try_rescue_tokens(&admin, &underlying.address, &recovery, &1_000);
+    assert_eq!(result, Err(Ok(WrapperError::UnderlyingAssetProtected)));
+
+    // The accounted assets are untouched.
+    assert_eq!(wrapper.total_assets(), 1_000);
+    assert_eq!(underlying.balance(&wrapper.address), 1_000);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_invalid_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (wrapper, _underlying, admin, _user, _wrapper_id) = setup(&env);
+
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign = BcForgeTokenClient::new(&env, &foreign_id);
+    let foreign_admin = Address::generate(&env);
+    foreign.initialize(
+        &foreign_admin,
+        &7,
+        &String::from_str(&env, "Foreign"),
+        &String::from_str(&env, "FRG"),
+    );
+    foreign.mint(&foreign_admin, &wrapper.address, &7_000);
+
+    let recovery = Address::generate(&env);
+
+    let result = wrapper.try_rescue_tokens(&admin, &foreign_id, &recovery, &0);
+    assert_eq!(result, Err(Ok(WrapperError::InvalidRescueAmount)));
+
+    // More than the vault holds reverts with InsufficientBalance.
+    let result = wrapper.try_rescue_tokens(&admin, &foreign_id, &recovery, &8_000);
+    assert_eq!(result, Err(Ok(WrapperError::InsufficientBalance)));
+
+    assert_eq!(foreign.balance(&recovery), 0);
+}
