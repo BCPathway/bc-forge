@@ -63,3 +63,16 @@ export class RPCError extends bcForgeError {
     this.name = 'RPCError';
   }
 }
+
+/**
+ * Thrown when a write transaction is attempted without a signer (Keypair or connected WalletAdapter).
+ */
+export class SignerRequiredError extends bcForgeError {
+  constructor(
+    message: string = 'A signer (Keypair or connected WalletAdapter) is required to execute write transactions',
+  ) {
+    super(message);
+    this.name = 'SignerRequiredError';
+  }
+}
+

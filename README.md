@@ -445,6 +445,22 @@ See the [Vault Integration Guide](docs/VAULTS.md) for details on yield-bearing f
 └─────────────────────────────────────────────────┘
 ```
 
+## Community & first contribution
+
+New here? Follow the [contributor walkthrough](docs/WALKTHROUGH.md) for a
+start-to-finish example of setting up the repository, making a small change,
+running checks, and opening a pull request.
+
+The project does not currently publish verified Discord or Telegram invite URLs
+in the repository. Maintainers can enable the badges below after adding the
+official invites; contributors should not invent or copy unverified invite
+links.
+
+<!--
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](MAINTAINER_DISCORD_INVITE_URL)
+[![Telegram](https://img.shields.io/badge/Telegram-Join-26A5E4?logo=telegram&logoColor=white)](MAINTAINER_TELEGRAM_INVITE_URL)
+-->
+
 ## Contributing
 
 We welcome contributions! bc-forge is maintained on [drips.network](https://www.drips.network) — contributors can earn rewards by resolving posted issues.
@@ -472,6 +488,8 @@ test/<issue-number>-<description>        # Test improvements
 The following contracts are experimental, untested, or incomplete. **Do not deploy them in a production environment.**
 
 - `contracts/yield_vault`: A yield vault that holds or routes token balances. High risk if deployed with unchecked sources.
+- `contracts/compound_fees`: A fee-compounding vault placeholder with no implementation yet. Excluded from the Cargo workspace, so it is not built or tested in CI.
+- `contracts/flash_loan_guard`: A same-ledger deposit/withdraw guard. Excluded from the Cargo workspace, so it is not built or tested in CI.
 
 ## Security
 

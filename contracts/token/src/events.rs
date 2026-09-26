@@ -251,3 +251,15 @@ pub fn emit_fee_exemption_removed(env: &Env, caller: &Address, address: &Address
         (caller.clone(), address.clone()),
     );
 }
+
+/// Emits the `exec_btch` event when a batch of operations is executed via `execute_from_contract`.
+///
+/// @notice Publishes batch execution event data including caller address and count of executed operations.
+/// @dev The event topics include the `exec_btch` symbol.
+/// @param env The Soroban environment.
+/// @param from The address that executed the batch.
+/// @param count The number of operations executed in the batch.
+pub fn emit_batch_execute(env: &Env, from: &Address, count: u32) {
+    env.events()
+        .publish((symbol_short!("exec_btch"),), (from.clone(), count));
+}

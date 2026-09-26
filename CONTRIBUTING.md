@@ -138,6 +138,8 @@ cargo test --tests
 cd sdk && npm run build
 ```
 
+CI also runs `cargo audit` against `Cargo.lock` in the Dependency Audit job: if any dependency matches a known RustSec advisory, the check fails and blocks the merge. Upgrade the affected crate (or, only when the advisory genuinely cannot apply, add a narrowly scoped, commented ignore) before opening your PR.
+
 ### 5. Pull Request Process
 
 1. **Push your branch** to your fork
@@ -153,6 +155,7 @@ cd sdk && npm run build
 - [ ] Branch follows naming convention
 - [ ] Code passes `cargo fmt` and `cargo clippy`
 - [ ] All tests pass (`cargo test --tests`)
+- [ ] `cargo audit` reports no advisories on `Cargo.lock`
 - [ ] SDK compiles (`npm run build` in `sdk/`)
 - [ ] New functions have doc comments
 - [ ] README updated if applicable

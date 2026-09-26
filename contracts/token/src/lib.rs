@@ -27,7 +27,8 @@ use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, TryIntoVal,
+    Val, Vec,
 };
 
 /// A mint recipient with an amount.
@@ -39,6 +40,18 @@ pub struct Recipient {
     pub to: Address,
     /// The amount to mint or transfer.
     pub amount: i128,
+}
+
+/// An inner operation that can be executed in a batch via [`BcForgeToken::execute_from_contract`].
+///
+/// @title BatchOp
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BatchOp {
+    /// Approve a spender to spend tokens on behalf of the wallet: `(spender, amount, expiration_ledger)`.
+    Approve(Address, i128, u32),
+    /// Transfer tokens to a recipient: `(to, amount)`.
+    Transfer(Address, i128),
 }
 
 #[derive(Clone)]
@@ -74,6 +87,8 @@ pub enum DataKey {
     FeeConfig,
     /// Fee exemptions keyed by address.
     FeeExemption(Address),
+    /// Nonce for contract wallet batch execution replay protection.
+    Nonce(Address),
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -104,7 +119,7 @@ pub struct FeeExemption {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-struct AllowanceData {
+pub(crate) struct AllowanceData {
     amount: i128,
     expiration_ledger: u32,
 }
@@ -149,6 +164,14 @@ pub enum TokenError {
     MaxSupplyExceeded = 10,
     AlreadyPaused = 11,
     NotPaused = 12,
+    /// Batch operations list exceeds maximum allowed cap (8).
+    BatchTooLarge = 13,
+    /// Batch operations list is empty.
+    BatchEmpty = 14,
+    /// Batch payload execution max ledger sequence has expired.
+    PayloadExpired = 15,
+    /// Batch payload nonce has already been used or is invalid.
+    PayloadReplayed = 16,
 }
 
 #[contract]
@@ -219,14 +242,56 @@ impl BcForgeToken {
         ttl::extend_instance_ttl(env);
     }
 
-    fn read_allowance_data(env: &Env, from: &Address, spender: &Address) -> AllowanceData {
+    fn remove_legacy_allowance_exp(env: &Env, from: &Address, spender: &Address) {
+        let exp_key = DataKey::AllowanceExp(from.clone(), spender.clone());
+        if env.storage().persistent().has(&exp_key) {
+            env.storage().persistent().remove(&exp_key);
+        }
+    }
+
+    fn persist_allowance_data(env: &Env, from: &Address, spender: &Address, data: &AllowanceData) {
         env.storage()
             .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(AllowanceData {
+            .set(&DataKey::Allowance(from.clone(), spender.clone()), data);
+        Self::remove_legacy_allowance_exp(env, from, spender);
+    }
+
+    /// Reads allowance state, migrating legacy `(Allowance: i128, AllowanceExp: u32)`
+    /// storage into a single [`AllowanceData`] entry when needed.
+    fn read_allowance_data(env: &Env, from: &Address, spender: &Address) -> AllowanceData {
+        let allowance_key = DataKey::Allowance(from.clone(), spender.clone());
+        let exp_key = DataKey::AllowanceExp(from.clone(), spender.clone());
+
+        let allowance_value = env.storage().persistent().get::<_, Val>(&allowance_key);
+        if let Some(value) = allowance_value.as_ref() {
+            if let Ok(data) = value.try_into_val(env) {
+                if env.storage().persistent().has(&exp_key) {
+                    Self::remove_legacy_allowance_exp(env, from, spender);
+                }
+                return data;
+            }
+        }
+
+        let legacy_amount = allowance_value.and_then(|value| value.try_into_val(env).ok());
+        let legacy_exp = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&exp_key)
+            .unwrap_or(0);
+        let has_legacy = legacy_amount.is_some() || env.storage().persistent().has(&exp_key);
+        if !has_legacy {
+            return AllowanceData {
                 amount: 0,
                 expiration_ledger: 0,
-            })
+            };
+        }
+
+        let data = AllowanceData {
+            amount: legacy_amount.unwrap_or(0),
+            expiration_ledger: legacy_exp,
+        };
+        Self::persist_allowance_data(env, from, spender, &data);
+        data
     }
 
     fn allowance_amount(env: &Env, from: &Address, spender: &Address) -> i128 {
@@ -247,9 +312,7 @@ impl BcForgeToken {
             amount,
             expiration_ledger: exp,
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &data);
+        Self::persist_allowance_data(env, from, spender, &data);
     }
 
     fn move_balance(
@@ -330,6 +393,19 @@ impl BcForgeToken {
             .instance()
             .remove(&DataKey::FeeExemption(address.clone()));
         ttl::extend_instance_ttl(env);
+    }
+
+    fn read_nonce(env: &Env, address: &Address) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Nonce(address.clone()))
+            .unwrap_or(0)
+    }
+
+    fn write_nonce(env: &Env, address: &Address, nonce: u64) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Nonce(address.clone()), &nonce);
     }
 }
 
@@ -848,6 +924,103 @@ impl BcForgeToken {
     ) -> Result<(), admin::AdminError> {
         Self::ensure_initialized(&env).expect("token must be initialized");
         admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+    }
+
+    /// Returns the current replay-protection nonce for an address.
+    ///
+    /// @notice Returns the nonce for `address` used in `execute_from_contract`.
+    /// @param env The Soroban environment.
+    /// @param address The address to query the nonce for.
+    /// @return The current nonce value.
+    pub fn get_nonce(env: Env, address: Address) -> u64 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_nonce(&env, &address)
+    }
+
+    /// Executes a batch of authorized operations (approve and transfer) on behalf of `from`.
+    ///
+    /// @notice Executes a bounded list of inner operations (approve and transfer only) in a single authorized invocation.
+    /// @dev Hard cap of 8 operations per batch. Requires `from` to authenticate.
+    ///      Replay-protected via `nonce` (stored in persistent storage) and `max_ledger` (ledger expiry).
+    ///      Admin-only functions are strictly unreachable as `BatchOp` is bounded to `Approve` and `Transfer`.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment.
+    /// * `from` - The wallet authorizing the batch operations.
+    /// * `operations` - Vector of inner operations (`BatchOp::Approve` or `BatchOp::Transfer`), up to 8 operations.
+    /// * `nonce` - Expected sequential transaction nonce for `from`.
+    /// * `max_ledger` - Maximum ledger sequence number until which this payload is valid (0 = no expiry).
+    ///
+    /// # Panics
+    /// Panics with contract error if initialized/paused checks or authentication fail.
+    ///
+    /// # Events
+    /// Emits `approve` and `transfer` events for each executed operation, and `exec_btch` for the batch.
+    ///
+    /// # Errors
+    /// Returns [`TokenError::BatchEmpty`] if `operations` is empty.
+    /// Returns [`TokenError::BatchTooLarge`] if `operations.len() > 8`.
+    /// Returns [`TokenError::PayloadExpired`] if `max_ledger > 0` and current ledger > `max_ledger`.
+    /// Returns [`TokenError::PayloadReplayed`] if `nonce` does not match the stored nonce for `from`.
+    /// Returns [`TokenError::InvalidAmount`] if any operation amount is invalid.
+    pub fn execute_from_contract(
+        env: Env,
+        from: Address,
+        operations: Vec<BatchOp>,
+        nonce: u64,
+        max_ledger: u32,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        reentrancy_guard!(&env, "execute_from_contract_guard", {
+            Self::ensure_initialized(&env)?;
+            Self::ensure_not_paused(&env)?;
+
+            if operations.is_empty() {
+                return Err(TokenError::BatchEmpty);
+            }
+            if operations.len() > 8 {
+                return Err(TokenError::BatchTooLarge);
+            }
+
+            if max_ledger > 0 && env.ledger().sequence() > max_ledger {
+                return Err(TokenError::PayloadExpired);
+            }
+
+            from.require_auth();
+
+            let current_nonce = Self::read_nonce(&env, &from);
+            if nonce != current_nonce {
+                return Err(TokenError::PayloadReplayed);
+            }
+            Self::write_nonce(&env, &from, current_nonce + 1);
+
+            for i in 0..operations.len() {
+                let op = operations.get(i).expect("operation should exist");
+                match op {
+                    BatchOp::Approve(spender, amount, expiration_ledger) => {
+                        if amount < 0 {
+                            return Err(TokenError::InvalidAmount);
+                        }
+                        Self::write_allowance(&env, &from, &spender, amount, expiration_ledger);
+                        events::emit_approve(&env, &from, &spender, amount, expiration_ledger);
+                    }
+                    BatchOp::Transfer(to, amount) => {
+                        if amount <= 0 {
+                            return Err(TokenError::InvalidAmount);
+                        }
+                        if !crate::rate_limit::check_transfer_rate_limit(&env, &from, amount) {
+                            return Err(TokenError::InvalidAmount);
+                        }
+                        Self::move_balance(&env, &from, &to, amount)?;
+                        events::emit_transfer(&env, &from, &to, amount);
+                    }
+                }
+            }
+
+            events::emit_batch_execute(&env, &from, operations.len());
+            Ok(())
+        })
     }
 }
 

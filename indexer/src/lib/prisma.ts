@@ -46,3 +46,16 @@ export async function disconnectPrismaClient(): Promise<void> {
     await client.$disconnect();
   }
 }
+
+/**
+ * Cheap database readiness probe.
+ *
+ * Runs a trivial `SELECT 1` through the shared Prisma client. Resolves when
+ * the database is reachable and usable; rejects with the driver error
+ * otherwise, so callers can decide how to report the failure. The error
+ * value may contain driver text — log it through `logger`, which scrubs
+ * connection strings and bearer tokens, and never echo it to clients.
+ */
+export async function pingDatabase(): Promise<void> {
+  await getPrismaClient().$queryRaw`SELECT 1`;
+}

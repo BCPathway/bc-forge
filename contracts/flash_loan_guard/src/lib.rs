@@ -1,3 +1,11 @@
+//! # bc-forge Flash Loan Guard Contract
+//!
+//! **EXPERIMENTAL — DO NOT DEPLOY.** This crate is excluded from the Cargo
+//! workspace (`exclude` in the root `Cargo.toml`), so it is not built or
+//! tested in CI. It must not be deployed to any network until it is
+//! finished, re-included in the workspace, and held to the same
+//! test/clippy bar as the other contracts.
+
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 
 #[derive(Clone)]
