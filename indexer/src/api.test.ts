@@ -2,11 +2,16 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
-import apiRouter, { jsonErrorHandler } from './api';
+import apiRouter, { createApiRouter, jsonErrorHandler } from './api';
 import { setPrismaClientFactoryForTests } from './lib/prisma';
 
 const API_TOKEN = 'test-indexer-api-token';
 process.env.INDEXER_API_TOKEN = API_TOKEN;
+
+// Use the default limiter settings so the rate-limit assertions below are
+// deterministic regardless of the ambient environment.
+delete process.env.INDEXER_RATE_LIMIT_MAX;
+delete process.env.INDEXER_RATE_LIMIT_WINDOW_MS;
 
 type Row = {
   id: string;
@@ -105,9 +110,21 @@ function makeRows(count: number, prefix: string, sameTimestamp = false): Row[] {
 
 const readRoutes = ['/api/v1/mints', '/api/v1/transfers', '/api/v1/burns', '/api/v1/stats'];
 
-async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
+/**
+ * Boots a throwaway app that mirrors `index.ts`: the API router mounted at
+ * `/api/v1`, an unauthenticated `/health` probe, and the shared JSON error
+ * handler. Pass a fresh `createApiRouter()` to give a rate-limit test its own
+ * in-memory store so counters do not leak between tests.
+ */
+async function withServer<T>(
+  run: (baseUrl: string) => Promise<T>,
+  router = apiRouter,
+): Promise<T> {
   const app = express();
-  app.use('/api/v1', apiRouter);
+  app.use('/api/v1', router);
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
   // Same position as in index.ts: after all routes.
   app.use(jsonErrorHandler);
 
@@ -433,7 +450,90 @@ test('second page via nextCursor continues where the first page stopped', async 
   });
 });
 
+// ─── Rate limiting ────────────────────────────────────────────────────────
+// These use a fresh `createApiRouter()` per test so each has its own
+// in-memory store and is unaffected by the requests the tests above made.
+
+test('the 61st request in the window returns 429 with rate limit headers', async () => {
+  useMockLists({});
+  await withServer(async (baseUrl) => {
+    for (let i = 1; i <= 60; i += 1) {
+      const res = await fetch(`${baseUrl}/api/v1/stats`, { headers: authHeaders() });
+      assert.equal(res.status, 200, `request ${i} should be under the limit`);
+    }
+
+    const limited = await fetch(`${baseUrl}/api/v1/stats`, { headers: authHeaders() });
+    assert.equal(limited.status, 429);
+    assert.deepEqual(await limited.json(), {
+      error: 'Too many requests, please try again later.',
+    });
+    assert.ok(limited.headers.get('retry-after'), 'Retry-After header should be set');
+    assert.ok(limited.headers.get('ratelimit'), 'RateLimit header should be set');
+  }, createApiRouter());
+});
+
+test('the limit is shared across every /api/v1 route', async () => {
+  useMockLists({});
+  await withServer(async (baseUrl) => {
+    for (let i = 0; i < 30; i += 1) {
+      assert.equal(
+        (await fetch(`${baseUrl}/api/v1/mints`, { headers: authHeaders() })).status,
+        200,
+      );
+      assert.equal(
+        (await fetch(`${baseUrl}/api/v1/transfers`, { headers: authHeaders() })).status,
+        200,
+      );
+    }
+
+    // 60 requests have now been spent, so the next route is limited too.
+    assert.equal(
+      (await fetch(`${baseUrl}/api/v1/burns`, { headers: authHeaders() })).status,
+      429,
+    );
+  }, createApiRouter());
+});
+
+test('GET /health is not counted against the limit', async () => {
+  useMockLists({});
+  await withServer(async (baseUrl) => {
+    for (let i = 0; i < 100; i += 1) {
+      assert.equal((await fetch(`${baseUrl}/health`)).status, 200);
+    }
+
+    assert.equal(
+      (await fetch(`${baseUrl}/api/v1/stats`, { headers: authHeaders() })).status,
+      200,
+    );
+  }, createApiRouter());
+});
+
+test('INDEXER_RATE_LIMIT_MAX overrides the default limit', async () => {
+  process.env.INDEXER_RATE_LIMIT_MAX = '3';
+  try {
+    useMockLists({});
+    await withServer(async (baseUrl) => {
+      for (let i = 1; i <= 3; i += 1) {
+        assert.equal(
+          (await fetch(`${baseUrl}/api/v1/stats`, { headers: authHeaders() })).status,
+          200,
+          `request ${i} should be under the configured limit`,
+        );
+      }
+
+      assert.equal(
+        (await fetch(`${baseUrl}/api/v1/stats`, { headers: authHeaders() })).status,
+        429,
+      );
+    }, createApiRouter());
+  } finally {
+    delete process.env.INDEXER_RATE_LIMIT_MAX;
+  }
+});
+
 after(() => {
   setPrismaClientFactoryForTests();
   delete process.env.INDEXER_API_TOKEN;
+  delete process.env.INDEXER_RATE_LIMIT_MAX;
+  delete process.env.INDEXER_RATE_LIMIT_WINDOW_MS;
 });

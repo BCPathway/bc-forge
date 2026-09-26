@@ -2,9 +2,10 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { timingSafeEqual } from 'node:crypto';
 import { getPrismaClient } from './lib/prisma';
 import { logger } from './lib/logger';
+import { createApiRateLimiter, type ApiRateLimiterOptions } from './lib/rateLimit';
 
 /**
- * Authenticated indexer read API.
+ * Authenticated, rate-limited indexer read API.
  *
  * Every route below requires a shared secret supplied as a bearer token:
  *
@@ -51,10 +52,6 @@ export function requireApiToken(req: Request, res: Response, next: NextFunction)
 
   next();
 }
-
-const router = express.Router();
-
-router.use(requireApiToken);
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -192,58 +189,82 @@ export function jsonErrorHandler(
 }
 
 /**
- * GET /mints
- * Retrieve mint logs (paginated).
+ * Builds the `/api/v1` read API router.
+ *
+ * Every route on this router is guarded by a single shared per-IP rate limiter
+ * (60 requests per minute by default, configurable with
+ * `INDEXER_RATE_LIMIT_WINDOW_MS` and `INDEXER_RATE_LIMIT_MAX`). Requests over
+ * the limit receive HTTP 429 with a JSON body, before any handler runs.
+ *
+ * `GET /health` is registered on the app in `index.ts`, outside this router, so
+ * uptime probes are never counted against the limit.
  */
-router.get(
-  '/mints',
-  asyncHandler(async (req, res) => {
-    await handlePaginatedList(req, res, getPrismaClient().mint);
-  }),
-);
+export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Router {
+  const router = express.Router();
 
-/**
- * GET /transfers
- * Retrieve transfer logs (paginated).
- */
-router.get(
-  '/transfers',
-  asyncHandler(async (req, res) => {
-    await handlePaginatedList(req, res, getPrismaClient().transfer);
-  }),
-);
+  // Applies to every route below. Routes added by other modules before this
+  // point would be counted too, but this router owns all of `/api/v1`.
+  router.use(createApiRateLimiter(options));
 
-/**
- * GET /burns
- * Retrieve burn logs (paginated).
- */
-router.get(
-  '/burns',
-  asyncHandler(async (req, res) => {
-    await handlePaginatedList(req, res, getPrismaClient().burn);
-  }),
-);
+  // Every route also requires the configured bearer token.
+  router.use(requireApiToken);
 
-/**
- * GET /stats
- * Retrieve basic token operation stats.
- */
-router.get(
-  '/stats',
-  asyncHandler(async (req, res) => {
-    const prisma = getPrismaClient();
-    const [mintCount, transferCount, burnCount] = await Promise.all([
-      prisma.mint.count(),
-      prisma.transfer.count(),
-      prisma.burn.count(),
-    ]);
+  /**
+   * GET /mints
+   * Retrieve mint logs (paginated).
+   */
+  router.get(
+    '/mints',
+    asyncHandler(async (req, res) => {
+      await handlePaginatedList(req, res, getPrismaClient().mint);
+    }),
+  );
 
-    res.json({
-      mintCount,
-      transferCount,
-      burnCount,
-    });
-  }),
-);
+  /**
+   * GET /transfers
+   * Retrieve transfer logs (paginated).
+   */
+  router.get(
+    '/transfers',
+    asyncHandler(async (req, res) => {
+      await handlePaginatedList(req, res, getPrismaClient().transfer);
+    }),
+  );
 
-export default router;
+  /**
+   * GET /burns
+   * Retrieve burn logs (paginated).
+   */
+  router.get(
+    '/burns',
+    asyncHandler(async (req, res) => {
+      await handlePaginatedList(req, res, getPrismaClient().burn);
+    }),
+  );
+
+  /**
+   * GET /stats
+   * Retrieve basic token operation stats.
+   */
+  router.get(
+    '/stats',
+    asyncHandler(async (req, res) => {
+      const prisma = getPrismaClient();
+      const [mintCount, transferCount, burnCount] = await Promise.all([
+        prisma.mint.count(),
+        prisma.transfer.count(),
+        prisma.burn.count(),
+      ]);
+
+      res.json({
+        mintCount,
+        transferCount,
+        burnCount,
+      });
+    }),
+  );
+
+  return router;
+}
+
+export default createApiRouter();
