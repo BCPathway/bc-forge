@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use bc_forge_admin::{AdminError, Role, TIMELOCK_DELAY_SECS};
+use bc_forge_admin::{AdminError, Proposal, PROPOSAL_EXPIRY_LEDGERS, Role, TIMELOCK_DELAY_SECS};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{contract, contractimpl, vec, Address, BytesN, Env, String};
 
@@ -83,6 +83,23 @@ impl AdminContract {
         wasm_hash: BytesN<32>,
     ) -> Result<(), AdminError> {
         bc_forge_admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+    }
+
+    pub fn execute_upgrade_batch(
+        env: Env,
+        executor: Address,
+        proposal_ids: soroban_sdk::Vec<u64>,
+        wasm_hashes: soroban_sdk::Vec<BytesN<32>>,
+    ) -> Result<(), AdminError> {
+        bc_forge_admin::execute_upgrade_batch(&env, executor, proposal_ids, wasm_hashes)
+    }
+
+    pub fn cancel_legacy_proposal(
+        env: Env,
+        caller: Address,
+        proposal_id: u64,
+    ) -> Result<(), AdminError> {
+        bc_forge_admin::cancel_legacy_proposal(&env, caller, proposal_id)
     }
 
     pub fn emergency_execute_upgrade(
@@ -321,6 +338,297 @@ fn test_double_vote_reverts() {
         res,
         Err(Ok(soroban_sdk::Error::from_contract_error(
             AdminError::ProposalAlreadyApproved as u32
+        )))
+    );
+}
+
+/// Reads the legacy proposal struct straight out of instance storage.
+fn read_proposal(env: &Env, contract_id: &Address, proposal_id: u64) -> Proposal {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .instance()
+            .get(&bc_forge_admin::AdminKey::Proposal(proposal_id))
+            .unwrap()
+    })
+}
+
+/// Overwrites a proposal's expiry ledger to `ledgers_from_now` ledgers ahead.
+///
+/// Tests need an expired proposal without archiving the instance storage: the
+/// shared TTL bump only carries entries ~100 ledgers, far short of the 600
+/// ledger default window, so the tests shrink the window instead of jumping
+/// past it.
+fn force_expiry(env: &Env, contract_id: &Address, proposal_id: u64, ledgers_from_now: u32) {
+    env.as_contract(contract_id, || {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&bc_forge_admin::AdminKey::Proposal(proposal_id))
+            .unwrap();
+        proposal.expiry_ledger = Some(env.ledger().sequence().saturating_add(ledgers_from_now));
+        env.storage()
+            .instance()
+            .set(&bc_forge_admin::AdminKey::Proposal(proposal_id), &proposal);
+    });
+}
+
+/// Issue #916: a quorate proposal inside its expiry window still executes —
+/// the boundary is inclusive on the expiry ledger itself.
+#[test]
+fn test_execute_upgrade_within_expiry_window_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
+
+    // Snapshot the expiry ledger recorded at creation.
+    let proposal = read_proposal(&env, &contract_id, proposal_id);
+    let expiry_ledger = proposal.expiry_ledger.expect("expiry recorded at creation");
+    assert_eq!(
+        expiry_ledger,
+        env.ledger().sequence() + PROPOSAL_EXPIRY_LEDGERS
+    );
+
+    // Advance the ledger timestamp past the timelock delay so time is not the
+    // blocker, but keep the sequence inside the expiry window: execution works.
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+    env.ledger().set(ledger_info);
+    let wasm_hash = upload_upgrade_wasm(&env);
+    assert!(client.try_execute_upgrade(&admin, &proposal_id, &wasm_hash).is_ok());
+}
+
+/// Issue #916: the same flow with the ledger sequence moved PAST the expiry
+/// ledger — execution must now revert with `ProposalExpired` (code 23).
+#[test]
+fn test_execute_upgrade_after_expiry_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
+    let proposal = read_proposal(&env, &contract_id, proposal_id);
+    assert_eq!(
+        proposal.expiry_ledger,
+        Some(env.ledger().sequence() + PROPOSAL_EXPIRY_LEDGERS)
+    );
+
+    // Shrink the window, then move the ledger sequence strictly past expiry
+    // (also past the timelock, so time is not the blocker).
+    force_expiry(&env, &contract_id, proposal_id, 5);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+    ledger_info.sequence += 6;
+    env.ledger().set(ledger_info);
+
+    let res = client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[1u8; 32]));
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::ProposalExpired as u32
+        )))
+    );
+}
+
+/// Issue #916: `execute_upgrade_batch` also respects the expiry window.
+#[test]
+fn test_execute_upgrade_batch_after_expiry_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
+    force_expiry(&env, &contract_id, proposal_id, 5);
+
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+    ledger_info.sequence += 6;
+    env.ledger().set(ledger_info);
+
+    let res = client.try_execute_upgrade_batch(
+        &admin,
+        &vec![&env, proposal_id],
+        &vec![&env, BytesN::from_array(&env, &[2u8; 32])],
+    );
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::ProposalExpired as u32
+        )))
+    );
+}
+
+/// Issue #916: the creator can cancel their own proposal before execution.
+#[test]
+fn test_creator_can_cancel_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let member = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
+
+    // Creator cancels while the proposal is still pending.
+    client.cancel_legacy_proposal(&admin, &proposal_id);
+
+    let proposal = read_proposal(&env, &contract_id, proposal_id);
+    assert!(proposal.cancelled);
+    assert!(!proposal.executed);
+
+    // A cancelled proposal can no longer collect approvals...
+    let res = client.try_approve_proposal(&member, &proposal_id);
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::ProposalCancelled as u32
+        )))
+    );
+
+    // ...and even with quorum already recorded at creation, it cannot execute.
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+    env.ledger().set(ledger_info);
+    let res = client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[3u8; 32]));
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::ProposalCancelled as u32
+        )))
+    );
+}
+
+/// Issue #916: only the creator may cancel.
+#[test]
+fn test_non_creator_cannot_cancel_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let member = Address::generate(&env);
+    let outsider = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
+
+    // Another pool member may not cancel...
+    let res = client.try_cancel_legacy_proposal(&member, &proposal_id);
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::Unauthorized as u32
+        )))
+    );
+
+    // ...and neither may an address that is not even in the pool.
+    let res = client.try_cancel_legacy_proposal(&outsider, &proposal_id);
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::Unauthorized as u32
+        )))
+    );
+
+    // The proposal is untouched and can still execute normally.
+    let proposal = read_proposal(&env, &contract_id, proposal_id);
+    assert!(!proposal.cancelled);
+    client.approve_proposal(&member, &proposal_id);
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+    env.ledger().set(ledger_info);
+    let wasm_hash = upload_upgrade_wasm(&env);
+    assert!(client
+        .try_execute_upgrade(&admin, &proposal_id, &wasm_hash)
+        .is_ok());
+}
+
+/// Issue #916: an executed proposal can never be cancelled — executed
+/// proposals stay executed.
+#[test]
+fn test_executed_proposal_cannot_be_cancelled() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
+
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
+    env.ledger().set(ledger_info);
+
+    assert!(client
+        .try_execute_upgrade(&admin, &proposal_id, &upload_upgrade_wasm(&env))
+        .is_ok());
+
+    let res = client.try_cancel_legacy_proposal(&admin, &proposal_id);
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::ProposalAlreadyExecuted as u32
+        )))
+    );
+}
+
+/// Issue #916: cancellation is also blocked once the expiry ledger has
+/// passed — there is nothing left to withdraw.
+#[test]
+fn test_expired_proposal_cannot_be_cancelled() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(AdminContract, ());
+    let client = AdminContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.set_admin_pool(&vec![&env, admin.clone()], &1);
+
+    let proposal_id = client.create_proposal(&admin, &String::from_str(&env, "Upgrade"));
+    force_expiry(&env, &contract_id, proposal_id, 5);
+
+    let mut ledger_info = env.ledger().get();
+    ledger_info.sequence += 6;
+    env.ledger().set(ledger_info);
+
+    let res = client.try_cancel_legacy_proposal(&admin, &proposal_id);
+    assert_eq!(
+        res,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::ProposalNotCancellable as u32
         )))
     );
 }

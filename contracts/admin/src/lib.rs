@@ -58,6 +58,8 @@
 //! | `22` | `RoleAlreadyGranted` | `grant_role` on a role the address already holds |
 //! | `21` | `BatchLengthMismatch` | `execute_upgrade_batch` given unequal id/hash vectors |
 //! | `22` | `RoleAlreadyGranted` | `validate_role_not_granted` / `grant_role_checked` when the role is already held |
+//! | `23` | `ProposalExpired` | `execute_upgrade` / `execute_upgrade_batch` past the proposal expiry ledger |
+//! | `24` | `ProposalCancelled` | approve/execute on a legacy proposal cancelled by its creator |
 //!
 //! ## Event Emissions
 //!
@@ -167,6 +169,9 @@
 //!   on the current contract; the first failure aborts the remainder.
 //!
 //! ### Cancellation
+//! - [`cancel_legacy_proposal`] (#916) lets the creator of a legacy
+//!   [`Proposal`] withdraw it before it executes or expires; a cancelled or
+//!   expired proposal can never be approved or executed again.
 //! - [`cancel_proposal`] (#662) lets the proposer of an [`UpgradeProposal`]
 //!   withdraw it before it executes. Only `UpgradeProposal::proposer` may
 //!   cancel; every other caller gets [`AdminError::NotProposer`], even an
@@ -263,6 +268,12 @@ pub enum AdminError {
     BatchLengthMismatch = 21,
     /// The target address already holds the role being granted (#768).
     RoleAlreadyGranted = 22,
+    /// The proposal's expiry ledger has passed: it can no longer execute.
+    /// Proposals live for [`PROPOSAL_EXPIRY_LEDGERS`] ledgers from creation.
+    ProposalExpired = 23,
+    /// The proposal was withdrawn by its creator via `cancel_legacy_proposal`
+    /// and can no longer be approved or executed.
+    ProposalCancelled = 24,
 }
 
 /// Storage keys for the access-control layer.
@@ -570,11 +581,36 @@ fn persist_role_mask(env: &Env, address: &Address, mask: u32) {
 /// @dev Mandatory delay applied once quorum is reached before an upgrade can be executed.
 pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
 
+/// Default lifetime of a legacy [`Proposal`], in ledgers.
+///
+/// A proposal created at ledger `N` can no longer be executed from ledger
+/// `N + PROPOSAL_EXPIRY_LEDGERS` onwards: [`execute_upgrade`],
+/// [`execute_upgrade_batch`] and [`mark_executed`] revert with
+/// [`AdminError::ProposalExpired`] once `env.ledger().sequence()` is past
+/// `proposal.expiry_ledger`. Soroban produces roughly one ledger every 5
+/// seconds, so 600 ledgers ≈ 50 minutes — short enough to choke off stale
+/// proposals, long enough for a pool to coordinate.
+///
+/// The window is a *default*, not a policy knob: the issue explicitly rules
+/// out a privileged setter, and the admin pool has none that fits (the pool
+/// setter configures membership/threshold, not policy constants), so the
+/// lifetime is fixed at compile time and documented here.
+///
+/// @title PROPOSAL_EXPIRY_LEDGERS
+/// @notice Default proposal lifetime in ledgers (600 ≈ 50 minutes at ~5s/ledger).
+/// @dev The expiry is snapshotted at creation; changing this constant affects
+///      only proposals created afterwards.
+pub const PROPOSAL_EXPIRY_LEDGERS: u32 = 600;
+
 /// A multi-sig governance proposal.
 ///
 /// @title Proposal
 /// @notice Holds the state of a governance proposal awaiting approval and execution.
 /// @dev Persisted under `AdminKey::Proposal(proposal_id)` in instance storage.
+///      `#[contracttype]` encodes struct fields by NAME symbol, so appending
+///      the `expiry_ledger` and `cancelled` fields below is decode-compatible
+///      with proposals persisted by older contract versions: missing fields
+///      decode as `None`/`false` and `None` means "does not expire".
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
@@ -586,6 +622,16 @@ pub struct Proposal {
     pub approvals: Vec<Address>,
     /// Whether the proposal has been executed.
     pub executed: bool,
+    /// Last ledger at which the proposal may execute: creation ledger plus
+    /// [`PROPOSAL_EXPIRY_LEDGERS`]. Execution past this point reverts with
+    /// [`AdminError::ProposalExpired`]. Proposals persisted by older contract
+    /// versions have no expiry; for those, `None` means "does not expire" so
+    /// an upgrade cannot retroactively kill in-flight proposals.
+    pub expiry_ledger: Option<u32>,
+    /// Whether the creator has withdrawn the proposal via
+    /// [`cancel_legacy_proposal`]. A cancelled proposal can neither be
+    /// approved nor executed, and terminal: it never resets.
+    pub cancelled: bool,
 }
 
 /// Lifecycle state of an [`UpgradeProposal`].
@@ -1455,6 +1501,12 @@ pub fn create_proposal(env: &Env, creator: Address, description: String) -> u64 
         description,
         approvals: vec![env, creator],
         executed: false,
+        expiry_ledger: Some(
+            env.ledger()
+                .sequence()
+                .saturating_add(PROPOSAL_EXPIRY_LEDGERS),
+        ),
+        cancelled: false,
     };
     env.storage()
         .instance()
@@ -1489,6 +1541,9 @@ pub fn approve_proposal(env: &Env, admin: Address, proposal_id: u64) {
 
     if proposal.executed {
         soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
+    }
+    if proposal.cancelled {
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalCancelled);
     }
     if proposal.approvals.contains(&admin) {
         soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyApproved);
@@ -1541,6 +1596,12 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
     if proposal.executed {
         soroban_sdk::panic_with_error!(env, AdminError::ProposalAlreadyExecuted);
     }
+    if proposal.cancelled {
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalCancelled);
+    }
+    if _proposal_expired(env, &proposal) {
+        soroban_sdk::panic_with_error!(env, AdminError::ProposalExpired);
+    }
     if !is_proposal_ready(env, proposal_id) {
         soroban_sdk::panic_with_error!(env, AdminError::ThresholdNotMet);
     }
@@ -1550,6 +1611,77 @@ pub fn mark_executed(env: &Env, proposal_id: u64) {
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
+}
+
+/// Returns `true` when `proposal`'s expiry ledger has passed.
+///
+/// Expired means `env.ledger().sequence()` is **strictly past**
+/// `proposal.expiry_ledger`, so the proposal can execute on its expiry ledger
+/// itself but not one ledger later (inclusive boundary, mirroring
+/// [`require_timelock_expired`]'s treatment of the timelock). Proposals with
+/// `expiry_ledger == None` never expire: they predate the expiry field and an
+/// upgrade must not retroactively kill them.
+fn _proposal_expired(env: &Env, proposal: &Proposal) -> bool {
+    match proposal.expiry_ledger {
+        Some(expiry_ledger) => env.ledger().sequence() > expiry_ledger,
+        None => false,
+    }
+}
+
+/// Cancels a not-yet-executed legacy governance proposal. Resolves issue #916.
+///
+/// The [Proposal::creator] may withdraw their proposal while it is still
+/// alive: unexecuted, uncancelled and not past [`PROPOSAL_EXPIRY_LEDGERS`].
+/// Cancellation is a one-way flag ([Proposal::cancelled]): a cancelled
+/// proposal can no longer be approved (`approve_proposal`), marked executed
+/// (`mark_executed`) or executed (`execute_upgrade`, `execute_upgrade_batch`),
+/// and it can never un-cancel. An executed proposal cannot be cancelled —
+/// executed proposals stay executed.
+///
+/// The newer [`UpgradeProposal`] flow has its own cancel path in
+/// [`cancel_proposal`]; this function is the legacy [`Proposal`] counterpart.
+///
+/// # Errors
+///
+/// Returns [`AdminError::ProposalNotFound`] if no proposal exists under
+/// `proposal_id`, [`AdminError::Unauthorized`] if `caller` is not the
+/// proposal's creator, [`AdminError::ProposalAlreadyExecuted`] if the proposal
+/// has already been executed, [`AdminError::ProposalNotCancellable`] if it is
+/// already cancelled or past its expiry ledger.
+///
+/// @notice Cancels proposal `proposal_id`; only its creator may call this and only before execution or expiry.
+/// @dev Requires the creator's authorization. Cancellation is terminal: cancelled proposals cannot be approved or executed.
+/// @param caller The address attempting the cancellation; must be the proposal's creator.
+/// @param proposal_id The ID of the proposal to cancel.
+/// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
+pub fn cancel_legacy_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
+    caller.require_auth();
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+
+    if caller != proposal.creator {
+        return Err(AdminError::Unauthorized);
+    }
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+    if proposal.cancelled || _proposal_expired(env, &proposal) {
+        return Err(AdminError::ProposalNotCancellable);
+    }
+
+    proposal.cancelled = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    events::emit_proposal_cancelled(env, &caller, proposal_id);
+    Ok(())
 }
 
 /// Records the unlock time for `proposal_id` if it has reached quorum and no
@@ -1718,6 +1850,12 @@ fn execute_upgrade_inner(
 
     if proposal.executed {
         return Err(AdminError::ProposalAlreadyExecuted);
+    }
+    if proposal.cancelled {
+        return Err(AdminError::ProposalCancelled);
+    }
+    if _proposal_expired(env, &proposal) {
+        return Err(AdminError::ProposalExpired);
     }
 
     // Quorum check: enough unique approvals must have been collected.
@@ -2227,6 +2365,14 @@ mod tests {
 
         pub fn mark_executed(env: Env, proposal_id: u64) {
             super::mark_executed(&env, proposal_id);
+        }
+
+        pub fn cancel_legacy_proposal(
+            env: Env,
+            caller: Address,
+            proposal_id: u64,
+        ) -> Result<(), AdminError> {
+            super::cancel_legacy_proposal(&env, caller, proposal_id)
         }
 
         pub fn execute_upgrade(
