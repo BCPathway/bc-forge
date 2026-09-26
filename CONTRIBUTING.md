@@ -50,6 +50,26 @@ npm install
 npm run build
 ```
 
+### Keeping Your Fork in Sync & Resetting Local Clones
+
+If upstream history is updated or rewritten:
+
+```bash
+# Fetch latest upstream changes
+git fetch upstream
+
+# Reset your local main branch cleanly onto upstream main
+git checkout main
+git reset --hard upstream/main
+
+# If you have an active feature branch, rebase it onto the updated main:
+git checkout <your-branch>
+git rebase upstream/main
+```
+
+> **Note on Test Snapshots**: Soroban test snapshots (`contracts/admin/test_snapshots/`) are generated test artifacts. They are ignored in `.gitignore` and must never be committed to git history.
+
+
 ## 📋 Workflow
 
 ### 1. Find an Issue
