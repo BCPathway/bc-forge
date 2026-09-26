@@ -1654,7 +1654,11 @@ fn _proposal_expired(env: &Env, proposal: &Proposal) -> bool {
 /// @param caller The address attempting the cancellation; must be the proposal's creator.
 /// @param proposal_id The ID of the proposal to cancel.
 /// @return `Ok(())` on success, or one of the [`AdminError`] variants listed above.
-pub fn cancel_legacy_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), AdminError> {
+pub fn cancel_legacy_proposal(
+    env: &Env,
+    caller: Address,
+    proposal_id: u64,
+) -> Result<(), AdminError> {
     let _reentrancy_guard = reentrancy_guard::enter(env);
     caller.require_auth();
 

@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use bc_forge_admin::{AdminError, Proposal, PROPOSAL_EXPIRY_LEDGERS, Role, TIMELOCK_DELAY_SECS};
+use bc_forge_admin::{AdminError, Proposal, Role, PROPOSAL_EXPIRY_LEDGERS, TIMELOCK_DELAY_SECS};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{contract, contractimpl, vec, Address, BytesN, Env, String};
 
@@ -402,7 +402,9 @@ fn test_execute_upgrade_within_expiry_window_succeeds() {
     ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
     env.ledger().set(ledger_info);
     let wasm_hash = upload_upgrade_wasm(&env);
-    assert!(client.try_execute_upgrade(&admin, &proposal_id, &wasm_hash).is_ok());
+    assert!(client
+        .try_execute_upgrade(&admin, &proposal_id, &wasm_hash)
+        .is_ok());
 }
 
 /// Issue #916: the same flow with the ledger sequence moved PAST the expiry
@@ -434,7 +436,8 @@ fn test_execute_upgrade_after_expiry_fails() {
     ledger_info.sequence += 6;
     env.ledger().set(ledger_info);
 
-    let res = client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[1u8; 32]));
+    let res =
+        client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[1u8; 32]));
     assert_eq!(
         res,
         Err(Ok(soroban_sdk::Error::from_contract_error(
@@ -513,7 +516,8 @@ fn test_creator_can_cancel_proposal() {
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp += TIMELOCK_DELAY_SECS + 1;
     env.ledger().set(ledger_info);
-    let res = client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[3u8; 32]));
+    let res =
+        client.try_execute_upgrade(&admin, &proposal_id, &BytesN::from_array(&env, &[3u8; 32]));
     assert_eq!(
         res,
         Err(Ok(soroban_sdk::Error::from_contract_error(
