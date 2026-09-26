@@ -1096,7 +1096,8 @@ impl WrapperContract {
         Self::remove_unlock_time(&env, &user);
         events::emit_unlock_time_cleared(&env, &caller, &user);
         Ok(())
-    }    /// Returns the timestamp at which `user`'s deposit becomes withdrawable,
+    }
+    /// Returns the timestamp at which `user`'s deposit becomes withdrawable,
     /// or `None` when no lockup is recorded for the user.
     pub fn get_unlock_time(env: Env, user: Address) -> Option<u64> {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
