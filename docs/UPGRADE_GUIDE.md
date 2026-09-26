@@ -317,6 +317,32 @@ This is a one-shot, idempotent operation:
 - Creates a persistent `SuperAdmin(admin)` entry.
 - Safe to call multiple times (no-op on subsequent calls).
 
+### Token allowance storage (#913)
+
+Older token WASM stored spending allowances as two persistent keys per
+`(owner, spender)` pair:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `Allowance(owner, spender)` | `i128` | Remaining allowance amount |
+| `AllowanceExp(owner, spender)` | `u32` | Ledger sequence after which the allowance expires (`0` = no expiry) |
+
+Upgraded token WASM uses a single struct value under `Allowance(owner, spender)`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `amount` | `i128` | Remaining allowance amount |
+| `expiration_ledger` | `u32` | Expiration ledger (`0` = no expiry) |
+
+**Migration behavior:** the first read or spend that touches a legacy pair copies
+the amount and expiration into `AllowanceData`, writes it back under
+`Allowance(owner, spender)`, and **removes** `AllowanceExp(owner, spender)`.
+New `approve` calls write only the struct and never recreate the legacy key.
+
+No separate migration transaction is required for allowances; upgrading the
+contract WASM is sufficient. Integrators should treat `AllowanceExp` as
+deprecated and must not write it after upgrade.
+
 Use this **before** upgrading to a WASM version that requires `SuperAdmin`
 guards (e.g., if the new code calls `require_super_admin` in `upgrade`).
 

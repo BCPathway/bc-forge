@@ -124,7 +124,7 @@ export function useTransfer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const transfer = useCallback(async (from: string, to: string, amount: bigint, source: Keypair) => {
+  const transfer = useCallback(async (from: string, to: string, amount: bigint, source?: Keypair) => {
     try {
       setLoading(true);
       setError(null);
@@ -176,7 +176,7 @@ export function useBurn() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const burn = useCallback(async (from: string, amount: bigint, source: Keypair) => {
+  const burn = useCallback(async (from: string, amount: bigint, source?: Keypair) => {
     try {
       setLoading(true);
       setError(null);

@@ -2,6 +2,17 @@
 
 This document outlines how security issues should be reported and handled for the bc-forge project.
 
+For third-party audit information, please refer to the [Audit Readiness Checklist](docs/AUDIT_READINESS.md).
+
+## Audits
+
+No third-party audit report has been published in this repository.
+
+| Date | Firm | Scope | Report |
+|------|------|-------|--------|
+
+Maintainers should add a row only when a real, published report exists.
+
 ## Supported Versions
 
 The following versions of bc-forge are currently supported for security updates:
@@ -26,6 +37,13 @@ When reporting, please include:
 
 We follow responsible disclosure practices and will work with you to understand and resolve the issue before public disclosure.
 
+## Bug Bounty
+
+Rewards for security reports are described in [docs/BUG_BOUNTY.md](docs/BUG_BOUNTY.md).
+That page copies the scope and out-of-scope lists below, and records whether a
+hosted bounty program is live. Read it before reporting if you want to know how
+a reward is assessed.
+
 ## Scope
 
 The following types of issues are in scope for security rewards and coordinated disclosure:
@@ -47,6 +65,15 @@ The following issues are explicitly out of scope:
 - Issues affecting unsupported versions
 - Theoretical vulnerabilities with no practical exploit path
 
+## Known Risk Areas
+
+The following components represent key security-sensitive areas within the codebase:
+
+- **Mint and supply changes**: `contracts/token/src/lib.rs`
+- **Admin roles, quorum, timelock, and upgrade execution (`execute_upgrade`, `execute_upgrade_batch`)**: `contracts/admin/src/lib.rs`
+- **Reentrancy gap**: Module-level note in `contracts/admin/src/lib.rs`: "Proposal lifecycle entry points share a persistent RAII guard. The guard is entered before authorization callbacks and remains held through WASM deployment, preventing callbacks from creating, changing, cancelling, or executing proposals while a lifecycle operation is active."
+- **Workspace-excluded crates not built in CI**: `contracts/compound_fees`, `contracts/flash_loan_guard`, and `contracts/yield_vault` (in the `exclude` array in root `Cargo.toml`)
+
 ## Response Timeline
 
 We aim to respond to security reports in a timely manner:
@@ -67,3 +94,4 @@ We ask that researchers follow responsible disclosure practices:
 - Respect user privacy and data protection requirements
 
 We appreciate the security community's efforts to help keep bc-forge secure.
+
