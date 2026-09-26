@@ -52,13 +52,12 @@ export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
 // ─── Generated Contract Bindings (#926) ──────────────────────────────────────
 // Auto-generated TypeScript bindings from `stellar contract bindings typescript`.
 // Re-run with: npm run generate:bindings
-export * as generatedToken from './generated';
-export { BcForgeTokenClient } from './generated';
+export * as generatedToken from './generated/src';
+export { Client as BcForgeTokenClient } from './generated/src';
 export type {
-  ClientOptions as GeneratedClientOptions,
   Recipient as GeneratedRecipient,
   FeeConfig as GeneratedFeeConfig,
   FeeExemption as GeneratedFeeExemption,
   LockupState as GeneratedLockupState,
-} from './generated';
-export { TokenError } from './generated';
+} from './generated/src';
+export { TokenError } from './generated/src';

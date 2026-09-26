@@ -551,18 +551,16 @@ CI runs a dedicated **SDK Bindings Staleness** job that regenerates bindings fro
 ```typescript
 import { BcForgeTokenClient, generatedToken } from '@bc-forge/sdk';
 
-// The generated client provides ABI-accurate entry point specs
+// ABI-accurate client generated from the token contract WASM.
+// BcForgeTokenClient is the generated `Client` class.
 const client = new BcForgeTokenClient({
   contractId: 'CABC...XYZ',
   rpcUrl: 'https://soroban-testnet.stellar.org',
   networkPassphrase: 'Test SDF Network ; September 2015',
 });
 
-// Access all entry point names
-console.log(BcForgeTokenClient.entryPoints);
-// ['initialize', 'admin', 'mint', 'batch_mint', ...]
+const nameTx = await client.name();
 
-// The generated types are also available
 const config: generatedToken.FeeConfig = {
   base_fee: BigInt(100),
   complexity_multiplier: 2,
