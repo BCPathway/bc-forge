@@ -183,6 +183,40 @@ describe('Deployments Export Utilities & Command', () => {
       expect(loadResult.artifacts?.contracts.fee.contractId).toBe('CFEE_CLI_TEST');
       expect(loadResult.artifacts?.txHashes?.exportTxHash).toBe('0x123456789abcdef');
       expect(loadResult.artifacts?.network).toBe('testnet');
+
+      const raw = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
+      expect(raw.networks.testnet.vault).toBe('CVAULT_CLI_TEST');
+      expect(raw.networks.testnet.fee).toBe('CFEE_CLI_TEST');
+    });
+
+    it('keeps aliases from other networks when exporting', async () => {
+      const targetPath = path.join(tmpDir, 'deployments-cli.json');
+      const mainnetId = `C${'M'.repeat(55)}`;
+      fs.writeFileSync(
+        targetPath,
+        JSON.stringify({
+          version: '1.0.0',
+          networks: { mainnet: { token: mainnetId } },
+        }),
+        'utf-8',
+      );
+
+      const cmd = createExportDeploymentsCommand();
+      await cmd.parseAsync([
+        'node',
+        'export-deployments',
+        '--out',
+        targetPath,
+        '--vault-id',
+        'CVAULT_CLI_TEST',
+        '--network',
+        'testnet',
+      ]);
+
+      const raw = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
+      expect(raw.networks.mainnet.token).toBe(mainnetId);
+      expect(raw.networks.testnet.vault).toBe('CVAULT_CLI_TEST');
+      expect(raw.contracts.vault.contractId).toBe('CVAULT_CLI_TEST');
     });
   });
 });

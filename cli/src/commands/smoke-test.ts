@@ -9,6 +9,8 @@ import {
 } from "@stellar/stellar-sdk";
 import { addNetworkOptions } from "../network.js";
 import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/soroban-tx.js";
+import logger from "../utils/logger.js";
+import { resolveContractIdOption } from "../utils/registry.js";
 
 function describeSubmitOutcome(outcome: PrepareSignSubmitResult): string {
   switch (outcome.outcome) {
@@ -52,7 +54,7 @@ export function createSmokeTestCommand(): Command {
     .description("Run a quick ping test against a live contract (mint/transfer)")
     .requiredOption(
       "--contract-id <id>",
-      "Contract ID of the deployed token to test"
+      "Contract ID, or a deployment alias for the selected network"
     )
     .requiredOption("--source <secret>", "Admin/source account secret key")
     .option("--recipient <address>", "Recipient address (auto-generated if omitted)")
@@ -65,8 +67,17 @@ export function createSmokeTestCommand(): Command {
 
   addNetworkOptions(cmd);
 
-  cmd.action(async (opts) => {
-    await runSmokeTest(opts);
+  cmd.action(async (opts, command) => {
+    try {
+      const contractId = resolveContractIdOption(command, opts.contractId);
+      await runSmokeTest({
+        ...opts,
+        contractId: contractId ?? opts.contractId,
+      });
+    } catch (err: unknown) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
   });
 
   return cmd;

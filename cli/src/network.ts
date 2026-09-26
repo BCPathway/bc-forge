@@ -156,20 +156,61 @@ export function addNetworkOptions(
 }
 
 /**
- * Merge a subcommand's flags with parent (global) flags, preferring the
- * value that was actually provided. Child options have no default so an
- * omitted `--network` on the subcommand does not clobber `bc-forge --network`.
+ * The command about to run, then each ancestor. Closest flags win, so a
+ * nested subcommand still sees `bc-forge --network`.
+ */
+function commandChain(command: Command): Command[] {
+  const chain: Command[] = [];
+  let current: Command | null | undefined = command;
+  while (current) {
+    chain.push(current);
+    current = current.parent;
+  }
+  return chain;
+}
+
+function hasOption(command: Command, key: string): boolean {
+  return command.options.some((option) => option.attributeName() === key);
+}
+
+function optionSource(command: Command, key: string): string | undefined {
+  if (!hasOption(command, key)) return undefined;
+  try {
+    return command.getOptionValueSource(key);
+  } catch {
+    return undefined;
+  }
+}
+
+function optionString(
+  command: Command,
+  key: "network" | "rpcUrl" | "networkPassphrase"
+): string | undefined {
+  if (!hasOption(command, key)) return undefined;
+  const value = command.opts()[key];
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * Merge a subcommand's flags with ancestor (global) flags, preferring the
+ * closest value. Child options have no default so an omitted `--network` on
+ * the subcommand does not clobber `bc-forge --network`.
  */
 export function mergeNetworkOptions(
   actionCommand: Command
 ): NetworkOverrides {
-  const local = actionCommand.opts();
-  const parent = actionCommand.parent?.opts() ?? {};
+  const pick = (key: "network" | "rpcUrl" | "networkPassphrase") => {
+    for (const command of commandChain(actionCommand)) {
+      const value = optionString(command, key);
+      if (value !== undefined) return value;
+    }
+    return undefined;
+  };
 
   return {
-    network: local.network ?? parent.network,
-    rpcUrl: local.rpcUrl ?? parent.rpcUrl,
-    networkPassphrase: local.networkPassphrase ?? parent.networkPassphrase,
+    network: pick("network"),
+    rpcUrl: pick("rpcUrl"),
+    networkPassphrase: pick("networkPassphrase"),
   };
 }
 
@@ -178,13 +219,11 @@ export function mergeNetworkOptions(
  * filled in by commander or {@link attachNetworkResolution}.
  */
 export function explicitNetworkOverrides(command: Command): NetworkOverrides {
-  const parent = command.parent ?? undefined;
   const pick = (key: "network" | "rpcUrl" | "networkPassphrase") => {
-    if (command.getOptionValueSource(key) === "cli") {
-      return command.opts()[key] as string | undefined;
-    }
-    if (parent?.getOptionValueSource(key) === "cli") {
-      return parent.opts()[key] as string | undefined;
+    for (const current of commandChain(command)) {
+      if (optionSource(current, key) === "cli") {
+        return current.opts()[key] as string | undefined;
+      }
     }
     return undefined;
   };
@@ -204,9 +243,8 @@ export function attachNetworkResolution(program: Command): void {
   program.hook("preAction", (_thisCommand, actionCommand) => {
     const resolved = resolveNetworkConfig(mergeNetworkOptions(actionCommand));
     const assign = (key: "network" | "rpcUrl" | "networkPassphrase", value: string) => {
-      if (actionCommand.getOptionValueSource(key) === "cli") {
-        return;
-      }
+      if (!hasOption(actionCommand, key)) return;
+      if (optionSource(actionCommand, key) === "cli") return;
       actionCommand.setOptionValueWithSource(key, value, "default");
     };
 

@@ -12,12 +12,14 @@ CLI deployment orchestrator and management toolkit for **bc-forge** Soroban smar
   - [Environment Variables](#environment-variables)
   - [Deployment Configuration (.bc-forge.json)](#deployment-configuration-bc-forgejson)
 - [Command Reference](#command-reference)
+  - [`init`](#init)
   - [`check-status`](#check-status)
   - [`upgrade`](#upgrade)
   - [`verify-hash`](#verify-hash)
   - [`smoke-test`](#smoke-test)
   - [`generate-bindings`](#generate-bindings)
   - [`export-deployments`](#export-deployments)
+  - [`deployments`](#deployments)
 - [Workflow Examples](#workflow-examples)
   - [Deploy & Status Check](#1-deploy--status-check)
   - [Contract WASM Upgrade](#2-contract-wasm-upgrade)
@@ -101,6 +103,64 @@ Place a `.bc-forge.json` file in your workspace root or specify a custom path wi
 
 ## Command Reference
 
+### `init`
+
+Scaffolds `config.json` in the working directory. In a terminal it prompts for each setting. In CI, pass a flag for every prompt. Network defaults to testnet, the RPC URL defaults to that network's preset, and decimals default to 7.
+
+The file stores public project settings only. Secret keys are not written.
+
+```bash
+bc-forge init [options]
+```
+
+#### Options
+
+- `-n, --network <name>`: Target network (`testnet`, `mainnet`, or `local`). Default: `testnet`.
+- `--rpc-url <url>`: Soroban RPC URL. Default: the preset for the selected network.
+- `--admin <publicKey>`: Admin account public key (`G...`).
+- `--name <name>`: Token name.
+- `--symbol <symbol>`: Token symbol (1–12 letters or digits).
+- `--decimals <n>`: Token decimals from 0 to 18. Default: `7`.
+- `--initial-supply <amount>`: Initial token supply as a non-negative integer.
+- `--force`: Replace an existing `config.json`. Without this flag, init refuses to overwrite.
+
+#### Examples
+
+**Interactive:**
+
+```bash
+bc-forge init
+```
+
+**Non-interactive (CI):**
+
+```bash
+bc-forge init \
+  --network testnet \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --admin GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX \
+  --name "bc-forge Token" \
+  --symbol BFG \
+  --decimals 7 \
+  --initial-supply 1000000
+```
+
+The written file looks like:
+
+```json
+{
+  "network": "testnet",
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "admin": "GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "name": "bc-forge Token",
+  "symbol": "BFG",
+  "decimals": 7,
+  "initialSupply": "1000000"
+}
+```
+
+---
+
 ### `check-status`
 
 Pings all deployed contracts defined under `contracts` in `.bc-forge.json` via Soroban RPC and reports latency and reachability status.
@@ -139,7 +199,7 @@ bc-forge upgrade [options]
 #### Options
 
 - `--wasm <path>` **(Required)**: Path to the new compiled `.wasm` binary.
-- `--contract-id <id>` **(Required)**: Contract ID of the target contract.
+- `--contract-id <id>` **(Required)**: Contract ID, or a deployment alias registered for the selected network.
 - `--rpc-url <url>` **(Required)**: Soroban RPC endpoint URL.
 - `--source <secret>` **(Required)**: Source account secret key (`S...`).
 - `--network-passphrase <phrase>`: Stellar network passphrase (default: `"Test SDF Network ; September 2015"`).
@@ -182,7 +242,7 @@ bc-forge verify-hash [options]
 #### Options
 
 - `--wasm <path>` **(Required)**: Path to the locally built `.wasm` artifact.
-- `--contract-id <id>`: Target contract ID (defaults to `CONTRACT_ID` env / configuration).
+- `--contract-id <id>`: Contract id or deployment alias (defaults to `CONTRACT_ID` env / configuration).
 - `--name <name>`: Label for the contract in the report (default: `"contract"`).
 
 #### Example
@@ -214,7 +274,7 @@ bc-forge smoke-test [options]
 
 #### Options
 
-- `--contract-id <id>` **(Required)**: Deployed contract ID to test.
+- `--contract-id <id>` **(Required)**: Contract id, or a deployment alias for the selected network.
 - `--rpc-url <url>` **(Required)**: Soroban RPC endpoint URL.
 - `--source <secret>` **(Required)**: Admin/source secret key (`S...`).
 - `--network-passphrase <phrase>`: Stellar network passphrase (default: `"Test SDF Network ; September 2015"`).
@@ -248,7 +308,7 @@ bc-forge generate-bindings [options]
 - `-l, --language <lang>`: Target language (`typescript`, `rust`, `python`, `java`, `flutter`, `swift`, `php`; default: `typescript`).
 - `--wasm <path>`: Local `.wasm` artifact to generate bindings from.
 - `--wasm-hash <hash>`: Hash of a WASM blob uploaded to the network.
-- `--contract-id <id>`: Deployed contract ID to fetch spec from network.
+- `--contract-id <id>`: Deployed contract id or deployment alias to fetch the spec from the network.
 - `-o, --output-dir <dir>`: Directory to write the generated client package into (required except for `rust`).
 - `--overwrite`: Overwrite the output directory if it already exists.
 
@@ -300,6 +360,57 @@ bc-forge export-deployments \
   --fee-id CFEE...456 \
   --tx-hash 0xabc...123 \
   --network testnet
+```
+
+Contract names from the export are also stored as aliases under `networks.<network>` in the same file, without removing aliases already registered for other networks.
+
+---
+
+### `deployments`
+
+Persists a project registry in `deployments.json`, keyed by network and alias. Later commands that take a contract id (`upgrade`, `smoke-test`, `verify-hash`, `generate-bindings`, `deploy`, `init-superadmin`, `connect`, `orchestrate`) accept that alias and resolve it for the selected network only. A raw `C...` contract id is used as-is. An unknown alias fails with the alias name in the error.
+
+Secret keys are rejected and are never written to the registry.
+
+```bash
+bc-forge deployments register <alias> <id> --network <name>
+bc-forge deployments resolve <alias> --network <name>
+```
+
+#### Options
+
+- `-n, --network <name>`: Network bucket (`testnet`, `mainnet`, or `local`). Defaults to the global `--network` (testnet).
+- `-f, --file <path>`: Registry path. Default: `deployments.json` in the working directory.
+
+#### Examples
+
+```bash
+bc-forge deployments register token CDEX...123 --network testnet
+bc-forge deployments register token CDEX...999 --network mainnet
+
+bc-forge deployments resolve token --network testnet
+
+bc-forge upgrade \
+  --wasm target/wasm32-unknown-unknown/release/bc_forge_token.wasm \
+  --contract-id token \
+  --network testnet \
+  --source $ADMIN_SECRET
+```
+
+`deployments.json` stores public contract ids:
+
+```json
+{
+  "version": "1.0.0",
+  "networks": {
+    "testnet": {
+      "token": "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    },
+    "mainnet": {
+      "token": "CYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+    }
+  }
+}
 ```
 
 ---

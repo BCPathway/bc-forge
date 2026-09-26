@@ -20,6 +20,8 @@ export interface DeploymentArtifacts {
   timestamp: string;
   contracts: Record<string, ContractDeploymentArtifact>;
   txHashes?: Record<string, string>;
+  /** Alias registry keyed by network, preserved across exports. */
+  networks?: Record<string, Record<string, string>>;
   [key: string]: unknown;
 }
 
@@ -94,19 +96,16 @@ export function buildDeploymentArtifacts(input: BuildDeploymentArtifactsInput): 
 }
 
 /**
- * Safely writes deployment artifacts JSON to a file using atomic write + rename.
- * This guarantees that overwrites will never corrupt an existing deployments file if
- * an error or crash occurs during writing.
+ * Writes JSON via a temp file in the destination directory, then renames it
+ * over the target. A crash mid-write leaves the previous file intact.
  */
-export function exportDeploymentsToFile(
-  artifacts: DeploymentArtifacts,
-  targetPath: string = 'deployments.json',
-  options: ExportDeploymentsOptions = {}
+export function writeJsonAtomic(
+  targetPath: string,
+  data: unknown,
+  pretty = true,
 ): ExportDeploymentsResult {
   const resolvedPath = path.resolve(targetPath);
-  const pretty = options.pretty ?? true;
-  const jsonContent = JSON.stringify(artifacts, null, pretty ? 2 : undefined);
-
+  const jsonContent = JSON.stringify(data, null, pretty ? 2 : undefined);
   const dir = path.dirname(resolvedPath);
 
   try {
@@ -114,16 +113,13 @@ export function exportDeploymentsToFile(
       fs.mkdirSync(dir, { recursive: true });
     }
   } catch (err: any) {
-    const errorMsg = `Failed to create destination directory: ${err.message}`;
-    logger.error(errorMsg);
     return {
       success: false,
       filePath: resolvedPath,
-      error: errorMsg,
+      error: `Failed to create destination directory: ${err.message}`,
     };
   }
 
-  // Atomic write setup: write to temp file first in the same directory
   const tempFileName = `.deployments.${crypto.randomBytes(6).toString('hex')}.tmp`;
   const tempPath = path.join(dir, tempFileName);
 
@@ -136,16 +132,12 @@ export function exportDeploymentsToFile(
       fs.closeSync(fd);
     }
 
-    // Atomic rename over target file
     fs.renameSync(tempPath, resolvedPath);
-    logger.info(`Saved deployment artifacts safely to ${resolvedPath}`);
-
     return {
       success: true,
       filePath: resolvedPath,
     };
   } catch (err: any) {
-    // Clean up temporary file if it still exists
     if (fs.existsSync(tempPath)) {
       try {
         fs.unlinkSync(tempPath);
@@ -153,14 +145,32 @@ export function exportDeploymentsToFile(
         // ignore cleanup error
       }
     }
-    const errorMsg = `Failed to write deployment file atomically: ${err.message}`;
-    logger.error(errorMsg);
     return {
       success: false,
       filePath: resolvedPath,
-      error: errorMsg,
+      error: `Failed to write deployment file atomically: ${err.message}`,
     };
   }
+}
+
+/**
+ * Safely writes deployment artifacts JSON to a file using atomic write + rename.
+ * This guarantees that overwrites will never corrupt an existing deployments file if
+ * an error or crash occurs during writing.
+ */
+export function exportDeploymentsToFile(
+  artifacts: DeploymentArtifacts,
+  targetPath: string = 'deployments.json',
+  options: ExportDeploymentsOptions = {}
+): ExportDeploymentsResult {
+  const pretty = options.pretty ?? true;
+  const result = writeJsonAtomic(targetPath, artifacts, pretty);
+  if (result.success) {
+    logger.info(`Saved deployment artifacts safely to ${result.filePath}`);
+  } else if (result.error) {
+    logger.error(result.error);
+  }
+  return result;
 }
 
 /**

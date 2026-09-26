@@ -6,6 +6,7 @@ import {
   exportDeploymentsToFile,
   ContractDeploymentArtifact,
 } from '../utils/deployments.js';
+import { mergeNetworkAliases, networksFromDocument, readDeploymentsDocument } from '../utils/registry.js';
 import logger from '../utils/logger.js';
 
 export interface ExportDeploymentsCommandOptions {
@@ -78,7 +79,23 @@ export function createExportDeploymentsCommand(): Command {
         txHashes,
       });
 
-      const exportResult = exportDeploymentsToFile(artifacts, opts.out);
+      const aliasEntries: Record<string, string> = {};
+      for (const [name, artifact] of Object.entries(contracts)) {
+        if (artifact.contractId) aliasEntries[name] = artifact.contractId;
+      }
+      const networks = mergeNetworkAliases(
+        networksFromDocument(readDeploymentsDocument(opts.out)),
+        netCfg.network,
+        aliasEntries,
+      );
+
+      const exportResult = exportDeploymentsToFile(
+        {
+          ...artifacts,
+          ...(Object.keys(networks).length > 0 ? { networks } : {}),
+        },
+        opts.out,
+      );
       if (exportResult.success) {
         logger.success(`Successfully exported deployment artifacts to ${exportResult.filePath}`);
       } else {

@@ -9,6 +9,8 @@ import {
 } from "@stellar/stellar-sdk";
 import { addNetworkOptions } from "../network.js";
 import { prepareSignAndSubmit } from "../utils/soroban-tx.js";
+import logger from "../utils/logger.js";
+import { resolveContractIdOption } from "../utils/registry.js";
 
 export interface FeeEstimate {
   baseFee: string;
@@ -43,7 +45,7 @@ export function createUpgradeCommand(): Command {
     .requiredOption("--wasm <path>", "Path to the new WASM binary")
     .requiredOption(
       "--contract-id <id>",
-      "Contract ID of the deployed contract to upgrade"
+      "Contract ID, or a deployment alias for the selected network"
     )
     .requiredOption("--source <secret>", "Source account secret key")
     .option("--proposal-id <id>", "Existing proposal ID to execute")
@@ -61,11 +63,18 @@ export function createUpgradeCommand(): Command {
 
   addNetworkOptions(cmd);
 
-  cmd.action(async (opts) => {
-    await runUpgrade({
-      ...opts,
-      wasmPath: opts.wasmPath ?? opts.wasm,
-    });
+  cmd.action(async (opts, command) => {
+    try {
+      const contractId = resolveContractIdOption(command, opts.contractId);
+      await runUpgrade({
+        ...opts,
+        contractId: contractId ?? opts.contractId,
+        wasmPath: opts.wasmPath ?? opts.wasm,
+      });
+    } catch (err: unknown) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
   });
 
   return cmd;
