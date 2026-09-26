@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { getClientConfig } from '../utils/config.js';
 import logger from '../utils/logger.js';
 import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
+import { resolveContractIdOption } from '../utils/registry.js';
 
 export type BindingsLanguage =
   | 'typescript'
@@ -212,7 +213,7 @@ export function createGenerateBindingsCommand(): Command {
     .option('-l, --language <lang>', `Target language (${SUPPORTED_LANGUAGES.join(', ')})`, 'typescript')
     .option('--wasm <path>', 'Local .wasm artifact to generate from')
     .option('--wasm-hash <hash>', 'Hash of a WASM blob already uploaded to the network')
-    .option('--contract-id <id>', 'Deployed contract to generate from')
+    .option('--contract-id <id>', 'Deployed contract id or deployment alias')
     .option('-o, --output-dir <dir>', 'Directory to write the generated package into')
     .option('--overwrite', 'Overwrite the output directory if it already exists');
 
@@ -222,7 +223,8 @@ export function createGenerateBindingsCommand(): Command {
       try {
         const clientConfig = getClientConfig(explicitNetworkOverrides(command));
         const contractId = options.contractId
-          || (!options.wasm && !options.wasmHash ? clientConfig.contractId : undefined);
+          ? resolveContractIdOption(command, options.contractId)
+          : (!options.wasm && !options.wasmHash ? clientConfig.contractId : undefined);
 
         logger.debug(`Generating ${options.language} bindings`);
 

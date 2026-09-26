@@ -130,6 +130,18 @@ describe("CLI network selection (#684)", () => {
       expect(merged.rpcUrl).toBe("https://parent.example");
     });
 
+    it("inherits a global network flag through nested subcommands", () => {
+      const root = addNetworkOptions(new Command("bc-forge"), { withDefault: true });
+      const group = root.command("deployments");
+      const child = addNetworkOptions(group.command("register"));
+
+      root.setOptionValue("network", "mainnet");
+      expect(mergeNetworkOptions(child).network).toBe("mainnet");
+
+      child.setOptionValue("network", "local");
+      expect(mergeNetworkOptions(child).network).toBe("local");
+    });
+
     it("reports only flags that were passed on the CLI", () => {
       const parent = addNetworkOptions(new Command("bc-forge"), { withDefault: true });
       const child = addNetworkOptions(parent.command("upgrade"));

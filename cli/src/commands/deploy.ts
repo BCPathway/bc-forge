@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
 import { getClientConfig } from '../utils/config.js';
 import { buildDeploymentArtifacts, exportDeploymentsToFile } from '../utils/deployments.js';
+import { resolveContractIdOption } from '../utils/registry.js';
 import logger from '../utils/logger.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -337,7 +338,7 @@ export function createDeployCommand(): Command {
     .option('--fee-wasm <path>', 'Path to the fee contract WASM binary (optional)')
     .requiredOption('--admin <address>', 'Admin address for the deployed vault')
     .requiredOption('--source <secret>', 'Source account secret key for signing transactions')
-    .requiredOption('--underlying-token <id>', 'Underlying SEP-41 token contract ID to wrap')
+    .requiredOption('--underlying-token <id>', 'Underlying SEP-41 token contract id, or a deployment alias')
     .requiredOption('--name <name>', 'Human-readable name for the wrapped token')
     .requiredOption('--symbol <symbol>', 'Ticker symbol for the wrapped token')
     .option('--decimals <n>', 'Decimal places (default: 7)', '7')
@@ -349,13 +350,14 @@ export function createDeployCommand(): Command {
   cmd.action(async (opts, command) => {
     try {
       const netCfg = getClientConfig(explicitNetworkOverrides(command));
+      const underlyingToken = resolveContractIdOption(command, opts.underlyingToken) ?? opts.underlyingToken;
 
       const result = await deployVault({
         vaultWasm: opts.vaultWasm,
         feeWasm: opts.feeWasm,
         admin: opts.admin,
         source: opts.source,
-        underlyingToken: opts.underlyingToken,
+        underlyingToken,
         name: opts.name,
         symbol: opts.symbol,
         decimals: parseInt(opts.decimals, 10),
