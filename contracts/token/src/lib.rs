@@ -172,6 +172,10 @@ pub enum TokenError {
     PayloadExpired = 15,
     /// Batch payload nonce has already been used or is invalid.
     PayloadReplayed = 16,
+    /// `rescue_tokens` was called on this contract's own token id. The token
+    /// contract can never rescue itself: its balances are accounted user
+    /// funds, not stranded foreign assets.
+    UnknownToken = 17,
 }
 
 #[contract]
@@ -682,6 +686,69 @@ impl BcForgeToken {
         admin::require_admin(&env, &current_admin);
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
+        Ok(())
+    }
+
+    /// Rescues a foreign SEP-41 token balance out of the contract.
+    ///
+    /// SEP-41 tokens sent to the contract by mistake would otherwise be stuck:
+    /// nothing in the token's own interface moves a balance that does not
+    /// belong to a holder who can sign. This escape hatch lets the admin send
+    /// such a stranded balance to a recovery address.
+    ///
+    /// The ban list is deliberately minimal and exact. Rescuing this
+    /// contract's *own* token id is rejected with [`TokenError::UnknownToken`]
+    /// (`rescue_tokens(&env.current_contract_address(), ..)`), because every
+    /// balance in this contract's own ledger entry is accounted user money:
+    /// draining it through the rescue hatch would be indistinguishable from
+    /// theft. Any *other* token id is rescuable, which is the point of the
+    /// hatch: by construction the contract never accounts balances of a token
+    /// it does not issue, so no accounted funds can sit under a foreign id.
+    ///
+    /// # Security
+    ///
+    /// - Admin-gated: reverts unless `caller` holds the `Admin` role (or the
+    ///   implicit all-roles grant the admin carries) via
+    ///   [`admin::require_admin`].
+    /// - `amount` must be positive.
+    /// - Emits a `rescue` event on success.
+    ///
+    /// @notice Sends `amount` of the foreign SEP-41 token at `token` held by
+    ///         this contract to `to`. Admin only; this contract's own token id
+    ///         is rejected.
+    /// @param caller The address requesting the rescue; must hold the Admin role.
+    /// @param token The contract id of the stranded SEP-41 token to rescue.
+    /// @param to The recovery address receiving the rescued balance.
+    /// @param amount The amount of `token` to move to `to`; must be positive.
+    /// @return `Ok(())` on success, [`TokenError::UnknownToken`] when `token` is
+    ///         this contract's own id, [`TokenError::InvalidAmount`] when
+    ///         `amount <= 0`, or [`TokenError::NotInitialized`] when the
+    ///         contract is uninitialized.
+    pub fn rescue_tokens(
+        env: Env,
+        caller: Address,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+
+        if token == env.current_contract_address() {
+            return Err(TokenError::UnknownToken);
+        }
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let client = soroban_sdk::token::TokenClient::new(&env, &token);
+        let contract_balance = client.balance(&env.current_contract_address());
+        if contract_balance < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+
+        client.transfer(&env.current_contract_address(), &to, &amount);
+        events::emit_rescued(&env, &caller, &token, &to, amount);
         Ok(())
     }
 

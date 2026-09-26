@@ -263,3 +263,21 @@ pub fn emit_batch_execute(env: &Env, from: &Address, count: u32) {
     env.events()
         .publish((symbol_short!("exec_btch"),), (from.clone(), count));
 }
+
+/// Emits the `rescue` event when the admin rescues a foreign token balance out
+/// of the contract via [`BcForgeToken::rescue_tokens`].
+///
+/// @notice Publishes rescue event data including the admin caller, the rescued
+///         token id, the recovery address, and the rescued amount.
+/// @dev The event topics include the `rescue` symbol.
+/// @param env The Soroban environment.
+/// @param caller The admin address that authorized the rescue.
+/// @param token The contract id of the rescued (foreign) token.
+/// @param to The recovery address that received the balance.
+/// @param amount The amount of the foreign token that was rescued.
+pub fn emit_rescued(env: &Env, caller: &Address, token: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("rescue"),),
+        (caller.clone(), token.clone(), to.clone(), amount),
+    );
+}

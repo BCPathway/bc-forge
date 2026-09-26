@@ -73,6 +73,44 @@ The following components represent key security-sensitive areas within the codeb
 - **Admin roles, quorum, timelock, and upgrade execution (`execute_upgrade`, `execute_upgrade_batch`)**: `contracts/admin/src/lib.rs`
 - **Reentrancy gap**: Module-level note in `contracts/admin/src/lib.rs`: "Proposal lifecycle entry points share a persistent RAII guard. The guard is entered before authorization callbacks and remains held through WASM deployment, preventing callbacks from creating, changing, cancelling, or executing proposals while a lifecycle operation is active."
 - **Workspace-excluded crates not built in CI**: `contracts/compound_fees`, `contracts/flash_loan_guard`, and `contracts/yield_vault` (in the `exclude` array in root `Cargo.toml`)
+- **Admin rescue hatch (`rescue_tokens`)**: `contracts/token/src/lib.rs` and `contracts/wrapper/src/lib.rs` (see [Admin rescue hatch](#admin-rescue-hatch) below)
+
+## Admin Rescue Hatch
+
+`rescue_tokens(caller, token, to, amount)` is the admin-only escape hatch for
+SEP-41 tokens that were sent to a contract by mistake. Without it, a mistaken
+transfer is permanently stuck: nothing in a token's interface lets a third
+party move a balance it holds but cannot sign for.
+
+**Who can call it.** Only the contract admin (the holder of the `Admin` role,
+which implicitly carries every role) via `bc_forge_admin::require_admin`. Every
+call requires the caller's own authorization on top of the role check.
+
+**What it can move.** Any SEP-41 token id the contract holds **except** the
+accounted asset(s) listed below. Only "unknown" tokens — tokens the contract
+does not itself issue or account — are rescuable.
+
+**What it can never move.**
+
+- On the token contract (`BcForgeToken::rescue_tokens`), rescuing the
+  contract's **own token id** is rejected with `TokenError::UnknownToken`.
+  Every balance in the token contract's own ledger entry is accounted user
+  money (balances, supply backing), so draining it through the hatch would be
+  indistinguishable from theft.
+- On the wrapper vault (`WrapperContract::rescue_tokens`), rescuing the
+  **underlying asset** recorded at initialization is rejected with
+  `WrapperError::UnderlyingAssetProtected`. That single id is what
+  `total_assets()` reports and what backs every user's `unwrap`/`withdraw`, so
+  banning it bans the whole of the vault's accounted assets. The wrapper's own
+  wrapped-token id is equally unrescuable in practice: user share balances
+  live under it, and it is never held by the vault except through the same
+  mistake path as any other foreign token — the explicit ban is the
+  underlying id.
+
+**Other limits.** `amount` must be positive, the rescue reverts with
+`InsufficientBalance` if the contract holds less than `amount` of the foreign
+token, and every successful rescue emits a `rescue` event naming the caller,
+the rescued token, the recovery address, and the amount.
 
 ## Response Timeline
 
