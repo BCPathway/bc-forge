@@ -271,18 +271,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bc-forge-yield-vault"
-version = "0.1.0"
-dependencies = [
- "bc-forge-admin",
- "bc-forge-lifecycle",
- "bc-forge-rate-limit",
- "bc-forge-token",
- "bc-forge-ttl",
- "soroban-sdk",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

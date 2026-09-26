@@ -1,4 +1,4 @@
-use crate::{BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
+use crate::{AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger as _;
@@ -670,6 +670,148 @@ fn test_unpause_when_not_paused_returns_error() {
     // Unpausing an active system returns NotPaused error
     let result = client.try_unpause_as(&pauser);
     assert_eq!(result, Err(Ok(TokenError::NotPaused)));
+}
+
+// ─── #913: AllowanceData migration from legacy storage ───────────────────────
+
+fn write_legacy_allowance(
+    env: &Env,
+    contract_id: &Address,
+    owner: &Address,
+    spender: &Address,
+    amount: i128,
+    expiration_ledger: u32,
+) {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Allowance(owner.clone(), spender.clone()), &amount);
+        if expiration_ledger > 0 {
+            env.storage().persistent().set(
+                &DataKey::AllowanceExp(owner.clone(), spender.clone()),
+                &expiration_ledger,
+            );
+        }
+    });
+}
+
+fn has_legacy_allowance_exp(
+    env: &Env,
+    contract_id: &Address,
+    owner: &Address,
+    spender: &Address,
+) -> bool {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .has(&DataKey::AllowanceExp(owner.clone(), spender.clone()))
+    })
+}
+
+fn read_allowance_struct(
+    env: &Env,
+    contract_id: &Address,
+    owner: &Address,
+    spender: &Address,
+) -> Option<AllowanceData> {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .get::<_, AllowanceData>(&DataKey::Allowance(owner.clone(), spender.clone()))
+    })
+}
+
+#[test]
+fn test_legacy_allowance_migrates_on_first_read() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&admin, &owner, &1_000);
+    write_legacy_allowance(&env, &contract_id, &owner, &spender, 400, 0);
+
+    assert_eq!(client.allowance(&owner, &spender), 400);
+    assert!(
+        !has_legacy_allowance_exp(&env, &contract_id, &owner, &spender),
+        "AllowanceExp must be removed after migration"
+    );
+    let data = read_allowance_struct(&env, &contract_id, &owner, &spender)
+        .expect("AllowanceData must be persisted");
+    assert_eq!(data.amount, 400);
+    assert_eq!(data.expiration_ledger, 0);
+}
+
+#[test]
+fn test_legacy_allowance_migrates_and_spends_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &owner, &1_000);
+    write_legacy_allowance(&env, &contract_id, &owner, &spender, 250, u32::MAX);
+
+    assert!(client
+        .try_transfer_from(&spender, &owner, &recipient, &100)
+        .is_ok());
+    assert_eq!(client.allowance(&owner, &spender), 150);
+    assert!(
+        !has_legacy_allowance_exp(&env, &contract_id, &owner, &spender),
+        "legacy expiration key must not remain after spend"
+    );
+}
+
+#[test]
+fn test_expired_allowance_cannot_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    client.mint(&admin, &owner, &1_000);
+    env.ledger().set_sequence_number(10);
+    let exp_ledger = env.ledger().sequence();
+    write_legacy_allowance(&env, &contract_id, &owner, &spender, 500, exp_ledger);
+    env.ledger().set_sequence_number(exp_ledger + 1);
+
+    assert_eq!(client.allowance(&owner, &spender), 0);
+    let result = client.try_transfer_from(&spender, &owner, &recipient, &1);
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientAllowance as u32
+        )))
+    );
+}
+
+#[test]
+fn test_fresh_approve_persists_only_allowance_data() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, contract_id) = setup_contract(&env);
+    let _admin = init_default(&env, &client);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.approve(&owner, &spender, &777, &123_456);
+
+    assert!(
+        !has_legacy_allowance_exp(&env, &contract_id, &owner, &spender),
+        "approve must not write AllowanceExp"
+    );
+    let data = read_allowance_struct(&env, &contract_id, &owner, &spender)
+        .expect("approve must write AllowanceData");
+    assert_eq!(data.amount, 777);
+    assert_eq!(data.expiration_ledger, 123_456);
 }
 
 // ─── #762: transfer / transfer_from pause hooks ───────────────────────────────
