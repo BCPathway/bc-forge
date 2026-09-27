@@ -1,22 +1,32 @@
 import React, { createContext, useContext, useMemo, ReactNode } from 'react';
-import { bcForgeClient, bcForgeClientConfig } from '@bc-forge/sdk';
+import { bcForgeClient, bcForgeClientConfig, VaultClient } from '@bc-forge/sdk';
 
 interface bcForgeContextType {
   client: bcForgeClient | null;
+  vaultClient: VaultClient | null;
 }
 
-const bcForgeContext = createContext<bcForgeContextType>({ client: null });
+const bcForgeContext = createContext<bcForgeContextType>({
+  client: null,
+  vaultClient: null,
+});
 
 export interface BcForgeProviderProps {
   config: bcForgeClientConfig;
+  /** Optional vault client consumed by vault-specific hooks. */
+  vaultClient?: VaultClient;
   children: ReactNode;
 }
 
-export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({ config, children }) => {
+export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({
+  config,
+  vaultClient,
+  children,
+}) => {
   const client = useMemo(() => new bcForgeClient(config), [config]);
 
   return (
-    <bcForgeContext.Provider value={{ client }}>
+    <bcForgeContext.Provider value={{ client, vaultClient: vaultClient ?? null }}>
       {children}
     </bcForgeContext.Provider>
   );
@@ -28,6 +38,17 @@ export const useBcForgeClient = () => {
     throw new Error('useBcForgeClient must be used within a BcForgeProvider');
   }
   return context.client;
+};
+
+/**
+ * Return the VaultClient supplied to BcForgeProvider.
+ */
+export const useVaultClient = () => {
+  const context = useContext(bcForgeContext);
+  if (!context.vaultClient) {
+    throw new Error('useVaultClient requires a vaultClient on BcForgeProvider');
+  }
+  return context.vaultClient;
 };
 
 export interface WalletState {

@@ -46,6 +46,25 @@ describe('VaultClient surface and methods', () => {
     expect(typeof client.simulateWithdraw).toBe('function');
     expect(typeof client.simulateCompound).toBe('function');
     expect(typeof client.signTx).toBe('function');
+    expect(typeof client.setWalletAdapter).toBe('function');
+    expect(typeof client.getWalletAdapter).toBe('function');
+  });
+
+  it('stores and clears the wallet adapter used for signerless writes', () => {
+    const adapter = {
+      name: 'test-wallet',
+      connected: true,
+      publicKey: Keypair.random().publicKey(),
+      connect: jest.fn(async () => undefined),
+      disconnect: jest.fn(async () => undefined),
+      signTransaction: jest.fn(async (xdr: string) => xdr),
+    };
+
+    client.setWalletAdapter(adapter);
+    expect(client.getWalletAdapter()).toBe(adapter);
+
+    client.setWalletAdapter(undefined);
+    expect(client.getWalletAdapter()).toBeUndefined();
   });
 
   it('handles deposit invocation with and without slippage tolerance', async () => {
@@ -68,7 +87,13 @@ describe('VaultClient surface and methods', () => {
     // 2. Call deposit with minSharesOut
     const res2 = await client.deposit(user, 1000n, source, 950n);
     expect(res2.success).toBe(true);
-    expect(invokeContract).toHaveBeenCalledTimes(2);
+
+    // 3. Omit Keypair: VaultClient.invokeContract receives no source and can
+    // fall back to its configured WalletAdapter.
+    const res3 = await client.deposit(user, 1000n, undefined, 900n);
+    expect(res3.success).toBe(true);
+    expect(invokeContract).toHaveBeenCalledWith('deposit', expect.any(Array), undefined);
+    expect(invokeContract).toHaveBeenCalledTimes(3);
   });
 
   it('handles withdraw invocation with and without minTokensOut', async () => {

@@ -27,7 +27,7 @@ import {
   simulateTransaction,
 } from './utils';
 
-import { SimulationError, RPCError } from './errors';
+import { SimulationError, RPCError, SignerRequiredError } from './errors';
 import type { TransactionResult } from './client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -60,6 +60,16 @@ export class VaultClient {
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
     this.walletAdapter = config.walletAdapter;
+  }
+
+  /** Replace or clear the wallet adapter used for browser signing. */
+  setWalletAdapter(adapter?: WalletAdapter): void {
+    this.walletAdapter = adapter;
+  }
+
+  /** Return the currently configured wallet adapter, if any. */
+  getWalletAdapter(): WalletAdapter | undefined {
+    return this.walletAdapter;
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
@@ -178,13 +188,13 @@ export class VaultClient {
    *
    * @param caller       - Depositor address
    * @param amount       - Amount of underlying tokens to deposit
-   * @param source       - Depositor keypair (or signer)
+   * @param source       - Optional depositor keypair; when omitted, the configured WalletAdapter signs
    * @param minSharesOut - Optional minimum shares to receive (slippage protection)
    */
   async deposit(
     caller: string,
     amount: bigint,
-    source: Keypair,
+    source?: Keypair,
     minSharesOut?: bigint,
   ): Promise<TransactionResult> {
     const args =
@@ -509,6 +519,9 @@ export class VaultClient {
       try {
         return await fn();
       } catch (error) {
+        if (error instanceof SignerRequiredError) {
+          throw error;
+        }
         lastError = error;
         if (i < retries - 1) {
           await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
@@ -555,11 +568,13 @@ export class VaultClient {
   private async invokeContract(
     method: string,
     args: xdr.ScVal[],
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
     return this.withRetry(async () => {
-      try {
-        const txXdr = await buildInvokeTransaction(
+      let txXdr: string;
+
+      if (source) {
+        txXdr = await buildInvokeTransaction(
           this.rpcUrl,
           this.networkPassphrase,
           this.contractId,
@@ -567,25 +582,40 @@ export class VaultClient {
           args,
           source,
         );
-
-        const response = await submitTransaction(this.rpcUrl, txXdr);
-
-        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-          return {
-            success: true,
-            hash: response.txHash,
-            returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
-          };
+      } else {
+        const adapter = this.walletAdapter;
+        if (!adapter) {
+          throw new SignerRequiredError();
+        }
+        if (!adapter.connected || !adapter.publicKey) {
+          throw new SignerRequiredError('Wallet adapter is not connected');
         }
 
-        return {
-          success: false,
-          hash: response.txHash,
-        };
-      } catch (error: unknown) {
-        if (error instanceof SimulationError) throw error;
-        throw error;
+        const unsignedXdr = await buildUnsignedTransaction(
+          this.rpcUrl,
+          this.networkPassphrase,
+          this.contractId,
+          method,
+          args,
+          adapter.publicKey,
+        );
+        txXdr = await adapter.signTransaction(unsignedXdr);
       }
+
+      const response = await submitTransaction(this.rpcUrl, txXdr);
+
+      if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        return {
+          success: true,
+          hash: response.txHash,
+          returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+        };
+      }
+
+      return {
+        success: false,
+        hash: response.txHash,
+      };
     });
   }
 }

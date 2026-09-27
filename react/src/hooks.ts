@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useBcForgeClient } from './context';
+import { useBcForgeClient, useVaultClient } from './context';
 import { Keypair } from '@stellar/stellar-sdk';
 
 /**
@@ -221,4 +221,66 @@ export function useAllowance(owner: string | undefined, spender: string | undefi
   }, [fetchAllowance]);
 
   return { data, loading, error, refetch: fetchAllowance };
+}
+
+/**
+ * Hook to deposit underlying tokens into the configured vault.
+ *
+ * Signing is delegated to the WalletAdapter configured on VaultClient; the
+ * hook deliberately exposes no Keypair or secret-key parameter.
+ */
+export function useVaultDeposit() {
+  const client = useVaultClient();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const deposit = useCallback(
+    async (caller: string, amount: bigint, minSharesOut?: bigint) => {
+      try {
+        setLoading(true);
+        setError(null);
+        return await client.deposit(caller, amount, undefined, minSharesOut);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        setError(error);
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+
+  return { deposit, loading, error };
+}
+
+/**
+ * Hook to approve a pending multisig proposal with the connected wallet.
+ *
+ * bcForgeClient.approveProposal already falls back to its configured
+ * WalletAdapter when no Keypair is supplied.
+ */
+export function useProposalVote() {
+  const client = useBcForgeClient();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const vote = useCallback(
+    async (admin: string, proposalId: bigint) => {
+      try {
+        setLoading(true);
+        setError(null);
+        return await client.approveProposal(admin, proposalId);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        setError(error);
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+
+  return { vote, loading, error };
 }
