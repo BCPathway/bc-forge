@@ -86,6 +86,15 @@ jobs:
           name: coverage-report
           path: ./tarpaulin-report.html
 
+      # Upload coverage to Codecov (#955). Codecov computes patch (diff)
+      # coverage from these reports and posts project/patch status checks on
+      # the PR; enabling branch protection on those checks is what makes a
+      # coverage drop on changed lines fail the PR. Upload failures stay
+      # non-blocking (`fail_ci_if_error: false`) until the maintainer adds a
+      # CODECOV_TOKEN and enables the Codecov GitHub App — without a token,
+      # tokenless uploads are rejected with "Token required - not valid
+      # tokenless upload" (observed on the first CI run of this PR), and the
+      # absolute 85% floor below is still enforced by --fail-under.
       - name: Upload coverage reports for Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -93,15 +102,6 @@ jobs:
           files: ./cobertura.xml,./lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
-
-      # Patch/diff coverage gate (#955): a PR that lowers coverage on the
-      # lines it touches fails this check (patch target 85% in codecov.yml).
-      # The project status check also fails on total-coverage regressions.
-      - name: Enforce diff (patch) coverage via Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
 
       - name: Build WASM
         env:
