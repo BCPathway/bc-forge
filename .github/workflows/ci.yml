@@ -63,15 +63,45 @@ jobs:
       - name: Install Tarpaulin
         run: cargo install cargo-tarpaulin --locked
 
-      - name: Run coverage (Tarpaulin)
-        run: cargo tarpaulin --workspace --out Html --out Xml --out Stdout
-        continue-on-error: true
+      # Coverage gate (#955): `continue-on-error` is gone — a coverage drop
+      # now fails CI. The gate is 85% line coverage: the workspace measures
+      # 89.35% (2627/2940 lines, measured with cargo-tarpaulin 0.37.4 with
+      # the e2e crate excluded). bc-forge-e2e-tests is excluded because the
+      # suite targets the Stellar testnet and is not unit-runnable in CI.
+      # Coverage reports are emitted as Cobertura XML and LCOV and uploaded
+      # to Codecov below, where patch (diff) coverage is also enforced.
+      - name: Run coverage (Tarpaulin, gated)
+        run: |
+          cargo tarpaulin --workspace \
+            --exclude bc-forge-e2e-tests \
+            --fail-under 85 \
+            --out Html \
+            --out Xml \
+            --out Lcov \
+            --out Stdout
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: ./tarpaulin-report.html
+
+      - name: Upload coverage reports for Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          directory: .
+          files: ./cobertura.xml,./lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      # Patch/diff coverage gate (#955): a PR that lowers coverage on the
+      # lines it touches fails this check (patch target 85% in codecov.yml).
+      # The project status check also fails on total-coverage regressions.
+      - name: Enforce diff (patch) coverage via Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
 
       - name: Build WASM
         env:
