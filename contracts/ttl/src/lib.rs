@@ -1,4 +1,5 @@
 #![no_std]
+// SPDX-License-Identifier: MIT
 
 use soroban_sdk::{Env, IntoVal, Val};
 

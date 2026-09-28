@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import { getClientConfig } from '../utils/config.js';

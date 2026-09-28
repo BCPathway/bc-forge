@@ -18,6 +18,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check SPDX license headers (#975)
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              contracts/*/test_snapshots/*|sdk/src/generated/*) continue ;;
+            esac
+            if ! grep -Eq '^// SPDX-License-Identifier: [A-Za-z0-9.+-]+' "$file"; then
+              echo "::error file=$file::Missing SPDX license identifier"
+              missing=1
+            fi
+          done < <(git ls-files -z -- \
+            ':(glob)contracts/**/*.rs' \
+            ':(glob)sdk/src/**/*.ts' ':(glob)sdk/src/**/*.tsx' \
+            ':(glob)cli/**/*.ts' ':(glob)cli/**/*.tsx' \
+            ':(glob)react/src/**/*.ts' ':(glob)react/src/**/*.tsx')
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
       - name: Ensure admin test snapshots are untracked
         if: github.event_name == 'pull_request'
         shell: bash

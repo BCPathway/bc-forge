@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { describe, it, expect } from '@jest/globals';
 import { WrapperClient } from './wrapperClient';
 

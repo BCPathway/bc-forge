@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Command, CommanderError } from "commander";
 import { createUpgradeCommand } from "./commands/upgrade.js";
 import { createSmokeTestCommand } from "./commands/smoke-test.js";

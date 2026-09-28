@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use soroban_sdk::{symbol_short, Address, Env};
 
 pub fn emit_vesting_created(

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Unit tests for the lockup period state storage mapping (#719).
 //!
 //! The mapping stores per-user [`LockupState`] (locked amount + unlock

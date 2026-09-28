@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/sdk — Tests for offline transaction builder and simulation methods
  */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Reentrancy Guard Module for Vesting Contract
 //!
 //! Implements a reentrancy protection pattern to prevent cross-contract callback attacks.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Keypair } from '@stellar/stellar-sdk';
 import { bcForgeClient } from '@bc-forge/sdk';
 import logger from '../utils/logger.js';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! End-to-end coverage for the multi-sig gated WASM upgrade flow. Resolves
 //! issue #672 (epic: Multi-Sig Gated WASM Upgrades).
 //!

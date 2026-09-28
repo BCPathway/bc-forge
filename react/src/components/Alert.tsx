@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { forwardRef } from 'react';
 
 export type AlertVariant = 'info' | 'success' | 'warning' | 'danger';

@@ -1,4 +1,5 @@
 #![cfg(test)]
+// SPDX-License-Identifier: MIT
 
 //! Integration coverage for a single address holding several roles at once.
 //!

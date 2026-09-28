@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { loadConfigFile, BcForgeConfig } from './config-parser.js';
 import logger from './logger.js';
 import {

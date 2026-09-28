@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/cli — Deployment Orchestrator
  *

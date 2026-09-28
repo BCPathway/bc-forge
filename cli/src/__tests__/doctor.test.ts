@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { describe, it, expect, vi } from 'vitest';
 import { StrKey } from '@stellar/stellar-sdk';
 import {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/sdk — E2E Integration Test: Token -> Vault -> Compound flow (#740)
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /** Test/build shim so CLI unit tests do not hit live Soroban RPC. */
 export enum Role {
   Admin = "Admin",

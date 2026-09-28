@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Wrapper Contract
 //!
 //! Wraps any SEP-41 compliant token into a bc-forge compatible token,

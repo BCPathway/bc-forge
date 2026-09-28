@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';

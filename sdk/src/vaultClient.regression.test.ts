@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { jest } from '@jest/globals';
 import { rpc as SorobanRpc, StrKey } from '@stellar/stellar-sdk';
 

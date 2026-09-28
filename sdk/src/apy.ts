@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/sdk — APY Calculation Helper (#745)
  *

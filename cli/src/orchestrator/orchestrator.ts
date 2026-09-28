@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import logger from '../utils/logger.js';
 import { loadConfigFile, BcForgeConfig } from '../utils/config-parser.js';
 import { initializeSuperAdmin } from './init-superadmin.js';

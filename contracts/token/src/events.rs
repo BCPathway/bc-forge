@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Structured event emission for the token contract.
 //!
 //! @title Token Events

@@ -110,6 +110,8 @@ git checkout -b docs/15-sdk-api-reference
 
 ### 3. Code Style
 
+All Rust and TypeScript source files in monitored trees must include an SPDX license identifier line (`// SPDX-License-Identifier: MIT` unless another license is explicitly declared). Generated code, dependency lockfiles, and test snapshots are excluded from this requirement and its CI check.
+
 #### Rust (Smart Contracts)
 
 - Follow standard Rust formatting: `cargo fmt --all`

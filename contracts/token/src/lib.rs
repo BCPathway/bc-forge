@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Token Contract
 //!
 //! A compact SEP-41-compatible token used by the vesting contract tests.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::{InvoiceStatus, Recipient, SplitContract, SplitContractClient};
 use bc_forge_admin as admin;
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};

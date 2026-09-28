@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { createContext, useContext, useMemo, useState, useCallback, ReactNode } from 'react';
 import {
   bcForgeClient,

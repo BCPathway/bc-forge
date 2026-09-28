@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Yield Vault Contract
 //!
 //! **WARNING: This contract is EXPERIMENTAL and NOT fully tested. DO NOT DEPLOY in a production environment.**

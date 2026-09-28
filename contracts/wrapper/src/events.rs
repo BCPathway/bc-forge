@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Wrapper Events
 //!
 //! Structured event emission for all wrapper contract operations.

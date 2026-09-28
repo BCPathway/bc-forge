@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export interface WalletAdapter {
   /** Human readable adapter name */
   name: string;

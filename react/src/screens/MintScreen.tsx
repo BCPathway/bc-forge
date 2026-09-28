@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { useState } from 'react';
 import { useMint, useWallet } from '../hooks';
 import { truncatePublicKey } from '../context';

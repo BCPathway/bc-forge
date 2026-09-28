@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { VaultClient, calculateApy } from '@bc-forge/sdk';
 import type { ApyResult, WalletAdapter } from '@bc-forge/sdk';

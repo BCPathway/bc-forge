@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Command } from "commander";
 import { addNetworkOptions } from "../network.js";
 
