@@ -49,7 +49,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --all
+        run: cargo test --all --exclude bc-forge-e2e-tests
 
       - name: Check for circular crate dependencies (#770)
         run: python3 scripts/check_crate_cycles.py
@@ -84,6 +84,31 @@ jobs:
       - name: Publish gas benchmarks summary (#961)
         if: always()
         run: cargo test -p bc-forge-admin gas_bench -- --nocapture | python3 scripts/parse_gas_bench.py >> $GITHUB_STEP_SUMMARY
+
+  # ─── WASM Upgrade E2E (#965) ────────────────────────────────────────────
+  upgrade-e2e:
+    name: WASM Upgrade E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-upgrade-e2e
+
+      - name: Build token WASM
+        run: cargo build -p bc-forge-token --target wasm32-unknown-unknown --release
+
+      - name: Run upgrade E2E tests
+        run: cargo test -p bc-forge-e2e-tests
 
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────
   sdk:

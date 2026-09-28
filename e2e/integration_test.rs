@@ -10,7 +10,9 @@ use bc_forge_wrapper::{WrapperContract, WrapperContractClient};
 #[cfg(test)]
 use soroban_sdk::testutils::Address as _;
 #[cfg(test)]
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::testutils::Ledger;
+#[cfg(test)]
+use soroban_sdk::{vec, Address, Bytes, Env, String};
 #[cfg(test)]
 use std::env;
 
@@ -28,6 +30,56 @@ fn get_testnet_rpc_url() -> std::string::String {
 fn get_testnet_network_passphrase() -> std::string::String {
     env::var("STELLAR_TESTNET_PASSPHRASE")
         .unwrap_or_else(|_| "Test SDF Network ; September 2015".to_string())
+}
+
+#[test]
+fn test_admin_governed_wasm_upgrade_preserves_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BcForgeToken, ());
+    let client = BcForgeTokenClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let second_admin = Address::generate(&env);
+    let holder = Address::generate(&env);
+    client.initialize(
+        &admin,
+        &7,
+        &String::from_str(&env, "upgrade-test-token"),
+        &String::from_str(&env, "UTT"),
+    );
+    client.set_admin_pool(&vec![&env, admin.clone(), second_admin.clone()], &2);
+    client.mint(&admin, &holder, &1_234_567);
+
+    let wasm_hash = env
+        .deployer()
+        .upload_contract_wasm(Bytes::from_slice(&env, &[]));
+
+    let proposal_id = client.create_proposal(
+        &admin,
+        &String::from_str(&env, "upgrade with same-source WASM"),
+    );
+    client.approve_proposal(&second_admin, &proposal_id);
+    let mut ledger = env.ledger().get();
+    ledger.timestamp += 86_401;
+    env.ledger().set(ledger);
+
+    client.execute_upgrade(&admin, &proposal_id, &wasm_hash);
+
+    assert_eq!(client.balance(&holder), 1_234_567);
+    assert_eq!(client.supply(), 1_234_567);
+    assert_eq!(client.admin(), admin);
+
+    let (admin_pool, threshold, is_super_admin) = env.as_contract(&contract_id, || {
+        (
+            bc_forge_admin::get_admin_pool(&env),
+            bc_forge_admin::get_threshold(&env),
+            bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &admin),
+        )
+    });
+    assert_eq!(admin_pool, vec![&env, admin.clone(), second_admin]);
+    assert_eq!(threshold, 2);
+    assert!(is_super_admin);
 }
 
 /// Test the complete lifecycle on testnet

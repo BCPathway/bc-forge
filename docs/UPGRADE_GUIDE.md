@@ -392,6 +392,25 @@ Role assignments, balances, fee config, and governance state are stored in
 `persistent()` or `instance()` storage and survive WASM upgrades automatically.
 No migration is needed for storage — only the contract code is replaced.
 
+## Automated WASM upgrade verification
+
+The E2E harness builds the current token WASM, creates an initialized token with
+balances and a two-member admin pool, executes the timelocked
+`execute_upgrade` route, and verifies balances, supply, admin, super-admin role,
+pool, and threshold afterward. Soroban's native test host cannot validate the
+compiled token WASM's reference-types section, so the state-preservation test
+uses the same empty-WASM test placeholder as the admin crate's upgrade tests;
+the compiled token artifact is still built in CI. Run it locally with:
+
+```bash
+cargo build -p bc-forge-token --target wasm32-unknown-unknown --release
+cargo test -p bc-forge-e2e-tests
+```
+
+CI runs these commands in the dedicated `WASM Upgrade E2E` job. The token WASM
+build and the admin-governed state-preservation execution are separate checks
+until the test host supports the compiled artifact's reference-types section.
+
 ## Compatibility rules
 
 Changes are upgrade-compatible only when they preserve:
@@ -410,10 +429,10 @@ release note.
 | Code | Variant | Meaning |
 | --- | --- | --- |
 | 3 | `UnauthorizedRole` | Executor is not an admin-pool member |
-| 7 | `ProposalNotFound` | No proposal exists under the given ID |
-| 8 | `QuorumNotMet` | Approval threshold not yet reached |
+| 8 | `ProposalNotFound` | No proposal exists under the given ID |
 | 9 | `ProposalAlreadyExecuted` | Proposal was already executed |
-| 10 | `TimelockActive` | 24-hour timelock has not yet expired |
+| 12 | `QuorumNotMet` | Approval threshold not yet reached |
+| 13 | `TimelockActive` | 24-hour timelock has not yet expired |
 
 ## Timelock details
 
