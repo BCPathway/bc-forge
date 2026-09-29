@@ -13,6 +13,7 @@ import {
 import { createDeployCommand } from "./commands/deploy.js";
 import { createExportDeploymentsCommand } from "./commands/export-deployments.js";
 import { createBatchMintCommand } from "./commands/batch-mint.js";
+import { createPauseCommand } from "./commands/pause.js";
 import { createInitCommand } from "./commands/init.js";
 import { createDeploymentsCommand } from "./commands/deployments.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
@@ -50,7 +51,9 @@ export function buildProgram(): Command {
     .addCommand(createConnectCommand())
     .addCommand(createOrchestrateCommand())
     .addCommand(createExportDeploymentsCommand())
-    .addCommand(createBatchMintCommand());
+    .addCommand(createBatchMintCommand())
+    .addCommand(createPauseCommand("pause"))
+    .addCommand(createPauseCommand("unpause"));
 
   return program;
 }

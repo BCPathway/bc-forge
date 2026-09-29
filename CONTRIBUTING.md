@@ -18,6 +18,9 @@ bc-forge is maintained on [drips.network](https://www.drips.network). As a contr
 3. Browse the bc-forge project for available issues
 4. Claim and work on issues that match your skills
 
+The linked account is where rewards are paid, so set it up before opening your
+PR. The README summarizes the same flow in [How we fund contributors](README.md#how-we-fund-contributors).
+
 ## 🛠️ Development Setup
 
 ### Prerequisites
@@ -76,7 +79,7 @@ git rebase upstream/main
 
 - Check the [Issues](https://github.com/BCPathway/bc-forge/issues) tab
 - Look for labels:
-  - `good-first-issue` — Perfect for newcomers
+  - `good first issue` — Perfect for newcomers
   - `smart-contract` — Rust/Soroban contract work
   - `sdk` — TypeScript SDK improvements
   - `documentation` — Docs and guides

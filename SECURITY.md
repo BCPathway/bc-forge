@@ -114,6 +114,40 @@ does not itself issue or account — are rescuable.
 token, and every successful rescue emits a `rescue` event naming the caller,
 the rescued token, the recovery address, and the amount.
 
+## Security Documentation
+
+Operational and audit documentation that supports this policy:
+
+- [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) — spec-to-code traceability matrix mapping `.kiro/specs/` requirements and the mint, role, and upgrade entry points to implementing functions and tests.
+- [`docs/ADMIN_KEYS.md`](docs/ADMIN_KEYS.md) — production admin key hygiene, multisig policy, and hardware-wallet/offline signing.
+- [`docs/UPGRADE_GUIDE.md`](docs/UPGRADE_GUIDE.md) — how to build, upload, verify, and roll back a contract upgrade, including the multisig governance path.
+- [`docs/ACCESS_CONTROL.md`](docs/ACCESS_CONTROL.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — role hierarchy and module boundaries.
+
+## Incident Response
+
+The contract exposes `BcForgeToken::pause` (`contracts/token/src/lib.rs`),
+restricted to the admin or a `Pauser` role holder. The `bc-forge` CLI can pause
+or unpause without writing a new script, using an existing signer or a
+pre-signed transaction file:
+
+```bash
+# Hot key from CLI config / flags (testnet or local only)
+bc-forge pause --contract-id <CONTRACT_ID> --source <S...>
+bc-forge unpause --contract-id <CONTRACT_ID> --source <S...>
+
+# Production: build unsigned, sign on a hardware wallet, then submit
+bc-forge pause --contract-id <CONTRACT_ID> --build-only \
+  --public-key <ADMIN_OR_PAUSER_PUBKEY> --out pause-unsigned.xdr
+stellar tx sign --sign-with-ledger --network mainnet pause-unsigned.xdr > pause-signed.xdr
+bc-forge pause --contract-id <CONTRACT_ID> --signature pause-signed.xdr
+
+# Same flow for unpause with `bc-forge unpause`.
+```
+
+No secret key is stored in the repository or in the pauser tool. The
+`--signature` path submits a transaction that was already signed elsewhere. See
+[ADMIN_KEYS.md](docs/ADMIN_KEYS.md) for the signing and key-rotation policy.
+
 ## Response Timeline
 
 We aim to respond to security reports in a timely manner:

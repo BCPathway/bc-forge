@@ -661,6 +661,60 @@ export class bcForgeClient {
     return this.invokeContract('unpause', [addressToScVal(signerAddress)], source);
   }
 
+  /**
+   * Build an unsigned pause transaction for offline signing.
+   *
+   * @param sourcePublicKey - Pauser/admin public key that will sign the transaction
+   * @returns Unsigned transaction XDR string
+   */
+  async buildPauseTx(sourcePublicKey: string): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'pause',
+      [addressToScVal(sourcePublicKey)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned unpause transaction for offline signing.
+   *
+   * @param sourcePublicKey - Pauser/admin public key that will sign the transaction
+   * @returns Unsigned transaction XDR string
+   */
+  async buildUnpauseTx(sourcePublicKey: string): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'unpause',
+      [addressToScVal(sourcePublicKey)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Submit an already-signed transaction XDR (for example one signed on a
+   * hardware wallet or offline machine).
+   *
+   * @param txXdr - Signed transaction XDR string
+   */
+  async submitSignedTransaction(txXdr: string): Promise<TransactionResult> {
+    const response = await submitTransaction(this.rpcUrl, txXdr, {
+      networkPassphrase: this.networkPassphrase,
+    });
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: response.txHash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+    return { success: false, hash: response.txHash };
+  }
+
   // ─── Offline Transaction Builders ──────────────────────────────────────────
 
   /**
