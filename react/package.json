@@ -19,7 +19,8 @@
     "dev": "tsup src/index.ts --format cjs,esm --watch --dts",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "jest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "prepublishOnly": "node ../../scripts/check-release-tag.mjs --pkg react/package.json"
   },
   "peerDependencies": {
     "@stellar/stellar-sdk": "^16.0.1",

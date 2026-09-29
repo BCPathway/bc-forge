@@ -1,0 +1,44 @@
+name: Publish React
+
+on:
+  push:
+    tags:
+      - 'react-v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate tag matches package version
+        run: node scripts/check-release-tag.mjs --pkg react/package.json
+
+      - name: Build React package
+        run: npm run build --workspace @bc-forge/react
+
+      - name: Configure npm auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then echo 'NPM_TOKEN not set' && exit 1; fi
+          npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+
+      - name: Publish React
+        run: npm publish --workspace @bc-forge/react --access public
