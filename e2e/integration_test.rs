@@ -1,7 +1,14 @@
-//! # End-to-End Integration Tests
+//! # End-to-End Integration Tests (offline / mock mode)
 //!
-//! Tests the complete lifecycle of the bc-forge token contract on Stellar testnet.
-//! Includes deployment, initialization, minting, transferring, and verification.
+//! Deterministic, offline coverage for the bc-forge token and wrapper
+//! contracts, exercised through `soroban_sdk`'s in-process test host
+//! (`Env::default()` plus `mock_all_auths()`). This is the suite pull-request
+//! CI runs via `cargo test --all`.
+//!
+//! Live Stellar **testnet** coverage is deliberately not here: the Soroban test
+//! host cannot reach a network. The nightly `Nightly E2E (Testnet)` workflow
+//! deploys the token to testnet and drives it with funded accounts through the
+//! CLI's live suite (`cli/src/__tests__/e2e-testnet.test.ts`). See README.md.
 
 #[cfg(test)]
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
@@ -11,34 +18,10 @@ use bc_forge_wrapper::{WrapperContract, WrapperContractClient};
 use soroban_sdk::testutils::Address as _;
 #[cfg(test)]
 use soroban_sdk::{Address, Env, String};
-#[cfg(test)]
-use std::env;
 
-/// Helper to get testnet RPC URL from environment or use default
-#[cfg(test)]
-#[allow(dead_code)]
-fn get_testnet_rpc_url() -> std::string::String {
-    env::var("STELLAR_TESTNET_RPC_URL")
-        .unwrap_or_else(|_| "https://soroban-testnet.stellar.org".to_string())
-}
-
-/// Helper to get testnet network passphrase
-#[cfg(test)]
-#[allow(dead_code)]
-fn get_testnet_network_passphrase() -> std::string::String {
-    env::var("STELLAR_TESTNET_PASSPHRASE")
-        .unwrap_or_else(|_| "Test SDF Network ; September 2015".to_string())
-}
-
-/// Test the complete lifecycle on testnet
+/// Test the complete token lifecycle (deploy -> init -> mint -> transfer).
 #[tokio::test]
 async fn test_complete_lifecycle() {
-    // Setup testnet environment
-    let _rpc_url = get_testnet_rpc_url();
-    let _network_passphrase = get_testnet_network_passphrase();
-
-    // Create testnet environment (this would use soroban-cli or similar in real implementation)
-    // For now, we'll use a mock environment for demonstration
     let env = Env::default();
     env.mock_all_auths();
 

@@ -15,9 +15,9 @@ no paid alerting client or service integration is required.
 ## API authentication
 
 The indexer read API (`/api/v1/mints`, `/api/v1/transfers`, `/api/v1/burns`,
-`/api/v1/stats`) is protected by a shared secret. Set it in the environment
-(dotenv loads `.env` automatically) and send it on every request as a bearer
-token:
+`/api/v1/holders`, `/api/v1/supply-history`, `/api/v1/stats`) is protected by a
+shared secret. Set it in the environment (dotenv loads `.env` automatically)
+and send it on every request as a bearer token:
 
 ```bash
 # .env
@@ -32,6 +32,14 @@ Requests with a missing or incorrect token receive HTTP `401` with
 `{ "error": "Unauthorized" }`. The token value is never logged. `GET /health`
 is registered outside the authenticated router and stays public so uptime
 probes keep working.
+
+## Holder & supply aggregates
+
+`GET /api/v1/holders` returns the current token holders with their balances,
+derived from the indexed mint, transfer, and burn events at ingestion time.
+`GET /api/v1/supply-history` returns timestamped supply points, one per
+supply-changing event. Both use the same cursor pagination (`limit`, `cursor`)
+and optional `from_ledger` filtering as the event-list routes.
 
 ## Health/readiness probe
 
@@ -80,5 +88,20 @@ docker run -p 3000:3000 \
 
 ### Database Migrations
 
-Database schema migrations are **not** automatically applied when the container starts (`npm run prisma:migrate` is a development command; the image does not run `migrate dev` on startup). Ensure database migrations are applied separately before starting the container.
+Schema migrations live in `indexer/prisma/migrations/` and are applied with
+`prisma migrate deploy` (`npm run prisma:deploy`). That is the command to use
+against staging and production: it applies the committed migrations in order and
+never prompts or resets data. `npm run prisma:migrate` (`prisma migrate dev`)
+remains a local development command. Run `npm run prisma:generate` to refresh
+the Prisma client after a schema change.
+
+Migrations are **not** automatically applied when the container starts, so run
+`npm run prisma:deploy` separately — or as a release step before starting the
+container.
+
+The aggregate tables `Holder` and `SupplyPoint`, which back
+`GET /api/v1/holders` and `GET /api/v1/supply-history`, are created by
+`20260928193226_add_holder_and_supply_point`. That migration only adds new
+tables and touches no existing table, so it applies cleanly whether or not the
+base schema `init` migration tracked in #1056 has been applied yet.
 

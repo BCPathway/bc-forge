@@ -35,6 +35,30 @@ model Burn {
   createdAt DateTime @default(now())
 }
 
+/// Aggregate holder balances, maintained transactionally by the indexer as
+/// mint, transfer, and burn events are persisted. A row exists only while the
+/// holder's balance is non-zero.
+model Holder {
+  id        String   @id @default(uuid())
+  address   String   @unique
+  balance   String
+  ledger    Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Aggregate supply points, one per supply-changing event (mint or burn).
+/// The `supply` value is the authoritative `new_supply` from the indexed
+/// event payload.
+model SupplyPoint {
+  id        String   @id @default(uuid())
+  timestamp DateTime
+  supply    String
+  ledger    Int
+  txHash    String
+  createdAt DateTime @default(now())
+}
+
 model LastIndexedLedger {
   id     Int @id @default(1)
   ledger Int
