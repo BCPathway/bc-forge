@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: MIT
 //! Property-based (fuzz) tests for `mint` access control.
 //!
 //! Complements the unit tests in `test.rs` by exercising `mint` across a wide
 //! range of amounts against unauthorized callers, asserting that only an
 //! authorized minter can ever create tokens.
-
-#![cfg(test)]
 
 extern crate std;
 

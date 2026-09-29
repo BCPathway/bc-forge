@@ -18,9 +18,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check SPDX license headers (#975)
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              contracts/*/test_snapshots/*|sdk/src/generated/*) continue ;;
+            esac
+            if ! grep -Eq '^// SPDX-License-Identifier: [A-Za-z0-9.+-]+' "$file"; then
+              echo "::error file=$file::Missing SPDX license identifier"
+              missing=1
+            fi
+          done < <(git ls-files -z -- \
+            ':(glob)contracts/**/*.rs' \
+            ':(glob)sdk/src/**/*.ts' ':(glob)sdk/src/**/*.tsx' \
+            ':(glob)cli/**/*.ts' ':(glob)cli/**/*.tsx' \
+            ':(glob)react/src/**/*.ts' ':(glob)react/src/**/*.tsx')
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Ensure admin test snapshots are untracked
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tracked_snapshots="$(git ls-files -- 'contracts/admin/test_snapshots/')"
+          if [[ -n "$tracked_snapshots" ]]; then
+            echo "::error::Files under contracts/admin/test_snapshots/ must not be tracked"
+            printf '%s\n' "$tracked_snapshots"
+            exit 1
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.96.0
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -35,15 +70,45 @@ jobs:
       - name: Clippy lints
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
+      - name: Run tests (including admin proptest regressions)
         run: cargo test --all
 
+      - name: Check for circular crate dependencies (#770)
+        run: python3 scripts/check_crate_cycles.py
+
+      - name: Lint Soroban public functions for TTL extension and panic guidelines (#959)
+        run: python3 scripts/check_soroban_ttl_and_panic.py
+
+      - name: Run multi-sig tests
+        if: github.event_name == 'pull_request'
+        run: cargo test -p bc-forge-admin
       - name: Install Tarpaulin
         run: cargo install cargo-tarpaulin --locked
 
-      - name: Run coverage (Tarpaulin)
-        run: cargo tarpaulin --workspace --out Html --out Xml --out Stdout
-        continue-on-error: true
+      # Coverage gate (#955): `continue-on-error` is gone — a coverage drop
+      # now fails CI. The gate is 85% line coverage: the workspace measures
+      # 89.35% (2627/2940 lines, measured with cargo-tarpaulin 0.37.4 with
+      # the e2e crate excluded). bc-forge-e2e-tests is excluded because the
+      # suite targets the Stellar testnet and is not unit-runnable in CI.
+      # Coverage reports are emitted as Cobertura XML and LCOV and uploaded
+      # to Codecov below, where patch (diff) coverage is also enforced.
+      - name: Run coverage (Tarpaulin, gated)
+        run: |
+          cargo tarpaulin --workspace \
+            --exclude bc-forge-e2e-tests \
+            --fail-under 85 \
+            --out Html \
+            --out Xml \
+            --out Lcov \
+            --out Stdout
+
+      # Patch coverage (#955) is computed here from the LCOV report and the PR
+      # diff. It does not depend on the Codecov app or CODECOV_TOKEN.
+      - name: Enforce patch coverage
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref }}"
+          python3 scripts/check_patch_coverage.py "origin/${{ github.base_ref }}" lcov.info 85
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
@@ -51,10 +116,34 @@ jobs:
           name: coverage-report
           path: ./tarpaulin-report.html
 
+      # Upload coverage to Codecov (#955). Codecov computes patch (diff)
+      # coverage from these reports and posts project/patch status checks on
+      # the PR; enabling branch protection on those checks is what makes a
+      # coverage drop on changed lines fail the PR. Upload failures stay
+      # non-blocking (`fail_ci_if_error: false`) until the maintainer adds a
+      # CODECOV_TOKEN and enables the Codecov GitHub App — without a token,
+      # tokenless uploads are rejected with "Token required - not valid
+      # tokenless upload" (observed on the first CI run of this PR), and the
+      # absolute 85% floor below is still enforced by --fail-under.
+      - name: Upload coverage reports for Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          directory: .
+          files: ./cobertura.xml,./lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
       - name: Build WASM
         env:
           CARGO_INCREMENTAL: 0
         run: cargo build --workspace --exclude bc-forge-e2e-tests --target wasm32-unknown-unknown --release
+
+      - name: Check WASM size budgets (#956)
+        run: python3 scripts/check_wasm_size.py
+
+      - name: Publish gas benchmarks summary (#961)
+        if: always()
+        run: cargo test -p bc-forge-admin gas_bench -- --nocapture | python3 scripts/parse_gas_bench.py >> $GITHUB_STEP_SUMMARY
 
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────
   sdk:
@@ -70,7 +159,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: sdk/package-lock.json
 
@@ -82,3 +171,246 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # ─── SDK Bindings Staleness Check (#926) ─────────────────────────────────
+  # Ensures the committed generated bindings match a fresh run of
+  # `stellar contract bindings typescript` against the latest WASM.
+  sdk-bindings:
+    name: SDK Bindings Staleness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-contracts
+
+      - name: Install Stellar CLI system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libudev-dev \
+            pkg-config
+
+      - name: Install Stellar CLI
+        run: cargo install stellar-cli --locked || cargo install soroban-cli --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install SDK dependencies
+        run: npm ci
+        working-directory: sdk
+
+      - name: Generate bindings from fresh WASM
+        run: bash scripts/generate-sdk-bindings.sh
+
+      - name: Fail if committed bindings are stale
+        run: |
+          if ! git diff --exit-code sdk/src/generated/; then
+            echo "::error::SDK bindings are stale. Run 'npm run generate:bindings' in sdk/ and commit the result."
+            exit 1
+          fi
+
+  # ─── Indexer CI ─────────────────────────────────────────────────────────
+  indexer:
+    name: Indexer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: indexer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run indexer API load test (#961)
+        run: npm run load-test
+
+  # ─── TypeScript CLI CI ──────────────────────────────────────────────────
+  cli:
+    name: TypeScript CLI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: .
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+  # ─── React Package CI (#896) ────────────────────────────────────────────
+  # @bc-forge/react wraps @bc-forge/sdk, so the workspace SDK is built first
+  # to provide the type declarations the react build consumes.
+  react:
+    name: React Package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: react
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SDK dependency
+        run: npm run build --workspace @bc-forge/sdk
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # ─── Dependency audit (#770) ────────────────────────────────────────────
+  # Verifies the workspace dependency graph resolves cleanly: cargo metadata
+  # fails on manifest cycles or malformed feature declarations, and `cargo
+  # tree --workspace --all-features` proves every member's graph resolves
+  # with all feature combinations enabled (feature isolation) without
+  # needing a full build.
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-dep-audit
+
+      - name: Resolve workspace metadata (rejects cycles / bad features)
+        run: cargo metadata --no-deps --format-version 1 >/dev/null
+
+      - name: Resolve full dependency graph with all features
+        run: cargo tree --workspace --all-features >/dev/null
+
+      - name: Install cargo-audit and cargo-deny
+        run: cargo install cargo-audit cargo-deny --locked
+
+      # Fails the job when any crate in Cargo.lock matches a RustSec advisory.
+      - name: Audit Cargo.lock against RustSec advisories (#883)
+        run: cargo audit
+
+      # Fails the job on security advisories via cargo-deny (#958)
+      - name: Check Cargo advisories with cargo-deny (#958)
+        run: cargo deny check advisories
+
+      # Fails the job on high or critical production vulnerability findings (#958)
+      - name: Run npm audit gate on workspace packages (#958)
+        run: |
+          for pkg in sdk cli react indexer; do
+            if [ -d "$pkg" ]; then
+              echo "Auditing npm production dependencies in $pkg..."
+              (cd "$pkg" && npm audit --omit=dev --audit-level=high)
+            fi
+          done
+
+  # ─── Documentation link check (#348) ─────────────────────────────────────
+  docs-links:
+    name: Documentation Links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Reject stale repository links in docs
+        run: python3 scripts/check_doc_links.py
+
+  # ─── Documentation Site (#968) ───────────────────────────────────────────
+  docs:
+    name: Docs Site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-docs
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install docs dependencies
+        run: npm ci
+
+      - name: Generate API pages and build site
+        run: npm run docs:build
+
+      - name: Upload docs site artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs/.vitepress/dist

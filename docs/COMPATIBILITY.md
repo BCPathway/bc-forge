@@ -26,7 +26,7 @@ are listed in the root README.
 | `@bc-forge/sdk` | `0.1.0` | `>=18.0.0` | `^16.0.1` | — |
 | `@bc-forge/cli` | `0.1.0` | `>=18.0.0` | `^17.1.0` | `@bc-forge/sdk: *` |
 | `@bc-forge/react` | `1.0.0` | Repository prerequisite: `18+` | `^16.0.1` | `@bc-forge/sdk: ^0.1.0`; `react: ^18.0.0 || ^19.0.0`; `react-dom: ^18.0.0 || ^19.0.0` |
-| `@bc-forge/indexer` | `1.0.0` | Repository prerequisite: `18+` | `^16.0.1` | `@bc-forge/sdk: ^0.1.0` |
+| `@bc-forge/indexer` | `1.0.0` | Repository prerequisite: `18+` | `^16.0.1` | `@bc-forge/sdk: ^0.1.0`; `prisma` / `@prisma/client`: `^5.10.0` |
 
 ### Notes
 
@@ -62,3 +62,4 @@ From the `sdk/` directory:
 
 ```bash
 npm run generate:bindings
+```

@@ -1,0 +1,840 @@
+openapi: 3.1.0
+
+info:
+  title: bc-forge Indexer API
+  description: |
+    Authenticated read API for the bc-forge Soroban indexer.
+
+    All routes (except `GET /health`) require a shared bearer token supplied
+    via the `Authorization` header:
+
+    ```
+    Authorization: Bearer <INDEXER_API_TOKEN>
+    ```
+
+    List routes support cursor-based pagination and optional filtering by
+    address and/or ledger sequence number.
+  version: 1.0.0
+  contact:
+    url: https://github.com/BCPathway/bc-forge
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+  - url: https://indexer.bc-forge.example.com
+    description: Production server (replace with your deployment URL)
+
+tags:
+  - name: health
+    description: Liveness probe (unauthenticated)
+  - name: events
+    description: Paginated token-event logs (mints, transfers, burns)
+  - name: stats
+    description: Aggregate counters
+  - name: aggregates
+    description: Derived holder balances and supply history
+  - name: streaming
+    description: Live server-sent event stream
+  - name: webhooks
+    description: Persisted HTTPS webhook subscriptions
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Shared secret configured via the `INDEXER_API_TOKEN` environment variable.
+
+  parameters:
+    address:
+      name: address
+      in: query
+      required: false
+      description: |
+        Filter rows by Stellar account address.
+
+        - **mints** – matches the `to` field.
+        - **transfers** – matches either the `from` **or** `to` field (OR semantics).
+        - **burns** – matches the `from` field.
+      schema:
+        type: string
+        example: GABC1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+
+    from_ledger:
+      name: from_ledger
+      in: query
+      required: false
+      description: Include only rows whose ledger sequence number is >= this value.
+      schema:
+        type: integer
+        minimum: 0
+        example: 42000000
+
+    limit:
+      name: limit
+      in: query
+      required: false
+      description: |
+        Maximum number of rows to return per page.
+        Defaults to **50**. Capped at **100**. Must be a positive integer.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+        example: 25
+
+    cursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        Opaque cursor returned as `nextCursor` in a previous response.
+        Omit or leave empty to start from the first page.
+      schema:
+        type: string
+        example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+          example: Unauthorized
+
+    MintRow:
+      type: object
+      required:
+        - id
+        - to
+        - amount
+        - ledger
+        - txHash
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal row identifier (used as pagination cursor).
+          example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+        to:
+          type: string
+          description: Recipient Stellar account address.
+          example: GABC1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+        amount:
+          type: string
+          description: Token amount (integer string in base units).
+          example: "100000000"
+        ledger:
+          type: integer
+          description: Ledger sequence number in which the mint was confirmed.
+          example: 42000001
+        txHash:
+          type: string
+          description: Transaction hash on the Stellar network.
+          example: "abc123def456..."
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the row was indexed.
+          example: "2026-01-15T12:34:56.789Z"
+
+    TransferRow:
+      type: object
+      required:
+        - id
+        - from
+        - to
+        - amount
+        - ledger
+        - txHash
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+        from:
+          type: string
+          description: Sender Stellar account address.
+          example: GABC1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+        to:
+          type: string
+          description: Recipient Stellar account address.
+          example: GDEF5678EFGH5678EFGH5678EFGH5678EFGH5678EFGH5678EFGH5678EFGH
+        amount:
+          type: string
+          description: Token amount (integer string in base units).
+          example: "50000000"
+        ledger:
+          type: integer
+          example: 42000002
+        txHash:
+          type: string
+          example: "def789ghi012..."
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-01-15T12:35:00.000Z"
+
+    BurnRow:
+      type: object
+      required:
+        - id
+        - from
+        - amount
+        - ledger
+        - txHash
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+        from:
+          type: string
+          description: Burner Stellar account address.
+          example: GABC1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+        amount:
+          type: string
+          description: Token amount (integer string in base units).
+          example: "25000000"
+        ledger:
+          type: integer
+          example: 42000003
+        txHash:
+          type: string
+          example: "ghi345jkl678..."
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-01-15T12:35:30.000Z"
+
+    MintPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MintRow"
+        nextCursor:
+          oneOf:
+            - type: string
+              description: Pass this value as the `cursor` query parameter to retrieve the next page.
+              example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+            - type: "null"
+              description: No further pages exist.
+
+    TransferPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransferRow"
+        nextCursor:
+          oneOf:
+            - type: string
+              example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+            - type: "null"
+
+    BurnPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BurnRow"
+        nextCursor:
+          oneOf:
+            - type: string
+              example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+            - type: "null"
+
+    HolderRow:
+      type: object
+      required:
+        - id
+        - address
+        - balance
+        - ledger
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal row identifier (used as pagination cursor).
+          example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+        address:
+          type: string
+          description: Holder Stellar account address.
+          example: GABC1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+        balance:
+          type: string
+          description: Current token balance (integer string in base units). Derived from indexed mint, transfer, and burn events.
+          example: "600000000"
+        ledger:
+          type: integer
+          description: Ledger sequence number the balance was last touched in.
+          example: 42000100
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the holder was first indexed.
+          example: "2026-01-15T12:34:56.789Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the last balance change.
+          example: "2026-01-15T12:40:00.000Z"
+
+    HolderPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/HolderRow"
+        nextCursor:
+          oneOf:
+            - type: string
+              example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+            - type: "null"
+
+    SupplyPointRow:
+      type: object
+      required:
+        - id
+        - timestamp
+        - supply
+        - ledger
+        - txHash
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal row identifier (used as pagination cursor).
+          example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+        timestamp:
+          type: string
+          format: date-time
+          description: Ledger close time of the supply-changing event.
+          example: "2026-01-15T12:34:56.000Z"
+        supply:
+          type: string
+          description: Total token supply after this event (integer string in base units).
+          example: "600000000"
+        ledger:
+          type: integer
+          description: Ledger sequence number the supply point was recorded for.
+          example: 42000100
+        txHash:
+          type: string
+          description: Transaction hash of the supply-changing event.
+          example: "abc123def456..."
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the supply point was indexed.
+          example: "2026-01-15T12:34:56.789Z"
+
+    SupplyPointPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplyPointRow"
+        nextCursor:
+          oneOf:
+            - type: string
+              example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+            - type: "null"
+
+    Stats:
+      type: object
+      required:
+        - mintCount
+        - transferCount
+        - burnCount
+      properties:
+        mintCount:
+          type: integer
+          description: Total number of indexed mint events.
+          example: 1024
+        transferCount:
+          type: integer
+          description: Total number of indexed transfer events.
+          example: 8192
+        burnCount:
+          type: integer
+          description: Total number of indexed burn events.
+          example: 256
+
+    IndexerEvent:
+      type: object
+      required:
+        - type
+        - data
+      properties:
+        type:
+          type: string
+          enum:
+            - mint
+            - transfer
+            - burn
+        data:
+          type: object
+          additionalProperties: true
+          description: The newly persisted Mint, Transfer, or Burn row.
+
+    Webhook:
+      type: object
+      required:
+        - id
+        - url
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+          pattern: "^https://"
+          example: https://hooks.example.com/bc-forge
+        createdAt:
+          type: string
+          format: date-time
+
+    WebhookResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: "#/components/schemas/Webhook"
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+          example: ok
+
+security:
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags:
+        - health
+      summary: Liveness probe
+      description: |
+        Returns `{ "status": "ok" }` when the server is running.
+        This endpoint is **unauthenticated** — no bearer token is required.
+      security: []
+      responses:
+        "200":
+          description: Server is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /api/v1/events/stream:
+    get:
+      operationId: streamIndexerEvents
+      tags:
+        - streaming
+      summary: Stream newly persisted token events
+      description: |
+        Opens a text/event-stream connection. Each newly persisted mint,
+        transfer, or burn is emitted with its type as the SSE event name
+        and the same { type, data } JSON envelope that webhook subscribers
+        receive.
+      responses:
+        "200":
+          description: Live SSE stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/webhooks:
+    post:
+      operationId: registerWebhook
+      tags:
+        - webhooks
+      summary: Register an HTTPS webhook
+      description: |
+        Persists an HTTPS webhook URL. Re-registering the same normalized URL
+        is idempotent. New indexer events are POSTed asynchronously; failures
+        are logged and retried once without blocking indexing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  pattern: "^https://"
+                  example: https://hooks.example.com/bc-forge
+      responses:
+        "201":
+          description: Webhook registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookResponse"
+        "400":
+          description: URL is missing, invalid, not HTTPS, or embeds credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/webhooks/{id}:
+    delete:
+      operationId: deleteWebhook
+      tags:
+        - webhooks
+      summary: Remove a webhook
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Webhook removed.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Webhook not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/mints:
+    get:
+      operationId: listMints
+      tags:
+        - events
+      summary: List mint events
+      description: |
+        Returns a cursor-paginated list of mint events in reverse-chronological
+        order (newest first).
+
+        Optional filters:
+        - `address` — match the `to` field exactly.
+        - `from_ledger` — include only rows at or after the given ledger sequence.
+
+        Filters can be combined. All filters are applied before pagination so
+        that `nextCursor` remains valid for the same filter combination.
+      parameters:
+        - $ref: "#/components/parameters/address"
+        - $ref: "#/components/parameters/from_ledger"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of mint events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintPage"
+        "400":
+          description: Invalid query parameter (`limit`, `from_ledger`, or `cursor`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                invalidLimit:
+                  summary: Non-positive limit
+                  value:
+                    error: "Invalid limit: must be an integer >= 1"
+                invalidFromLedger:
+                  summary: Non-integer from_ledger
+                  value:
+                    error: "Invalid from_ledger: must be a non-negative integer"
+                invalidCursor:
+                  summary: Cursor not found
+                  value:
+                    error: "Invalid cursor"
+        "401":
+          description: Missing or incorrect bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Unauthorized
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: internal_error
+
+  /api/v1/transfers:
+    get:
+      operationId: listTransfers
+      tags:
+        - events
+      summary: List transfer events
+      description: |
+        Returns a cursor-paginated list of transfer events in reverse-chronological
+        order (newest first).
+
+        Optional filters:
+        - `address` — match the `from` **or** `to` field (OR semantics).
+        - `from_ledger` — include only rows at or after the given ledger sequence.
+      parameters:
+        - $ref: "#/components/parameters/address"
+        - $ref: "#/components/parameters/from_ledger"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of transfer events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferPage"
+        "400":
+          description: Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/burns:
+    get:
+      operationId: listBurns
+      tags:
+        - events
+      summary: List burn events
+      description: |
+        Returns a cursor-paginated list of burn events in reverse-chronological
+        order (newest first).
+
+        Optional filters:
+        - `address` — match the `from` field exactly.
+        - `from_ledger` — include only rows at or after the given ledger sequence.
+      parameters:
+        - $ref: "#/components/parameters/address"
+        - $ref: "#/components/parameters/from_ledger"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of burn events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BurnPage"
+        "400":
+          description: Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/holders:
+    get:
+      operationId: listHolders
+      tags:
+        - aggregates
+      summary: List current token holders
+      description: |
+        Returns a cursor-paginated list of current holders with their
+        balances. Balances are derived from the indexed mint, transfer, and
+        burn events at ingestion time; holders whose balance reaches zero are
+        not listed.
+
+        Optional filters:
+        - `address` — match a single holder exactly.
+        - `from_ledger` — include only holders last touched at or after the
+          given ledger sequence.
+      parameters:
+        - $ref: "#/components/parameters/address"
+        - $ref: "#/components/parameters/from_ledger"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of holders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HolderPage"
+        "400":
+          description: Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/supply-history:
+    get:
+      operationId: listSupplyHistory
+      tags:
+        - aggregates
+      summary: List timestamped supply points
+      description: |
+        Returns a cursor-paginated list of supply points, one per
+        supply-changing event (mint or burn). Each point carries the total
+        supply reported by the indexed event and the ledger close time.
+
+        Optional filter:
+        - `from_ledger` — include only points at or after the given ledger
+          sequence.
+      parameters:
+        - $ref: "#/components/parameters/from_ledger"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of supply points.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyPointPage"
+        "400":
+          description: Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/stats:
+    get:
+      operationId: getStats
+      tags:
+        - stats
+      summary: Get aggregate event counts
+      description: |
+        Returns the total number of indexed mint, transfer, and burn events.
+        Useful as a quick health and activity sanity check.
+      responses:
+        "200":
+          description: Aggregate event counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"

@@ -39,10 +39,8 @@ jobs:
                 status: 'action_required'
               });
               
-              // Filter runs associated with this specific PR
-              runsToApprove = runs.workflow_runs.filter(run => 
-                run.pull_requests && run.pull_requests.some(p => p.number === pull_number)
-              );
+              // Filter runs associated with this specific PR's head commit
+              runsToApprove = runs.workflow_runs.filter(run => run.head_sha === sha);
               
               if (runsToApprove.length > 0) {
                 break;

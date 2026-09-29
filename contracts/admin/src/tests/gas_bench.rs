@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Gas-consumption benchmarks for `has_role` role verification.
 //!
 //! Profiles the CPU-instruction and memory-byte costs metered by the Soroban

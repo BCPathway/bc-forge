@@ -2,6 +2,8 @@
 
 TypeScript SDK for interacting with bc-forge token contracts deployed on the Stellar/Soroban network.
 
+Supported Node, Stellar SDK, and package ranges are in the [compatibility matrix](../docs/COMPATIBILITY.md).
+
 ## Installation
 
 ```bash
@@ -160,6 +162,33 @@ await client.initialize(
   deployerKeypair               // Signer
 );
 console.log('Contract initialized');
+```
+
+## RBAC Initialization (SuperAdmin)
+
+After `initialize`, run the `init_rbac` deployment step to bootstrap role-based
+access control and assign the initial `SuperAdmin`:
+
+```typescript
+import { bcForgeClient, Role } from '@bc-forge/sdk';
+
+const adminKeypair = Keypair.fromSecret('SXXX...SECRET');
+
+// One-time RBAC bootstrap: migrate_admin + grant SuperAdmin role
+const rbac = await client.initRbac(adminKeypair.publicKey(), adminKeypair);
+console.log('migrate_admin TX:', rbac.migrate.hash, 'Success:', rbac.migrate.success);
+console.log('grant_role TX:', rbac.grant.hash, 'Success:', rbac.grant.success);
+
+// Verify the assignment
+const isSuperAdmin = await client.hasRole(Role.SuperAdmin, adminKeypair.publicKey());
+console.log('Is SuperAdmin:', isSuperAdmin);
+```
+
+You can also assign or revoke the role independently:
+
+```typescript
+await client.grantSuperAdmin('GOTHER...ADMIN', adminKeypair);
+await client.revokeSuperAdmin('GOTHER...ADMIN', adminKeypair);
 ```
 
 ## Batch Minting
@@ -395,6 +424,7 @@ await client.unpause(adminKeypair);
 | `getVersion()` | `string` | Contract version |
 | `getBalances(addresses[], batchSize)` | `bigint[]` | Batch query multiple balances |
 | `getEvents(startLedger?)` | `any[]` | Get contract events |
+| `hasRole(role, address)` | `boolean` | Check whether an address holds a role |
 
 ### Write Methods (require Keypair)
 
@@ -439,6 +469,9 @@ When a `walletAdapter` is configured and connected, write methods may be invoked
 | `updateSymbol(newSymbol, source)` | Update token symbol (admin-only) |
 | `lockTokens(user, amount, unlockTime, source)` | Lock tokens for vesting |
 | `withdrawLocked(user, source)` | Withdraw matured locked tokens |
+| `initRbac(superAdmin, source)` | `init_rbac` step: migrate_admin + grant initial SuperAdmin |
+| `grantSuperAdmin(address, source)` | Grant the SuperAdmin role |
+| `revokeSuperAdmin(address, source)` | Revoke the SuperAdmin role |
 
 ### Offline Transaction Builders
 
@@ -458,6 +491,89 @@ When a `walletAdapter` is configured and connected, write methods may be invoked
 | `simulateMint(to, amount, sourcePublicKey)` | `any` | Simulate mint operation |
 | `simulateTransfer(from, to, amount, sourcePublicKey)` | `any` | Simulate transfer operation |
 
+## Vault Client (`VaultClient`) (#744)
+
+The SDK provides `VaultClient` for interacting with yield-bearing fee vault contracts and wrapper contracts.
+
+```typescript
+import { VaultClient } from '@bc-forge/sdk';
+import { Keypair } from '@stellar/stellar-sdk';
+
+const vault = new VaultClient({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+  contractId: 'CVAULT...XYZ',
+});
+
+// Deposit underlying tokens to receive vault shares
+await vault.deposit('GUSER...', BigInt(1000_0000000), userKeypair);
+
+// Check share balance & underlying value
+const shares = await vault.getShareBalance('GUSER...');
+const totalAssets = await vault.getTotalAssets();
+const sharePrice = await vault.calculateSharePrice();
+const rewards = await vault.calculateRewards(shares);
+
+// Compound protocol fees into vault assets
+await vault.compound('GADMIN...', adminKeypair);
+
+// Withdraw shares and receive underlying tokens + accrued yield
+await vault.withdraw('GUSER...', shares, userKeypair);
+```
+
+## Generated Contract Bindings (#926)
+
+The SDK includes auto-generated TypeScript bindings produced by `stellar contract bindings typescript`. These provide an ABI-accurate client surface that stays in lock-step with the Rust token contract, eliminating drift from hand-maintained methods.
+
+### Regenerating Bindings
+
+Prerequisites:
+- Rust toolchain with `wasm32-unknown-unknown` target
+- [Stellar CLI 22.0+](https://developers.stellar.org/docs/tools/cli)
+
+```bash
+# From the sdk/ directory:
+npm run generate:bindings
+
+# Or from the repo root:
+bash scripts/generate-sdk-bindings.sh
+```
+
+This will:
+1. Build the `bc-forge-token` contract WASM (`cargo build -p bc-forge-token --target wasm32-unknown-unknown --release`)
+2. Run `stellar contract bindings typescript --wasm <path> --output-dir sdk/src/generated --overwrite`
+3. Overwrite `sdk/src/generated/` with the fresh output
+
+### CI Staleness Check
+
+CI runs a dedicated **SDK Bindings Staleness** job that regenerates bindings from a fresh WASM build and fails if the committed `sdk/src/generated/` directory differs. Always re-run `npm run generate:bindings` after contract changes and commit the result.
+
+### Using the Generated Client
+
+```typescript
+import { BcForgeTokenClient, generatedToken } from '@bc-forge/sdk';
+
+// ABI-accurate client generated from the token contract WASM.
+// BcForgeTokenClient is the generated `Client` class.
+const client = new BcForgeTokenClient({
+  contractId: 'CABC...XYZ',
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+});
+
+const nameTx = await client.name();
+
+const config: generatedToken.FeeConfig = {
+  base_fee: BigInt(100),
+  complexity_multiplier: 2,
+  max_fee: BigInt(1000),
+  enabled: true,
+};
+```
+
+> **Note:** The existing `bcForgeClient` remains the recommended high-level client for most use cases. The generated `BcForgeTokenClient` is the low-level, ABI-accurate surface for advanced consumers and tooling.
+
 ## License
 
 MIT
+

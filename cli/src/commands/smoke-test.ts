@@ -1,0 +1,308 @@
+// SPDX-License-Identifier: MIT
+import { Command } from "commander";
+import {
+  Keypair,
+  Contract,
+  TransactionBuilder,
+  Address,
+  nativeToScVal,
+  rpc as SorobanRpcNs,
+} from "@stellar/stellar-sdk";
+import { addNetworkOptions } from "../network.js";
+import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/soroban-tx.js";
+import logger from "../utils/logger.js";
+import { resolveContractIdOption } from "../utils/registry.js";
+
+/** Default delay between passes in --watch mode (#940). */
+export const DEFAULT_WATCH_INTERVAL_MS = 15000;
+
+function describeSubmitOutcome(outcome: PrepareSignSubmitResult): string {
+  switch (outcome.outcome) {
+    case "simulation_failed":
+      return `simulation failed: ${outcome.error}`;
+    case "submission_failed":
+      return `submission failed: ${outcome.error}`;
+    case "failed_on_ledger":
+      return `transaction ${outcome.hash} failed on-ledger`;
+    case "timed_out":
+      return `timed out waiting for confirmation of ${outcome.hash} (last status: ${outcome.lastStatus})`;
+    case "confirmed":
+      return `confirmed (${outcome.hash})`;
+  }
+}
+
+export interface SmokeTestOptions {
+  contractId: string;
+  rpcUrl: string;
+  networkPassphrase: string;
+  source: string;
+  recipient?: string;
+  amount?: string;
+  timeout?: number;
+}
+
+export interface SmokeTestResult {
+  success: boolean;
+  sequence: string[];
+  message: string;
+  details?: {
+    balanceBefore?: bigint;
+    balanceAfter?: bigint;
+    transferHash?: string;
+    mintHash?: string;
+  };
+}
+
+export function createSmokeTestCommand(): Command {
+  const cmd = new Command("smoke-test")
+    .description("Run a quick ping test against a live contract (mint/transfer)")
+    .requiredOption(
+      "--contract-id <id>",
+      "Contract ID, or a deployment alias for the selected network"
+    )
+    .requiredOption("--source <secret>", "Admin/source account secret key")
+    .option("--recipient <address>", "Recipient address (auto-generated if omitted)")
+    .option("--amount <amount>", "Amount to mint and transfer (default: 1)", "1")
+  .option(
+    "--timeout <ms>",
+    "Timeout in milliseconds for the full sequence",
+    "30000"
+  )
+  .option("--watch", "Repeat the smoke test until interrupted", false)
+  .option(
+    "--interval <ms>",
+    "Delay between smoke test passes in --watch mode",
+    "15000"
+  );
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (opts, command) => {
+    try {
+      const contractId = resolveContractIdOption(command, opts.contractId);
+      const resolved = {
+        ...opts,
+        contractId: contractId ?? opts.contractId,
+      };
+      if (opts.watch) {
+        await watchSmokeTest({
+          intervalMs: Number(opts.interval) || DEFAULT_WATCH_INTERVAL_MS,
+          once: () => runSmokeTest(resolved),
+          onResult: reportSmokeTestResult,
+        });
+        return;
+      }
+      await runSmokeTest(resolved);
+    } catch (err: unknown) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+  return cmd;
+}
+
+export async function runSmokeTest(
+  opts: SmokeTestOptions
+): Promise<SmokeTestResult> {
+  const timeout = Number(opts.timeout) || 30000;
+  const amount = BigInt(opts.amount || "1");
+  const startTime = Date.now();
+  const sequence: string[] = [];
+
+  const checkDeadline = () => {
+    if (Date.now() - startTime > timeout) {
+      throw new Error(
+        `Smoke test timed out after ${timeout}ms (completed: ${sequence.join(" → ")})`
+      );
+    }
+  };
+
+  try {
+    // 1. Connect to RPC
+    const server = new SorobanRpcNs.Server(opts.rpcUrl, {
+      allowHttp: opts.rpcUrl.startsWith("http://"),
+    });
+
+    const sourceKeypair = Keypair.fromSecret(opts.source);
+    const sourcePublicKey = sourceKeypair.publicKey();
+    const contract = new Contract(opts.contractId);
+
+    // 2. Check initial balance
+    checkDeadline();
+    sequence.push("balance_check");
+
+    const balanceArgs = [Address.fromString(sourcePublicKey).toScVal()];
+    const account = await server.getAccount(sourcePublicKey);
+    const balanceTx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: opts.networkPassphrase,
+    })
+      .addOperation(contract.call("balance", ...balanceArgs))
+      .setTimeout(30)
+      .build();
+    const balanceSim = await server.simulateTransaction(balanceTx);
+    const balanceBefore = BigInt(0);
+    sequence.push("balance_ok");
+
+    // 3. Mint tokens
+    checkDeadline();
+    sequence.push("mint_start");
+
+    // The token contract mints via `mint(minter, to, amount)` and requires the
+    // `minter` to hold the Minter role and authorize the call. The operator's
+    // source account is both minter and recipient of the smoke-test mint.
+    const mintArgs = [
+      Address.fromString(sourcePublicKey).toScVal(),
+      Address.fromString(sourcePublicKey).toScVal(),
+      nativeToScVal(amount, { type: "i128" }),
+    ];
+    const freshAccount = await server.getAccount(sourcePublicKey);
+    const mintTx = new TransactionBuilder(freshAccount, {
+      fee: "100",
+      networkPassphrase: opts.networkPassphrase,
+    })
+      .addOperation(contract.call("mint", ...mintArgs))
+      .setTimeout(30)
+      .build();
+
+    const mintOutcome = await prepareSignAndSubmit(server, mintTx, sourceKeypair, {
+      deadline: startTime + timeout,
+    });
+    if (mintOutcome.outcome !== "confirmed") {
+      return {
+        success: false,
+        sequence,
+        message: `Mint failed: ${describeSubmitOutcome(mintOutcome)}`,
+      };
+    }
+    const mintHash = mintOutcome.hash;
+    sequence.push("mint_ok");
+
+    // 4. Check balance after mint
+    checkDeadline();
+    const account2 = await server.getAccount(sourcePublicKey);
+    const balanceAfterMintTx = new TransactionBuilder(account2, {
+      fee: "100",
+      networkPassphrase: opts.networkPassphrase,
+    })
+      .addOperation(contract.call("balance", ...balanceArgs))
+      .setTimeout(30)
+      .build();
+    await server.simulateTransaction(balanceAfterMintTx);
+    sequence.push("balance_after_mint_ok");
+
+    // 5. Determine recipient
+    const recipientAddress =
+      opts.recipient || Keypair.random().publicKey();
+
+    // 6. Transfer tokens to recipient
+    checkDeadline();
+    sequence.push("transfer_start");
+
+    const transferArgs = [
+      Address.fromString(sourcePublicKey).toScVal(),
+      Address.fromString(recipientAddress).toScVal(),
+      nativeToScVal(amount, { type: "i128" }),
+    ];
+    const account3 = await server.getAccount(sourcePublicKey);
+    const transferTx = new TransactionBuilder(account3, {
+      fee: "100",
+      networkPassphrase: opts.networkPassphrase,
+    })
+      .addOperation(contract.call("transfer", ...transferArgs))
+      .setTimeout(30)
+      .build();
+
+    const transferOutcome = await prepareSignAndSubmit(server, transferTx, sourceKeypair, {
+      deadline: startTime + timeout,
+    });
+    if (transferOutcome.outcome !== "confirmed") {
+      return {
+        success: false,
+        sequence,
+        message: `Transfer failed: ${describeSubmitOutcome(transferOutcome)}`,
+      };
+    }
+    const transferHash = transferOutcome.hash;
+    sequence.push("transfer_ok");
+
+    // 7. Final balance check
+    checkDeadline();
+    const account4 = await server.getAccount(sourcePublicKey);
+    const finalBalanceTx = new TransactionBuilder(account4, {
+      fee: "100",
+      networkPassphrase: opts.networkPassphrase,
+    })
+      .addOperation(contract.call("balance", ...balanceArgs))
+      .setTimeout(30)
+      .build();
+    await server.simulateTransaction(finalBalanceTx);
+    sequence.push("final_balance_ok");
+
+    return {
+      success: true,
+      sequence,
+      message: `Smoke test passed: minted ${amount}, transferred to ${recipientAddress.slice(0, 8)}…`,
+      details: {
+        balanceBefore,
+        transferHash,
+        mintHash,
+      },
+    };
+  } catch (err) {
+    return {
+      success: false,
+      sequence,
+      message: `Smoke test error: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+export interface WatchLoopOptions {
+  /** Delay between smoke test passes, in milliseconds. */
+  intervalMs: number;
+  /** Runs one smoke test pass. Injected so tests never need a live network. */
+  once: (iteration: number) => Promise<SmokeTestResult>;
+  /** Defaults to a real timer sleep. */
+  sleep?: (ms: number) => Promise<void>;
+  /**
+   * Called after every pass; return false to stop the loop. The real CLI
+   * never stops early — it repeats until the operator interrupts with Ctrl-C,
+   * which terminates the process by default SIGINT handling.
+   */
+  shouldContinue?: (iteration: number) => boolean;
+  /** Invoked with every pass result (pass or fail). */
+  onResult?: (result: SmokeTestResult, iteration: number) => void;
+}
+
+/**
+ * Repeats a smoke test on an interval until interrupted (#940).
+ *
+ * Runs one pass immediately, reports it, waits `intervalMs`, then repeats.
+ * Every pass — success or failure — is reported before continuing.
+ */
+export async function watchSmokeTest(options: WatchLoopOptions): Promise<void> {
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const shouldContinue = options.shouldContinue ?? (() => true);
+
+  let iteration = 1;
+  while (true) {
+    const result = await options.once(iteration);
+    options.onResult?.(result, iteration);
+    if (!shouldContinue(iteration)) {
+      return;
+    }
+    await sleep(options.intervalMs);
+    iteration += 1;
+  }
+}
+
+/** Prints one pass result in --watch mode. */
+function reportSmokeTestResult(result: SmokeTestResult, iteration: number): void {
+  if (result.success) {
+    logger.success(`watch pass ${iteration}: ${result.message}`);
+  } else {
+    logger.error(`watch pass ${iteration}: ${result.message}`);
+  }
+}

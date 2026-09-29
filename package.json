@@ -7,7 +7,22 @@
     "cli",
     "indexer"
   ],
+  "scripts": {
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset publish",
+    "docs:gen:sdk": "typedoc",
+    "docs:gen:contracts": "cargo doc --workspace --exclude bc-forge-e2e-tests --no-deps && node scripts/copy-rustdoc.mjs",
+    "docs:gen": "npm run docs:gen:sdk && npm run docs:gen:contracts",
+    "docs:dev": "vitepress dev docs",
+    "docs:preview": "vitepress preview docs",
+    "docs:build": "npm run docs:gen && vitepress build docs"
+  },
   "devDependencies": {
-    "typescript": "^6.0.3"
+    "@changesets/cli": "^3.0.3",
+    "typedoc": "^0.28.20",
+    "typedoc-plugin-markdown": "^4.13.1",
+    "typescript": "^6.0.3",
+    "vitepress": "^1.6.4"
   }
 }

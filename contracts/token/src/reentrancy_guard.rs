@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Reentrancy Guard Module
 //!
 //! Implements a reentrancy protection pattern to prevent cross-contract callback attacks.
@@ -51,6 +52,7 @@ impl ReentrancyGuard {
     /// @dev Stores `ReentrancyGuardState::Entered` in persistent storage to prevent re-entry.
     /// @param env The Soroban environment.
     /// @return `true` if the guard was successfully entered, `false` if already entered.
+    // ttl-allow: callers extend instance TTL before taking the guard
     pub fn enter(&self, env: &Env) -> bool {
         let current_state = env
             .storage()
@@ -73,6 +75,7 @@ impl ReentrancyGuard {
     /// @notice Releases the guard lock by setting the state back to `NotEntered`.
     /// @dev Should be called after the guarded logic completes. Typically used via the `Drop` implementation.
     /// @param env The Soroban environment.
+    // ttl-allow: callers extend instance TTL before taking the guard
     pub fn exit(&self, env: &Env) {
         env.storage()
             .persistent()
@@ -99,9 +102,10 @@ impl ReentrancyGuard {
     /// @dev This is typically called at the beginning of a guarded function to ensure mutual exclusion.
     /// @param env The Soroban environment.
     /// @panics If the guard is already entered (reentrancy detected).
+    // ttl-allow: callers extend instance TTL before taking the guard
     pub fn require_not_entered(&self, env: &Env) {
         assert!(
-            !self.is_entered(env),
+            self.enter(env),
             "Reentrancy detected: function is being called recursively"
         );
     }

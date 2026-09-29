@@ -1,9 +1,13 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/sdk — TypeScript SDK for bc-forge Token Contracts
  *
- * Re-exports the main client and utility types.
+ * Re-exports the main client, utility types, and custom error classes.
  *
- * @example
+ * Supports read-only mode without a wallet or keypair (queries, balance checks, event polling)
+ * as well as write operations using a Keypair or connected WalletAdapter.
+ *
+ * @example Read-only mode:
  * ```typescript
  * import { bcForgeClient } from '@bc-forge/sdk';
  *
@@ -19,13 +23,42 @@
  */
 
 export { bcForgeClient, Role } from './client';
-export type { BatchMintRecipient, bcForgeClientConfig, TransactionResult } from './client';
+export type {
+  BatchMintRecipient,
+  bcForgeClientConfig,
+  RbacInitResult,
+  TransactionResult,
+} from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
-export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
-export type { bcForgeEvent, SubscriptionOptions } from './events';
+export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents, onMint, onTransfer, onVaultDeposit } from './events';
+export type { bcForgeEvent, SubscriptionOptions, EventListenerOptions } from './events';
+export * from './errors';
 export * from './mockClient';
 
 export type { WalletAdapter } from './walletAdapter';
 export { FreighterAdapter } from './adapters/freighterAdapter';
 export { AlbedoAdapter } from './adapters/albedoAdapter';
 export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
+
+// ─── Vault and Wrapper Clients (#744) ────────────────────────────────────────
+export { VaultClient } from './vaultClient';
+export type { VaultClientConfig } from './vaultClient';
+export { WrapperClient } from './wrapperClient';
+export type { WrapperClientConfig } from './wrapperClient';
+
+// ─── APY helpers (#745) ──────────────────────────────────────────────────────
+export { calculateApy } from './apy';
+export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
+
+// ─── Generated Contract Bindings (#926) ──────────────────────────────────────
+// Auto-generated TypeScript bindings from `stellar contract bindings typescript`.
+// Re-run with: npm run generate:bindings
+export * as generatedToken from './generated/src';
+export { Client as BcForgeTokenClient } from './generated/src';
+export type {
+  Recipient as GeneratedRecipient,
+  FeeConfig as GeneratedFeeConfig,
+  FeeExemption as GeneratedFeeExemption,
+  LockupState as GeneratedLockupState,
+} from './generated/src';
+export { TokenError } from './generated/src';

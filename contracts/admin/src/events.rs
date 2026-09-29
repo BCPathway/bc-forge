@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Structured event emission for the admin access-control module.
 //!
 //! @title Admin Events
@@ -70,5 +71,37 @@ pub fn emit_upgraded(env: &Env, executor: &Address, proposal_id: u64, wasm_hash:
     env.events().publish(
         (symbol_short!("upgraded"),),
         (executor.clone(), proposal_id, wasm_hash.clone()),
+    );
+}
+
+/// Emitted when a multi-sig WASM upgrade proposal is cancelled by its
+/// proposer. Resolves issue #662.
+///
+/// Topics: `prop_cncl`
+/// Data:   `(caller, proposal_id)`
+///
+/// @notice Publishes upgrade-proposal-cancellation event data including the cancelling proposer and the proposal ID.
+/// @dev The event topics include the `prop_cncl` symbol.
+/// @param env The Soroban environment.
+/// @param caller The proposer that cancelled the proposal.
+/// @param proposal_id The ID of the upgrade proposal that was cancelled.
+pub fn emit_proposal_cancelled(env: &Env, caller: &Address, proposal_id: u64) {
+    env.events()
+        .publish((symbol_short!("prop_cncl"),), (caller.clone(), proposal_id));
+}
+
+/// Emitted when a multi-sig WASM upgrade proposal is submitted.
+///
+/// Topics: `upg_prop`
+/// Data:   `(proposal_id, submitter, new_wasm_hash)`
+pub fn emit_upgrade_proposal_submitted(
+    env: &Env,
+    submitter: &Address,
+    proposal_id: u64,
+    new_wasm_hash: &BytesN<32>,
+) {
+    env.events().publish(
+        (symbol_short!("upg_prop"),),
+        (proposal_id, submitter.clone(), new_wasm_hash.clone()),
     );
 }

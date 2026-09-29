@@ -1,0 +1,26 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    project:
+      default:
+        # Fail the PR when total project coverage drops by more than 1
+        # percentage point versus the base commit. The tarpaulin step in
+        # `.github/workflows/ci.yml` already enforces the absolute 85% floor
+        # (see issue #955); this guards against smaller regressions above it.
+        target: 85%
+        threshold: 1%
+    # Patch coverage: at least 85% of the lines a PR adds or touches must be
+    # covered, so a PR that lowers coverage on its changed lines fails
+    # (issue #955). Codecov only posts these status checks once the Codecov
+    # GitHub App is enabled and a CODECOV_TOKEN secret is configured; until
+    # then the absolute 85% floor is enforced by `--fail-under` in CI.
+    patch:
+      default:
+        target: 85%
+
+comment:
+  layout: reach, diff, flags, files
+  behavior: default
+  require_changes: false

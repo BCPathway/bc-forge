@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { forwardRef, useState, useRef, useEffect } from 'react';
 
 export type DropdownVariant = 'default' | 'primary' | 'danger';

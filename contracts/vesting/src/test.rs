@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
@@ -141,4 +142,138 @@ fn test_multiple_schedules_per_beneficiary_release_together() {
     assert_eq!(vesting.release(&beneficiary), 1_000);
     assert_eq!(token.balance(&beneficiary), 1_000);
     assert_eq!(token.balance(&vesting_id), 500);
+}
+
+// ── initialize deployer check ────────────────────────────────────────────
+
+#[test]
+fn test_initialize_succeeds_for_deployer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_id = env.register(BcForgeToken, ());
+    let token = BcForgeTokenClient::new(&env, &token_id);
+    token.initialize(
+        &admin,
+        &7,
+        &String::from_str(&env, "Test Token"),
+        &String::from_str(&env, "TST"),
+    );
+
+    let vesting_id = env.register(VestingContract, ());
+    let vesting = VestingContractClient::new(&env, &vesting_id);
+
+    let result = vesting.try_initialize(&admin, &token_id);
+    assert_eq!(result, Ok(Ok(())));
+}
+
+#[test]
+#[should_panic]
+fn test_initialize_fails_for_non_deployer() {
+    let env = Env::default();
+    // Don't mock_all_auths - only deployer can authorize
+
+    let admin = Address::generate(&env);
+    let token_id = env.register(BcForgeToken, ());
+    let token = BcForgeTokenClient::new(&env, &token_id);
+    token.initialize(
+        &admin,
+        &7,
+        &String::from_str(&env, "Test Token"),
+        &String::from_str(&env, "TST"),
+    );
+
+    let vesting_id = env.register(VestingContract, ());
+    let vesting = VestingContractClient::new(&env, &vesting_id);
+    let non_deployer = Address::generate(&env);
+
+    env.as_contract(&vesting_id, || {
+        non_deployer.require_auth();
+        vesting.initialize(&admin, &token_id);
+    });
+}
+
+#[test]
+fn test_initialize_fails_on_double_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let token_id = env.register(BcForgeToken, ());
+    let token = BcForgeTokenClient::new(&env, &token_id);
+    token.initialize(
+        &admin,
+        &7,
+        &String::from_str(&env, "Test Token"),
+        &String::from_str(&env, "TST"),
+    );
+
+    let vesting_id = env.register(VestingContract, ());
+    let vesting = VestingContractClient::new(&env, &vesting_id);
+
+    // First initialize succeeds
+    vesting.initialize(&admin, &token_id);
+
+    // Second initialize fails with AlreadyInitialized
+    assert_eq!(
+        vesting.try_initialize(&admin2, &token_id),
+        Err(Ok(VestingError::AlreadyInitialized))
+    );
+}
+
+#[soroban_sdk::contract]
+pub struct ReenteringVestingTokenContract;
+
+#[soroban_sdk::contractimpl]
+impl ReenteringVestingTokenContract {
+    pub fn mint(_env: Env, _admin: Address, _to: Address, _amount: i128) {}
+
+    pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
+        let vesting_id = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&soroban_sdk::Symbol::new(&env, "vesting"))
+            .unwrap();
+        let beneficiary = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&soroban_sdk::Symbol::new(&env, "ben"))
+            .unwrap();
+
+        let vesting_client = VestingContractClient::new(&env, &vesting_id);
+        vesting_client.release(&beneficiary);
+    }
+}
+
+#[test]
+fn test_reentrancy_on_vesting_release_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+
+    let admin = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+
+    let token_id = env.register(ReenteringVestingTokenContract, ());
+
+    let vesting_id = env.register(VestingContract, ());
+    let vesting = VestingContractClient::new(&env, &vesting_id);
+    vesting.initialize(&admin, &token_id);
+
+    env.as_contract(&token_id, || {
+        env.storage()
+            .instance()
+            .set(&soroban_sdk::Symbol::new(&env, "vesting"), &vesting_id);
+        env.storage()
+            .instance()
+            .set(&soroban_sdk::Symbol::new(&env, "ben"), &beneficiary);
+    });
+
+    vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
+
+    env.ledger().set_sequence_number(15);
+    let result = vesting.try_release(&beneficiary);
+    assert!(result.is_err());
 }

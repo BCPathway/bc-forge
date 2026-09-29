@@ -1,4 +1,4 @@
-# bc-forge 🔨
+# bc-forge
 
 A modular Soroban smart contract platform for **token minting** on the Stellar blockchain, with a TypeScript SDK for seamless integration.
 
@@ -6,7 +6,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 
 ---
 
-## ✨ Features
+## Features
 
 - **SEP-41 Compliant Token** — Full `TokenInterface` implementation (balance, transfer, approve, burn)
 - **Admin-Controlled Minting** — Only the contract admin can mint new tokens
@@ -22,58 +22,109 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 - **End-to-End Integration Tests** — Complete lifecycle testing on Stellar testnet
 - **Automatic Storage TTL Management** — Shared helper module extends Soroban contract and persistent storage TTL across calls
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 bc-forge/
-├── contracts/                    # Soroban smart contracts (Rust)
-│   ├── admin/                    # Admin access control module
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   ├── lifecycle/                # Pause/unpause lifecycle module
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   ├── rate-limit/             # Rate limiting module
-│   ├── split/                   # Batch payout with per-recipient failure isolation
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs            # Split contract implementation
-│   │       ├── events.rs         # Structured event emissions
-│   │       └── test.rs           # Unit tests
-│   ├── ttl/                      # Shared storage TTL helpers
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   └── token/                    # Core SEP-41 token contract
-│       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs            # Token contract implementation
-│           ├── events.rs         # Structured event emissions
-│           ├── proptest.rs       # Property-based fuzz testing
-│           ├── reentrancy_guard.rs # Reentrancy protection
-│           ├── rate_limit.rs     # Rate limit integration
-│           └── test.rs           # Unit tests
-├── e2e/                          # End-to-end integration tests
-│   ├── Cargo.toml              # E2E test dependencies
-│   ├── integration_test.rs     # Integration test suite
-│   └── README.md               # E2E test documentation
-├── sdk/                          # TypeScript SDK
-│   ├── src/
-│   │   ├── index.ts              # Entry point
-│   │   ├── client.ts             # bcForgeClient class
-│   │   └── utils.ts              # Transaction helpers
-│   ├── package.json
-│   └── tsconfig.json
+├── contracts/                     # Soroban smart contracts (Rust)
+│   ├── admin/                     # Admin access control, proposals, multisig pool
+│   ├── lifecycle/                 # Pause/unpause lifecycle module
+│   ├── rate-limit/                # Rate limiting module
+│   ├── split/                     # Batch payout with per-recipient failure isolation
+│   ├── token/                     # Core SEP-41 token contract
+│   ├── ttl/                       # Shared storage TTL helpers
+│   ├── vesting/                   # Vesting schedules
+│   ├── wrapper/                   # Wrapper vault
+│   └── yield_vault/               # Yield-bearing vault with share accounting
+├── cli/                           # TypeScript CLI (deploy, upgrade, multisig flows)
+├── sdk/                           # TypeScript SDK consumed by dApps and the CLI
+├── react/                         # React hooks and components for the SDK
+├── indexer/                       # Event indexer and query API
+├── e2e/                           # End-to-end integration tests
+├── docs/                          # Long-form docs (architecture, vaults, upgrades)
+├── deployments/                   # Recorded deployment addresses per network
+├── migrations/                    # Database migrations for the indexer
+├── scripts/                       # Repo maintenance and CI helper scripts
 ├── .github/
-│   ├── ISSUE_TEMPLATE/           # Bug, Feature, Contract Improvement
+│   ├── ISSUE_TEMPLATE/            # Bug, Feature, Contract Improvement
 │   ├── PULL_REQUEST_TEMPLATE.md
-│   └── workflows/ci.yml         # CI pipeline
-├── Cargo.toml                    # Workspace manifest
-├── CONTRIBUTING.md               # Contributor guide (drips.network)
-├── LICENSE                       # MIT
-└── README.md                     # This file
+│   └── workflows/ci.yml           # CI pipeline
+├── Cargo.toml                     # Rust workspace manifest
+├── package.json                   # Root Node workspace manifest
+├── config.example.json            # Example CLI/indexer configuration
+├── CONTRIBUTING.md                # Contributor guide (drips.network)
+├── SECURITY.md                    # Security policy and disclosure
+├── VAULTS.md                      # Vault integration guide
+├── LICENSE                        # MIT
+└── README.md                      # This file
 ```
 
-## 🧠 Storage TTL Strategy
+> `contracts/yield_vault` is listed in the `exclude` array of the root
+> `Cargo.toml`. It is not part of the built workspace and is not shipped;
+> treat it as experimental. (#923 removed the excluded `compound_fees` stub
+> and promoted `flash_loan_guard` into the workspace — see below.)
+
+### Architecture
+
+```mermaid
+flowchart TD
+    subgraph Clients
+        DApp[dApp / Frontend]
+        CLI[cli - TypeScript CLI]
+        React[react - hooks and components]
+    end
+
+    subgraph TypeScript
+        SDK[sdk - bcForgeClient]
+        Indexer[indexer - event indexer and query API]
+    end
+
+    subgraph Contracts[Soroban contracts]
+        Token[token - SEP-41 token]
+        Admin[admin - access control and multisig pool]
+        Lifecycle[lifecycle - pause / unpause]
+        RateLimit[rate-limit]
+        Vesting[vesting]
+        Split[split - batch payout]
+        Wrapper[wrapper - wrapper vault]
+        YieldVault[yield_vault - share accounting]
+        TTL[ttl - shared storage TTL helpers]
+    end
+
+    Ledger[(Stellar ledger)]
+
+    DApp --> SDK
+    React --> SDK
+    CLI --> SDK
+    SDK --> Token
+    SDK --> Admin
+    CLI --> Token
+    CLI --> Admin
+    Token --> TTL
+    Admin --> TTL
+    Lifecycle --> TTL
+    Split --> TTL
+    Wrapper --> TTL
+    YieldVault --> TTL
+    Wrapper --> Token
+    YieldVault --> Token
+    Split --> Token
+    Admin -.governs.-> Token
+    Admin -.governs.-> Lifecycle
+    Admin -.governs.-> YieldVault
+    Token --> Ledger
+    Wrapper --> Ledger
+    YieldVault --> Ledger
+    Ledger -.events.-> Indexer
+    Indexer --> SDK
+```
+
+The contracts share the `ttl` helper crate so that instance and persistent
+storage entries stay live. `admin` holds the multisig pool that governs
+upgrades and privileged operations on the value-bearing contracts.
+
+
+## Storage TTL Strategy
 
 To keep Soroban contract state active, bc-forge now includes shared TTL logic that:
 
@@ -83,7 +134,7 @@ To keep Soroban contract state active, bc-forge now includes shared TTL logic th
 
 This makes the system more resilient to Soroban storage expiry while preserving on-chain security semantics.
 
-## 🛠️ Prerequisites
+## Prerequisites
 
 | Tool | Version | Install |
 |------|---------|---------|
@@ -92,12 +143,12 @@ This makes the system more resilient to Soroban storage expiry while preserving 
 | **Stellar CLI** | 22.0+ | `cargo install stellar-cli --locked` |
 | **Node.js** | 18+ | [nodejs.org](https://nodejs.org) |
 
-## 🚀 Local Setup
+## Local Setup
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/p3ris0n/bc-forge.git
+git clone https://github.com/BCPathway/bc-forge.git
 cd bc-forge
 ```
 
@@ -148,7 +199,36 @@ npm install
 npm run build
 ```
 
-## 🌐 Deploy to Testnet
+## CLI Deployment Configuration
+
+The CLI reads `.bc-forge.json` from the current working directory. Start with the ready-to-use [`config.example.json`](config.example.json):
+
+```bash
+cp config.example.json .bc-forge.json
+```
+
+You can also generate a minimal file with `bc-forge config init`. The example contains these fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `version` | No | Configuration schema version. Defaults to `1.0.0`. |
+| `name` | Yes | Token or project name. |
+| `symbol` | Yes | Token symbol. |
+| `decimals` | No | Token decimal precision, from 0 to 18. Defaults to `7`. |
+| `admin` | No | Stellar public `G...` address that administers the token. Required when initializing a contract. |
+| `superAdmin` | No | Stellar public `G...` address assigned the initial `SuperAdmin` role during RBAC initialization. Defaults to `admin` when omitted. |
+| `network` | No | Deployment environment: `mainnet`, `testnet`, `futurenet`, `standalone`, or `custom`. Defaults to `testnet`. |
+| `rpcUrl` | No | Soroban RPC endpoint URL. |
+| `networkPassphrase` | No | Stellar network passphrase. |
+| `secretKey` | No | Stellar `S...` secret key used to sign transactions. Prefer `SECRET_KEY` or another secret manager. |
+| `contracts` | No | Map of deployed contract metadata keyed by contract name. |
+| `contracts.<name>.contractId` | No | Deployed Soroban contract ID. |
+| `contracts.<name>.wasmHash` | No | Hash of the deployed contract WASM. |
+| `contracts.<name>.deployer` | No | Stellar public address that deployed the contract. |
+
+Environment variables take precedence over file and local-store values for `RPC_URL`, `NETWORK_PASSPHRASE`, `CONTRACT_ID`, and `SECRET_KEY`. Replace every placeholder before deploying, and do not commit real secret keys.
+
+## Deploy to Testnet
 
 ### Generate a Keypair
 
@@ -188,6 +268,41 @@ stellar contract invoke \
   --symbol "SFG"
 ```
 
+### Initialize RBAC (Assign Initial SuperAdmin)
+
+After initialization, run the `init_rbac` step to bootstrap role-based access
+control and assign the initial `SuperAdmin` role:
+
+```bash
+# Bootstrap the SuperAdmin mapping from the configured admin (idempotent)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  migrate_admin
+
+# Assign the initial SuperAdmin role (the contract admin can perform this grant)
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source deployer \
+  --network testnet \
+  -- \
+  grant_role \
+  --caller <YOUR_PUBLIC_KEY> \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
+
+# Verify the assignment
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --network testnet \
+  -- \
+  has_role \
+  --role SuperAdmin \
+  --address <SUPER_ADMIN_PUBLIC_KEY>
+```
+
 ### Mint Tokens
 
 ```bash
@@ -212,7 +327,7 @@ stellar contract invoke \
   --id <ADDRESS>
 ```
 
-## 🧪 Local Development with Quickstart
+## Local Development with Quickstart
 
 If you want to build and test against a local Soroban network, run the Stellar Quickstart container instead of using public testnet services.
 
@@ -267,7 +382,7 @@ const client = new bcForgeClient({
 
 If your local Quickstart setup exposes RPC on a different path, keep the same host and update the URL to match your container configuration.
 
-## 📦 SDK Usage
+## SDK Usage
 
 ```typescript
 import { bcForgeClient } from '@bc-forge/sdk';
@@ -299,10 +414,11 @@ await client.transfer(
 
 See [sdk/README.md](sdk/README.md) for the full API reference.
 
-## 🏗️ Smart Contract Architecture
+## Smart Contract Architecture
 
 See the [access-control diagrams](docs/ACCESS_CONTROL.md) for the current role
 hierarchy, authorization sequence, protected operations, and governance flow.
+See the [Vault Integration Guide](docs/VAULTS.md) for details on yield-bearing fee vaults, APY calculations, and frontend dApp integration.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -330,18 +446,102 @@ hierarchy, authorization sequence, protected operations, and governance flow.
 └─────────────────────────────────────────────────┘
 ```
 
-## 🤝 Contributing
+## Documentation Site
+
+The docs site is built with [VitePress](https://vitepress.dev/) from the
+markdown under [`docs/`](docs/), plus API pages generated from TSDoc (TypeDoc)
+and Rust doc comments (`cargo doc`).
+
+### Run the docs site locally
+
+From the repository root:
+
+```bash
+npm install        # once; also installs VitePress and TypeDoc
+npm run docs:gen   # generate the SDK and contract API pages
+npm run docs:dev   # serve at http://localhost:5173
+npm run docs:build # production build into docs/.vitepress/dist
+```
+
+`npm run docs:gen` needs the Rust toolchain because the contract reference is
+generated with `cargo doc`. If you only want the SDK page, run
+`npm run docs:gen:sdk`.
+
+The generated API pages under `docs/api/sdk/` and `docs/public/api/` are not
+checked in. Run `npm run docs:gen` after changing `sdk/src/*` or any contract
+doc comments. CI builds the site on every pull request and uploads the built
+site as a `docs-site` artifact. Deployment is left to the maintainer because no
+docs host is configured in this repository.
+
+The site includes the [spec-to-code traceability matrix](docs/TRACEABILITY.md),
+the [admin key runbook](docs/ADMIN_KEYS.md), and the
+[upgrade guide](docs/UPGRADE_GUIDE.md). Supported Node, Rust, Stellar CLI, and
+package ranges are in the [compatibility matrix](docs/COMPATIBILITY.md).
+
+## Community & first contribution
+
+New here? Follow the [contributor walkthrough](docs/WALKTHROUGH.md) for a
+start-to-finish example of setting up the repository, making a small change,
+running checks, and opening a pull request.
+
+The project does not currently publish verified Discord or Telegram invite URLs
+in the repository. Maintainers can enable the badges below after adding the
+official invites; contributors should not invent or copy unverified invite
+links.
+
+<!--
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](MAINTAINER_DISCORD_INVITE_URL)
+[![Telegram](https://img.shields.io/badge/Telegram-Join-26A5E4?logo=telegram&logoColor=white)](MAINTAINER_TELEGRAM_INVITE_URL)
+-->
+
+## Contributing
 
 We welcome contributions! bc-forge is maintained on [drips.network](https://www.drips.network) — contributors can earn rewards by resolving posted issues.
 
 ### Quick Start for Contributors
 
-1. **Browse open issues** — Look for issues labeled `good-first-issue`, `smart-contract`, or `sdk`
+1. **Browse open issues** — Look for issues labeled `good first issue`, `smart-contract`, or `sdk`
 2. **Fork & branch** — Create a branch: `feature/<issue-number>-<short-description>`
 3. **Implement & test** — Write code, add/update tests, ensure `cargo test` and `npm run build` pass
 4. **Submit a PR** — Use the PR template; reference the issue number
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+
+### How we fund contributors
+
+Contributor work on bc-forge is funded through [Drips](https://www.drips.network).
+Bounties are attached to issues that maintainers have posted for funding, and the
+same three steps apply whether the issue is a first contribution or a larger
+change.
+
+**1. Claim the issue.** Comment on the GitHub issue to claim it before you start
+work. The maintainer posts funded issues on the bc-forge project page on Drips;
+find them from the [open issues](https://github.com/BCPathway/bc-forge/issues?q=is%3Aissue+is%3Aopen)
+list, and start with issues labeled `good first issue` if you are new to the
+codebase.
+
+**2. Open a pull request.** Branch from `main` using the naming convention below,
+make one focused change, and open a PR against `BCPathway/bc-forge:main`. Use
+`Closes #<issue-number>` in the PR description so the issue is linked.
+
+**3. Get paid after merge.** Once a maintainer reviews and merges your PR, the
+reward for the issue is distributed to you through Drips. Rewards are paid after
+merge, not on submission.
+
+To receive a payout, create a profile at [drips.network](https://www.drips.network)
+and link your GitHub account before you open the PR. The linked address is where
+merged work is paid, so set it up first.
+
+| Step | Where | What happens |
+|---|---|---|
+| Claim | The GitHub issue | Comment to claim; avoid two people on one issue |
+| Submit | A PR against `main` | Include `Closes #<issue-number>` |
+| Get paid | Drips | Reward distributed after the PR is merged |
+
+Funding does not change the review bar: every PR is still reviewed against
+[CONTRIBUTING.md](CONTRIBUTING.md), and security reports are handled separately
+and privately as described in [SECURITY.md](SECURITY.md). See also
+[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) for a full end-to-end example.
 
 ### Branch Naming Convention
 
@@ -352,7 +552,24 @@ docs/<issue-number>-<description>        # Documentation
 test/<issue-number>-<description>        # Test improvements
 ```
 
-## 🔒 Security
+## Experimental contracts
+
+The following contracts are experimental, untested, or incomplete. **Do not deploy them in a production environment.**
+
+- `contracts/yield_vault`: A yield vault that holds or routes token balances. High risk if deployed with unchecked sources.
+
+### Crate outcomes (#923)
+
+- `contracts/compound_fees` — **removed.** It was a placeholder with no implementation (no contract entry points and no compiled tests), so it was deleted instead of shipping an empty crate. Restore it from git history if a fee-compounding vault is implemented later.
+- `contracts/flash_loan_guard` — **finished and added to the workspace.** See [Flash Loan Guard](#flash-loan-guard-contractsflash_loan_guard) below.
+
+### Flash Loan Guard (`contracts/flash_loan_guard`)
+
+- **Purpose:** a same-ledger reentrancy guard for deposit/withdraw flows. It records the ledger sequence of a user's most recent `deposit` and rejects any `withdraw` attempted in the same ledger block, cutting off flash-loan-funded withdrawal loops.
+- **Who may call it:** any authenticated user — both entry points (`deposit(user)`, `withdraw(user)`) require the authorization of the user address they act on, and the contract holds no admin or privileged role.
+- **CI:** the crate is now part of the Cargo workspace, so `cargo test -p bc-forge-flash-loan-guard` and clippy cover it in CI like every other contract.
+
+## Security
 
 Security is our top priority. If you discover a security vulnerability in bc-forge, please report it responsibly following our [Security Policy](SECURITY.md).
 
@@ -360,11 +577,13 @@ Security is our top priority. If you discover a security vulnerability in bc-for
 
 For more details about our vulnerability disclosure process, supported versions, scope, and response timeline, please review the [SECURITY.md](SECURITY.md) file.
 
-## 📄 License
+How security reports are rewarded, and whether a hosted bounty program is live, is tracked in [docs/BUG_BOUNTY.md](docs/BUG_BOUNTY.md).
+
+## License
 
 [MIT](LICENSE) — Free for personal and commercial use.
 
-## 🔗 Links
+## Links
 
 - [Soroban Documentation](https://soroban.stellar.org/docs)
 - [Stellar SDK (JS)](https://github.com/stellar/js-stellar-sdk)

@@ -1,0 +1,31 @@
+name: Admin proptest nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  PROPTEST_CASES: 2000
+
+jobs:
+  admin-proptests:
+    name: Admin property tests (extended)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-admin-proptests
+
+      - name: Run admin tests with extended proptest cases
+        run: cargo test -p bc-forge-admin

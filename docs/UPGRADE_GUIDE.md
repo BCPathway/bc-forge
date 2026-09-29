@@ -255,6 +255,8 @@ If you have an existing contract that was deployed before the `SuperAdmin`
 role was introduced, use `migrate_admin` to enable `SuperAdmin`-based guards
 without resetting state.
 
+### Option 1: CLI
+
 ```bash
 stellar contract invoke \
   --id <CONTRACT_ID> \
@@ -263,10 +265,83 @@ stellar contract invoke \
   migrate_admin
 ```
 
+### Option 2: TypeScript SDK
+
+```typescript
+import { bcForgeClient } from '@bc-forge/sdk';
+import { Keypair } from '@stellar/stellar-sdk';
+
+const client = new bcForgeClient({
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+  contractId: '<CONTRACT_ID>',
+});
+
+const adminKeypair = Keypair.fromSecret(process.env.ADMIN_SECRET!);
+const result = await client.migrateAdmin(adminKeypair);
+console.log('Migration TX:', result.hash);
+```
+
+### Option 3: Standalone migration script
+
+A standalone migration script is available at `migrations/rbac-migration.ts`.
+It provides a complete migration workflow with verification:
+
+```bash
+# Dry-run (simulate without submitting)
+npx ts-node migrations/rbac-migration.ts \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --contract-id <CONTRACT_ID> \
+  --admin-secret <ADMIN_SECRET> \
+  --dry-run
+
+# Execute migration
+npx ts-node migrations/rbac-migration.ts \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --contract-id <CONTRACT_ID> \
+  --admin-secret <ADMIN_SECRET>
+```
+
+The script performs the following steps:
+1. Verifies the contract has an admin set
+2. Checks if migration is already complete (idempotent)
+3. Executes the migration transaction
+4. Verifies the admin now has the SuperAdmin role
+
+### Storage migration process
+
 This is a one-shot, idempotent operation:
-- Reads the current admin from instance storage.
+- Reads the current admin from instance storage (`AdminKey::Admin`).
 - Creates a persistent `SuperAdmin(admin)` entry.
 - Safe to call multiple times (no-op on subsequent calls).
+
+### Token allowance storage (#913)
+
+Older token WASM stored spending allowances as two persistent keys per
+`(owner, spender)` pair:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `Allowance(owner, spender)` | `i128` | Remaining allowance amount |
+| `AllowanceExp(owner, spender)` | `u32` | Ledger sequence after which the allowance expires (`0` = no expiry) |
+
+Upgraded token WASM uses a single struct value under `Allowance(owner, spender)`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `amount` | `i128` | Remaining allowance amount |
+| `expiration_ledger` | `u32` | Expiration ledger (`0` = no expiry) |
+
+**Migration behavior:** the first read or spend that touches a legacy pair copies
+the amount and expiration into `AllowanceData`, writes it back under
+`Allowance(owner, spender)`, and **removes** `AllowanceExp(owner, spender)`.
+New `approve` calls write only the struct and never recreate the legacy key.
+
+No separate migration transaction is required for allowances; upgrading the
+contract WASM is sufficient. Integrators should treat `AllowanceExp` as
+deprecated and must not write it after upgrade.
 
 Use this **before** upgrading to a WASM version that requires `SuperAdmin`
 guards (e.g., if the new code calls `require_super_admin` in `upgrade`).
@@ -350,6 +425,85 @@ release note.
 - **Storage:** Stored under `AdminKey::ProposalTimelock(proposal_id)` in
   instance storage.
 
+## Rolling back a bad upgrade
+
+The CLI maintains a local upgrade history file so that a bad upgrade can be
+rolled back in one step.
+
+### How history is recorded
+
+Every time `bc-forge upgrade` submits a **confirmed** on-chain upgrade (not
+a dry-run or estimate), the CLI appends an entry to:
+
+```
+~/.bc-forge/upgrade-history.json
+```
+
+Each entry stores the **previous** and **new** WASM hashes along with the
+transaction hash and a timestamp. No secrets are ever written.
+
+You can override the history file location by setting the
+`BC_FORGE_UPGRADE_HISTORY` environment variable.
+
+### Proposing a rollback with `--to-last-good`
+
+```bash
+bc-forge upgrade \
+  --contract-id <CONTRACT_ID> \
+  --source $ADMIN_SECRET \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --to-last-good
+```
+
+This reads the previous WASM hash from the local history file and starts the
+same multisig propose/approve/execute flow as a normal upgrade — the only
+difference is that the WASM hash is read from history instead of compiled from
+source.
+
+The command fails with a clear error message when:
+
+- No history exists for the given contract ID.
+- The history file is missing or unreadable.
+
+### Dry-run a rollback
+
+```bash
+bc-forge upgrade \
+  --contract-id <CONTRACT_ID> \
+  --source $ADMIN_SECRET \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015" \
+  --to-last-good \
+  --dry-run
+```
+
+### Verifying the stored history
+
+Inspect the history file directly:
+
+```bash
+cat ~/.bc-forge/upgrade-history.json
+```
+
+The file is human-readable JSON. Example:
+
+```json
+{
+  "CABC…XYZ": [
+    {
+      "previousHash": "aabb…",
+      "newHash": "ccdd…",
+      "txHash": "eeef…",
+      "recordedAt": "2026-09-25T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+> **Note:** The `--to-last-good` flag proposes the `previousHash` from the
+> **most recent** entry. Keep the history file safe between deployments.
+
 ## Source of truth
 
 - Upgrade entrypoints:
@@ -360,3 +514,5 @@ release note.
   [`deployments/deploy-wrapper-testnet.sh`](../deployments/deploy-wrapper-testnet.sh)
 - SDK upgrade method:
   [`sdk/src/client.ts`](../sdk/src/client.ts)
+- Upgrade history utility:
+  [`cli/src/utils/upgrade-history.ts`](../cli/src/utils/upgrade-history.ts)

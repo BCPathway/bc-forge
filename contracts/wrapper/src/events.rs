@@ -1,8 +1,25 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Wrapper Events
 //!
 //! Structured event emission for all wrapper contract operations.
+//!
+//! # Event data layout & schema version (#924)
+//!
+//! The vault `deposit` and `withdraw` event data tuples **end with a
+//! `version: u32` field** (`EVENT_SCHEMA_VERSION`, currently `1`). Existing
+//! fields keep their order and meaning; the version is appended last so
+//! positional parsers of the previous layout keep working. Consumers must
+//! read the version from the last element before interpreting the data.
+//!
+//! Layout reference (v1):
+//! - `deposit`: `(caller, assets, shares, version)`
+//! - `withdrw`: `(caller, shares, underlying_amount, version)`
 
 use soroban_sdk::{symbol_short, Address, Env};
+
+/// Schema version appended to the vault `deposit` and `withdraw` event data
+/// tuples. Bump when their field layout changes (#924).
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
 
 /// Emitted when the wrapper contract is initialized.
 pub fn emit_initialized(env: &Env, admin: &Address, token_contract_id: &Address) {
@@ -17,6 +34,19 @@ pub fn emit_wrap(env: &Env, caller: &Address, amount: i128, wrapped_amount: i128
     env.events().publish(
         (symbol_short!("wrap"),),
         (caller.clone(), amount, wrapped_amount),
+    );
+}
+
+/// Emitted when underlying tokens are deposited into the vault and shares are minted.
+///
+/// @param env The Soroban environment.
+/// @param caller The depositing address.
+/// @param assets The amount of underlying tokens deposited.
+/// @param shares The number of vault shares minted to the caller.
+pub fn emit_deposit(env: &Env, caller: &Address, assets: i128, shares: i128) {
+    env.events().publish(
+        (symbol_short!("deposit"),),
+        (caller.clone(), assets, shares, EVENT_SCHEMA_VERSION),
     );
 }
 
@@ -84,4 +114,91 @@ pub fn emit_unpaused(env: &Env, admin: &Address) {
 pub fn emit_distribute_rewards(env: &Env, caller: &Address, amount: i128) {
     env.events()
         .publish((symbol_short!("dist_rw"),), (caller.clone(), amount));
+}
+
+/// Emitted when vault state parameters are configured or updated.
+///
+/// @notice Publishes vault state configuration event data.
+/// @param env The Soroban environment.
+/// @param caller The admin address setting the vault state.
+/// @param state The updated [`VaultState`].
+pub fn emit_vault_state_set(env: &Env, caller: &Address, state: &crate::VaultState) {
+    env.events()
+        .publish((symbol_short!("v_state"),), (caller.clone(), state.clone()));
+}
+
+/// Emitted when wrapped shares are withdrawn for proportional underlying tokens.
+///
+/// @notice Publishes withdrawal event data including the caller, burned shares, and payout.
+/// @dev The event topics include the `withdrw` symbol.
+/// @param env The Soroban environment.
+/// @param caller The address withdrawing shares.
+/// @param shares The amount of wrapped shares burned.
+/// @param underlying_amount The amount of underlying tokens transferred to the caller.
+pub fn emit_withdraw(env: &Env, caller: &Address, shares: i128, underlying_amount: i128) {
+    env.events().publish(
+        (symbol_short!("withdrw"),),
+        (
+            caller.clone(),
+            shares,
+            underlying_amount,
+            EVENT_SCHEMA_VERSION,
+        ),
+    );
+}
+
+/// Emitted when an admin records a deposit lockup (unlock timestamp) for a user.
+///
+/// @notice Publishes lockup data including the admin caller, the locked user, and the unlock timestamp.
+/// @dev The event topics include the `lockup` symbol.
+/// @param env The Soroban environment.
+/// @param caller The admin address enforcing the lockup.
+/// @param user The address whose deposit is time-locked.
+/// @param unlock_timestamp The timestamp (seconds since epoch) at which the deposit unlocks.
+pub fn emit_unlock_time_set(env: &Env, caller: &Address, user: &Address, unlock_timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("lockup"),),
+        (caller.clone(), user.clone(), unlock_timestamp),
+    );
+}
+
+/// Emitted when an admin clears a user's deposit lockup.
+///
+/// @notice Publishes lockup-clearing data including the admin caller and the unlocked user.
+/// @dev The event topics include the `unlock` symbol.
+/// @param env The Soroban environment.
+/// @param caller The admin address clearing the lockup.
+/// @param user The address whose deposit lockup was removed.
+pub fn emit_unlock_time_cleared(env: &Env, caller: &Address, user: &Address) {
+    env.events()
+        .publish((symbol_short!("unlock"),), (caller.clone(), user.clone()));
+}
+
+/// Emitted when the admin rescues a foreign token balance out of the vault via
+/// [`crate::WrapperContract::rescue_tokens`].
+pub fn emit_rescued(env: &Env, caller: &Address, token: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("rescue"),),
+        (caller.clone(), token.clone(), to.clone(), amount),
+    );
+}
+
+/// Emitted when withdrawal cooldown configuration is set or updated.
+pub fn emit_cooldown_config_set(env: &Env, admin: &Address, config: &crate::CooldownConfig) {
+    env.events()
+        .publish((symbol_short!("c_cfg"),), (admin.clone(), config.clone()));
+}
+
+/// Emitted when a withdrawal is queued in cooldown mode.
+pub fn emit_withdraw_queued(
+    env: &Env,
+    caller: &Address,
+    shares: i128,
+    amount: i128,
+    release_ledger: u32,
+) {
+    env.events().publish(
+        (symbol_short!("w_queued"),),
+        (caller.clone(), shares, amount, release_ledger),
+    );
 }
