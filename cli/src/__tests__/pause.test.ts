@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { describe, it, expect } from "vitest";
 import { Keypair } from "@stellar/stellar-sdk";
 import { runPauseCommand, type PauseCapableClient } from "../utils/pause.js";

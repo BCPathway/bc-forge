@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * Pauser tool — incident-response logic for `bc-forge pause` / `bc-forge unpause`.
  *

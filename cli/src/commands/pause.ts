@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Command } from "commander";
 import { bcForgeClient } from "@bc-forge/sdk";
 import { addNetworkOptions } from "../network.js";
