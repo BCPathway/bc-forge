@@ -21,6 +21,8 @@ bc-forge is maintained on [drips.network](https://www.drips.network). As a contr
 The linked account is where rewards are paid, so set it up before opening your
 PR. The README summarizes the same flow in [How we fund contributors](README.md#how-we-fund-contributors).
 
+Release ownership, review counts, and escalation are in [docs/MAINTAINERS.md](docs/MAINTAINERS.md).
+
 ## 🛠️ Development Setup
 
 ### Prerequisites

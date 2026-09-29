@@ -590,12 +590,14 @@ How security reports are rewarded, and whether a hosted bounty program is live, 
 - [drips.network](https://www.drips.network)
 
 
-## 📦 Release Artifacts & Installation Map
+## Release artifacts
 
-| Deliverable | Artifact Type | Distribution Channel / Install Command | Status / Release Notes |
-| :--- | :--- | :--- | :--- |
-| **SDK** (`sdk/`) | npm Package | `npm install @bcpathway/forge-sdk` *(or local source)* | [Release Notes](./docs/MAINTAINERS.md) / *Unpublished (Staging)* |
-| **CLI** (`cli/`) | Binary / npm CLI | `npm install -g @bcpathway/forge-cli` | *Not yet published to registry* |
-| **React Components** (`web/`) | npm Package | `npm install @bcpathway/forge-react` | *Not yet published to registry* |
-| **Indexer** (`indexer/`) | Container Image | `docker pull ghcr.io/bcpathway/forge-indexer:latest` | *Awaiting initial tag* |
-| **Contracts** (`contracts/`) | Compiled WASM | Build from source via `cargo build --target wasm32-unknown-unknown` | Source-only (Release WASMs pending audit) |
+Names match the package manifests. Nothing in this table is published yet.
+
+| Deliverable | Channel | Install or build | Release notes |
+| --- | --- | --- | --- |
+| SDK (`sdk/`, `@bc-forge/sdk`) | npm | Not yet published. After a release: `npm install @bc-forge/sdk` | [Maintainers](docs/MAINTAINERS.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) |
+| CLI (`cli/`, `@bc-forge/cli`) | npm | Not yet published. After a release: `npm install -g @bc-forge/cli` | [Maintainers](docs/MAINTAINERS.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) |
+| React (`react/`, `@bc-forge/react`) | npm | Not yet published. After a release: `npm install @bc-forge/react` | [Maintainers](docs/MAINTAINERS.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) |
+| Indexer (`indexer/`) | source | Not yet published as an image. Run it from this repo with `docker compose up` in `indexer/`. | [indexer/README.md](indexer/README.md) |
+| Contracts (`contracts/`) | source WASM | Not yet published as release assets. Build with `cargo build --target wasm32-unknown-unknown --release`. | [Upgrade guide](docs/UPGRADE_GUIDE.md) |

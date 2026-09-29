@@ -10,7 +10,7 @@ This document outlines ownership domains, release responsibilities, review thres
 | :--- | :--- | :--- | :--- |
 | **Smart Contracts** | `contracts/` | Lead Contract Maintainer | Protocol Core Team |
 | **SDK & CLI** | `sdk/`, `cli/` | Developer Tooling Lead | Core Contributors |
-| **React Frontend** | `web/`, client packages | Frontend Lead | UI/UX Reviewers |
+| **React** | `react/` | Frontend Lead | UI/UX Reviewers |
 | **Indexer Services** | `indexer/`, database migrations | Data Engineering Lead | Backend Maintainers |
 
 ---
@@ -29,3 +29,7 @@ To maintain high security and stability, code changes affecting release artifact
 
 1. **Blocked Reviews**: If a domain owner is unresponsive for >48 hours during an urgent release patch, escalate to the repository lead maintainers via the internal governance channel.
 2. **Disputes**: Architectural disagreements are resolved by majority vote among core domain maintainers during weekly syncs.
+
+## Maintainer action: CODEOWNERS
+
+`.github/CODEOWNERS` is not updated here. No confirmed GitHub team or username was available to assign, and this document does not invent one. A maintainer must add CODEOWNERS only after those owners are confirmed.
