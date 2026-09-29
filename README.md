@@ -557,3 +557,14 @@ How security reports are rewarded, and whether a hosted bounty program is live, 
 - [Stellar SDK (JS)](https://github.com/stellar/js-stellar-sdk)
 - [SEP-41 Token Standard](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)
 - [drips.network](https://www.drips.network)
+
+
+## 📦 Release Artifacts & Installation Map
+
+| Deliverable | Artifact Type | Distribution Channel / Install Command | Status / Release Notes |
+| :--- | :--- | :--- | :--- |
+| **SDK** (`sdk/`) | npm Package | `npm install @bcpathway/forge-sdk` *(or local source)* | [Release Notes](./docs/MAINTAINERS.md) / *Unpublished (Staging)* |
+| **CLI** (`cli/`) | Binary / npm CLI | `npm install -g @bcpathway/forge-cli` | *Not yet published to registry* |
+| **React Components** (`web/`) | npm Package | `npm install @bcpathway/forge-react` | *Not yet published to registry* |
+| **Indexer** (`indexer/`) | Container Image | `docker pull ghcr.io/bcpathway/forge-indexer:latest` | *Awaiting initial tag* |
+| **Contracts** (`contracts/`) | Compiled WASM | Build from source via `cargo build --target wasm32-unknown-unknown` | Source-only (Release WASMs pending audit) |
