@@ -58,7 +58,7 @@ import {
   hashToScVal,
 } from './utils';
 
-import { SimulationError, RPCError, SignerRequiredError } from './errors';
+import { SimulationError, RPCError, SignerRequiredError, ContractError, parseContractError } from './errors';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +71,10 @@ export interface bcForgeClientConfig {
   contractId: string;
   /** Optional wallet adapter for browser-based signing flows */
   walletAdapter?: WalletAdapter;
+  /** Max retry attempts for transient sequence or fee errors (default: 3) */
+  maxRetryAttempts?: number;
+  /** Maximum fee cap in stroops for fee bump retries (default: 10000000) */
+  maxFeeCap?: string | number | bigint;
 }
 
 export interface TransactionResult {
@@ -144,6 +148,10 @@ export class bcForgeClient {
   private server: SorobanRpc.Server;
   private contract: Contract;
   private walletAdapter?: WalletAdapter;
+  private maxRetryAttempts?: number;
+  private maxFeeCap?: string | number | bigint;
+  private readCache = new Map<string, { value: unknown; ledger: number }>();
+  private cachedLedgerSequence: number = 0;
 
   constructor(config: bcForgeClientConfig) {
     this.rpcUrl = config.rpcUrl;
@@ -152,6 +160,8 @@ export class bcForgeClient {
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
     this.walletAdapter = config.walletAdapter;
+    this.maxRetryAttempts = config.maxRetryAttempts;
+    this.maxFeeCap = config.maxFeeCap;
   }
 
   /** Replace or set the wallet adapter at runtime */
@@ -177,6 +187,57 @@ export class bcForgeClient {
     await this.walletAdapter.disconnect();
   }
 
+  // ─── Ledger Cache Helpers ──────────────────────────────────────────────────
+
+  /** Get current ledger sequence number */
+  async getLatestLedgerSequence(): Promise<number> {
+    if (this.cachedLedgerSequence > 0) {
+      return this.cachedLedgerSequence;
+    }
+    try {
+      const latest = await this.server.getLatestLedger();
+      return latest.sequence;
+    } catch {
+      return this.cachedLedgerSequence;
+    }
+  }
+
+  /** Set ledger sequence manually for testing or mock control */
+  setLedgerSequence(sequence: number): void {
+    this.cachedLedgerSequence = sequence;
+  }
+
+  /** Clear all cached read responses */
+  clearCache(): void {
+    this.readCache.clear();
+  }
+
+  /** Helper to execute a ledger-cached read query */
+  private async getCachedRead<T>(
+    method: string,
+    strArgs: string[],
+    fetcher: () => Promise<T>,
+  ): Promise<T> {
+    const currentLedger = await this.getLatestLedgerSequence();
+    const cacheKey = `${this.contractId}:${method}:${strArgs.join(':')}:${currentLedger}`;
+
+    const existing = this.readCache.get(cacheKey);
+    if (existing && existing.ledger === currentLedger) {
+      return existing.value as T;
+    }
+
+    // Invalidate entries from old ledgers
+    for (const [k, entry] of this.readCache.entries()) {
+      if (entry.ledger !== currentLedger) {
+        this.readCache.delete(k);
+      }
+    }
+
+    const val = await fetcher();
+    this.readCache.set(cacheKey, { value: val, ledger: currentLedger });
+    return val;
+  }
+
   // ─── Read-Only Queries ───────────────────────────────────────────────────
 
   /**
@@ -186,8 +247,10 @@ export class bcForgeClient {
    * @returns Token balance as a fixed-scale decimal string.
    */
   async getBalance(address: string): Promise<bigint> {
-    const result = await this.queryContract('balance', [addressToScVal(address)]);
-    return BigInt(scValToNative(result) as string | number | bigint);
+    return this.getCachedRead('balance', [address], async () => {
+      const result = await this.queryContract('balance', [addressToScVal(address)]);
+      return BigInt(scValToNative(result) as string | number | bigint);
+    });
   }
 
   /**
@@ -228,11 +291,13 @@ export class bcForgeClient {
    * Get the spending allowance from `owner` to `spender`.
    */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
-    const result = await this.queryContract('allowance', [
-      addressToScVal(owner),
-      addressToScVal(spender),
-    ]);
-    return BigInt(scValToNative(result) as string | number | bigint);
+    return this.getCachedRead('allowance', [owner, spender], async () => {
+      const result = await this.queryContract('allowance', [
+        addressToScVal(owner),
+        addressToScVal(spender),
+      ]);
+      return BigInt(scValToNative(result) as string | number | bigint);
+    });
   }
 
   /**
@@ -1360,12 +1425,15 @@ export class bcForgeClient {
       try {
         return await fn();
       } catch (error) {
-        if (error instanceof SimulationError || error instanceof SignerRequiredError) {
+        if (
+          error instanceof ContractError ||
+          error instanceof SimulationError ||
+          error instanceof SignerRequiredError
+        ) {
           throw error;
         }
         lastError = error;
         // Only retry on certain errors (e.g., network/RPC errors)
-        // For now, we retry on any error that isn't a known terminal error
         if (i < retries - 1) {
           await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
         }
@@ -1396,6 +1464,8 @@ export class bcForgeClient {
         const simulated = await this.server.simulateTransaction(tx);
 
         if (SorobanRpc.Api.isSimulationError(simulated)) {
+          const parsed = parseContractError(simulated.error, method);
+          if (parsed) throw parsed;
           throw new SimulationError(`Query failed: ${simulated.error}`, simulated.error);
         }
 
@@ -1405,7 +1475,7 @@ export class bcForgeClient {
 
         return simulated.result.retval;
       } catch (error: unknown) {
-        if (error instanceof SimulationError) throw error;
+        if (error instanceof ContractError || error instanceof SimulationError) throw error;
         throw new RPCError('RPC call failed', error);
       }
     });
@@ -1421,6 +1491,16 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.withRetry(async () => {
       try {
+        const submitOpts = {
+          maxAttempts: this.maxRetryAttempts,
+          maxFeeCap: this.maxFeeCap,
+          sourceKeypair: source,
+          networkPassphrase: this.networkPassphrase,
+          contractId: this.contractId,
+          method,
+          args,
+        };
+
         // If an explicit Keypair is provided, use the existing signed builder
         if (source) {
           const txXdr = await buildInvokeTransaction(
@@ -1432,9 +1512,10 @@ export class bcForgeClient {
             source,
           );
 
-          const response = await submitTransaction(this.rpcUrl, txXdr);
+          const response = await submitTransaction(this.rpcUrl, txXdr, submitOpts);
 
           if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+            this.clearCache();
             return {
               success: true,
               hash: (response as unknown as { hash: string }).hash,
@@ -1467,11 +1548,14 @@ export class bcForgeClient {
           this.walletAdapter.publicKey,
         );
 
-        const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr);
+        const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr, {
+          networkPassphrase: this.networkPassphrase,
+        });
 
-        const response = await submitTransaction(this.rpcUrl, signedXdr);
+        const response = await submitTransaction(this.rpcUrl, signedXdr, submitOpts);
 
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+          this.clearCache();
           return {
             success: true,
             hash: (response as unknown as { hash: string }).hash,
@@ -1485,7 +1569,13 @@ export class bcForgeClient {
         };
       } catch (error: unknown) {
         // Don't retry on simulation errors or missing signer errors
-        if (error instanceof SimulationError || error instanceof SignerRequiredError) throw error;
+        if (
+          error instanceof ContractError ||
+          error instanceof SimulationError ||
+          error instanceof SignerRequiredError
+        ) {
+          throw error;
+        }
         throw error;
       }
     });
@@ -1500,6 +1590,7 @@ export class bcForgeClient {
     const response = await responsePromise;
 
     if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      this.clearCache();
       return {
         success: true,
         hash: (response as unknown as { hash: string }).hash,

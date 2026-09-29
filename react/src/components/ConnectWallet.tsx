@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useWallet } from '../hooks';
 import { truncatePublicKey, type WalletName } from '../context';
 import { Alert } from './Alert';
@@ -36,17 +36,9 @@ const DISCONNECT_STYLE: React.CSSProperties = {
  * surfaced through {@link Alert}.
  */
 export const ConnectWallet: React.FC<ConnectWalletProps> = ({ style, className }) => {
-  const { name, publicKey, connected, connect, disconnect, error } = useWallet();
-  const [connecting, setConnecting] = useState<WalletName | null>(null);
+  const { name, publicKey, connected, status, connect, disconnect, error } = useWallet();
 
-  const handleConnect = async (wallet: WalletName) => {
-    setConnecting(wallet);
-    try {
-      await connect(wallet);
-    } finally {
-      setConnecting(null);
-    }
-  };
+  const handleConnect = (wallet: WalletName) => void connect(wallet);
 
   return (
     <div
@@ -60,7 +52,10 @@ export const ConnectWallet: React.FC<ConnectWalletProps> = ({ style, className }
       }}
     >
       {error && (
-        <Alert variant="danger" title="Wallet connection failed">
+        <Alert
+          variant="danger"
+          title={status === 'wrong-network' ? 'Wrong network' : 'Wallet connection failed'}
+        >
           {error.message}
         </Alert>
       )}
@@ -91,19 +86,19 @@ export const ConnectWallet: React.FC<ConnectWalletProps> = ({ style, className }
             type="button"
             data-testid="connect-freighter"
             style={BUTTON_STYLE}
-            disabled={connecting !== null}
+            disabled={status === 'connecting'}
             onClick={() => void handleConnect('freighter')}
           >
-            {connecting === 'freighter' ? 'Connecting…' : 'Connect Freighter'}
+            {status === 'connecting' && name === 'freighter' ? 'Connecting…' : 'Connect Freighter'}
           </button>
           <button
             type="button"
             data-testid="connect-albedo"
             style={BUTTON_STYLE}
-            disabled={connecting !== null}
+            disabled={status === 'connecting'}
             onClick={() => void handleConnect('albedo')}
           >
-            {connecting === 'albedo' ? 'Connecting…' : 'Connect Albedo'}
+            {status === 'connecting' && name === 'albedo' ? 'Connecting…' : 'Connect Albedo'}
           </button>
         </div>
       )}

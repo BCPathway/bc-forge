@@ -217,14 +217,19 @@ export interface bcForgeEvent {
   ledger: number;
   contractId: string;
   data: unknown;
+  txHash?: string;
 }
 
 /**
- * Options for event subscriptions.
+ * Options for event subscriptions and listeners.
  */
 export interface SubscriptionOptions {
   pollingIntervalMs?: number;
   startLedger?: number;
+}
+
+export interface EventListenerOptions extends SubscriptionOptions {
+  server?: SorobanRpc.Server;
 }
 
 /**
@@ -244,6 +249,7 @@ export function decodeEvent(event: SorobanRpc.Api.EventResponse): bcForgeEvent |
       ledger: event.ledger,
       contractId: event.contractId?.toString() ?? '',
       data: scValToNative(event.value),
+      txHash: event.txHash ?? (event as any).id,
     };
   } catch {
     return null;
@@ -286,7 +292,7 @@ export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEve
  * @param rpcUrl      - Soroban RPC endpoint
  * @param contractId  - Target contract ID
  * @param callback    - Function called for every new decoded event
- * @param options     - Polking and ledger range options
+ * @param options     - Polling and ledger range options
  * @returns An unsubscribe function to stop polling.
  */
 export async function subscribeEvents(
@@ -343,5 +349,258 @@ export async function subscribeEvents(
   // Return unsubscribe closure
   return () => {
     active = false;
+  };
+}
+
+/**
+ * Poll-based listener for mint events.
+ *
+ * @param rpcUrl      - Soroban RPC endpoint URL
+ * @param contractId  - Deployed contract ID
+ * @param callback    - Callback invoked for each new mint event
+ * @param options     - Polling interval and starting ledger options
+ * @returns Promise resolving to an unsubscribe function to stop polling.
+ */
+export async function onMint(
+  rpcUrl: string,
+  contractId: string,
+  callback: (event: bcForgeEvent, data: MintEventData) => void,
+  options: EventListenerOptions = {},
+): Promise<() => void> {
+  const server = options.server || new SorobanRpc.Server(rpcUrl);
+  let lastLedger = options.startLedger;
+  if (lastLedger === undefined) {
+    try {
+      const latest = await server.getLatestLedger();
+      lastLedger = latest.sequence;
+    } catch {
+      lastLedger = 0;
+    }
+  }
+
+  const seenTxHashes = new Set<string>();
+  let active = true;
+  let timerId: ReturnType<typeof setTimeout> | null = null;
+
+  const poll = async () => {
+    if (!active) return;
+    try {
+      const response = await server.getEvents({
+        startLedger: lastLedger!,
+        filters: [{ contractIds: [contractId], type: 'contract' }],
+      });
+
+      for (const eventResponse of response.events) {
+        const decoded = decodeEvent(eventResponse);
+        if (decoded && decoded.type === bcForgeEventType.MINT) {
+          const txHash = decoded.txHash || eventResponse.txHash || eventResponse.id;
+          if (txHash && seenTxHashes.has(txHash)) {
+            continue;
+          }
+          if (txHash) {
+            seenTxHashes.add(txHash);
+          }
+          const mintData = decodeMintEventData(decoded.data);
+          if (mintData) {
+            callback(decoded, mintData);
+          }
+        }
+        if (eventResponse.ledger >= lastLedger!) {
+          lastLedger = eventResponse.ledger + 1;
+        }
+      }
+    } catch {
+      // Retry on next cycle
+    }
+
+    if (active) {
+      timerId = setTimeout(poll, options.pollingIntervalMs || 5000);
+    }
+  };
+
+  poll();
+
+  return () => {
+    active = false;
+    if (timerId) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
+  };
+}
+
+/**
+ * Poll-based listener for transfer events (both xfer and xfer_frm).
+ *
+ * @param rpcUrl      - Soroban RPC endpoint URL
+ * @param contractId  - Deployed contract ID
+ * @param callback    - Callback invoked for each new transfer event
+ * @param options     - Polling interval and starting ledger options
+ * @returns Promise resolving to an unsubscribe function to stop polling.
+ */
+export async function onTransfer(
+  rpcUrl: string,
+  contractId: string,
+  callback: (event: bcForgeEvent, data: TransferEventData | TransferFromEventData) => void,
+  options: EventListenerOptions = {},
+): Promise<() => void> {
+  const server = options.server || new SorobanRpc.Server(rpcUrl);
+  let lastLedger = options.startLedger;
+  if (lastLedger === undefined) {
+    try {
+      const latest = await server.getLatestLedger();
+      lastLedger = latest.sequence;
+    } catch {
+      lastLedger = 0;
+    }
+  }
+
+  const seenTxHashes = new Set<string>();
+  let active = true;
+  let timerId: ReturnType<typeof setTimeout> | null = null;
+
+  const poll = async () => {
+    if (!active) return;
+    try {
+      const response = await server.getEvents({
+        startLedger: lastLedger!,
+        filters: [{ contractIds: [contractId], type: 'contract' }],
+      });
+
+      for (const eventResponse of response.events) {
+        const decoded = decodeEvent(eventResponse);
+        if (
+          decoded &&
+          (decoded.type === bcForgeEventType.TRANSFER ||
+            decoded.type === bcForgeEventType.TRANSFER_FROM)
+        ) {
+          const txHash = decoded.txHash || eventResponse.txHash || eventResponse.id;
+          if (txHash && seenTxHashes.has(txHash)) {
+            continue;
+          }
+          if (txHash) {
+            seenTxHashes.add(txHash);
+          }
+          if (decoded.type === bcForgeEventType.TRANSFER) {
+            const data = decodeTransferEventData(decoded.data);
+            if (data) callback(decoded, data);
+          } else {
+            const data = decodeTransferFromEventData(decoded.data);
+            if (data) callback(decoded, data);
+          }
+        }
+        if (eventResponse.ledger >= lastLedger!) {
+          lastLedger = eventResponse.ledger + 1;
+        }
+      }
+    } catch {
+      // Retry on next cycle
+    }
+
+    if (active) {
+      timerId = setTimeout(poll, options.pollingIntervalMs || 5000);
+    }
+  };
+
+  poll();
+
+  return () => {
+    active = false;
+    if (timerId) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
+  };
+}
+
+/**
+ * Poll-based listener for vault deposit events.
+ *
+ * @param rpcUrl      - Soroban RPC endpoint URL
+ * @param contractId  - Deployed vault / wrapper contract ID
+ * @param callback    - Callback invoked for each new vault deposit event
+ * @param options     - Polling interval and starting ledger options
+ * @returns Promise resolving to an unsubscribe function to stop polling.
+ */
+export async function onVaultDeposit(
+  rpcUrl: string,
+  contractId: string,
+  callback: (event: bcForgeEvent, data: DepositEventData) => void,
+  options: EventListenerOptions = {},
+): Promise<() => void> {
+  const server = options.server || new SorobanRpc.Server(rpcUrl);
+  let lastLedger = options.startLedger;
+  if (lastLedger === undefined) {
+    try {
+      const latest = await server.getLatestLedger();
+      lastLedger = latest.sequence;
+    } catch {
+      lastLedger = 0;
+    }
+  }
+
+  const seenTxHashes = new Set<string>();
+  let active = true;
+  let timerId: ReturnType<typeof setTimeout> | null = null;
+
+  const poll = async () => {
+    if (!active) return;
+    try {
+      const response = await server.getEvents({
+        startLedger: lastLedger!,
+        filters: [{ contractIds: [contractId], type: 'contract' }],
+      });
+
+      for (const eventResponse of response.events) {
+        let topicSymbol: string | undefined;
+        if (eventResponse.topic && eventResponse.topic.length > 0) {
+          try {
+            topicSymbol = scValToNative(eventResponse.topic[0]) as string;
+          } catch {
+            // ignore
+          }
+        }
+
+        if (topicSymbol === 'deposit') {
+          const txHash = eventResponse.txHash || eventResponse.id;
+          if (txHash && seenTxHashes.has(txHash)) {
+            continue;
+          }
+          if (txHash) {
+            seenTxHashes.add(txHash);
+          }
+          const data = decodeDepositEventData(scValToNative(eventResponse.value));
+          if (data) {
+            const synthEvent: bcForgeEvent = {
+              type: 'deposit' as bcForgeEventType,
+              ledger: eventResponse.ledger,
+              contractId: eventResponse.contractId?.toString() ?? contractId,
+              data: scValToNative(eventResponse.value),
+              txHash,
+            };
+            callback(synthEvent, data);
+          }
+        }
+        if (eventResponse.ledger >= lastLedger!) {
+          lastLedger = eventResponse.ledger + 1;
+        }
+      }
+    } catch {
+      // Retry on next cycle
+    }
+
+    if (active) {
+      timerId = setTimeout(poll, options.pollingIntervalMs || 5000);
+    }
+  };
+
+  poll();
+
+  return () => {
+    active = false;
+    if (timerId) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
   };
 }

@@ -8,10 +8,28 @@
 extern crate std;
 
 use proptest::prelude::*;
+use proptest::test_runner::FileFailurePersistence;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{vec as sdk_vec, Address, Env, String, Vec};
+use std::boxed::Box;
 
 use super::{AdminContract, AdminContractClient};
+
+fn admin_proptest_config(default_cases: u32) -> ProptestConfig {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default_cases);
+
+    ProptestConfig {
+        cases,
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/proptest-regressions/tests/quorum_proptest.txt"
+        )))),
+        ..ProptestConfig::default()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,7 +87,7 @@ fn arb_dynamic_threshold_pct() -> impl Strategy<Value = f64> {
 // ===========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(admin_proptest_config(100))]
 
     /// `get_threshold` always returns the value set by `set_admin_pool`.
     #[test]
@@ -134,7 +152,7 @@ proptest! {
 // ===========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(admin_proptest_config(100))]
 
     /// `is_proposal_ready` is true iff `approver_count >= threshold`.
     #[test]
@@ -225,7 +243,7 @@ proptest! {
 // ===========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(80))]
+    #![proptest_config(admin_proptest_config(80))]
 
     /// `mark_executed` returns error when threshold is not met.
     #[test]
@@ -302,7 +320,7 @@ proptest! {
 // ===========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(80))]
+    #![proptest_config(admin_proptest_config(80))]
 
     /// Non-pool member cannot create proposals.
     #[test]
@@ -359,7 +377,7 @@ proptest! {
 // ===========================================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(admin_proptest_config(100))]
 
     /// Fuzz: dynamic threshold (percentage-based) always yields correct readiness.
     #[test]

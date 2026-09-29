@@ -27,7 +27,7 @@ import {
   simulateTransaction,
 } from './utils';
 
-import { SimulationError, RPCError } from './errors';
+import { SimulationError, RPCError, SignerRequiredError } from './errors';
 import type { TransactionResult } from './client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -60,6 +60,16 @@ export class VaultClient {
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
     this.walletAdapter = config.walletAdapter;
+  }
+
+  /** Replace or set the wallet adapter at runtime. */
+  setWalletAdapter(adapter?: WalletAdapter): void {
+    this.walletAdapter = adapter;
+  }
+
+  /** The wallet adapter configured on this client, if any. */
+  getWalletAdapter(): WalletAdapter | undefined {
+    return this.walletAdapter;
   }
 
   // ─── Read-Only Queries ───────────────────────────────────────────────────
@@ -184,7 +194,7 @@ export class VaultClient {
   async deposit(
     caller: string,
     amount: bigint,
-    source: Keypair,
+    source?: Keypair,
     minSharesOut?: bigint,
   ): Promise<TransactionResult> {
     const args =
@@ -555,18 +565,37 @@ export class VaultClient {
   private async invokeContract(
     method: string,
     args: xdr.ScVal[],
-    source: Keypair,
+    source?: Keypair,
   ): Promise<TransactionResult> {
+    const adapter = source ? undefined : this.walletAdapter;
+    if (!source && !adapter) throw new SignerRequiredError();
+    if (!source && (!adapter?.connected || !adapter.publicKey)) {
+      throw new SignerRequiredError('Wallet adapter is not connected');
+    }
+
     return this.withRetry(async () => {
       try {
-        const txXdr = await buildInvokeTransaction(
-          this.rpcUrl,
-          this.networkPassphrase,
-          this.contractId,
-          method,
-          args,
-          source,
-        );
+        let txXdr: string;
+        if (source) {
+          txXdr = await buildInvokeTransaction(
+            this.rpcUrl,
+            this.networkPassphrase,
+            this.contractId,
+            method,
+            args,
+            source,
+          );
+        } else {
+          const unsignedXdr = await buildUnsignedTransaction(
+            this.rpcUrl,
+            this.networkPassphrase,
+            this.contractId,
+            method,
+            args,
+            adapter!.publicKey!,
+          );
+          txXdr = await adapter!.signTransaction(unsignedXdr);
+        }
 
         const response = await submitTransaction(this.rpcUrl, txXdr);
 
@@ -583,7 +612,7 @@ export class VaultClient {
           hash: response.txHash,
         };
       } catch (error: unknown) {
-        if (error instanceof SimulationError) throw error;
+        if (error instanceof SimulationError || error instanceof SignerRequiredError) throw error;
         throw error;
       }
     });

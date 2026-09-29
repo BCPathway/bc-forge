@@ -1,10 +1,12 @@
 /**
- * @bc-forge/sdk — Tests for the event data decoders (#924)
+ * @bc-forge/sdk — Tests for the event data decoders and poll-based listeners (#924, #928)
  *
  * Pure unit tests; all inputs are plain tuples as produced by
  * `scValToNative` on Soroban event data.
  */
 
+import { jest } from '@jest/globals';
+import { xdr } from '@stellar/stellar-sdk';
 import {
   EVENT_SCHEMA_VERSION,
   decodeMintEventData,
@@ -13,6 +15,9 @@ import {
   decodeTransferFromEventData,
   decodeDepositEventData,
   decodeWithdrawEventData,
+  onMint,
+  onTransfer,
+  onVaultDeposit,
 } from './events';
 
 describe('EVENT_SCHEMA_VERSION', () => {
@@ -165,5 +170,148 @@ describe('decodeWithdrawEventData', () => {
 
   it('returns null for invalid tuples', () => {
     expect(decodeWithdrawEventData(null)).toBeNull();
+  });
+});
+
+describe('Poll-based listeners (#928)', () => {
+  it('delivers one new event, ignores duplicate transaction hashes, and unsubscribe stops calls', async () => {
+    const mintScValTopic = xdr.ScVal.scvSymbol('mint');
+    const mintValueScVal = xdr.ScVal.scvVec([
+      xdr.ScVal.scvString('GADMIN'),
+      xdr.ScVal.scvString('GTO'),
+      xdr.ScVal.scvI128(new xdr.Int128Parts({ lo: xdr.Uint64.fromString('100'), hi: xdr.Int64.fromString('0') })),
+      xdr.ScVal.scvI128(new xdr.Int128Parts({ lo: xdr.Uint64.fromString('100'), hi: xdr.Int64.fromString('0') })),
+      xdr.ScVal.scvI128(new xdr.Int128Parts({ lo: xdr.Uint64.fromString('100'), hi: xdr.Int64.fromString('0') })),
+      xdr.ScVal.scvU32(1),
+    ]);
+
+    const mockEvents = [
+      {
+        id: 'tx_hash_1',
+        txHash: 'tx_hash_1',
+        ledger: 10,
+        contractId: 'C123',
+        topic: [mintScValTopic],
+        value: mintValueScVal,
+      },
+    ];
+
+    const mockServer = {
+      getLatestLedger: jest.fn(async () => ({ sequence: 10 })),
+      getEvents: jest.fn(async () => ({ events: mockEvents })),
+    };
+
+    const mintCallback = jest.fn();
+
+    const unsub = await onMint('http://localhost', 'C123', mintCallback, {
+      pollingIntervalMs: 50,
+      startLedger: 10,
+      server: mockServer as any,
+    });
+
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(mintCallback).toHaveBeenCalledTimes(1);
+    expect(mintCallback.mock.calls[0][1]).toMatchObject({
+      admin: 'GADMIN',
+      to: 'GTO',
+    });
+
+    // Same tx hash delivered again -> ignored
+    await new Promise((r) => setTimeout(r, 120));
+    expect(mintCallback).toHaveBeenCalledTimes(1);
+
+    // Unsubscribe stops polling
+    unsub();
+    mintCallback.mockClear();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(mintCallback).not.toHaveBeenCalled();
+  });
+
+  it('onTransfer delivers transfer events and ignores duplicates', async () => {
+    const xferTopic = xdr.ScVal.scvSymbol('xfer');
+    const xferVal = xdr.ScVal.scvVec([
+      xdr.ScVal.scvString('GFROM'),
+      xdr.ScVal.scvString('GTO'),
+      xdr.ScVal.scvI128(new xdr.Int128Parts({ lo: xdr.Uint64.fromString('250'), hi: xdr.Int64.fromString('0') })),
+      xdr.ScVal.scvU32(1),
+    ]);
+
+    const mockEvents = [
+      {
+        id: 'tx_transfer_1',
+        txHash: 'tx_transfer_1',
+        ledger: 10,
+        contractId: 'C123',
+        topic: [xferTopic],
+        value: xferVal,
+      },
+    ];
+
+    const mockServer = {
+      getLatestLedger: jest.fn(async () => ({ sequence: 10 })),
+      getEvents: jest.fn(async () => ({ events: mockEvents })),
+    };
+
+    const xferCallback = jest.fn();
+
+    const unsub = await onTransfer('http://localhost', 'C123', xferCallback, {
+      pollingIntervalMs: 50,
+      startLedger: 10,
+      server: mockServer as any,
+    });
+
+    await new Promise((r) => setTimeout(r, 120));
+    expect(xferCallback).toHaveBeenCalledTimes(1);
+    expect(xferCallback.mock.calls[0][1]).toMatchObject({
+      from: 'GFROM',
+      to: 'GTO',
+      amount: 250n,
+    });
+
+    unsub();
+  });
+
+  it('onVaultDeposit delivers deposit events and ignores duplicates', async () => {
+    const depositTopic = xdr.ScVal.scvSymbol('deposit');
+    const depositVal = xdr.ScVal.scvVec([
+      xdr.ScVal.scvString('GCALLER'),
+      xdr.ScVal.scvI128(new xdr.Int128Parts({ lo: xdr.Uint64.fromString('500'), hi: xdr.Int64.fromString('0') })),
+      xdr.ScVal.scvI128(new xdr.Int128Parts({ lo: xdr.Uint64.fromString('500'), hi: xdr.Int64.fromString('0') })),
+      xdr.ScVal.scvU32(1),
+    ]);
+
+    const mockEvents = [
+      {
+        id: 'tx_deposit_1',
+        txHash: 'tx_deposit_1',
+        ledger: 10,
+        contractId: 'C123',
+        topic: [depositTopic],
+        value: depositVal,
+      },
+    ];
+
+    const mockServer = {
+      getLatestLedger: jest.fn(async () => ({ sequence: 10 })),
+      getEvents: jest.fn(async () => ({ events: mockEvents })),
+    };
+
+    const depositCallback = jest.fn();
+
+    const unsub = await onVaultDeposit('http://localhost', 'C123', depositCallback, {
+      pollingIntervalMs: 50,
+      startLedger: 10,
+      server: mockServer as any,
+    });
+
+    await new Promise((r) => setTimeout(r, 120));
+    expect(depositCallback).toHaveBeenCalledTimes(1);
+    expect(depositCallback.mock.calls[0][1]).toMatchObject({
+      caller: 'GCALLER',
+      assets: 500n,
+    });
+
+    unsub();
   });
 });

@@ -31,6 +31,8 @@ tags:
     description: Paginated token-event logs (mints, transfers, burns)
   - name: stats
     description: Aggregate counters
+  - name: aggregates
+    description: Derived holder balances and supply history
   - name: streaming
     description: Live server-sent event stream
   - name: webhooks
@@ -256,6 +258,114 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/BurnRow"
+        nextCursor:
+          oneOf:
+            - type: string
+              example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+            - type: "null"
+
+    HolderRow:
+      type: object
+      required:
+        - id
+        - address
+        - balance
+        - ledger
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal row identifier (used as pagination cursor).
+          example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+        address:
+          type: string
+          description: Holder Stellar account address.
+          example: GABC1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD
+        balance:
+          type: string
+          description: Current token balance (integer string in base units). Derived from indexed mint, transfer, and burn events.
+          example: "600000000"
+        ledger:
+          type: integer
+          description: Ledger sequence number the balance was last touched in.
+          example: 42000100
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the holder was first indexed.
+          example: "2026-01-15T12:34:56.789Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the last balance change.
+          example: "2026-01-15T12:40:00.000Z"
+
+    HolderPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/HolderRow"
+        nextCursor:
+          oneOf:
+            - type: string
+              example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+            - type: "null"
+
+    SupplyPointRow:
+      type: object
+      required:
+        - id
+        - timestamp
+        - supply
+        - ledger
+        - txHash
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal row identifier (used as pagination cursor).
+          example: "01920f4e-6c3b-7d3a-bf42-8c7a0f3e1d2b"
+        timestamp:
+          type: string
+          format: date-time
+          description: Ledger close time of the supply-changing event.
+          example: "2026-01-15T12:34:56.000Z"
+        supply:
+          type: string
+          description: Total token supply after this event (integer string in base units).
+          example: "600000000"
+        ledger:
+          type: integer
+          description: Ledger sequence number the supply point was recorded for.
+          example: 42000100
+        txHash:
+          type: string
+          description: Transaction hash of the supply-changing event.
+          example: "abc123def456..."
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the supply point was indexed.
+          example: "2026-01-15T12:34:56.789Z"
+
+    SupplyPointPage:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplyPointRow"
         nextCursor:
           oneOf:
             - type: string
@@ -590,6 +700,97 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BurnPage"
+        "400":
+          description: Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/holders:
+    get:
+      operationId: listHolders
+      tags:
+        - aggregates
+      summary: List current token holders
+      description: |
+        Returns a cursor-paginated list of current holders with their
+        balances. Balances are derived from the indexed mint, transfer, and
+        burn events at ingestion time; holders whose balance reaches zero are
+        not listed.
+
+        Optional filters:
+        - `address` — match a single holder exactly.
+        - `from_ledger` — include only holders last touched at or after the
+          given ledger sequence.
+      parameters:
+        - $ref: "#/components/parameters/address"
+        - $ref: "#/components/parameters/from_ledger"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of holders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HolderPage"
+        "400":
+          description: Invalid query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/supply-history:
+    get:
+      operationId: listSupplyHistory
+      tags:
+        - aggregates
+      summary: List timestamped supply points
+      description: |
+        Returns a cursor-paginated list of supply points, one per
+        supply-changing event (mint or burn). Each point carries the total
+        supply reported by the indexed event and the ledger close time.
+
+        Optional filter:
+        - `from_ledger` — include only points at or after the given ledger
+          sequence.
+      parameters:
+        - $ref: "#/components/parameters/from_ledger"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of supply points.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyPointPage"
         "400":
           description: Invalid query parameter.
           content:

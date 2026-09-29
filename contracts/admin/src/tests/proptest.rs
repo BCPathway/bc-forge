@@ -3,14 +3,32 @@
 extern crate std;
 
 use proptest::prelude::*;
+use proptest::test_runner::FileFailurePersistence;
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
 use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Map, String, TryIntoVal, Vec};
+use std::boxed::Box;
 
 use super::{AdminContract, AdminContractClient, Role};
 use crate::{AdminError, AdminKey, ProposalStatus, UpgradeProposal};
 
 const ALL_ROLES: [Role; 4] = [Role::Admin, Role::Minter, Role::SuperAdmin, Role::Pauser];
 const GRANTABLE_ROLES: [Role; 3] = [Role::Minter, Role::SuperAdmin, Role::Pauser];
+
+fn admin_proptest_config(default_cases: u32) -> ProptestConfig {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default_cases);
+
+    ProptestConfig {
+        cases,
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/proptest-regressions/tests/proptest.txt"
+        )))),
+        ..ProptestConfig::default()
+    }
+}
 
 fn setup(env: &Env) -> (AdminContractClient<'_>, Address) {
     env.mock_all_auths();
@@ -69,7 +87,7 @@ fn read_upgrade_proposal(env: &Env, contract_id: &Address, id: u64) -> UpgradePr
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(admin_proptest_config(100))]
 
     /// Fuzz: grant_role succeeds for every valid Role variant.
     #[test]

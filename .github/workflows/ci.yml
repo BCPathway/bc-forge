@@ -48,7 +48,7 @@ jobs:
       - name: Clippy lints
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
+      - name: Run tests (including admin proptest regressions)
         run: cargo test --all
 
       - name: Check for circular crate dependencies (#770)
