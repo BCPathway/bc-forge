@@ -1,0 +1,14 @@
+.git
+**/.git
+node_modules
+**/node_modules
+dist
+**/dist
+.env
+.env.*
+**/.env
+**/.env.*
+.npmrc
+**/.npmrc
+npm-debug.log*
+**/npm-debug.log*

@@ -128,7 +128,25 @@ failures are logged server-side with credentials scrubbed.
 Build the production Docker container from the root directory:
 
 ```bash
-docker build -f indexer/Dockerfile -t bc-forge-indexer indexer
+docker build -f indexer/Dockerfile -t bc-forge-indexer .
+```
+
+### Release SBOM
+
+When a GitHub Release is published, the release workflow generates a CycloneDX
+SBOM from the final GHCR image digest, validates that no environment metadata
+or credential values are present, uploads the file as a release asset, and
+attests it to that image digest with Cosign keyless OIDC. The asset is named
+`indexer-<tag>-sbom.cdx.json`.
+
+To verify the attestation, replace the tag and digest with the release values:
+
+```bash
+cosign verify-attestation \
+  --type cyclonedx \
+  --certificate-identity "https://github.com/BCPathway/bc-forge/.github/workflows/publish-indexer.yml@refs/tags/<tag>" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "ghcr.io/bcpathway/bc-forge/indexer@sha256:<digest>"
 ```
 
 ### Running the Container
