@@ -74,3 +74,43 @@ Get-Content checksums.txt | ForEach-Object {
 A matching command prints `OK` for each file. A mismatch prints a checksum error and a non-zero exit status.
 
 The indexer entry in `manifest.json` uses `digest` (`sha256:...`) rather than a filename. Compare that value to `containerimage.digest` in the "Build indexer image and record its digest" log of the release workflow. That digest is the image built for the release; it is not a GHCR pull digest, because this repository does not push the indexer image.
+
+## Indexer image release
+
+Publishing a GitHub Release whose tag is `indexer-v<semver>` runs
+[`.github/workflows/publish-indexer.yml`](../.github/workflows/publish-indexer.yml).
+From that commit it builds `indexer/Dockerfile` and publishes the image to
+`ghcr.io/bcpathway/bc-forge-indexer` with:
+
+- an immutable `<version>` tag (for example `1.2.3`),
+- an immutable `sha-<commit>` tag, and
+- `latest`, updated only for stable releases — a `1.2.3-rc.1` prerelease never moves it.
+
+The same run packages the migrations for that commit — `prisma/migrations/`,
+`prisma/schema.prisma`, and `prisma/migration_lock.toml` — as
+`bc-forge-indexer-prisma-migrations-<version>.tar.gz`, attaches the archive and
+its `.sha256` companion to the Release, and appends the archive name, checksum,
+image digest, and commit to the release notes. Component tags for the other
+packages (`sdk-v*`, `cli-v*`, `react-v*`) are ignored.
+
+### Verify the migration archive
+
+Download the archive and its checksum into one directory, then recompute the
+hash:
+
+```bash
+sha256sum -c bc-forge-indexer-prisma-migrations-<version>.tar.gz.sha256   # Linux
+shasum -a 256 -c bc-forge-indexer-prisma-migrations-<version>.tar.gz.sha256  # macOS
+```
+
+A matching command prints `OK` for the archive. A mismatch means the download is
+corrupt or was modified; do not apply its migrations.
+
+### Deploy the indexer image
+
+Deploy by the immutable image digest recorded in the release notes, never by
+`latest`. The full rollout, health-verification, and rollback procedure — the
+pre-rollout backup, applying migrations with `prisma migrate deploy`, the
+`/health` and `/healthz` success criteria, and the point at which a migration
+makes an image rollback unsafe — is in
+[indexer/README.md](../indexer/README.md#deploy-verify-and-roll-back-an-indexer-release).

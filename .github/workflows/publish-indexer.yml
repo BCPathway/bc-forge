@@ -1,0 +1,215 @@
+name: Publish indexer image
+
+# Publishing an indexer release does two things from a single commit:
+#   1. builds indexer/Dockerfile and pushes an immutable, versioned image to
+#      the GitHub Container Registry, and
+#   2. packages the Prisma migrations that match that image and attaches the
+#      archive, plus its checksum, to the same GitHub Release (#1054).
+#
+# Tag convention: indexer-v<semver>, e.g. indexer-v1.2.3 or indexer-v1.2.3-rc.1.
+# Component tags for the sdk, cli, and react packages (sdk-v*, cli-v*, react-v*)
+# do not match, so they never push an image or a migration archive.
+on:
+  release:
+    types: [published]
+
+# Least privilege by default. `packages: write` is granted only to the job that
+# pushes to GHCR, and `contents: write` only to the job that uploads release
+# assets. Authentication uses the automatic GITHUB_TOKEN; no repository secrets
+# are referenced.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: bcpathway/bc-forge-indexer
+
+jobs:
+  publish:
+    name: Build and push indexer image
+    if: startsWith(github.event.release.tag_name, 'indexer-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tags
+        id: meta
+        env:
+          GIT_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+
+          prefix="indexer-v"
+          if [[ "$GIT_TAG" != "$prefix"* ]]; then
+            echo "::error::Unexpected tag ${GIT_TAG}; expected ${prefix}<semver>."
+            exit 1
+          fi
+
+          # e.g. 1.2.3, 1.2.3-rc.1
+          version="${GIT_TAG#${prefix}}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag ${GIT_TAG} does not carry a semantic version."
+            exit 1
+          fi
+
+          tags="${REGISTRY}/${IMAGE_NAME}:${version}"
+          tags="${tags},${REGISTRY}/${IMAGE_NAME}:sha-${GITHUB_SHA}"
+
+          # `latest` tracks stable releases only; a prerelease must never take
+          # over the channel default.
+          if [[ "$IS_PRERELEASE" != "true" ]]; then
+            tags="${tags},${REGISTRY}/${IMAGE_NAME}:latest"
+          fi
+
+          {
+            echo "version=${version}"
+            echo "tags=${tags}"
+            # A release-published event carries the commit that the tag points
+            # at, so the archive and the image are both built from it.
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Publishing ${REGISTRY}/${IMAGE_NAME} for ${GIT_TAG} (prerelease=${IS_PRERELEASE})"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./indexer
+          file: ./indexer/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.build_date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summarize published tags
+        run: |
+          {
+            echo "### Indexer image published"
+            echo ""
+            echo "- Image: \`${REGISTRY}/${IMAGE_NAME}\`"
+            echo "- Version: \`${{ steps.meta.outputs.version }}\`"
+            echo "- Tags: \`${{ steps.meta.outputs.tags }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  migrations:
+    name: Package and attach Prisma migration archive
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package migrations and schema
+        id: package
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          archive="bc-forge-indexer-prisma-migrations-${VERSION}.tar.gz"
+          mkdir -p release_assets
+
+          # Deterministic archive: sorted entries, fixed ownership, and a
+          # name-free gzip stream make the checksum reproducible for the same
+          # commit.
+          tar \
+            --create \
+            --sort=name \
+            --mtime='UTC 1980-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --use-compress-program='gzip -9n' \
+            --file "release_assets/${archive}" \
+            -C indexer \
+            prisma/schema.prisma \
+            prisma/migrations
+
+          ( cd release_assets && sha256sum "${archive}" > "${archive}.sha256" )
+
+          checksum="$(cut -d' ' -f1 "release_assets/${archive}.sha256")"
+          {
+            echo "archive=${archive}"
+            echo "checksum=${checksum}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Packaged release_assets/${archive} (sha256 ${checksum})"
+
+      - name: Attach archive to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" \
+            "release_assets/${ARCHIVE}" \
+            "release_assets/${ARCHIVE}.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Record the artifact in the release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          notes="$(mktemp)"
+          gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body --jq '.body // ""' > "$notes"
+
+          # Replace any previous copy of the section so re-running the job is
+          # idempotent instead of appending a duplicate.
+          awk '
+            /^<!-- indexer-migrations:end -->$/ { skip = 0; next }
+            /^<!-- indexer-migrations:start -->$/ { skip = 1; next }
+            skip != 1 { print }
+          ' "$notes" > "${notes}.next"
+          mv "${notes}.next" "$notes"
+
+          {
+            echo ""
+            echo "<!-- indexer-migrations:start -->"
+            echo "### Indexer Prisma migration archive"
+            echo ""
+            echo "- Artifact: \`${ARCHIVE}\`"
+            echo "- SHA-256: \`${CHECKSUM}\`"
+            echo "- Matches image digest: \`${DIGEST}\`"
+            echo "- Built from commit: \`${GITHUB_SHA}\`"
+            echo "<!-- indexer-migrations:end -->"
+          } >> "$notes"
+
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-file "$notes"
