@@ -339,3 +339,40 @@ jobs:
 
       - name: Reject stale repository links in docs
         run: python3 scripts/check_doc_links.py
+
+  # ─── Documentation Site (#968) ───────────────────────────────────────────
+  docs:
+    name: Docs Site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bc-forge-docs
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install docs dependencies
+        run: npm ci
+
+      - name: Generate API pages and build site
+        run: npm run docs:build
+
+      - name: Upload docs site artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs/.vitepress/dist
