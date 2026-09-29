@@ -53,7 +53,7 @@ mod test {
         env.mock_all_auths();
         let contract_id = env.register(YieldVaultGuardContract, ());
         let client = YieldVaultGuardContractClient::new(&env, &contract_id);
-        let user = Address::generate(&env);
+        let user = Address::generate(&env);N
 
         // User holds 1000 shares, attempting to withdraw 1500 should panic
         client.withdraw(&user, &1500);
