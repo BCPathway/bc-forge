@@ -5,28 +5,26 @@ RUN apk add --no-cache openssl
 
 WORKDIR /app
 
-# Copy package manifests
 COPY package.json package-lock.json ./
+COPY cli/package.json cli/package.json
+COPY indexer/package.json indexer/package.json
+COPY react/package.json react/package.json
+COPY sdk/package.json sdk/package.json
+COPY sdk/tsconfig.json sdk/tsconfig.json
+COPY sdk/src sdk/src
+COPY indexer/tsconfig.json indexer/tsconfig.json
+COPY indexer/prisma indexer/prisma
+COPY indexer/src indexer/src
 
-# Install production and build dependencies
-RUN npm ci
+RUN npm ci --workspace=sdk --workspace=indexer --include-workspace-root=false
+RUN npm run build --workspace=sdk
+RUN npm run prisma:generate --workspace=indexer
+RUN npm run build --workspace=indexer
 
-# Copy Prisma schema and source code required for generation and build
-COPY prisma ./prisma
-COPY tsconfig.json ./
-COPY src ./src
+WORKDIR /app/indexer
 
-# Generate Prisma client
-RUN npx prisma generate
-
-# Build TypeScript source
-RUN npm run build
-
-# Expose default HTTP port
 EXPOSE 3000
 
-# Default port environment variable
 ENV PORT=3000
 
-# Start compiled server
 CMD ["npm", "start"]

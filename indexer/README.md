@@ -125,11 +125,43 @@ failures are logged server-side with credentials scrubbed.
 
 ### Building the Image
 
-Build the production Docker container from the root directory:
+Build the production Docker container from the repository root:
 
 ```bash
-docker build -f indexer/Dockerfile -t bc-forge-indexer indexer
+docker build -f indexer/Dockerfile -t bc-forge-indexer .
 ```
+
+### Verifying the Published Image Signature
+
+Images published for GitHub Releases are signed with Cosign keyless signing.
+No private signing key is created or stored. The signature certificate is
+issued through GitHub Actions OIDC and is attached to the immutable image
+digest in GHCR.
+
+1. Find the `sha256:` digest in the successful `Build and push image` step of
+   the release workflow run.
+2. Set the release tag and image digest, replacing the examples below:
+
+   ```bash
+   IMAGE=ghcr.io/bcpathway/bc-forge/indexer
+   TAG=v1.2.3
+   DIGEST=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+   ```
+
+3. Verify the signature against the exact repository workflow identity, tag,
+  and GitHub Actions OIDC issuer:
+
+   ```bash
+   cosign verify \
+     --certificate-identity "https://github.com/BCPathway/bc-forge/.github/workflows/publish-indexer.yml@refs/tags/${TAG}" \
+     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+     "${IMAGE}@${DIGEST}"
+   ```
+
+Cosign prints the verified signature payload on success. Check that its image
+digest matches `DIGEST` and that its certificate identity and issuer match the
+values above. The tag is included in the identity check, while the signature
+verification target is the immutable digest rather than the mutable tag.
 
 ### Running the Container
 
