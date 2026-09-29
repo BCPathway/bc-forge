@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # Property-based tests for quorum threshold math
 //!
 //! Uses `proptest` to verify invariants across a wide range of inputs,

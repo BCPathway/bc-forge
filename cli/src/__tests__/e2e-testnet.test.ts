@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { describe, it, expect } from "vitest";
 import { runSmokeTest } from "../commands/smoke-test.js";
 import { NETWORK_PRESETS } from "../network.js";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { useState, useEffect } from 'react';
 import { Role } from '@bc-forge/sdk';
 import type { bcForgeClient } from '@bc-forge/sdk';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { jest } from '@jest/globals';
 import { Keypair, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import { bcForgeClient, Role } from './client';

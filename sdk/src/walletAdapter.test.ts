@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { FreighterAdapter, AlbedoAdapter, WalletConnectAdapter } from './index';
 
 describe('Wallet adapters basic surface', () => {

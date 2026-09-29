@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # Property-based tests for token arithmetic
 //!
 //! Uses `proptest` to verify invariants across a wide range of inputs,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Yield Vault Tests
 //!
 //! Covers issues #732 (rate-limit deposits), #733 (pause vault deposits),

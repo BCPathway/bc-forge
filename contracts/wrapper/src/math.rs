@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # Fixed-Point Math & Rounding Utilities
 //!
 //! Provides rounding error mitigation for yield-bearing token vaults.

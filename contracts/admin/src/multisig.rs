@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Multi-sig proposals and WASM upgrade flows for the admin access-control
 //! module (#922).
 //!

@@ -446,6 +446,37 @@ See the [Vault Integration Guide](docs/VAULTS.md) for details on yield-bearing f
 └─────────────────────────────────────────────────┘
 ```
 
+## Documentation Site
+
+The docs site is built with [VitePress](https://vitepress.dev/) from the
+markdown under [`docs/`](docs/), plus API pages generated from TSDoc (TypeDoc)
+and Rust doc comments (`cargo doc`).
+
+### Run the docs site locally
+
+From the repository root:
+
+```bash
+npm install        # once; also installs VitePress and TypeDoc
+npm run docs:gen   # generate the SDK and contract API pages
+npm run docs:dev   # serve at http://localhost:5173
+npm run docs:build # production build into docs/.vitepress/dist
+```
+
+`npm run docs:gen` needs the Rust toolchain because the contract reference is
+generated with `cargo doc`. If you only want the SDK page, run
+`npm run docs:gen:sdk`.
+
+The generated API pages under `docs/api/sdk/` and `docs/public/api/` are not
+checked in. Run `npm run docs:gen` after changing `sdk/src/*` or any contract
+doc comments. CI builds the site on every pull request and uploads the built
+site as a `docs-site` artifact. Deployment is left to the maintainer because no
+docs host is configured in this repository.
+
+The site includes the [spec-to-code traceability matrix](docs/TRACEABILITY.md),
+the [admin key runbook](docs/ADMIN_KEYS.md), and the
+[upgrade guide](docs/UPGRADE_GUIDE.md).
+
 ## Community & first contribution
 
 New here? Follow the [contributor walkthrough](docs/WALKTHROUGH.md) for a

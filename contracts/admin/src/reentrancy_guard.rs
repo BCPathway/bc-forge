@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use soroban_sdk::{Env, Symbol};
 
 const GUARD_KEY: &str = "admin_proposal_guard";

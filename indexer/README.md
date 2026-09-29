@@ -1,5 +1,70 @@
 # Indexer microservice
 
+## Quick start (Docker Compose)
+
+The fastest way to run the indexer is the bundled Compose stack, which starts
+Postgres plus the indexer (API + background indexer) with one command:
+
+```bash
+docker compose up
+```
+
+Run it from this `indexer/` directory. The stack brings up:
+
+| Service    | What it does                                                             |
+| ---------- | ------------------------------------------------------------------------ |
+| `postgres` | Postgres 16 with a persistent `postgres-data` volume                     |
+| `indexer`  | applies migrations on start, seeds sample rows, then runs the indexer + API |
+
+### Required environment
+
+Two variables are mandatory; compose fails fast with a clear error if they are
+missing. Put them in `indexer/.env` (git-ignored) or export them in your shell:
+
+```bash
+CONTRACT_ID=C...           # Soroban contract ID whose events get indexed
+INDEXER_API_TOKEN=replace-with-a-long-random-secret
+```
+
+Optional overrides (also settable in `.env`):
+
+- `RPC_URL` — Soroban RPC endpoint (defaults to `https://soroban-testnet.stellar.org`).
+- `PORT` — host port for the API (defaults to `3000`).
+
+Once the stack is up:
+
+```bash
+curl http://localhost:3000/health
+# {"status":"ok"}
+
+curl -H "Authorization: Bearer $INDEXER_API_TOKEN" http://localhost:3000/api/v1/stats
+```
+
+### How migrations run in the container
+
+On startup the `indexer` container runs:
+
+```
+npx prisma migrate deploy && npx prisma db seed && node dist/index.js
+```
+
+This is the `command:` on the `indexer` service in `docker-compose.yml`:
+- `prisma migrate deploy` applies the committed migrations from
+  `prisma/migrations/` that have not run yet, in order. It never drafts new
+  migrations and never resets data, which makes it the right command for
+  start-up and for production databases. **Do not run `prisma migrate dev`
+  against a database with data you care about** — `migrate dev` is a
+  development command that may reset the database to reconcile drift.
+- `prisma db seed` inserts a few clearly marked sample rows from
+  `prisma/seed.ts` (no secrets; ledger `0` and `seed-` txHashes).
+- `node dist/index.js` starts the compiled server (the image's default
+  `CMD`); Compose overrides the default entry sequence with the command
+  above so migrations are guaranteed to run first.
+
+To change the schema: edit `prisma/schema.prisma`, run
+`npx prisma migrate dev --name <change>` against a disposable local database,
+and commit the new folder under `prisma/migrations/`. The same SQL can be
+applied outside Docker with `npm run db:deploy` (`prisma migrate deploy`).
 ## Health and monitoring
 
 `GET /health` remains the database readiness probe. `GET /healthz` returns
@@ -78,6 +143,11 @@ docker run -p 3000:3000 \
   bc-forge-indexer
 ```
 
+> `docker run` starts the server only — it does not apply migrations or seed
+> (that is the Compose stack's job via its `command:`). Run
+> `npm run db:deploy && npm run db:seed` against the target database first,
+> or use the Compose quick start above.
+
 ### Environment Variables
 
 - `PORT` — Port number the Express HTTP server listens on (defaults to `3000`).
@@ -104,4 +174,16 @@ The aggregate tables `Holder` and `SupplyPoint`, which back
 `20260928193226_add_holder_and_supply_point`. That migration only adds new
 tables and touches no existing table, so it applies cleanly whether or not the
 base schema `init` migration tracked in #1056 has been applied yet.
+
+> Prefer the one-command path? Use the Compose stack above, whose `indexer`
+> service runs `prisma migrate deploy` (never `migrate dev`) on start.
+> The committed migrations live under `prisma/migrations/` and apply to a
+> fresh database with `npm run db:deploy`.
+
+### Seeding
+
+`prisma/seed.ts` inserts at most three sample rows, all clearly marked as
+seed data (placeholder `SEED_DATA_ADDRESS`, amount `1`, ledger `0`,
+`seed-` txHashes). It contains no secrets. Run it with `npm run db:seed`,
+or automatically via `prisma migrate reset` / the Compose stack.
 

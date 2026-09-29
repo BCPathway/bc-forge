@@ -1,9 +1,12 @@
 {
   "name": "@bc-forge/cli",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "CLI deployment orchestrator for bc-forge Soroban contracts",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "bc-forge": "./dist/index.js"
   },
@@ -18,7 +21,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@bc-forge/sdk": "*",
+    "@bc-forge/sdk": "^0.1.0",
     "commander": "^15.0.0",
     "@stellar/stellar-sdk": "^17.1.0",
     "ajv": "^8.17.0",

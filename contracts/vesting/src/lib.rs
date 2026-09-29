@@ -1,4 +1,5 @@
 #![no_std]
+// SPDX-License-Identifier: MIT
 
 mod events;
 mod reentrancy_guard;

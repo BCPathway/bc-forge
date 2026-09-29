@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Yield Vault Events
 //!
 //! Structured event emission for all yield vault operations.

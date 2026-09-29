@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import logger, { enableDebugMode, setLogLevel, isDebugEnabled } from '../logger.js';
 

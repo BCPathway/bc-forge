@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { MockBcForgeClient } from './mockClient';
 
 describe('MockBcForgeClient', () => {

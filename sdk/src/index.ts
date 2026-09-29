@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/sdk — TypeScript SDK for bc-forge Token Contracts
  *

@@ -1,4 +1,5 @@
 #![cfg(test)]
+// SPDX-License-Identifier: MIT
 
 extern crate std;
 

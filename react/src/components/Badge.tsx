@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { forwardRef } from 'react';
 
 export type BadgeVariant = 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';

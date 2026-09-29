@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Lifecycle Module
 //!
 //! Emergency pause/unpause functionality for Soroban contracts.

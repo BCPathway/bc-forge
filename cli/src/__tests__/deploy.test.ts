@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * CLI deploy command tests (#746)
  *

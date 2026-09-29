@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use soroban_sdk::{symbol_short, Address, BytesN, Env};
 
 pub fn emit_invoice_created(env: &Env, invoice_id: u64, total_amount: i128) {

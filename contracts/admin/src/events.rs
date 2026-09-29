@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Structured event emission for the admin access-control module.
 //!
 //! @title Admin Events

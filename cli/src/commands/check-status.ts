@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Command } from 'commander';
 import { Contract, rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import { getClientConfig, loadConfigFile } from '../utils/config.js';

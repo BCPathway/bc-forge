@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bc-forge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bcforge
+      POSTGRES_PASSWORD: bcforge
+      POSTGRES_DB: bcforge
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U bcforge -d bcforge']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  indexer:
+    build: .
+    container_name: bc-forge-indexer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Apply the committed migrations, insert the sample seed rows, then start
+    # the compiled server (#949). `migrate deploy` (never `migrate dev`) is
+    # the start-up-safe command: it only applies committed migrations from
+    # prisma/migrations/ and never drafts or resets anything.
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed && node dist/index.js"
+    environment:
+      DATABASE_URL: postgresql://bcforge:bcforge@postgres:5432/bcforge
+      RPC_URL: https://soroban-testnet.stellar.org
+      CONTRACT_ID: ${CONTRACT_ID:?Set CONTRACT_ID in indexer/.env or your shell}
+      INDEXER_API_TOKEN: ${INDEXER_API_TOKEN:?Set INDEXER_API_TOKEN in indexer/.env or your shell}
+      PORT: 3000
+    ports:
+      - '3000:3000'
+
+volumes:
+  postgres-data:

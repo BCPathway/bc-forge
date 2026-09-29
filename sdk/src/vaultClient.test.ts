@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { jest } from '@jest/globals';
 import { VaultClient } from './vaultClient';
 import { MockVaultClient } from './mockClient';

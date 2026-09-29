@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 const mockClient = {

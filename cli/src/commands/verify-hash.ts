@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { Command } from 'commander';

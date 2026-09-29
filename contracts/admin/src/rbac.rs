@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Role-based access control (RBAC) for the admin access-control module (#922).
 //!
 //! Owns the `Role` enum and its bitmask representation, role-mask storage

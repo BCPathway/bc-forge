@@ -29,7 +29,10 @@ export async function runIndexer() {
 
   // 1. Get the last indexed ledger
   let lastLedger = await prisma.lastIndexedLedger.findUnique({ where: { id: 1 } });
-  let startLedger = lastLedger ? lastLedger.ledger + 1 : 0;
+  if (lastLedger) {
+    await seedLedgerCheckpoints(prisma, server, lastLedger);
+  }
+  let startLedger = lastLedger ? lastLedger.ledger + 1 : 1;
 
   // 2. Continuous loop
   while (true) {
@@ -57,8 +60,37 @@ export async function runIndexer() {
       const endLedger = Math.min(startLedger + 1000, currentLedger);
       logger.info('indexing ledger range', { startLedger, endLedger });
 
+      const ledgerStart = Math.max(1, startLedger - 1);
+      const ledgerResponse = await server.getLedgers({
+        startLedger: ledgerStart,
+        pagination: { limit: endLedger - ledgerStart + 1 },
+      });
+      const coordinates = ledgerResponse.ledgers
+        .filter((ledger) => ledger.sequence >= startLedger && ledger.sequence <= endLedger)
+        .map(toLedgerCoordinate);
+      const previousCoordinate = lastLedger?.ledger === startLedger - 1 && lastLedger.hash
+        ? {
+            ledger: lastLedger.ledger,
+            hash: lastLedger.hash,
+            parentHash: lastLedger.parentHash ?? '',
+          }
+        : ledgerResponse.ledgers
+            .filter((ledger) => ledger.sequence === startLedger - 1)
+            .map(toLedgerCoordinate)[0];
+
+      if (
+        coordinates.length !== endLedger - startLedger + 1 ||
+        !hasContinuousParentChain(coordinates, previousCoordinate)
+      ) {
+        if (lastLedger) {
+          await reconcileLedgerCursor(prisma, server, lastLedger);
+        }
+        throw new Error(`Ledger sequence or parent hash mismatch at ${startLedger}`);
+      }
+
       const response = await server.getEvents({
         startLedger: startLedger,
+        endLedger,
         filters: [
           {
             type: 'contract',
@@ -71,12 +103,20 @@ export async function runIndexer() {
         await processEvent(event);
       }
 
-      // Update last indexed ledger
-      await prisma.lastIndexedLedger.upsert({
-        where: { id: 1 },
-        update: { ledger: endLedger },
-        create: { id: 1, ledger: endLedger },
-      });
+      const latestCoordinate = coordinates[coordinates.length - 1];
+      if (!latestCoordinate) throw new Error(`No ledger coordinates returned through ${endLedger}`);
+      await prisma.$transaction([
+        prisma.indexedLedger.createMany({ data: coordinates, skipDuplicates: true }),
+        prisma.lastIndexedLedger.upsert({
+          where: { id: 1 },
+          update: {
+            ledger: latestCoordinate.ledger,
+            hash: latestCoordinate.hash,
+            parentHash: latestCoordinate.parentHash,
+          },
+          create: { id: 1, ...latestCoordinate },
+        }),
+      ]);
 
       startLedger = endLedger + 1;
 
@@ -111,27 +151,38 @@ function ledgerCloseTime(event: SorobanRpc.Api.EventResponse): Date {
  * transaction so a re-index cannot apply an event twice.
  */
 async function persistEventRow(
+  client: PrismaClient,
   model: 'mint' | 'transfer' | 'burn',
   data: Record<string, unknown>,
   ledgerEvent: LedgerEvent,
   event: SorobanRpc.Api.EventResponse,
   newSupply?: string,
 ): Promise<unknown> {
-  return prisma.$transaction(async (tx) => {
-    // Loose delegate access keeps the shared writer type-safe enough while
-    // letting each event type build its own row shape.
+  const run = async (tx: AggregateStore & Record<string, { create: (args: { data: Record<string, unknown> }) => Promise<unknown> }>) => {
     const created = await (tx as any)[model].create({ data });
-    await applyLedgerEventAggregates(tx as unknown as AggregateStore, ledgerEvent, {
-      ledger: event.ledger,
-      txHash: event.txHash,
-      timestamp: ledgerCloseTime(event),
-      newSupply,
-    });
+    if (typeof (tx as AggregateStore).holder?.upsert === 'function') {
+      await applyLedgerEventAggregates(tx as unknown as AggregateStore, ledgerEvent, {
+        ledger: event.ledger,
+        txHash: event.txHash,
+        timestamp: ledgerCloseTime(event),
+        newSupply,
+      });
+    }
     return created;
-  });
+  };
+  const transactional = client as PrismaClient & {
+    $transaction?: (fn: (tx: PrismaClient) => Promise<unknown>) => Promise<unknown>;
+  };
+  if (typeof transactional.$transaction === 'function') {
+    return transactional.$transaction((tx) => run(tx as never));
+  }
+  return run(client as never);
 }
 
-async function processEvent(event: SorobanRpc.Api.EventResponse) {
+export async function processEvent(
+  event: SorobanRpc.Api.EventResponse,
+  database: PrismaClient = prisma,
+) {
   if (!event.topic || event.topic.length === 0) return;
   const topic = scValToNative(event.topic[0] as any);
   const data = event.value as any;
@@ -154,6 +205,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
           amount: decoded[2].toString(),
         };
         const row = await persistEventRow(
+          database,
           'mint',
           {
             to: decoded[1],
@@ -177,6 +229,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
           amount: decoded[1].toString(),
         };
         const row = await persistEventRow(
+          database,
           'burn',
           {
             from: decoded[0],
@@ -201,6 +254,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
           amount: decoded[2].toString(),
         };
         const row = await persistEventRow(
+          database,
           'transfer',
           {
             from: decoded[0],
@@ -225,6 +279,7 @@ async function processEvent(event: SorobanRpc.Api.EventResponse) {
           amount: decoded[3].toString(),
         };
         const row = await persistEventRow(
+          database,
           'transfer',
           {
             from: decoded[1],

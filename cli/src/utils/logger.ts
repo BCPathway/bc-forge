@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import winston from 'winston';
 import chalk from 'chalk';
 
