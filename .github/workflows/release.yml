@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate packages before publish
+        run: npm run release:validate
+
       - name: Version and publish with Changesets
         id: changesets
         uses: changesets/action@v1
@@ -40,6 +43,7 @@ jobs:
           publish: |
             npm run build --workspace @bc-forge/sdk
             npm run build --workspace @bc-forge/cli
+            npm run build --workspace @bc-forge/react
             npm config set provenance true
             npx changeset publish
         env:

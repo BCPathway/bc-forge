@@ -589,3 +589,16 @@ How security reports are rewarded, and whether a hosted bounty program is live, 
 - [Stellar SDK (JS)](https://github.com/stellar/js-stellar-sdk)
 - [SEP-41 Token Standard](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)
 - [drips.network](https://www.drips.network)
+
+
+## Release artifacts
+
+Names match the package manifests. Nothing in this table is published yet.
+
+| Deliverable | Channel | Install or build | Release notes |
+| --- | --- | --- | --- |
+| SDK (`sdk/`, `@bc-forge/sdk`) | npm | Not yet published. After a release: `npm install @bc-forge/sdk` | [Maintainers](docs/MAINTAINERS.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) |
+| CLI (`cli/`, `@bc-forge/cli`) | npm | Not yet published. After a release: `npm install -g @bc-forge/cli` | [Maintainers](docs/MAINTAINERS.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) |
+| React (`react/`, `@bc-forge/react`) | npm | Not yet published. After a release: `npm install @bc-forge/react` | [Maintainers](docs/MAINTAINERS.md), [`.github/workflows/release.yml`](.github/workflows/release.yml) |
+| Indexer (`indexer/`) | source | Not yet published as an image. Run it from this repo with `docker compose up` in `indexer/`. | [indexer/README.md](indexer/README.md) |
+| Contracts (`contracts/`) | source WASM | Not yet published as release assets. Build with `cargo build --target wasm32-unknown-unknown --release`. | [Upgrade guide](docs/UPGRADE_GUIDE.md) |

@@ -39,6 +39,7 @@ export default {
           { text: 'Vaults', link: '/VAULTS' },
           { text: 'Walkthrough', link: '/WALKTHROUGH' },
           { text: 'Compatibility', link: '/COMPATIBILITY' },
+          { text: 'Release Checklist', link: '/RELEASE_CHECKLIST' },
           { text: 'SDK Errors', link: '/sdk-errors' },
         ],
       },
