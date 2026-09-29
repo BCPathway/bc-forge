@@ -80,6 +80,14 @@ jobs:
             --out Lcov \
             --out Stdout
 
+      # Patch coverage (#955) is computed here from the LCOV report and the PR
+      # diff. It does not depend on the Codecov app or CODECOV_TOKEN.
+      - name: Enforce patch coverage
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref }}"
+          python3 scripts/check_patch_coverage.py "origin/${{ github.base_ref }}" lcov.info 85
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:

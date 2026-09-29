@@ -164,12 +164,12 @@ CI also runs `cargo audit` against `Cargo.lock` in the Dependency Audit job: if 
 
 ### Coverage Gate
 
-Rust line coverage is measured with [cargo-tarpaulin](https://github.com/xd009642/tarpaulin) in CI and uploaded to [Codecov](https://about.codecov.io), which enforces two gates on every PR (issue #955):
+Rust line coverage is measured with [cargo-tarpaulin](https://github.com/xd009642/tarpaulin). CI enforces two gates on every PR (issue #955):
 
 | Gate | Threshold | Effect |
 |------|-----------|--------|
 | Project (total) coverage | **85%** | `cargo tarpaulin --fail-under 85` fails the CI job when workspace line coverage falls below 85%. Codecov additionally fails the PR when total coverage drops by more than 1 percentage point versus the base branch. |
-| Patch (diff) coverage | **85%** | At least 85% of the lines a PR adds or modifies must be covered by tests; Codecov fails the PR when the touched lines fall below this. |
+| Patch (diff) coverage | **85%** | `scripts/check_patch_coverage.py` fails the CI job when fewer than 85% of the changed, instrumented Rust lines are covered in `lcov.info`. |
 
 - The workspace currently measures **89.35% line coverage** (2627/2940 lines, cargo-tarpaulin 0.37.4 with `bc-forge-e2e-tests` excluded), so the 85% gate has headroom — keep it that way. The long-term goal is to keep total coverage ≥ 85% and raise patch coverage toward 100%.
 - Reports are emitted in Cobertura XML and LCOV and uploaded to Codecov, which computes patch coverage against the PR diff.
