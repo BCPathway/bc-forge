@@ -11,7 +11,10 @@ name: Publish indexer image
 # jobs sign the immutable digest with Cosign keyless OIDC and generate a
 # CycloneDX SBOM from that digest, upload it to the GitHub Release, and attest
 # it. Only those jobs have id-token: write, and no private signing key is
-# created (#1051, #1050).
+# created (#1051, #1050). The same tag run also archives prisma/schema.prisma
+# and prisma/migrations from that commit, attaches the archive and its SHA-256
+# to the GitHub Release, and records them in the release notes (#1054).
+# contents: write is limited to the jobs that upload release assets.
 # Component tags (sdk-v*, cli-v*, react-v*) do not match this filter, so they
 # never push an image.
 #
@@ -49,6 +52,7 @@ jobs:
       security-events: write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
+      version: ${{ steps.meta.outputs.version }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -527,3 +531,109 @@ jobs:
             echo "- Identity: \`https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-indexer.yml@${GITHUB_REF}\`"
             echo "- Issuer: \`https://token.actions.githubusercontent.com\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  migrations:
+    name: Package and attach Prisma migration archive
+    needs: [publish, sbom]
+    if: github.event_name != 'pull_request' && needs.publish.result == 'success' && needs.sbom.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package migrations and schema
+        id: package
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          archive="bc-forge-indexer-prisma-migrations-${VERSION}.tar.gz"
+          mkdir -p release_assets
+
+          # Deterministic archive: sorted entries, fixed ownership, and a
+          # name-free gzip stream make the checksum reproducible for the same
+          # commit.
+          tar \
+            --create \
+            --sort=name \
+            --mtime='UTC 1980-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --use-compress-program='gzip -9n' \
+            --file "release_assets/${archive}" \
+            -C indexer \
+            prisma/schema.prisma \
+            prisma/migrations
+
+          ( cd release_assets && sha256sum "${archive}" > "${archive}.sha256" )
+
+          checksum="$(cut -d' ' -f1 "release_assets/${archive}.sha256")"
+          {
+            echo "archive=${archive}"
+            echo "checksum=${checksum}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Packaged release_assets/${archive} (sha256 ${checksum})"
+
+      - name: Attach archive to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Indexer image ${IMAGE}@${DIGEST}"
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            "release_assets/${ARCHIVE}" \
+            "release_assets/${ARCHIVE}.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Record the artifact in the release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          notes="$(mktemp)"
+          gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body --jq '.body // ""' > "$notes"
+
+          # Replace any previous copy of the section so re-running the job is
+          # idempotent instead of appending a duplicate.
+          awk '
+            /^<!-- indexer-migrations:end -->$/ { skip = 0; next }
+            /^<!-- indexer-migrations:start -->$/ { skip = 1; next }
+            skip != 1 { print }
+          ' "$notes" > "${notes}.next"
+          mv "${notes}.next" "$notes"
+
+          {
+            echo ""
+            echo "<!-- indexer-migrations:start -->"
+            echo "### Indexer Prisma migration archive"
+            echo ""
+            echo "- Artifact: \`${ARCHIVE}\`"
+            echo "- SHA-256: \`${CHECKSUM}\`"
+            echo "- Matches image digest: \`${DIGEST}\`"
+            echo "- Built from commit: \`${GITHUB_SHA}\`"
+            echo "<!-- indexer-migrations:end -->"
+          } >> "$notes"
+
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-file "$notes"
