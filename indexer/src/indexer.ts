@@ -3,12 +3,6 @@ import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 import { publishIndexerEvent } from './events';
 import { applyLedgerEventAggregates, type AggregateStore } from './aggregates';
-import {
-  hasContinuousParentChain,
-  reconcileLedgerCursor,
-  seedLedgerCheckpoints,
-  toLedgerCoordinate,
-} from './cursor';
 import type { LedgerEvent } from './ledger';
 import { logger } from './lib/logger';
 import { setLatestNetworkLedger } from './metrics';
