@@ -646,13 +646,18 @@ impl WrapperContract {
     ///
     /// This is the vault-style entry point (analogous to ERC-4626 `deposit`). Unlike
     /// [`WrapperContract::wrap`], which mints shares at a flat decimal-scaled 1:1 rate,
-    /// `deposit` always uses the **current share price** so that depositors entering after
-    /// rewards have been distributed receive the correct (lower) number of shares:
+    /// `deposit` always uses the **current share price**, including the virtual offset
+    /// in [`math::VIRTUAL_OFFSET`], so that depositors entering after rewards have been
+    /// distributed receive the correct (lower) number of shares:
     ///
     /// ```text
-    /// shares_out = assets * total_shares / total_assets   (when total_shares > 0)
-    /// shares_out = assets                                   (first deposit: 1:1 bootstrap)
+    /// shares_out = assets * (total_shares + OFFSET) / (total_assets + OFFSET)
     /// ```
+    ///
+    /// On an empty vault the offset cancels and the first deposit is still 1:1.
+    /// A donation that lands in the vault before that deposit is part of
+    /// `total_assets` and is absorbed by the virtual shares, so it cannot inflate
+    /// the first depositor out of their assets.
     ///
     /// Rounding is in favour of the protocol (floor division), and the call reverts if the
     /// computed share amount rounds down to zero.
@@ -698,35 +703,24 @@ impl WrapperContract {
             &assets,
         );
 
-        // Calculate shares to mint based on the current exchange rate:
-        //   shares = assets * total_shares / total_assets  (post-transfer, so total_assets
-        //   already includes the newly deposited tokens — we read it before the transfer to
-        //   get the pre-deposit total, which is the correct reference price).
+        // Mint shares against the pre-deposit totals. The transfer above is
+        // already in the token balance, so subtract it back. Donations that
+        // arrived without minting shares stay in `total_assets_before` and are
+        // priced through the virtual offset:
+        //   shares = assets * (total_shares + OFFSET) / (total_assets + OFFSET)
+        // An empty vault (both totals zero) still mints 1:1 because OFFSET cancels.
         let total_shares = Self::read_supply(&env);
-        let shares_out: i128 = if total_shares == 0 {
-            // First deposit — bootstrap at 1:1 (assets == shares).
-            assets
-        } else {
-            // total_assets includes the freshly transferred tokens; subtract them back to
-            // get the pre-deposit asset total so the exchange rate reflects the vault state
-            // before this deposit.
-            let total_assets_after = underlying_client.balance(&env.current_contract_address());
-            let total_assets_before = total_assets_after.checked_sub(assets).unwrap_or_else(|| {
-                soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
-            });
+        let total_assets_after = underlying_client.balance(&env.current_contract_address());
+        let total_assets_before = total_assets_after
+            .checked_sub(assets)
+            .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount));
+        if total_assets_before < 0 {
+            Self::release_lock(&env);
+            return Err(WrapperError::InvalidAmount);
+        }
 
-            if total_assets_before <= 0 {
-                // Edge case: vault had zero assets but nonzero shares — treat like first deposit.
-                assets
-            } else {
-                assets
-                    .checked_mul(total_shares)
-                    .and_then(|product| product.checked_div(total_assets_before))
-                    .unwrap_or_else(|| {
-                        soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount)
-                    })
-            }
-        };
+        let shares_out = math::convert_to_shares(assets, total_shares, total_assets_before)
+            .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount));
 
         if shares_out <= 0 {
             Self::release_lock(&env);
@@ -1024,23 +1018,27 @@ impl WrapperContract {
         Self::read_pending_rewards(&env)
     }
 
-    /// Calculates the current vault share price: `total_assets / total_shares`.
+    /// Calculates the current vault share price:
+    /// `(total_assets + OFFSET) / (total_shares + OFFSET)`.
     ///
-    /// The share price is the amount of underlying tokens each outstanding
-    /// vault share is entitled to. It rises when rewards are distributed
-    /// (`distribute_rewards`) and stays flat on wrap/unwrap at a 1:1 rate.
+    /// `OFFSET` is [`math::VIRTUAL_OFFSET`]. The price is the amount of
+    /// underlying tokens each outstanding vault share is entitled to, floored.
+    /// It rises when rewards are distributed (`distribute_rewards`) by enough
+    /// to move that integer ratio, and stays flat on wrap/unwrap at a 1:1 rate.
     ///
     /// # Math safety
-    /// The division uses [`i128::checked_div`], and the zero-share case is
-    /// rejected up front with [`WrapperError::ZeroShares`], so this function
-    /// can never panic on a divide-by-zero.
+    /// The zero-share case is rejected up front with [`WrapperError::ZeroShares`].
+    /// The divisor is `total_shares + OFFSET`, which is non-zero whenever
+    /// `total_shares` is non-negative, so this function cannot divide by zero.
     ///
     /// # Errors
     /// * [`WrapperError::NotInitialized`] if the contract is uninitialized.
     /// * [`WrapperError::ZeroShares`] if there are no outstanding vault shares.
+    /// * [`WrapperError::InvalidAmount`] if the offset addition overflows.
     ///
     /// @param env The Soroban environment.
-    /// @return `Ok(share_price)` where `share_price = total_assets / total_shares`
+    /// @return `Ok(share_price)` where
+    ///         `share_price = (total_assets + OFFSET) / (total_shares + OFFSET)`
     ///         (integer division, rounded down), or an error as documented above.
     pub fn calculate_share_price(env: Env) -> Result<i128, WrapperError> {
         Self::ensure_initialized(&env)?;
@@ -1051,24 +1049,20 @@ impl WrapperContract {
         }
 
         let total_tokens = Self::read_total_assets(&env);
-        // total_shares > 0 here, so checked_div cannot fail: it only returns
-        // None for a zero divisor (excluded above) or i128::MIN / -1 (impossible
-        // with a positive divisor). The guard keeps the math panic-free.
-        total_tokens
-            .checked_div(total_shares)
-            .ok_or(WrapperError::ZeroShares)
+        math::share_price(total_tokens, total_shares).ok_or(WrapperError::InvalidAmount)
     }
 
     /// Calculates the pro-rata reward entitlement for a given amount of shares:
-    /// `rewards = (user_shares * total_tokens) / total_shares`.
+    /// `rewards = user_shares * (total_tokens + OFFSET) / (total_shares + OFFSET)`.
     ///
-    /// This is a read-only preview of what [`WrapperContract::withdraw`] would
-    /// pay out for `user_shares` right now — it does not burn shares or move
-    /// tokens. It is deliberately computed directly from the totals rather than
-    /// via `user_shares * calculate_share_price()`: multiplying by the
-    /// per-share price first floors twice (once computing the price, once
-    /// multiplying it back out), which under-reports the entitlement whenever
-    /// `total_tokens` isn't an exact multiple of `total_shares`. Multiplying
+    /// `OFFSET` is [`math::VIRTUAL_OFFSET`]. This is a read-only preview of what
+    /// [`WrapperContract::withdraw`] would pay out for `user_shares` right now —
+    /// it does not burn shares or move tokens. It is deliberately computed
+    /// directly from the totals rather than via
+    /// `user_shares * calculate_share_price()`: multiplying by the per-share
+    /// price first floors twice (once computing the price, once multiplying it
+    /// back out), which under-reports the entitlement whenever `total_tokens +
+    /// OFFSET` isn't an exact multiple of `total_shares + OFFSET`. Multiplying
     /// before dividing floors only once, matching `withdraw`'s payout exactly.
     ///
     /// # Math safety
@@ -1091,7 +1085,8 @@ impl WrapperContract {
     ///
     /// @param env The Soroban environment.
     /// @param user_shares The share amount to price out; must be non-negative.
-    /// @return `Ok(rewards)` where `rewards = (user_shares * total_tokens) / total_shares`
+    /// @return `Ok(rewards)` where
+    ///         `rewards = user_shares * (total_tokens + OFFSET) / (total_shares + OFFSET)`
     ///         (integer division, rounded down), or an error as documented above.
     pub fn calculate_rewards(env: Env, user_shares: i128) -> Result<i128, WrapperError> {
         Self::ensure_initialized(&env)?;
@@ -1105,11 +1100,14 @@ impl WrapperContract {
             return Err(WrapperError::ZeroShares);
         }
 
-        let total_tokens = Self::read_total_assets(&env);
+        // Zero shares queried is an empty claim, not a math error. The
+        // conversion helper rejects a non-positive share amount.
+        if user_shares == 0 {
+            return Ok(0);
+        }
 
-        user_shares
-            .checked_mul(total_tokens)
-            .and_then(|product| product.checked_div(total_shares))
+        let total_tokens = Self::read_total_assets(&env);
+        math::convert_to_assets(user_shares, total_shares, total_tokens)
             .ok_or(WrapperError::InvalidAmount)
     }
 
@@ -1175,8 +1173,9 @@ impl WrapperContract {
     /// the vault's underlying assets, including any accrued yield.
     ///
     /// Burns `shares` from `caller` and transfers
-    /// `tokens_out = shares * total_assets / total_shares` underlying tokens
-    /// back to `caller`.
+    /// `tokens_out = shares * (total_assets + OFFSET) / (total_shares + OFFSET)`
+    /// underlying tokens back to `caller`, where `OFFSET` is
+    /// [`math::VIRTUAL_OFFSET`].
     ///
     /// When cooldown mode is ON, records a queued withdrawal and defers token transfer
     /// until [`claim_withdrawal`] is called at or after the release ledger.
@@ -1220,12 +1219,11 @@ impl WrapperContract {
 
         // Pay out a pro-rata share of the vault's underlying assets so rewards
         // distributed via `distribute_rewards` accrue to withdrawing users.
-        // Round down to favor the protocol.
+        // The virtual offset is included on both sides; round down to favor
+        // the protocol.
         let total_shares = Self::read_supply(&env);
         let total_assets = underlying_client.balance(&env.current_contract_address());
-        let tokens_out = shares
-            .checked_mul(total_assets)
-            .and_then(|product| product.checked_div(total_shares))
+        let tokens_out = math::convert_to_assets(shares, total_shares, total_assets)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, WrapperError::InvalidAmount));
 
         if tokens_out <= 0 {
