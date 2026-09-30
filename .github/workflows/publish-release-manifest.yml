@@ -4,10 +4,13 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
 jobs:
   manifest:
     name: Generate and Upload Release Manifest
     runs-on: ubuntu-latest
+    environment: container
     permissions:
       contents: write
     steps:

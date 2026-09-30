@@ -17,7 +17,7 @@ use soroban_sdk::{Address, Env, String};
 
 /// Deploys and initializes a token contract, returning the client, the admin
 /// and a fresh address holding no roles yet.
-fn setup<'a>(env: &'a Env) -> (BcForgeTokenClient<'a>, Address, Address, Address) {
+fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address, Address, Address) {
     env.mock_all_auths();
 
     let contract_id = env.register(BcForgeToken, ());

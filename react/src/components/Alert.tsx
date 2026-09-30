@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import React, { forwardRef } from 'react';
+import { theme } from '../theme';
 
 export type AlertVariant = 'info' | 'success' | 'warning' | 'danger';
 
@@ -15,10 +16,10 @@ export interface AlertProps extends Omit<React.HTMLAttributes<HTMLDivElement>, '
 }
 
 const VARIANT_STYLES: Record<AlertVariant, React.CSSProperties> = {
-  info: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', color: '#1e40af' },
-  success: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', color: '#166534' },
-  warning: { backgroundColor: '#fffbeb', borderColor: '#fde68a', color: '#92400e' },
-  danger: { backgroundColor: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' },
+  info: { backgroundColor: theme.primaryBackground, borderColor: theme.primaryBorder, color: theme.primaryText },
+  success: { backgroundColor: theme.successBackground, borderColor: theme.successBorder, color: theme.successText },
+  warning: { backgroundColor: theme.warningBackground, borderColor: theme.warningBorder, color: theme.warningText },
+  danger: { backgroundColor: theme.dangerBackground, borderColor: theme.dangerBorder, color: theme.dangerText },
 };
 
 /** Alert banner; role is "alert" for danger/warning and "status" otherwise. */

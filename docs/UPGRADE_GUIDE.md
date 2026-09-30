@@ -425,6 +425,48 @@ release note.
 - **Storage:** Stored under `AdminKey::ProposalTimelock(proposal_id)` in
   instance storage.
 
+## Delayed privileged actions (#914)
+
+Fee-config changes and ownership transfers on the token contract run through
+the same review-window discipline as WASM upgrades, but with single-admin
+bookkeeping instead of the pool quorum:
+
+1. **Propose** — an admin calls `propose_privilege_action` with
+   `SetFeeConfig` or `TransferOwnership(new_admin)`. The proposal records
+   `executable_at = now + 86,400`.
+2. **Review window** — during the 24-hour delay any admin can
+   `cancel_privilege_action` (the emergency brake against a compromised
+   key). UIs surface the pending state via `get_privilege_proposal`.
+3. **Execute** — after the delay, the matching effect function
+   (`set_fee_config` / `transfer_ownership`) consumes the proposal and
+   applies the change. Executing without a live, elapsed proposal fails:
+   - `TokenError::TimelockNotElapsed` (18) — the proposal is still inside
+     the delay;
+   - `TokenError::PrivilegeProposalNotFound` (19) — nothing was proposed,
+     or the proposal was already consumed or cancelled.
+
+Resubmitting a consumed or cancelled action starts a fresh 24-hour clock.
+
+## Role renounce (#915)
+
+Role holders can drop their own role with `renounce_role(caller, role)` —
+no SuperAdmin counter-signature needed, which is the point: a holder can
+give up their own privilege. Renouncing is rejected with
+`RoleNotHeldForRenounce` for a role the caller does not directly hold (a
+role held only implicitly via the Admin bit has no separate storage to
+clear), and the last SuperAdmin can never renounce (`LastSuperAdmin`) —
+recovery must not depend on a chain with nobody able to grant roles. The
+one-call `get_role_hierarchy` view reports an address's full role set.
+
+## Proposal listing (#917)
+
+`list_legacy_proposals(start_after)` and `list_upgrade_proposals(start_after)`
+return the pending and approved-not-executed proposal IDs for both proposal
+flows, oldest first. Ledger keys are not enumerable, so the on-chain scan is
+capped at 50 slots per call: when `next_cursor` is present, pass it back as
+`start_after` for the next page. `get_threshold` and `get_admin_pool` expose
+the configured quorum for UIs.
+
 ## Rolling back a bad upgrade
 
 The CLI maintains a local upgrade history file so that a bad upgrade can be

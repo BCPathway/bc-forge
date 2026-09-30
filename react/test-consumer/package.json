@@ -1,0 +1,21 @@
+{
+  "name": "react-test-consumer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/index.tsx --bundle --minify --target=es2022 --outfile=dist/bundle.js"
+  },
+  "dependencies": {
+    "@bc-forge/sdk": "^0.1.0",
+    "@stellar/stellar-sdk": "^16.0.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3"
+  }
+}

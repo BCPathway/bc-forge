@@ -12,6 +12,7 @@ import {
   resolveContractReference,
 } from '../utils/registry.js';
 import { createDeploymentsCommand } from '../commands/deployments.js';
+import { getClientConfig } from '../utils/config.js';
 import { createUpgradeCommand } from '../commands/upgrade.js';
 import {
   createConnectCommand,
@@ -218,7 +219,69 @@ describe('Deployments registry (#937)', () => {
         registryPath,
       ]);
       expect(resolved.exitCode).not.toBe(1);
-      expect(resolved.stdout).toContain(TESTNET_ID);
+      expect(resolved.stdout).toContain(
+        `${TESTNET_ID} (https://stellar.expert/explorer/testnet/contract/${TESTNET_ID})`,
+      );
+    });
+
+    it('appends the testnet explorer link when registering an alias', async () => {
+      const messages: string[] = [];
+      const spy = vi.spyOn(logger, 'success').mockImplementation((message: string) => {
+        messages.push(message);
+      });
+      try {
+        process.exitCode = 0;
+        await createDeploymentsCommand().parseAsync([
+          'node',
+          'deployments',
+          'register',
+          'token',
+          TESTNET_ID,
+          '--network',
+          'testnet',
+          '--file',
+          registryPath,
+        ]);
+        expect(process.exitCode).not.toBe(1);
+        expect(messages.join('\n')).toContain(
+          `https://stellar.expert/explorer/testnet/contract/${TESTNET_ID}`,
+        );
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('prints JSON without an explorer URL when --json is supplied', async () => {
+      registerDeploymentAlias({
+        alias: 'token',
+        contractId: TESTNET_ID,
+        network: 'testnet',
+        filePath: registryPath,
+      });
+
+      const result = await run([
+        'resolve',
+        'token',
+        '--network',
+        'testnet',
+        '--file',
+        registryPath,
+        '--json',
+      ]);
+
+      expect(result.exitCode).not.toBe(1);
+      expect(JSON.parse(result.stdout)).toEqual({ contractId: TESTNET_ID, network: 'testnet' });
+      expect(result.stdout).not.toContain('stellar.expert');
+    });
+
+    it('fails cleanly for an unknown NETWORK environment value', () => {
+      vi.stubEnv('NETWORK', 'invalid-network');
+      vi.stubEnv('RPC_URL', 'https://rpc.example.test');
+      try {
+        expect(() => getClientConfig()).toThrow(/Unknown network "invalid-network"/);
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it('fails a CLI resolve of an unknown alias with the alias name', async () => {

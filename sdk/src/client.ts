@@ -140,6 +140,57 @@ function roleToScVal(role: Role): xdr.ScVal {
   return xdr.ScVal.scvSymbol(role);
 }
 
+/**
+ * Per-address role membership across the whole hierarchy (#915).
+ *
+ * Mirrors the contract's `RoleHierarchy` struct: `isAdmin` means the address
+ * is the configured admin, which implicitly holds every other role, so a
+ * UI reading this view sees the full truth rather than raw storage bits.
+ */
+export interface RoleHierarchy {
+  /** The address that was queried. */
+  address: string;
+  /** Holds the Admin role (implies all roles below). */
+  isAdmin: boolean;
+  /** Holds the SuperAdmin role. */
+  isSuperAdmin: boolean;
+  /** Holds the Minter role. */
+  isMinter: boolean;
+  /** Holds the Pauser role. */
+  isPauser: boolean;
+}
+
+/**
+ * One page of the #917 proposal listings.
+ *
+ * Ledger keys are not enumerable on-chain, so the contract walks proposal
+ * slots from `startAfter` and returns at most 50 per call. When
+ * `nextCursor` is non-null, more IDs exist past the cap — pass it back as
+ * `startAfter` to fetch the next page.
+ */
+export interface ProposalLists {
+  /** Proposals still collecting approvals/quorum. */
+  pendingIds: bigint[];
+  /** Proposals at/above threshold (or past quorum) not yet executed/cancelled. */
+  approvedIds: bigint[];
+  /** Resume token for the next page, or null when the ID space is exhausted. */
+  nextCursor: bigint | null;
+}
+
+/** Normalize a native-decoded proposal-listing struct into {@link ProposalLists}. */
+function parseProposalLists(native: Record<string, unknown>): ProposalLists {
+  const asIds = (value: unknown): bigint[] =>
+    Array.isArray(value) ? value.map((id) => BigInt(id as string | number | bigint)) : [];
+  const pending = native.pending_ids ?? native.pendingIds;
+  const approved = native.approved_ids ?? native.approvedIds;
+  const cursor = native.next_cursor ?? native.nextCursor;
+  return {
+    pendingIds: asIds(pending),
+    approvedIds: asIds(approved),
+    nextCursor: cursor === null || cursor === undefined ? null : BigInt(cursor as string | number | bigint),
+  };
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class bcForgeClient {
@@ -1176,6 +1227,84 @@ export class bcForgeClient {
       [addressToScVal(signerAddress), roleToScVal(role), addressToScVal(address)],
       source,
     );
+  }
+
+  /**
+   * Renounce a role the caller holds, dropping it from themself (#915).
+   *
+   * No SuperAdmin counter-signature is needed — that is the point: a holder
+   * can give up their own privilege. The contract reverts if the caller does
+   * not directly hold the role (`RoleNotHeldForRenounce`) and, for
+   * SuperAdmin, if no other holder would remain (`LastSuperAdmin`).
+   *
+   * @param role   - Role to renounce
+   * @param source - Keypair of the role holder renouncing the role
+   * @throws {ContractError} If the caller does not hold the role (`RoleNotHeldForRenounce`)
+   * @throws {ContractError} If the caller is the last SuperAdmin (`LastSuperAdmin`)
+   */
+  async renounceRole(role: Role, source?: Keypair): Promise<TransactionResult> {
+    const signerAddress = this.getSignerAddress(source);
+    return this.invokeContract(
+      'renounce_role',
+      [addressToScVal(signerAddress), roleToScVal(role)],
+      source,
+    );
+  }
+
+  /**
+   * One-call role-hierarchy view for an address (#915).
+   *
+   * Cheaper and more truthful than four `hasRole` calls: the configured
+   * admin is reported as holding every role, matching the contract's own
+   * authorization semantics.
+   *
+   * @param address - Stellar public key or contract address to inspect
+   */
+  async getRoleHierarchy(address: string): Promise<RoleHierarchy> {
+    const result = await this.queryContract('get_role_hierarchy', [addressToScVal(address)]);
+    const native = scValToNative(result) as Record<string, unknown>;
+    // Struct field keys arrive snake_case from the XDR map; older SDK
+    // versions camelCase them, so accept both spellings.
+    const pick = (snake: string, camel: string): unknown => native[snake] ?? native[camel];
+    return {
+      address: (pick('address', 'address') as string) ?? address,
+      isAdmin: Boolean(pick('is_admin', 'isAdmin')),
+      isSuperAdmin: Boolean(pick('is_super_admin', 'isSuperAdmin')),
+      isMinter: Boolean(pick('is_minter', 'isMinter')),
+      isPauser: Boolean(pick('is_pauser', 'isPauser')),
+    };
+  }
+
+  /**
+   * List legacy proposal IDs by state, oldest first (#917).
+   *
+   * Bounded scan: at most 50 slots per call; resume via `nextCursor`.
+   *
+   * @param startAfter - Exclusive lower bound; pass the previous page's
+   *                     `nextCursor` (or 0 for the first page).
+   */
+  async listLegacyProposals(startAfter: bigint | number = 0): Promise<ProposalLists> {
+    const result = await this.queryContract('list_legacy_proposals', [
+      nativeToScVal(BigInt(startAfter), { type: 'u64' }),
+    ]);
+    return parseProposalLists(scValToNative(result) as Record<string, unknown>);
+  }
+
+  /**
+   * List upgrade-proposal IDs by state, oldest first (#917).
+   *
+   * Same bounded-scan and cursoring contract as {@link listLegacyProposals}.
+   * Terminal proposals (executed, cancelled, expired) and closed-window
+   * pending ones are omitted.
+   *
+   * @param startAfter - Exclusive lower bound; pass the previous page's
+   *                     `nextCursor` (or 0 for the first page).
+   */
+  async listUpgradeProposals(startAfter: bigint | number = 0): Promise<ProposalLists> {
+    const result = await this.queryContract('list_upgrade_proposals', [
+      nativeToScVal(BigInt(startAfter), { type: 'u64' }),
+    ]);
+    return parseProposalLists(scValToNative(result) as Record<string, unknown>);
   }
 
   /**
