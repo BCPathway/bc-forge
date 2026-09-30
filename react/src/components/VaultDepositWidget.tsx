@@ -7,6 +7,7 @@ import { VaultClient } from '@bc-forge/sdk';
 import { useVaultShareBalance, useWallet } from '../hooks';
 import { truncatePublicKey, useOptionalVaultClient } from '../context';
 import { formatTokenAmount, parsePositiveInteger } from '../utils';
+import { asSdkKeypair } from '../sdkSigner';
 import { Alert } from './Alert';
 import { TransactionToast, type TransactionToastStatus } from './TransactionToast';
 
@@ -211,7 +212,7 @@ export const VaultDepositWidget: React.FC<VaultDepositWidgetProps> = ({
     setToast({ status: 'pending' });
     setSubmitting(true);
     try {
-      const result = await client.deposit(depositor, parsedAmount, source, minSharesOut);
+      const result = await client.deposit(depositor, parsedAmount, asSdkKeypair(source), minSharesOut);
       if (result.success) {
         setToast({ status: 'success', hash: result.hash });
         setAmount('');

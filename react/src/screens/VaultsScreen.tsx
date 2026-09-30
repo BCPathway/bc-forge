@@ -4,6 +4,7 @@ import { VaultClient, calculateApy } from '@bc-forge/sdk';
 import type { ApyResult, WalletAdapter } from '@bc-forge/sdk';
 import { Alert } from '../components/Alert';
 import { isPositiveInteger } from '../utils';
+import { asSdkKeypair } from '../sdkSigner';
 
 export interface VaultsScreenProps {
   /** Optional pre-instantiated VaultClient instance */
@@ -156,7 +157,7 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
       const result = await activeClient.deposit(
         connectedAddress,
         amountBigInt,
-        walletAdapter as unknown as import('@stellar/stellar-sdk').Keypair,
+        asSdkKeypair(walletAdapter),
       );
       if (result && result.success) {
         setSuccessTx(result.hash);
@@ -200,7 +201,7 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
       const result = await activeClient.withdraw(
         connectedAddress,
         sharesBigInt,
-        walletAdapter as unknown as import('@stellar/stellar-sdk').Keypair,
+        asSdkKeypair(walletAdapter),
       );
       if (result && result.success) {
         setSuccessTx(result.hash);

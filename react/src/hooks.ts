@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useBcForgeClient, useOptionalBcForgeClient, useVaultClient, useWallet } from './context';
 import type { Keypair } from '@stellar/stellar-sdk';
 import type { TransactionResult, VaultClient } from '@bc-forge/sdk';
+import { asSdkKeypair } from './sdkSigner';
 
 /**
  * Hook to read the connected wallet state: adapter name, public key,
@@ -101,7 +102,7 @@ export function useMint() {
       setLoading(true);
       setError(null);
       requireConnectedWallet();
-      const result = await client.mint(to, amount, source);
+      const result = await client.mint(to, amount, asSdkKeypair(source));
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -160,7 +161,7 @@ export function useTransfer() {
       setLoading(true);
       setError(null);
       requireConnectedWallet();
-      const result = await client.transfer(from, to, amount, source);
+      const result = await client.transfer(from, to, amount, asSdkKeypair(source));
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -188,7 +189,7 @@ export function useApprove() {
       setLoading(true);
       setError(null);
       requireConnectedWallet();
-      const result = await client.approve(from, spender, amount, source);
+      const result = await client.approve(from, spender, amount, asSdkKeypair(source));
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -219,7 +220,7 @@ export function useBurn() {
       setLoading(true);
       setError(null);
       requireConnectedWallet();
-      const result = await client.burn(from, amount, source);
+      const result = await client.burn(from, amount, asSdkKeypair(source));
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -396,7 +397,7 @@ export function useProposalVoting() {
       if (!client) {
         throw new Error('useProposalVoting requires a BcForgeProvider client');
       }
-      return run(proposalId.toString(), () => client.approveProposal(admin, proposalId, source));
+      return run(proposalId.toString(), () => client.approveProposal(admin, proposalId, asSdkKeypair(source)));
     },
     [client, run],
   );
@@ -406,7 +407,7 @@ export function useProposalVoting() {
       if (!client) {
         throw new Error('useProposalVoting requires a BcForgeProvider client');
       }
-      return run(proposalId.toString(), () => client.executeProposal(proposalId, source));
+      return run(proposalId.toString(), () => client.executeProposal(proposalId, asSdkKeypair(source)));
     },
     [client, run],
   );
