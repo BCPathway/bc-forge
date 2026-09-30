@@ -3,7 +3,6 @@ import { loadConfigFile, BcForgeConfig } from './config-parser.js';
 import logger from './logger.js';
 import {
   resolveNetworkConfig,
-  UnknownNetworkError,
   type NetworkOverrides,
 } from '../network.js';
 
@@ -100,31 +99,13 @@ export function getClientConfig(overrides: NetworkOverrides = {}) {
       (hasExplicitNetwork ? undefined : passphraseFromEnvFile),
   };
 
-  try {
-    const resolved = resolveNetworkConfig(inputs);
-    return {
-      network: resolved.name,
-      rpcUrl: resolved.rpcUrl,
-      networkPassphrase: resolved.networkPassphrase,
-      contractId: (process.env.CONTRACT_ID || fileCfg?.contracts?.token?.contractId || storedConfig.contractId || '') as string,
-    };
-  } catch (err) {
-    // Config schema allows futurenet/custom; if an RPC URL is already known, use it.
-    if (err instanceof UnknownNetworkError && (overrides.rpcUrl || rpcFromEnvFile)) {
-      const fallback = resolveNetworkConfig({
-        network: 'testnet',
-        rpcUrl: overrides.rpcUrl || rpcFromEnvFile,
-        networkPassphrase: overrides.networkPassphrase || passphraseFromEnvFile,
-      });
-      return {
-        network: fallback.name,
-        rpcUrl: fallback.rpcUrl,
-        networkPassphrase: fallback.networkPassphrase,
-        contractId: (process.env.CONTRACT_ID || fileCfg?.contracts?.token?.contractId || storedConfig.contractId || '') as string,
-      };
-    }
-    throw err;
-  }
+  const resolved = resolveNetworkConfig(inputs);
+  return {
+    network: resolved.name,
+    rpcUrl: resolved.rpcUrl,
+    networkPassphrase: resolved.networkPassphrase,
+    contractId: (process.env.CONTRACT_ID || fileCfg?.contracts?.token?.contractId || storedConfig.contractId || '') as string,
+  };
 }
 
 export function getSecretKey() {

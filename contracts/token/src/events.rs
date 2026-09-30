@@ -31,8 +31,10 @@
 //! - `fee_tres`: `(caller, treasury, version)`
 //! - `fee_exm`: `(caller, address, exemption_type, version)`
 //! - `fee_rmv`: `(caller, address, version)`
+//! - `locked`: `(user, amount, unlock_timestamp, version)`
+//! - `withdraw_locked`: `(user, amount, version)`
 
-use soroban_sdk::{symbol_short, Address, BytesN, Env, String};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String, Symbol};
 
 /// Schema version appended to every event data tuple emitted by this
 /// contract. Bump when the event field layout changes (#924).
@@ -393,5 +395,30 @@ pub fn emit_rescued(env: &Env, caller: &Address, token: &Address, to: &Address, 
     env.events().publish(
         (symbol_short!("rescue"),),
         (caller.clone(), token.clone(), to.clone(), amount),
+    );
+}
+
+/// Emits the `locked` event when an admin locks part of a holder's balance.
+///
+/// @notice Publishes the holder, the amount locked by this call, and the
+///         unlock timestamp stored after the update.
+/// @dev The event topics include the `locked` symbol. The data tuple ends
+///      with [`EVENT_SCHEMA_VERSION`].
+pub fn emit_locked(env: &Env, user: &Address, amount: i128, unlock_timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("locked"),),
+        (user.clone(), amount, unlock_timestamp, EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits the `withdraw_locked` event when a holder releases an expired lock.
+///
+/// @notice Publishes the holder and the full locked amount that was released.
+/// @dev The topic is longer than `symbol_short` allows. The data tuple ends
+///      with [`EVENT_SCHEMA_VERSION`].
+pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
+    env.events().publish(
+        (Symbol::new(env, "withdraw_locked"),),
+        (user.clone(), amount, EVENT_SCHEMA_VERSION),
     );
 }

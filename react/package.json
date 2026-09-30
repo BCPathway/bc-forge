@@ -5,12 +5,49 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
-  "files": [
-    "dist"
+  "exports": {
+    ".": {
+      "types": {
+        "import": "./dist/index.d.mts",
+        "require": "./dist/index.d.ts",
+        "default": "./dist/index.d.ts"
+      },
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "**/*.css"
   ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/p3ris0n/bc-forge.git"
+    "url": "git+https://github.com/BCPathway/bc-forge.git",
+    "directory": "react"
+  },
+  "homepage": "https://github.com/BCPathway/bc-forge#readme",
+  "bugs": {
+    "url": "https://github.com/BCPathway/bc-forge/issues"
+  },
+  "keywords": [
+    "bc-forge",
+    "react",
+    "web3",
+    "hooks",
+    "components"
+  ],
+  "funding": {
+    "type": "drips",
+    "url": "https://www.drips.network/wave"
   },
   "author": "bc-forge contributors",
   "license": "MIT",
@@ -19,7 +56,14 @@
     "dev": "tsup src/index.ts --format cjs,esm --watch --dts",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "jest",
-    "e2e": "playwright test"
+    "test:consumer": "node test-consumer/run-smoke-test.mjs",
+    "e2e": "playwright test",
+    "storybook": "storybook dev -p 6006 --no-open --disable-telemetry",
+    "build-storybook": "storybook build --disable-telemetry",
+    "typecheck:storybook": "tsc -p tsconfig.storybook.json",
+    "lint:storybook": "eslint .storybook stories visual playwright.visual.config.ts",
+    "test:visual": "npm run build-storybook && playwright test --config playwright.visual.config.ts",
+    "test:visual:update": "npm run test:visual -- --update-snapshots=all"
   },
   "peerDependencies": {
     "@stellar/stellar-sdk": "^16.0.1",
@@ -30,9 +74,10 @@
     "@bc-forge/sdk": "^0.1.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.48.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.63.0",
     "@stellar/stellar-sdk": "^16.0.1",
+    "@storybook/react-vite": "10.6.1",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -47,10 +92,12 @@
     "jest-environment-jsdom": "^30.5.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "storybook": "10.6.1",
     "ts-jest": "^29.4.12",
     "tsup": "^8.0.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.70.0"
+    "typescript-eslint": "^8.70.0",
+    "vite": "8.3.0"
   },
   "overrides": {
     "esbuild": "^0.28.1"

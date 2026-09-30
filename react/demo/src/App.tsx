@@ -1,14 +1,16 @@
 import React from 'react';
-import { BcForgeProvider } from '@bc-forge/react';
+import {
+  BcForgeProvider,
+  WalletProvider,
+  ConnectWallet,
+  MintScreen,
+  TransferScreen,
+  BurnScreen,
+  RolesScreen,
+  VaultsScreen,
+} from '@bc-forge/react';
 import { Nav } from './Nav';
 import { useHashRoute } from './useHashRoute';
-import { MintScreen } from './placeholders/MintScreen';
-import { BurnScreen } from './placeholders/BurnScreen';
-import { RolesScreen } from './placeholders/RolesScreen';
-import { ConnectControl } from './placeholders/ConnectControl';
-
-// Real screens exported from the library
-import { TransferScreen, VaultsScreen } from '@bc-forge/react';
 
 /**
  * Contract id and RPC URL come from import.meta.env.
@@ -19,18 +21,27 @@ const providerConfig = {
   networkPassphrase:
     import.meta.env.VITE_NETWORK_PASSPHRASE ??
     'Test SDF Network ; September 2015',
-  contractId: import.meta.env.VITE_CONTRACT_ID ?? 'PLACEHOLDER_CONTRACT_ID',
+  contractId: import.meta.env.VITE_CONTRACT_ID ?? 'CCW67B452GD67B452GD67B452GD67B452GD67B452GD67B452GD67B452',
 };
 
 const ROUTES: Record<string, React.ReactNode> = {
-  '': <ConnectControl />,
+  '': (
+    <section data-testid="connect-control">
+      <h2>Connect Control</h2>
+      <ConnectWallet />
+    </section>
+  ),
   '#/mint': <MintScreen />,
   '#/transfer': (
     <TransferScreen
       walletAddress={import.meta.env.VITE_WALLET_ADDRESS}
     />
   ),
-  '#/burn': <BurnScreen />,
+  '#/burn': (
+    <BurnScreen
+      walletAddress={import.meta.env.VITE_WALLET_ADDRESS}
+    />
+  ),
   '#/roles': <RolesScreen />,
   '#/vaults': (
     <VaultsScreen
@@ -48,12 +59,15 @@ export const App: React.FC = () => {
 
   return (
     <BcForgeProvider config={providerConfig}>
-      <div style={{ fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto', padding: 24 }}>
-        <h1>bc-forge React Demo</h1>
-        <Nav />
-        <hr />
-        <main data-testid="screen-container">{content}</main>
-      </div>
+      <WalletProvider>
+        <div style={{ fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto', padding: 24 }}>
+          <h1>bc-forge React Demo</h1>
+          <Nav />
+          <hr />
+          <main data-testid="screen-container">{content}</main>
+        </div>
+      </WalletProvider>
     </BcForgeProvider>
   );
 };
+

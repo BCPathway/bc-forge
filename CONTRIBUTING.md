@@ -210,6 +210,29 @@ Rust line coverage is measured with [cargo-tarpaulin](https://github.com/xd00964
 - [ ] README updated if applicable
 - [ ] No unrelated changes included
 
+## 📦 Releases
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) still publishes
+the npm workspaces on every push to `main` through [Changesets](https://changesets.dev)
+and npm Trusted Publishing (`id-token: write`, `npm config set provenance true`).
+That job builds `@bc-forge/sdk`, `@bc-forge/cli`, and `@bc-forge/react` from the
+repository root before `npx changeset publish`. Do not remove those builds:
+React compiles against the SDK, and `dist/` is gitignored.
+
+[`.github/workflows/publish-react.yml`](.github/workflows/publish-react.yml) is a
+`workflow_call` used by `release.yml`. It lints, tests, builds, and validates
+the React tarball from the repository root. It does not publish and it does
+not use `NPM_TOKEN`. Do not set `defaults.run.working-directory` to `react/`:
+`npm run build --workspace` only resolves against the root `package.json`.
+
+`@bc-forge/react` is published only by the Changesets job in `release.yml`,
+with npm provenance (`id-token: write`). Changesets publishes a package when
+that package's version is new. An SDK or CLI release that does not bump
+`react/package.json` does not publish React. There is one publish job.
+
+Request a Changesets release with `npm run changeset` and name `@bc-forge/react`
+when the React package should ship from `main`.
+
 ## 📐 Architecture Guidelines
 
 ### Smart Contracts

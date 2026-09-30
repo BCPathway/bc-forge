@@ -137,6 +137,159 @@ describe('bcForgeClient RBAC init', () => {
     });
   });
 
+  describe('renounceRole', () => {
+    it('invokes renounce_role with the caller address and role', async () => {
+      const invokeContract = jest.fn(async () => ({
+        success: true,
+        hash: 'mock-hash',
+        returnValue: null,
+      }));
+      (client as unknown as { invokeContract: InvokeContractMock }).invokeContract =
+        invokeContract as unknown as InvokeContractMock;
+
+      const result = await client.renounceRole(Role.Minter, adminKeypair);
+
+      expect(result.success).toBe(true);
+      const [method, args, source] = invokeContract.mock.calls[0] as unknown as [
+        string,
+        xdr.ScVal[],
+        Keypair,
+      ];
+      expect(method).toBe('renounce_role');
+      expect(args).toHaveLength(2);
+      expect(args[0].toXDR('base64')).toBe(
+        addressToScVal(adminKeypair.publicKey()).toXDR('base64'),
+      );
+      expect(args[1].sym().toString()).toBe(Role.Minter);
+      expect(source).toBe(adminKeypair);
+    });
+
+    it('propagates a rejected renounce as an unsuccessful result', async () => {
+      const invokeContract = jest.fn(async () => ({ success: false, hash: 'renounce-failed' }));
+      (client as unknown as { invokeContract: InvokeContractMock }).invokeContract =
+        invokeContract as unknown as InvokeContractMock;
+
+      const result = await client.renounceRole(Role.SuperAdmin, adminKeypair);
+
+      expect(result.success).toBe(false);
+      expect(result.hash).toBe('renounce-failed');
+    });
+  });
+
+  describe('getRoleHierarchy', () => {
+    it('queries get_role_hierarchy and decodes the snake_case struct', async () => {
+      const target = Keypair.random().publicKey();
+      const queryContract = jest.fn(async () =>
+        xdr.ScVal.scvMap([
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('address'),
+            val: addressToScVal(target),
+          }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('is_admin'),
+            val: xdr.ScVal.scvBool(false),
+          }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('is_super_admin'),
+            val: xdr.ScVal.scvBool(true),
+          }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('is_minter'),
+            val: xdr.ScVal.scvBool(true),
+          }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('is_pauser'),
+            val: xdr.ScVal.scvBool(false),
+          }),
+        ]),
+      );
+      (client as unknown as { queryContract: typeof queryContract }).queryContract = queryContract;
+
+      const hierarchy = await client.getRoleHierarchy(target);
+
+      expect(hierarchy).toEqual({
+        address: target,
+        isAdmin: false,
+        isSuperAdmin: true,
+        isMinter: true,
+        isPauser: false,
+      });
+      const [method, args] = queryContract.mock.calls[0] as unknown as [string, xdr.ScVal[]];
+      expect(method).toBe('get_role_hierarchy');
+      expect(args[0].toXDR('base64')).toBe(addressToScVal(target).toXDR('base64'));
+    });
+  });
+
+  describe('proposal listings (#917)', () => {
+    function listingMap() {
+      return xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('pending_ids'),
+          val: xdr.ScVal.scvVec([xdr.ScVal.scvU64(new xdr.Uint64(1)), xdr.ScVal.scvU64(new xdr.Uint64(3))]),
+        }),
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('approved_ids'),
+          val: xdr.ScVal.scvVec([xdr.ScVal.scvU64(new xdr.Uint64(2))]),
+        }),
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('next_cursor'),
+          val: xdr.ScVal.scvU64(new xdr.Uint64(50)),
+        }),
+      ]);
+    }
+
+    it('listLegacyProposals queries with a u64 cursor and decodes ID lists', async () => {
+      const queryContract = jest.fn(async () => listingMap());
+      (client as unknown as { queryContract: typeof queryContract }).queryContract = queryContract;
+
+      const lists = await client.listLegacyProposals(0);
+
+      expect(lists.pendingIds).toEqual([1n, 3n]);
+      expect(lists.approvedIds).toEqual([2n]);
+      expect(lists.nextCursor).toBe(50n);
+      const [method, args] = queryContract.mock.calls[0] as unknown as [string, xdr.ScVal[]];
+      expect(method).toBe('list_legacy_proposals');
+      expect(args[0].u64().toString()).toBe('0');
+    });
+
+    it('listUpgradeProposals passes the resume cursor through', async () => {
+      const queryContract = jest.fn(async () => listingMap());
+      (client as unknown as { queryContract: typeof queryContract }).queryContract = queryContract;
+
+      await client.listUpgradeProposals(50);
+
+      const [method, args] = queryContract.mock.calls[0] as unknown as [string, xdr.ScVal[]];
+      expect(method).toBe('list_upgrade_proposals');
+      expect(args[0].u64().toString()).toBe('50');
+    });
+
+    it('decodes a null cursor as null', async () => {
+      const queryContract = jest.fn(async () =>
+        xdr.ScVal.scvMap([
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('pending_ids'),
+            val: xdr.ScVal.scvVec([]),
+          }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('approved_ids'),
+            val: xdr.ScVal.scvVec([]),
+          }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('next_cursor'),
+            val: xdr.ScVal.scvVoid(),
+          }),
+        ]),
+      );
+      (client as unknown as { queryContract: typeof queryContract }).queryContract = queryContract;
+
+      const lists = await client.listLegacyProposals(0);
+
+      expect(lists.pendingIds).toEqual([]);
+      expect(lists.approvedIds).toEqual([]);
+      expect(lists.nextCursor).toBeNull();
+    });
+  });
+
   describe('initRbac', () => {
     it('runs migrate_admin then grant_role(SuperAdmin) as the init_rbac step', async () => {
       const superAdmin = Keypair.random().publicKey();

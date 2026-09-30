@@ -4,10 +4,14 @@ node_modules
 **/node_modules
 dist
 **/dist
+target
+**/target
 .env
 .env.*
 **/.env
 **/.env.*
+!.env.example
+!**/.env.example
 .npmrc
 **/.npmrc
 npm-debug.log*

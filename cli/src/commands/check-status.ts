@@ -4,7 +4,7 @@ import { Contract, rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import { getClientConfig, loadConfigFile } from '../utils/config.js';
 import logger from '../utils/logger.js';
 import type { BcForgeConfig, ContractDeploymentConfig } from '../utils/config-parser.js';
-import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
+import { addNetworkOptions, explicitNetworkOverrides, formatContractIdWithExplorer } from '../network.js';
 
 export type ContractStatus = 'responsive' | 'unreachable' | 'not_deployed' | 'invalid';
 
@@ -159,7 +159,9 @@ export function createCheckStatusCommand(): Command {
         logger.info(`Network: ${status.network ?? 'unknown'} (${status.rpcUrl})`);
         for (const report of status.reports) {
           const latency = report.latencyMs !== undefined ? ` ${report.latencyMs}ms` : '';
-          const target = report.contractId ?? 'no contract id';
+          const target = report.contractId
+            ? formatContractIdWithExplorer(report.contractId, clientConfig.network)
+            : 'no contract id';
           if (report.status === 'responsive') {
             logger.success(`${report.name}: responsive${latency} [${target}]`);
           } else {

@@ -1,0 +1,54 @@
+name: Validate React package
+
+# Not a second npm publisher. @bc-forge/react is published only by
+# release.yml (Changesets on push to main, id-token: write, provenance).
+# This workflow_call lints, tests, builds, and validates the tarball.
+# It does not authenticate to npm and does not run npm publish.
+#
+# Do not set defaults.run.working-directory to react/. Workspace commands
+# such as `npm run build --workspace` resolve from the repository root.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, test, and validate @bc-forge/react
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check the React version before publish
+        run: node scripts/check-version-tag.mjs --before-changeset-publish --component react
+
+      - name: Lint
+        run: npm run lint --workspace @bc-forge/react
+
+      - name: Test
+        run: npm test --workspace @bc-forge/react -- --runInBand
+
+      - name: Build SDK dependency
+        run: npm run build --workspace @bc-forge/sdk
+
+      - name: Build React package
+        run: npm run build --workspace @bc-forge/react
+
+      - name: Validate the packed tarball
+        run: node scripts/validate-react-tarball.mjs
+
+      - name: Test the tarball listing check
+        run: node --test scripts/validate-react-tarball.test.mjs

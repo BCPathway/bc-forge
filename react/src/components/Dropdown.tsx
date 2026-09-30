@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import React, { forwardRef, useState, useRef, useEffect } from 'react';
+import { theme } from '../theme';
 
 export type DropdownVariant = 'default' | 'primary' | 'danger';
 export type DropdownSize = 'sm' | 'md' | 'lg';
@@ -63,21 +64,21 @@ const ITEM_SIZE_STYLES: Record<DropdownSize, React.CSSProperties> = {
 };
 
 const VARIANT_TRIGGER: Record<DropdownVariant, React.CSSProperties> = {
-  default: { borderColor: '#d1d5db', backgroundColor: '#ffffff', color: '#111827' },
-  primary: { borderColor: '#2563eb', backgroundColor: '#2563eb', color: '#ffffff' },
-  danger: { borderColor: '#dc2626', backgroundColor: '#dc2626', color: '#ffffff' },
+  default: { borderColor: theme.border, backgroundColor: theme.surface, color: theme.text },
+  primary: { borderColor: theme.primary, backgroundColor: theme.primary, color: theme.surface },
+  danger: { borderColor: theme.danger, backgroundColor: theme.danger, color: theme.surface },
 };
 
 const VARIANT_FOCUS: Record<DropdownVariant, React.CSSProperties> = {
-  default: { borderColor: '#6366f1', boxShadow: '0 0 0 2px rgba(99,102,241,0.15)' },
-  primary: { boxShadow: '0 0 0 2px rgba(37,99,235,0.3)' },
-  danger: { boxShadow: '0 0 0 2px rgba(220,38,38,0.3)' },
+  default: { borderColor: theme.focus, boxShadow: `0 0 0 2px ${theme.focusRing}` },
+  primary: { boxShadow: `0 0 0 2px ${theme.primaryFocusRing}` },
+  danger: { boxShadow: `0 0 0 2px ${theme.dangerFocusRing}` },
 };
 
 const ACTIVE_ITEM: Record<DropdownVariant, React.CSSProperties> = {
-  default: { backgroundColor: '#f3f4f6' },
-  primary: { backgroundColor: '#eff6ff', color: '#2563eb' },
-  danger: { backgroundColor: '#fef2f2', color: '#dc2626' },
+  default: { backgroundColor: theme.neutralBackground },
+  primary: { backgroundColor: theme.primaryBackground, color: theme.primary },
+  danger: { backgroundColor: theme.dangerBackground, color: theme.danger },
 };
 
 const MENU_BASE: React.CSSProperties = {
@@ -87,10 +88,10 @@ const MENU_BASE: React.CSSProperties = {
   right: 0,
   zIndex: 50,
   marginTop: 4,
-  border: '1px solid #d1d5db',
+  border: `1px solid ${theme.border}`,
   borderRadius: 6,
-  backgroundColor: '#ffffff',
-  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+  backgroundColor: theme.surface,
+  boxShadow: `0 4px 12px ${theme.shadow}`,
   overflow: 'hidden',
   boxSizing: 'border-box',
 };

@@ -5,6 +5,10 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+  // Ship Prisma engines for both image architectures so the same generate
+  // step works for linux/amd64 and linux/arm64 (#1049). Alpine uses musl with
+  // OpenSSL 3, hence the musl-openssl-3.0.x targets (amd64 + arm64).
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 model Mint {

@@ -9,14 +9,17 @@ import {
   addNetworkOptions,
   mergeNetworkOptions,
   explicitNetworkOverrides,
+  formatContractIdWithExplorer,
+  getBlockExplorerBaseUrl,
   UnknownNetworkError,
   InvalidRpcUrlError,
 } from "../network.js";
 
 describe("CLI network selection (#684)", () => {
   describe("parseNetworkName", () => {
-    it("accepts testnet, mainnet, and local", () => {
+    it("accepts testnet, futurenet, mainnet, and local", () => {
       expect(parseNetworkName("testnet")).toBe("testnet");
+      expect(parseNetworkName("futurenet")).toBe("futurenet");
       expect(parseNetworkName("mainnet")).toBe("mainnet");
       expect(parseNetworkName("local")).toBe("local");
     });
@@ -30,7 +33,9 @@ describe("CLI network selection (#684)", () => {
 
     it("rejects unknown network names", () => {
       expect(() => parseNetworkName("devnet")).toThrow(UnknownNetworkError);
-      expect(() => parseNetworkName("devnet")).toThrow(/Supported networks: testnet, mainnet, local/);
+      expect(() => parseNetworkName("devnet")).toThrow(
+        /Supported networks: testnet, futurenet, mainnet, public, local/,
+      );
     });
 
     it("rejects empty network names", () => {
@@ -57,6 +62,14 @@ describe("CLI network selection (#684)", () => {
         name: "mainnet",
         rpcUrl: "https://mainnet.sorobanrpc.com",
         networkPassphrase: "Public Global Stellar Network ; September 2015",
+      });
+    });
+
+    it("maps futurenet to its public Soroban RPC and passphrase", () => {
+      expect(resolveNetworkConfig({ network: "futurenet" })).toEqual({
+        name: "futurenet",
+        rpcUrl: "https://rpc-futurenet.stellar.org",
+        networkPassphrase: "Test SDF Future Network ; October 2022",
       });
     });
 
@@ -156,5 +169,15 @@ describe("CLI network selection (#684)", () => {
         networkPassphrase: undefined,
       });
     });
+  });
+
+  it("resolves and formats a testnet explorer link for a contract id", () => {
+    const contractId = `C${"A".repeat(55)}`;
+    expect(getBlockExplorerBaseUrl("testnet")).toBe(
+      "https://stellar.expert/explorer/testnet",
+    );
+    expect(formatContractIdWithExplorer(contractId, "testnet")).toBe(
+      `${contractId} (https://stellar.expert/explorer/testnet/contract/${contractId})`,
+    );
   });
 });

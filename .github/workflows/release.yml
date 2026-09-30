@@ -5,15 +5,57 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-  id-token: write
-  pull-requests: write
+permissions: {}
+
+# Per-component groups live on component-guard. cancel-in-progress is false
+# there and on the Changesets job, so a later push waits and cannot cancel a
+# publish that has already started. One Changesets job publishes every
+# component; the guard groups keep sdk, cli, react, and indexer from
+# cancelling each other. Rerun behavior: docs/RELEASE_CHECKLIST.md (#1036).
 
 jobs:
+  component-guard:
+    name: Publish guard (${{ matrix.component }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [sdk, cli, react, indexer]
+    concurrency:
+      group: publish-${{ matrix.component }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+
+      - name: Check npm before publish
+        run: node scripts/check-version-tag.mjs --before-changeset-publish --component ${{ matrix.component }}
+
+  # Lint, test, build, and tarball checks for @bc-forge/react. This job
+  # does not publish. The release job below is the only npm registry write.
+  react-prepublish:
+    uses: ./.github/workflows/publish-react.yml
+
   release:
     name: Release packages
+    needs: [component-guard, react-prepublish]
     runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+    concurrency:
+      group: publish-changesets
+      cancel-in-progress: false
+    outputs:
+      react_version: ${{ steps.published.outputs.react_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,8 +66,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
+          registry-url: https://registry.npmjs.org
+          cache: npm
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
@@ -34,6 +76,9 @@ jobs:
       - name: Validate packages before publish
         run: npm run release:validate
 
+      # react-prepublish already linted, tested, built, and validated the
+      # React tarball. This step builds again and re-checks that tarball
+      # immediately before the only registry write (Changesets).
       - name: Version and publish with Changesets
         id: changesets
         uses: changesets/action@v1
@@ -44,10 +89,42 @@ jobs:
             npm run build --workspace @bc-forge/sdk
             npm run build --workspace @bc-forge/cli
             npm run build --workspace @bc-forge/react
+            npm run prisma:generate --workspace @bc-forge/indexer
+            npm run build --workspace @bc-forge/indexer
+            node scripts/validate-react-tarball.mjs
             npm config set provenance true
+            node scripts/check-version-tag.mjs --before-changeset-publish
             npx changeset publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Check release status
+
+      # The publish step bumps the version in the working tree, so the version
+      # that reached npm only exists in the Changesets output (#1046).
+      - name: Resolve the published React version (#1046)
+        id: published
+        env:
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
         run: |
-          echo "Published packages: ${{ steps.changesets.outputs.publishedPackages || 'none' }}"
+          set -euo pipefail
+          version="$(node -e 'const published = JSON.parse(process.env.PUBLISHED_PACKAGES || "[]"); const react = published.find((entry) => entry.name === "@bc-forge/react"); if (react) process.stdout.write(react.version);')"
+          if [ -z "$version" ] && ! git diff --quiet -- react/package.json; then
+            version="$(node -p "require('./react/package.json').version")"
+          fi
+          echo "react_version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Attach component release notes
+        env:
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-notes.mjs --attach
+
+  # Post-publish verification (#1046): proves the exact version that reached
+  # npm is installable, importable, and type-checks. It is skipped when the
+  # release did not publish @bc-forge/react.
+  verify-react-release:
+    name: Verify React release from a clean install (#1046)
+    needs: release
+    if: needs.release.outputs.react_version != ''
+    uses: ./.github/workflows/verify-react-release.yml
+    with:
+      version: ${{ needs.release.outputs.react_version }}

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 import { Command } from 'commander';
-import { addNetworkOptions, resolveNetworkConfig, mergeNetworkOptions } from '../network.js';
+import {
+  addNetworkOptions,
+  formatContractIdWithExplorer,
+  getBlockExplorerBaseUrl,
+  resolveNetworkConfig,
+  mergeNetworkOptions,
+} from '../network.js';
 import logger from '../utils/logger.js';
 import {
   DEFAULT_REGISTRY_PATH,
@@ -37,7 +43,7 @@ export function createDeploymentsCommand(): Command {
         filePath: opts.file,
       });
       logger.success(
-        `Registered alias "${result.alias}" on ${result.network} → ${result.contractId}`
+        `Registered alias "${result.alias}" on ${result.network} → ${formatContractIdWithExplorer(result.contractId, result.network)}`,
       );
       logger.info(`Saved ${result.filePath}`);
     } catch (err: unknown) {
@@ -50,17 +56,25 @@ export function createDeploymentsCommand(): Command {
   const resolve = new Command('resolve')
     .description('Print the contract id for an alias on the selected network')
     .argument('<alias>', 'Alias or contract id')
-    .option('-f, --file <path>', 'Registry JSON path', DEFAULT_REGISTRY_PATH);
+    .option('-f, --file <path>', 'Registry JSON path', DEFAULT_REGISTRY_PATH)
+    .option('--json', 'Print the contract id as JSON without an explorer link');
 
   addNetworkOptions(resolve);
 
-  resolve.action(async (alias: string, opts: { file: string }, command: Command) => {
+  resolve.action(async (alias: string, opts: { file: string; json?: boolean }, command: Command) => {
     try {
+      const network = selectedNetwork(command);
       const contractId = resolveContractReference(alias, {
-        network: selectedNetwork(command),
+        network,
         filePath: opts.file,
       });
-      process.stdout.write(`${contractId}\n`);
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify({ contractId, network })}\n`);
+      } else {
+        process.stdout.write(
+          `${formatContractIdWithExplorer(contractId, network, getBlockExplorerBaseUrl(network))}\n`,
+        );
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error(message);
