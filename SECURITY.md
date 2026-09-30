@@ -71,6 +71,7 @@ The following components represent key security-sensitive areas within the codeb
 
 - **Mint and supply changes**: `contracts/token/src/lib.rs`
 - **Admin roles, quorum, timelock, and upgrade execution (`execute_upgrade`, `execute_upgrade_batch`)**: `contracts/admin/src/lib.rs`
+- **Privileged-action timelock (#914)**: `set_fee_config` and `transfer_ownership` on the token contract consume a proposed-and-elapsed privilege proposal (`contracts/admin/src/privilege.rs`, consumed at the effect point in `contracts/token/src/lib.rs`), so a fee change or ownership rotation cannot land in one transaction: it waits a 24-hour delay during which any admin can cancel (`cancel_privilege_action`). Role holders can renounce their own roles (#915); the last SuperAdmin cannot.
 - **Reentrancy gap**: Module-level note in `contracts/admin/src/lib.rs`: "Proposal lifecycle entry points share a persistent RAII guard. The guard is entered before authorization callbacks and remains held through WASM deployment, preventing callbacks from creating, changing, cancelling, or executing proposals while a lifecycle operation is active."
 - **Workspace-excluded crates not built in CI**: `contracts/yield_vault` (in the `exclude` array in root `Cargo.toml`). #923 removed the `contracts/compound_fees` stub and promoted `contracts/flash_loan_guard` into the workspace.
 - **Admin rescue hatch (`rescue_tokens`)**: `contracts/token/src/lib.rs` and `contracts/wrapper/src/lib.rs` (see [Admin rescue hatch](#admin-rescue-hatch) below)

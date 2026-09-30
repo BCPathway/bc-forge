@@ -41,3 +41,36 @@ Use a granular npm token only when trusted publishing is unavailable (for exampl
    - Delete the secret entirely once trusted publishing is confirmed on a release page.
 
 Do not leave `NODE_AUTH_TOKEN` in the workflow after the fallback publish. A provenance publish that always sends a long-lived token is not trusted publishing.
+
+## Verify a release
+
+[`.github/workflows/publish-release-manifest.yml`](../.github/workflows/publish-release-manifest.yml) runs when a GitHub Release is published. It builds `@bc-forge/sdk`, `@bc-forge/cli`, and `@bc-forge/react`, packs each tarball, builds `bc_forge_token.wasm`, and builds the indexer image. It attaches `checksums.txt`, `manifest.json`, the three tarballs, and the token WASM to that release. `manifest.json` lists every one of those files with its component, version, filename, and SHA-256 checksum, plus the indexer image name and `containerimage.digest`.
+
+Download `checksums.txt` and the artifacts into the same directory, then recompute the checksums.
+
+Linux:
+
+```bash
+sha256sum -c checksums.txt
+```
+
+macOS:
+
+```bash
+shasum -a 256 -c checksums.txt
+```
+
+Windows PowerShell:
+
+```powershell
+Get-Content checksums.txt | ForEach-Object {
+  $hash, $name = $_ -split '\s+', 2
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $name).Hash.ToLower()
+  if ($actual -ne $hash) { throw "$name checksum mismatch" }
+  Write-Output "$name OK"
+}
+```
+
+A matching command prints `OK` for each file. A mismatch prints a checksum error and a non-zero exit status.
+
+The indexer entry in `manifest.json` uses `digest` (`sha256:...`) rather than a filename. Compare that value to `containerimage.digest` in the "Build indexer image and record its digest" log of the release workflow. That digest is the image built for the release; it is not a GHCR pull digest, because this repository does not push the indexer image.

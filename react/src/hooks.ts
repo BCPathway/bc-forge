@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 import { useState, useEffect, useCallback } from 'react';
-import { useBcForgeClient, useVaultClient, useWallet } from './context';
-import { Keypair } from '@stellar/stellar-sdk';
+import { useBcForgeClient, useOptionalBcForgeClient, useVaultClient, useWallet } from './context';
+import type { Keypair } from '@stellar/stellar-sdk';
+import type { TransactionResult, VaultClient } from '@bc-forge/sdk';
 
 /**
  * Hook to read the connected wallet state: adapter name, public key,
@@ -316,4 +317,99 @@ export function useProposalVote() {
   );
 
   return { vote, loading, error };
+}
+
+// ─── Vault share balance (#950) ─────────────────────────────────────────────
+
+/**
+ * Reads a depositor's vault share balance through {@link VaultClient}.
+ *
+ * `client` may be `null` when the host component could not resolve one (for
+ * example before the `BcForgeProvider` is configured); the hook then leaves
+ * `data` as `null` instead of throwing. Set `enabled` to `false` to suspend
+ * the lookup (for example while the widget is disconnected).
+ */
+export function useVaultShareBalance(
+  address: string | undefined,
+  client: VaultClient | null,
+  enabled = true,
+) {
+  const [data, setData] = useState<bigint | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const refetch = useCallback(async () => {
+    if (!client || !address || !enabled) return;
+    try {
+      setLoading(true);
+      setError(null);
+      setData(await client.getShareBalance(address));
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setLoading(false);
+    }
+  }, [client, address, enabled]);
+
+  useEffect(() => {
+    void (async () => {
+      await refetch();
+    })();
+  }, [refetch]);
+
+  return { data, loading, error, refetch };
+}
+
+// ─── Proposal voting (#950) ─────────────────────────────────────────────────
+
+/**
+ * Multi-sig proposal actions, backed by `bcForgeClient.approveProposal` and
+ * `bcForgeClient.executeProposal`.
+ *
+ * Uses the optional context client so {@link ProposalVotingPanel} can also be
+ * driven entirely by its `onVote` / `onExecute` props.
+ */
+export function useProposalVoting() {
+  const client = useOptionalBcForgeClient();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+
+  const run = useCallback(
+    async (id: string, action: (source?: Keypair) => Promise<TransactionResult>) => {
+      setPendingId(id);
+      setError(null);
+      try {
+        return await action();
+      } catch (err) {
+        const failure = err instanceof Error ? err : new Error(String(err));
+        setError(failure);
+        throw failure;
+      } finally {
+        setPendingId(null);
+      }
+    },
+    [],
+  );
+
+  const approve = useCallback(
+    async (admin: string, proposalId: bigint, source?: Keypair) => {
+      if (!client) {
+        throw new Error('useProposalVoting requires a BcForgeProvider client');
+      }
+      return run(proposalId.toString(), () => client.approveProposal(admin, proposalId, source));
+    },
+    [client, run],
+  );
+
+  const execute = useCallback(
+    async (proposalId: bigint, source?: Keypair) => {
+      if (!client) {
+        throw new Error('useProposalVoting requires a BcForgeProvider client');
+      }
+      return run(proposalId.toString(), () => client.executeProposal(proposalId, source));
+    },
+    [client, run],
+  );
+
+  return { approve, execute, pendingId, error, available: client !== null };
 }

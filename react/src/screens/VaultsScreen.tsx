@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { VaultClient, calculateApy } from '@bc-forge/sdk';
 import type { ApyResult, WalletAdapter } from '@bc-forge/sdk';
 import { Alert } from '../components/Alert';
+import { isPositiveInteger } from '../utils';
 
 export interface VaultsScreenProps {
   /** Optional pre-instantiated VaultClient instance */
@@ -143,7 +144,7 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
     }
 
     const trimmed = depositAmount.trim();
-    if (!/^\d+$/.test(trimmed) || BigInt(trimmed) <= 0n) {
+    if (!isPositiveInteger(trimmed)) {
       setError('Deposit amount must be a positive integer');
       return;
     }
@@ -187,7 +188,7 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
     }
 
     const trimmed = withdrawAmount.trim();
-    if (!/^\d+$/.test(trimmed) || BigInt(trimmed) <= 0n) {
+    if (!isPositiveInteger(trimmed)) {
       setError('Withdraw amount must be a positive integer');
       return;
     }

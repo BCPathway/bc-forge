@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useMint, useWallet } from '../hooks';
 import { truncatePublicKey } from '../context';
+import { isPositiveInteger } from '../utils';
 import { Alert } from '../components/Alert';
 
 export interface MintScreenProps {
@@ -9,11 +10,6 @@ export interface MintScreenProps {
   style?: React.CSSProperties;
   /** Optional container CSS class */
   className?: string;
-}
-
-/** Positive-integer check: digits only and greater than zero. */
-function isPositiveInteger(value: string): boolean {
-  return /^\d+$/.test(value) && BigInt(value) > 0n;
 }
 
 /**

@@ -209,10 +209,12 @@ use soroban_sdk::{contracterror, contracttype, Address, Env};
 use soroban_sdk::{vec, Map, String, Vec};
 mod address;
 mod multisig;
+mod privilege;
 mod rbac;
 
 pub use address::*;
 pub use multisig::*;
+pub use privilege::*;
 pub use rbac::*;
 
 /// Errors returned by the admin access-control module.
@@ -284,6 +286,19 @@ pub enum AdminError {
     /// The proposal was withdrawn by its creator via `cancel_legacy_proposal`
     /// and can no longer be approved or executed.
     ProposalCancelled = 24,
+    /// A privileged action (fee-config change, ownership transfer) was
+    /// proposed but its timelock delay has not elapsed yet (#914).
+    PrivilegeTimelockActive = 25,
+    /// The privileged-action proposal does not exist or was already consumed
+    /// (executed or cancelled) (#914).
+    PrivilegeProposalNotFound = 26,
+    /// The privileged-action proposal was submitted by a different caller
+    /// than the one now trying to execute it (#914).
+    PrivilegeProposalNotOwner = 27,
+    /// `renounce_role` was called for a role the caller does not hold (#915).
+    RoleNotHeldForRenounce = 28,
+    /// The last SuperAdmin tried to renounce; at least one must remain (#915).
+    LastSuperAdmin = 29,
 }
 
 /// Storage keys for the access-control layer.
@@ -332,6 +347,10 @@ pub enum AdminKey {
     /// Auto-incrementing counter for upgrade proposal IDs. Distinct from
     /// [`AdminKey::ProposalIdCounter`], so the two flows never share an ID space.
     UpgradeProposalIdCounter,
+    /// The live privileged-action proposal for a given action kind (#914).
+    /// One entry per action (fee config, ownership transfer) in `persistent()`
+    /// storage so a pending proposal's clock survives instance archiving.
+    PrivilegeProposal(crate::PrivilegeAction),
     /// Maps an address to its role bitmask: bit `i` is set when the address
     /// holds the role whose bit is `1 << i` (see [`ROLE_BIT_ADMIN`] and
     /// friends). One ledger entry per address; grants and revokes are a
@@ -351,6 +370,15 @@ pub enum AdminKey {
 
 fn extend_instance_ttl(env: &Env) {
     ttl::extend_instance_ttl(env);
+}
+
+/// pub(crate) re-export of the persistent-key TTL bump so the `privilege`
+/// module shares the exact same bump policy as the rest of the crate.
+pub(crate) fn bump_persistent_key<K>(env: &Env, key: &K)
+where
+    K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
+{
+    extend_storage_ttl_for_key(env, key);
 }
 
 fn extend_storage_ttl_for_key<K>(env: &Env, key: &K)
@@ -379,6 +407,7 @@ mod tests {
     };
 
     mod gas_bench;
+    mod issue_914_918;
     mod proptest;
     mod quorum_proptest;
     mod rbac_errors;
@@ -586,6 +615,46 @@ mod tests {
             super::get_roles_bitmask(&env, &address)
         }
 
+        /// Proposes a privileged action (fee-config change or ownership
+        /// transfer) under the #914 timelock. Admin-only.
+        pub fn propose_privilege_action(
+            env: Env,
+            submitter: Address,
+            action: PrivilegeAction,
+        ) -> Result<u64, AdminError> {
+            super::propose_privilege_action(&env, submitter, action)
+        }
+
+        /// Cancels a pending privileged action. Admin-only (any admin —
+        /// cancellation is the emergency brake).
+        pub fn cancel_privilege_action(
+            env: Env,
+            caller: Address,
+            action: PrivilegeAction,
+        ) -> Result<(), AdminError> {
+            super::cancel_privilege_action(&env, caller, action)
+        }
+
+        /// Read-only view of a privileged-action proposal.
+        pub fn get_privilege_proposal(
+            env: Env,
+            action: PrivilegeAction,
+        ) -> Option<PrivilegeProposal> {
+            super::get_privilege_proposal(&env, action)
+        }
+
+        /// One-call role-hierarchy view for `address` (#915): Admin,
+        /// SuperAdmin, Minter, Pauser membership.
+        pub fn get_role_hierarchy(env: Env, address: Address) -> RoleHierarchy {
+            super::get_role_hierarchy(&env, address)
+        }
+
+        /// Renounces `role` from the caller themselves (#915). The last
+        /// SuperAdmin cannot renounce.
+        pub fn renounce_role(env: Env, caller: Address, role: Role) -> Result<(), AdminError> {
+            super::renounce_role(&env, caller, role)
+        }
+
         pub fn submit_upgrade_proposal(
             env: Env,
             submitter: Address,
@@ -593,6 +662,27 @@ mod tests {
             description: String,
         ) -> Result<u64, AdminError> {
             super::submit_upgrade_proposal(&env, submitter, new_wasm_hash, description)
+        }
+
+        /// Lists legacy [`Proposal`] IDs by state (#917).
+        pub fn list_legacy_proposals(env: Env, start_after: u64) -> LegacyProposalLists {
+            super::list_legacy_proposals(&env, start_after)
+        }
+
+        /// Lists [`UpgradeProposal`] IDs by state (#917).
+        pub fn list_upgrade_proposals(env: Env, start_after: u64) -> UpgradeProposalLists {
+            super::list_upgrade_proposals(&env, start_after)
+        }
+
+        /// Test hook: consumes (executes) a privileged proposal directly,
+        /// bypassing the token contract, so the #914 timelock window can be
+        /// asserted without a deployed token. Mirrors what `set_fee_config`
+        /// / `transfer_ownership` invoke at their effect point.
+        pub fn consume_privilege_proposal(
+            env: Env,
+            action: PrivilegeAction,
+        ) -> Result<(), AdminError> {
+            super::consume_privilege_proposal(&env, &action)
         }
     }
 

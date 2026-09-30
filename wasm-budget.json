@@ -1,11 +1,11 @@
 {
-  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects the batch transfer and batch execution code on main.",
-  "_measured_on": "cargo 1.96.0, wasm32-unknown-unknown, --release, zero warnings",
+  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects the batch transfer and batch execution code on main, raised by #914 for the privileged-action timelock entry points; the vesting budget by #918 for milestone tranches and claim delegates. The rate-limit and split budgets are raised by #914/#918 as well: both contracts link the bc-forge-admin crate, whose privileged-action timelock, role renounce, and proposal listing additions compile into their WASMs.",
+  "_measured_on": "cargo 1.96.0, wasm32-unknown-unknown, --release, zero warnings. #914/#918 re-measured on 1.94.0; rate-limit/split re-measured on 1.96.0.",
   "budgets": {
-    "bc_forge_rate_limit.wasm": 49605,
-    "bc_forge_split.wasm": 88230,
-    "bc_forge_token.wasm": 162000,
-    "bc_forge_vesting.wasm": 188000,
+    "bc_forge_rate_limit.wasm": 54603,
+    "bc_forge_split.wasm": 94692,
+    "bc_forge_token.wasm": 175000,
+    "bc_forge_vesting.wasm": 210000,
     "bc_forge_wrapper.wasm": 140000,
     "bc_forge_yield_vault.wasm": 76765
   }

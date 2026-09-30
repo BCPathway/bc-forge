@@ -382,6 +382,20 @@ const client = new bcForgeClient({
 
 If your local Quickstart setup exposes RPC on a different path, keep the same host and update the URL to match your container configuration.
 
+## Quickstart dApp
+
+A complete testnet dApp example that connects a wallet, reads a balance through `@bc-forge/sdk`, renders it with `@bc-forge/react`, and shows recent mints from the indexer API.
+
+**Location:** [`examples/quickstart/`](examples/quickstart/)
+
+```bash
+cd examples/quickstart
+npm install
+npm run dev
+```
+
+See the [quickstart README](examples/quickstart/README.md) for full setup instructions, including deploying a testnet token and running the indexer.
+
 ## SDK Usage
 
 ```typescript
