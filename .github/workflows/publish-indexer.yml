@@ -127,6 +127,20 @@ jobs:
             throw new Error('Expected a non-empty CycloneDX SBOM');
           }
 
+          const purls = bom.components.map((component) => component.purl || '');
+          const npmCount = purls.filter((purl) => purl.startsWith('pkg:npm/')).length;
+          const osCount = bom.components.filter((component) => {
+            const purl = component.purl || '';
+            return component.type === 'operating-system'
+              || purl.startsWith('pkg:apk/')
+              || purl.startsWith('pkg:deb/')
+              || purl.startsWith('pkg:rpm/')
+              || purl.startsWith('pkg:alpm/');
+          }).length;
+          if (npmCount === 0 || osCount === 0) {
+            throw new Error(`SBOM must contain OS and npm packages (os=${osCount}, npm=${npmCount})`);
+          }
+
           const properties = [bom.metadata, ...bom.components]
             .flatMap((item) => item?.properties ?? []);
           if (properties.some((property) => /(?:^|[.:/])(?:env|environment)(?:[.:/]|$)/i.test(property.name ?? ''))) {
@@ -141,7 +155,7 @@ jobs:
             throw new Error('SBOM contains a credential-like value');
           }
 
-          console.log(`Validated CycloneDX SBOM with ${bom.components.length} components; no environment metadata or credential values found.`);
+          console.log(`Validated CycloneDX SBOM with ${bom.components.length} components (${osCount} OS, ${npmCount} npm); no environment metadata or credential values found.`);
           NODE
 
       - name: Attach SBOM to GitHub Release
