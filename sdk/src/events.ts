@@ -258,6 +258,23 @@ export function decodeEvent(event: SorobanRpc.Api.EventResponse): bcForgeEvent |
 }
 
 /**
+ * Decodes simulation diagnostic events into bc-forge events.
+ * Events that are not contract events, or that use an unknown topic, are dropped.
+ */
+export function decodeSimulationEvents(
+  events: readonly xdr.DiagnosticEvent[] | undefined,
+): bcForgeEvent[] {
+  if (!events || events.length === 0) return [];
+
+  const decoded: bcForgeEvent[] = [];
+  for (const event of events) {
+    const parsed = decodeDiagnosticEvent(event);
+    if (parsed) decoded.push(parsed);
+  }
+  return decoded;
+}
+
+/**
  * Decodes raw diagnostic events (often found in transaction results) into bcForgeEvents.
  */
 export function decodeDiagnosticEvent(rawEvent: xdr.DiagnosticEvent): bcForgeEvent | null {

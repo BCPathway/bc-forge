@@ -13,6 +13,7 @@ jest.unstable_mockModule('./utils', () => ({
   buildUnsignedTransaction: jest.fn(),
   signTransaction: jest.fn(),
   simulateTransaction: jest.fn(),
+  simulationToDryRun: jest.fn(),
   hashToScVal: jest.fn(),
 }));
 
