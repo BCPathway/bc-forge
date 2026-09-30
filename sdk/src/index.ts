@@ -29,6 +29,12 @@ export type {
   RbacInitResult,
   TransactionResult,
 } from './client';
+/**
+ * Result of {@link bcForgeClient.dryRun}: the estimated resource fee (stroops),
+ * the ledger footprint, and the contract events a call would emit. No transaction
+ * is submitted.
+ */
+export type { DryRunResult, DryRunFootprint } from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents, onMint, onTransfer, onVaultDeposit } from './events';
 export type { bcForgeEvent, SubscriptionOptions, EventListenerOptions } from './events';
