@@ -54,6 +54,8 @@ jobs:
     concurrency:
       group: publish-changesets
       cancel-in-progress: false
+    outputs:
+      react_version: ${{ steps.published.outputs.react_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -92,12 +94,38 @@ jobs:
             node scripts/validate-react-tarball.mjs
             npm config set provenance true
             node scripts/check-version-tag.mjs --before-changeset-publish
+            node scripts/react-dist-tag.mjs --publish-react
             npx changeset publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The publish step bumps the version in the working tree, so the version
+      # that reached npm only exists in the Changesets output (#1046).
+      - name: Resolve the published React version (#1046)
+        id: published
+        env:
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          set -euo pipefail
+          version="$(node -e 'const published = JSON.parse(process.env.PUBLISHED_PACKAGES || "[]"); const react = published.find((entry) => entry.name === "@bc-forge/react"); if (react) process.stdout.write(react.version);')"
+          if [ -z "$version" ] && ! git diff --quiet -- react/package.json; then
+            version="$(node -p "require('./react/package.json').version")"
+          fi
+          echo "react_version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Attach component release notes
         env:
           PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/release-notes.mjs --attach
+
+  # Post-publish verification (#1046): proves the exact version that reached
+  # npm is installable, importable, and type-checks. It is skipped when the
+  # release did not publish @bc-forge/react.
+  verify-react-release:
+    name: Verify React release from a clean install (#1046)
+    needs: release
+    if: needs.release.outputs.react_version != ''
+    uses: ./.github/workflows/verify-react-release.yml
+    with:
+      version: ${{ needs.release.outputs.react_version }}

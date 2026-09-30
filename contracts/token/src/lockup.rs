@@ -256,6 +256,148 @@ fn expired_but_unwithdrawn_lock_still_blocks_burn() {
 }
 
 #[test]
+fn transfer_allows_exactly_the_free_balance_and_preserves_lock() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    mint(&env, &client, &admin, &user, 1_000);
+    client.lock_tokens(&admin, &user, &400, &200);
+    assert_eq!(client.balance(&user), 1_000);
+
+    client.transfer(&user, &recipient, &600);
+
+    assert_eq!(client.balance(&user), 400);
+    assert_eq!(client.balance(&recipient), 600);
+    assert_eq!(client.supply(), 1_000);
+    env.as_contract(&client.address, || {
+        assert_eq!(
+            BcForgeToken::read_lockup(&env, &user),
+            Some(LockupState {
+                amount: 400,
+                unlock_timestamp: 200
+            })
+        );
+    });
+}
+
+#[test]
+fn transfer_rejects_spending_any_locked_balance() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    mint(&env, &client, &admin, &user, 1_000);
+    client.lock_tokens(&admin, &user, &400, &200);
+
+    assert_eq!(
+        client.try_transfer(&user, &recipient, &601),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientBalance as u32
+        )))
+    );
+    assert_eq!(client.balance(&user), 1_000);
+    assert_eq!(client.balance(&recipient), 0);
+    assert_eq!(client.supply(), 1_000);
+    env.as_contract(&client.address, || {
+        assert_eq!(
+            BcForgeToken::read_lockup(&env, &user),
+            Some(LockupState {
+                amount: 400,
+                unlock_timestamp: 200
+            })
+        );
+    });
+}
+
+#[test]
+fn transfer_from_enforces_lock_in_addition_to_allowance() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    mint(&env, &client, &admin, &owner, 1_000);
+    client.lock_tokens(&admin, &owner, &400, &200);
+    client.approve(&owner, &spender, &1_000, &u32::MAX);
+
+    assert_eq!(
+        client.try_transfer_from(&spender, &owner, &recipient, &601),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientBalance as u32
+        )))
+    );
+    assert_eq!(client.allowance(&owner, &spender), 1_000);
+    assert_eq!(client.balance(&owner), 1_000);
+    assert_eq!(client.balance(&recipient), 0);
+    assert_eq!(client.supply(), 1_000);
+    env.as_contract(&client.address, || {
+        assert_eq!(BcForgeToken::get_locked_amount(&env, &owner), 400);
+    });
+
+    client.transfer_from(&spender, &owner, &recipient, &600);
+    assert_eq!(client.balance(&owner), 400);
+    assert_eq!(client.balance(&recipient), 600);
+    assert_eq!(client.allowance(&owner, &spender), 400);
+    env.as_contract(&client.address, || {
+        assert_eq!(
+            BcForgeToken::read_lockup(&env, &owner),
+            Some(LockupState {
+                amount: 400,
+                unlock_timestamp: 200
+            })
+        );
+    });
+}
+
+#[test]
+fn expired_but_unwithdrawn_lock_still_blocks_transfer() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let spender = Address::generate(&env);
+    mint(&env, &client, &admin, &user, 1_000);
+    client.lock_tokens(&admin, &user, &400, &50);
+    client.approve(&user, &spender, &1_000, &u32::MAX);
+    env.ledger().set_timestamp(50);
+
+    assert!(!env.as_contract(&client.address, || BcForgeToken::is_locked(&env, &user)));
+    assert_eq!(client.balance(&user), 1_000);
+    assert_eq!(
+        client.try_transfer(&user, &recipient, &601),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientBalance as u32
+        )))
+    );
+    assert_eq!(
+        client.try_transfer_from(&spender, &user, &recipient, &601),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::InsufficientBalance as u32
+        )))
+    );
+    assert_eq!(client.allowance(&user, &spender), 1_000);
+    assert_eq!(client.balance(&user), 1_000);
+    assert_eq!(client.balance(&recipient), 0);
+    env.as_contract(&client.address, || {
+        assert_eq!(
+            BcForgeToken::read_lockup(&env, &user),
+            Some(LockupState {
+                amount: 400,
+                unlock_timestamp: 50
+            })
+        );
+    });
+
+    client.transfer(&user, &recipient, &600);
+    assert_eq!(client.balance(&user), 400);
+    assert_eq!(client.balance(&recipient), 600);
+    env.as_contract(&client.address, || {
+        assert_eq!(BcForgeToken::get_locked_amount(&env, &user), 400);
+    });
+}
+
+#[test]
 fn withdraw_requires_holder_authorization() {
     let env = Env::default();
     let (client, admin) = setup(&env);

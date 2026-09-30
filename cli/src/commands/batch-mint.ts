@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { Command } from "commander";
 import { addNetworkOptions } from "../network.js";
+import { loadAccounts, resolveAccount } from "../utils/address-book.js";
 
 export interface BatchMintRecipient {
   to: string;
@@ -40,7 +41,7 @@ export function createBatchMintCommand(): Command {
     .requiredOption("--source <secret>", "Minter source account secret key")
     .option(
       "--recipient <address:amount>",
-      "Recipient and amount (repeatable)",
+      "Recipient public key or address-book name, and amount (repeatable)",
       (value: string, previous: BatchMintRecipient[]) => {
         previous.push(parseRecipientSpec(value));
         return previous;
@@ -57,6 +58,11 @@ export function createBatchMintCommand(): Command {
         "batch-mint requires at least one --recipient <address>:<amount>.",
       );
     }
+    const accounts = loadAccounts();
+    opts.recipient = recipients.map((recipient) => ({
+      to: resolveAccount(recipient.to, accounts),
+      amount: recipient.amount,
+    }));
   });
 
   return cmd;

@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { StrKey } from '@stellar/stellar-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +39,8 @@ export interface BcForgeConfig {
   networkPassphrase?: string;
   secretKey?: string;
   contracts?: Record<string, ContractDeploymentConfig>;
+  /** Named address book: account name to Ed25519 public key (G...). */
+  accounts?: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -55,6 +58,33 @@ export interface ConfigParseResult {
 }
 
 const DEFAULT_CONFIG_FILENAME = '.bc-forge.json';
+const ACCOUNT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+
+/**
+ * Reject address-book entries whose StrKey checksum does not match.
+ * Shape-only checks (56-character G...) still let a typo through.
+ */
+function validateAccountBook(accounts: unknown): string[] {
+  if (accounts === undefined) return [];
+  if (accounts === null || typeof accounts !== 'object' || Array.isArray(accounts)) {
+    return ['accounts: must be an object mapping names to public keys'];
+  }
+
+  const errors: string[] = [];
+  for (const [name, key] of Object.entries(accounts as Record<string, unknown>)) {
+    if (!ACCOUNT_NAME_PATTERN.test(name)) {
+      errors.push(
+        `accounts/${name}: invalid account name. Use a letter followed by letters, digits, "_" or "-".`
+      );
+    }
+    if (typeof key !== 'string' || !StrKey.isValidEd25519PublicKey(key)) {
+      errors.push(
+        `accounts/${name}: invalid public key "${String(key)}". Stellar StrKey checksum check failed.`
+      );
+    }
+  }
+  return errors;
+}
 
 import { Ajv } from 'ajv';
 
@@ -122,6 +152,14 @@ export function validateConfig(data: unknown): ConfigValidationResult {
   }
 
   const config = data as BcForgeConfig;
+  const accountErrors = validateAccountBook(config.accounts);
+  if (accountErrors.length > 0) {
+    return {
+      valid: false,
+      errors: accountErrors,
+    };
+  }
+
   return {
     valid: true,
     errors: [],

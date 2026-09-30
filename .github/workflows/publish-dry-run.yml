@@ -1,0 +1,33 @@
+name: Publish package dry run
+
+# Non-publishing demonstration of publish-package.yml (#1030).
+# workflow_dispatch runs install, build, test, tarball validation, and
+# `npm publish --dry-run`. It does not authenticate to the registry.
+on:
+  workflow_dispatch:
+    inputs:
+      package-dir:
+        description: Package directory
+        required: true
+        default: sdk
+        type: choice
+        options:
+          - sdk
+          - cli
+          - react
+          - indexer
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dry-run:
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      package-dir: ${{ inputs.package-dir }}
+      package-name: ${{ format('@bc-forge/{0}', inputs.package-dir) }}
+      build-command: npm run build --workspace @bc-forge/${{ inputs.package-dir }}
+      test-command: npm test --workspace @bc-forge/${{ inputs.package-dir }}
+      tag-prefix: ${{ inputs.package-dir }}-v
+      dry-run: true

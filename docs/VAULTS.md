@@ -72,6 +72,8 @@ The vault logic is implemented in `WrapperContract` (`contracts/wrapper/src/lib.
 
 The `@bc-forge/sdk` package provides a high-level `calculateApy()` function that simulates contract state across historical ledger snapshots to calculate annualised returns without spending network fees.
 
+Pure helpers beside `calculateApy()` convert APR and APY and measure a time-weighted yield from the same snapshots. `aprToApy(apr, frequency)` and `apyToApr(apy, frequency)` use `APY = (1 + APR / n)^n - 1` and `APR = n * ((1 + APY)^(1/n) - 1)`. Pass `frequency` as `"day"` (`n = 365`) or `"ledger"` (Stellar ledgers are assumed to close every 5 seconds, so `n = 365.25 * 24 * 60 * 60 / 5`). `timeWeightedYield(snapshots, window)` geometrically links `ApySnapshot` share prices inside a caller-supplied inclusive ledger window and returns that holding-period yield, or `null` when fewer than two priced snapshots fall inside it.
+
 ### TypeScript SDK Example
 
 ```typescript

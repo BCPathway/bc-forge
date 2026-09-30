@@ -50,7 +50,27 @@ const mockGetLatestLedger = jest.spyOn(
 
 // ─── Import subject after mock setup ─────────────────────────────────────────
 
-import { calculateApy } from './apy';
+import {
+  aprToApy,
+  apyToApr,
+  calculateApy,
+  compoundingPeriodsPerYear,
+  timeWeightedYield,
+  type ApySnapshot,
+} from './apy';
+
+function snapshot(ledger: number, sharePrice: number | null): ApySnapshot {
+  if (sharePrice === null) {
+    return { ledger, totalAssets: 0n, totalShares: 0n, sharePrice: null };
+  }
+  const shares = 1_000_000n;
+  return {
+    ledger,
+    totalAssets: BigInt(Math.round(sharePrice * 1_000_000)),
+    totalShares: shares,
+    sharePrice,
+  };
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -187,5 +207,93 @@ describe('calculateApy (#745)', () => {
       // Historical sharePrice is null (supply fell back to 0n) → returns null.
       expect(result).toBeNull();
     });
+  });
+});
+
+describe('APR and APY conversion (#935)', () => {
+  const ledgerPeriods = (365.25 * 24 * 60 * 60) / 5;
+
+  it('uses 365 periods per day and the 5-second ledger year', () => {
+    expect(compoundingPeriodsPerYear('day')).toBe(365);
+    expect(compoundingPeriodsPerYear('ledger')).toBe(ledgerPeriods);
+  });
+
+  it('converts APR to APY with daily compounding', () => {
+    const apr = 0.12;
+    const n = 365;
+    const expected = Math.pow(1 + apr / n, n) - 1;
+
+    expect(aprToApy(apr, 'day')).toBeCloseTo(expected, 12);
+    expect(aprToApy(apr, 'day')).toBeGreaterThan(apr);
+  });
+
+  it('converts APR to APY with per-ledger compounding', () => {
+    const apr = 0.05;
+    const n = ledgerPeriods;
+    const expected = Math.pow(1 + apr / n, n) - 1;
+
+    expect(aprToApy(apr, 'ledger')).toBeCloseTo(expected, 12);
+  });
+
+  it('converts APY back to APR for both frequencies', () => {
+    for (const frequency of ['day', 'ledger'] as const) {
+      expect(apyToApr(aprToApy(0.08, frequency), frequency)).toBeCloseTo(0.08, 8);
+      expect(apyToApr(0, frequency)).toBeCloseTo(0, 12);
+      expect(aprToApy(0, frequency)).toBeCloseTo(0, 12);
+    }
+  });
+
+  it('rejects an unknown frequency and rates that make the base negative', () => {
+    expect(() => compoundingPeriodsPerYear('weekly' as 'day')).toThrow(RangeError);
+    expect(() => aprToApy(Number.NaN, 'day')).toThrow(RangeError);
+    expect(() => apyToApr(Number.POSITIVE_INFINITY, 'ledger')).toThrow(RangeError);
+    expect(() => apyToApr(-1.01, 'day')).toThrow(RangeError);
+    expect(() => aprToApy(-366, 'day')).toThrow(RangeError);
+  });
+});
+
+describe('timeWeightedYield (#935)', () => {
+  const window = { startLedger: 100, endLedger: 300 };
+
+  it('geometrically links share prices inside the caller window', () => {
+    const snapshots = [snapshot(300, 1.21), snapshot(100, 1), snapshot(200, 1.1)];
+
+    expect(timeWeightedYield(snapshots, window)).toBeCloseTo(0.21, 12);
+  });
+
+  it('links a non-monotonic path instead of averaging sub-period returns', () => {
+    const yieldOverWindow = timeWeightedYield(
+      [snapshot(100, 1), snapshot(200, 0.9), snapshot(300, 1.21)],
+      window,
+    );
+    const arithmeticMean = (-0.1 + (1.21 / 0.9 - 1)) / 2;
+
+    expect(yieldOverWindow).toBeCloseTo(0.21, 12);
+    expect(yieldOverWindow).not.toBeCloseTo(arithmeticMean, 5);
+  });
+
+  it('ignores snapshots outside the window and null share prices', () => {
+    const snapshots = [
+      snapshot(50, 10),
+      snapshot(100, 1),
+      snapshot(150, null),
+      snapshot(300, 1.05),
+      snapshot(400, 9),
+    ];
+
+    expect(timeWeightedYield(snapshots, window)).toBeCloseTo(0.05, 12);
+  });
+
+  it('returns null when the window has fewer than two priced snapshots', () => {
+    expect(timeWeightedYield([snapshot(100, 1)], window)).toBeNull();
+    expect(timeWeightedYield([snapshot(100, null), snapshot(200, null)], window)).toBeNull();
+    expect(timeWeightedYield([], window)).toBeNull();
+  });
+
+  it('rejects an inverted window', () => {
+    expect(() => timeWeightedYield([snapshot(100, 1), snapshot(200, 1.1)], {
+      startLedger: 200,
+      endLedger: 100,
+    })).toThrow(RangeError);
   });
 });
