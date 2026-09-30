@@ -1,0 +1,59 @@
+name: 🚀 Deployment Request
+description: Request a testnet or mainnet deployment of a bc-forge contract
+title: "[Deploy]: "
+labels: ["ci-cd", "smart-contract"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request a contract deployment. Include the network, contract id, and WASM
+        hash so operators can confirm the exact artifact, plus a rollback contact
+        in case the release has to be reverted.
+
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network
+      description: Which Stellar network should this contract be deployed to?
+      options:
+        - Testnet
+        - Mainnet
+    validations:
+      required: true
+
+  - type: input
+    id: contract_id
+    attributes:
+      label: Contract ID
+      description: Stellar contract id for this deployment (starts with C).
+      placeholder: "C..."
+    validations:
+      required: true
+
+  - type: input
+    id: wasm_hash
+    attributes:
+      label: WASM Hash
+      description: Hex hash of the WASM binary to deploy.
+      placeholder: "a1b2c3d4..."
+    validations:
+      required: true
+
+  - type: input
+    id: rollback_contact
+    attributes:
+      label: Rollback Contact
+      description: Who should operators reach if this deployment must be rolled back?
+      placeholder: "Name or GitHub handle, plus Discord or email"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Release notes, related PRs, or anything else operators should know.
+    validations:
+      required: false

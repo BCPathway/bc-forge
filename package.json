@@ -21,10 +21,14 @@
     "release:notes:react": "node scripts/release-notes.mjs react",
     "release:notes:indexer": "node scripts/release-notes.mjs indexer",
     "test:tarball": "node scripts/test-tarball.mjs",
-    "release:validate": "node scripts/prepublish-validate.mjs && node scripts/test-tarball.mjs"
+    "release:validate": "node scripts/prepublish-validate.mjs && node scripts/test-tarball.mjs",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.9.9",
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.13.1",
     "typescript": "^6.0.3",
