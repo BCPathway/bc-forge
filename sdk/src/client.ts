@@ -57,9 +57,13 @@ import {
   signTransaction,
   simulateTransaction,
   hashToScVal,
+  simulationToDryRun,
 } from './utils';
+import type { DryRunResult } from './utils';
 
 import { SimulationError, RPCError, SignerRequiredError, ContractError, parseContractError } from './errors';
+
+export type { DryRunResult, DryRunFootprint } from './utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -939,6 +943,27 @@ export class bcForgeClient {
       args,
       sourcePublicKey,
     );
+  }
+
+  /**
+   * Dry-run a contract call. Builds the same invocation as {@link simulate},
+   * then returns the estimated resource fee, ledger footprint, and decoded
+   * events. Does not submit the transaction.
+   *
+   * @param method - Contract method name
+   * @param args - Method arguments as ScVal array
+   * @param sourcePublicKey - Public key for simulation context
+   */
+  async dryRun(method: string, args: xdr.ScVal[], sourcePublicKey: string): Promise<DryRunResult> {
+    const simulated = await simulateTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      method,
+      args,
+      sourcePublicKey,
+    );
+    return simulationToDryRun(simulated);
   }
 
   /**

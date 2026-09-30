@@ -21,7 +21,8 @@
     "release:notes:react": "node scripts/release-notes.mjs react",
     "release:notes:indexer": "node scripts/release-notes.mjs indexer",
     "test:tarball": "node scripts/test-tarball.mjs",
-    "release:validate": "node scripts/prepublish-validate.mjs && node scripts/test-tarball.mjs"
+    "release:validate": "node scripts/prepublish-validate.mjs && node scripts/test-tarball.mjs",
+    "verify:published": "node scripts/verify-published-react.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",

@@ -29,6 +29,12 @@ export type {
   RbacInitResult,
   TransactionResult,
 } from './client';
+/**
+ * Result of {@link bcForgeClient.dryRun}: the estimated resource fee (stroops),
+ * the ledger footprint, and the contract events a call would emit. No transaction
+ * is submitted.
+ */
+export type { DryRunResult, DryRunFootprint } from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents, onMint, onTransfer, onVaultDeposit } from './events';
 export type { bcForgeEvent, SubscriptionOptions, EventListenerOptions } from './events';
@@ -39,6 +45,10 @@ export type { WalletAdapter } from './walletAdapter';
 export { FreighterAdapter } from './adapters/freighterAdapter';
 export { AlbedoAdapter } from './adapters/albedoAdapter';
 export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
+export { LobstrAdapter } from './adapters/lobstrAdapter';
+export { XBullAdapter } from './adapters/xbullAdapter';
+export { PrivateKeyAdapter } from './adapters/privateKeyAdapter';
+export type { PrivateKeyAdapterOptions } from './adapters/privateKeyAdapter';
 
 // ─── Vault and Wrapper Clients (#744) ────────────────────────────────────────
 export { VaultClient } from './vaultClient';
@@ -47,8 +57,20 @@ export { WrapperClient } from './wrapperClient';
 export type { WrapperClientConfig } from './wrapperClient';
 
 // ─── APY helpers (#745) ──────────────────────────────────────────────────────
-export { calculateApy } from './apy';
-export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
+export {
+  calculateApy,
+  aprToApy,
+  apyToApr,
+  compoundingPeriodsPerYear,
+  timeWeightedYield,
+} from './apy';
+export type {
+  ApyOptions,
+  ApyResult,
+  ApySnapshot,
+  CompoundingFrequency,
+  YieldWindow,
+} from './apy';
 
 // ─── Generated Contract Bindings (#926) ──────────────────────────────────────
 // Auto-generated TypeScript bindings from `stellar contract bindings typescript`.

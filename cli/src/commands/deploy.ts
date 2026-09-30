@@ -6,6 +6,7 @@ import { addNetworkOptions, explicitNetworkOverrides, formatContractIdWithExplor
 import { getClientConfig } from '../utils/config.js';
 import { buildDeploymentArtifacts, exportDeploymentsToFile } from '../utils/deployments.js';
 import { resolveContractIdOption } from '../utils/registry.js';
+import { resolveAccountReference } from '../utils/address-book.js';
 import logger from '../utils/logger.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -341,7 +342,7 @@ export function createDeployCommand(): Command {
     .description('Deploy the yield-bearing vault contract and (optionally) link a fee contract')
     .requiredOption('--vault-wasm <path>', 'Path to the vault (WrapperContract) WASM binary')
     .option('--fee-wasm <path>', 'Path to the fee contract WASM binary (optional)')
-    .requiredOption('--admin <address>', 'Admin address for the deployed vault')
+    .requiredOption('--admin <address>', 'Admin public key (G...) or an address-book name')
     .requiredOption('--source <secret>', 'Source account secret key for signing transactions')
     .requiredOption('--underlying-token <id>', 'Underlying SEP-41 token contract id, or a deployment alias')
     .requiredOption('--name <name>', 'Human-readable name for the wrapped token')
@@ -360,7 +361,7 @@ export function createDeployCommand(): Command {
       const result = await deployVault({
         vaultWasm: opts.vaultWasm,
         feeWasm: opts.feeWasm,
-        admin: opts.admin,
+        admin: resolveAccountReference(opts.admin),
         source: opts.source,
         underlyingToken,
         name: opts.name,
