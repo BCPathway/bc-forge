@@ -66,9 +66,9 @@ Any later component publisher must keep `permissions: {}` at the workflow root, 
 
 Use a granular npm token only when trusted publishing is unavailable (for example, the publisher record has not been created yet).
 
-1. On npm, create a **granular access token** that can publish only `@bc-forge/sdk`, `@bc-forge/cli`, and `@bc-forge/react`. Do not create a classic token with access to every package you own.
+1. On npm, create a **granular access token** that can publish only `@bc-forge/sdk`, `@bc-forge/cli`, `@bc-forge/react`, and `@bc-forge/indexer`. Do not create a classic token with access to every package you own.
 2. Store it as the `NPM_TOKEN` Actions secret on `BCPathway/bc-forge`.
-3. In `.github/workflows/release.yml`, add `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` to the Changesets step, publish the pending release, then remove that line so later releases go back to OIDC.
+3. The reusable workflow accepts `NPM_TOKEN` as an optional secret for fallback publishing.
 4. Rotate the secret after that publish, and after any exposure:
    - Revoke the token on npm (**Access Tokens → Revoke**).
    - Create a replacement granular token with the same package list.
@@ -201,3 +201,13 @@ Before `changeset publish`, `scripts/check-version-tag.mjs --before-changeset-pu
 A direct tag check (`node scripts/check-version-tag.mjs sdk@1.2.3`) still rejects a version that is already on npm. The release path above is the one that treats a matching republish as a no-op.
 
 Re-run the failed Release workflow from the Actions tab after fixing the commit. A successful rerun of a commit whose versions are already on npm with the same version exits 0 and does not publish a second copy.
+
+## Component tags
+
+`scripts/validate-tag.js` maps a tag to exactly one component. CI runs `node --test scripts/validate-tag.test.mjs`.
+
+- `sdk-v*`, `cli-v*`, and `react-v*` name those npm packages. They do not start a second registry write. `@bc-forge/sdk`, `@bc-forge/cli`, and `@bc-forge/react` publish from [`release.yml`](../.github/workflows/release.yml).
+- `indexer-v*` selects [`publish-indexer.yml`](../.github/workflows/publish-indexer.yml) for the indexer image. It does not publish the npm packages.
+- Any other tag, including `v1.2.3`, selects no publisher.
+
+[`.github/workflows/publish-package.yml`](../.github/workflows/publish-package.yml) is a reusable `workflow_call` that validates the package input and can install, build, test, and publish. [`.github/workflows/publish-dry-run.yml`](../.github/workflows/publish-dry-run.yml) demonstrates it with `npm publish --dry-run` and does not write to the registry. There is no `publish-sdk.yml` or `publish-cli.yml`.
