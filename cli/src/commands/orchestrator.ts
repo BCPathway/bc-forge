@@ -3,6 +3,7 @@ import { Command } from "commander";
 import logger from "../utils/logger.js";
 import { addNetworkOptions } from "../network.js";
 import { resolveContractIdOption } from "../utils/registry.js";
+import { resolveAccountReference } from "../utils/address-book.js";
 import { initializeSuperAdmin } from "../orchestrator/init-superadmin.js";
 import { connectContractIds } from "../orchestrator/connect-contracts.js";
 import { runDeploymentOrchestrator } from "../orchestrator/orchestrator.js";
@@ -15,7 +16,7 @@ export function createInitSuperAdminCommand(): Command {
   const command = new Command("init-superadmin")
     .description("Initialize contract natively with deployer as SuperAdmin and verify on-chain")
     .option("--contract-id <string>", "Contract ID or deployment alias to initialize")
-    .option("--deployer <string>", "Deployer Stellar public key (G...)")
+    .option("--deployer <string>", "Deployer public key (G...) or an address-book name")
     .option("--secret-key <string>", "Deployer secret key (S...)")
     .option("--name <string>", "Token name")
     .option("--symbol <string>", "Token symbol")
@@ -25,7 +26,9 @@ export function createInitSuperAdminCommand(): Command {
       try {
         const result = await initializeSuperAdmin({
           contractId: resolveId(command, options.contractId),
-          deployer: options.deployer,
+          deployer: options.deployer
+            ? resolveAccountReference(options.deployer)
+            : options.deployer,
           secretKey: options.secretKey,
           name: options.name,
           symbol: options.symbol,

@@ -86,7 +86,7 @@ describe("parseArgs return contract (#350)", () => {
       "--recipient",
       "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF:10",
       "--recipient",
-      "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB:20",
+      "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U:20",
     ]);
     expect(opts).toBeDefined();
     expect(opts!.contractId).toBe("CABC123");
@@ -97,7 +97,7 @@ describe("parseArgs return contract (#350)", () => {
         amount: "10",
       },
       {
-        to: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        to: "GCATS5YOVB6ROX2WUNKGNQ2MP3GMXDMKSG2O4N5CLX3A6W4PZGZZI55U",
         amount: "20",
       },
     ]);

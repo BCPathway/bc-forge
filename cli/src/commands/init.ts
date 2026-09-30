@@ -11,6 +11,7 @@ import {
   type NetworkName,
 } from '../network.js';
 import logger from '../utils/logger.js';
+import { resolveAccountReference } from '../utils/address-book.js';
 
 const CONFIG_FILENAME = 'config.json';
 const ADMIN_REGEX = /^G[A-Z2-7]{55}$/;
@@ -100,7 +101,7 @@ function validateInitConfig(input: {
 }): InitConfig {
   const network = parseNetworkName(input.network);
   const resolved = resolveNetworkConfig({ network, rpcUrl: input.rpcUrl });
-  const admin = input.admin.trim();
+  const admin = resolveAccountReference(input.admin.trim());
   const name = input.name.trim();
   const symbol = input.symbol.trim();
   const initialSupply = input.initialSupply.trim();
@@ -236,7 +237,7 @@ export function createInitCommand(): Command {
     .description('Scaffold config.json with network, admin, and token supply settings')
     .option('-n, --network <name>', 'Target network (testnet, mainnet, or local). Default: testnet')
     .option('--rpc-url <url>', 'Soroban RPC URL (defaults to the selected network preset)')
-    .option('--admin <publicKey>', 'Admin public key (G...)')
+    .option('--admin <publicKey>', 'Admin public key (G...) or an address-book name')
     .option('--name <name>', 'Token name')
     .option('--symbol <symbol>', 'Token symbol')
     .option('--decimals <n>', 'Token decimals (default: 7)')
