@@ -39,6 +39,10 @@ export type { WalletAdapter } from './walletAdapter';
 export { FreighterAdapter } from './adapters/freighterAdapter';
 export { AlbedoAdapter } from './adapters/albedoAdapter';
 export { WalletConnectAdapter } from './adapters/walletConnectAdapter';
+export { LobstrAdapter } from './adapters/lobstrAdapter';
+export { XBullAdapter } from './adapters/xbullAdapter';
+export { PrivateKeyAdapter } from './adapters/privateKeyAdapter';
+export type { PrivateKeyAdapterOptions } from './adapters/privateKeyAdapter';
 
 // ─── Vault and Wrapper Clients (#744) ────────────────────────────────────────
 export { VaultClient } from './vaultClient';
