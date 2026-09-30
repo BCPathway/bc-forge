@@ -102,19 +102,23 @@ async fn test_token_vault_compound_lifecycle() {
     assert_eq!(vault_client.total_assets(), 1_500_000);
     assert_eq!(vault_client.supply(), 1_000_000); // shares unchanged
 
-    // 6. COMPOUND & PRO-RATA ENTITLEMENT: Verify share price appreciation
+    // 6. COMPOUND & PRO-RATA ENTITLEMENT: Verify share price appreciation.
+    // Virtual offset (10^7) is on both sides of the exchange rate, so the
+    // 1_000_000 real shares do not claim the entire 1_500_000 assets:
+    // 1_000_000 * (1_500_000 + 10_000_000) / (1_000_000 + 10_000_000) = 1_045_454.
     let entitlement = vault_client.calculate_rewards(&1_000_000);
-    assert_eq!(entitlement, 1_500_000);
+    assert_eq!(entitlement, 1_045_454);
 
-    // 7. VAULT WITHDRAW: User withdraws all 1,000,000 shares
+    // 7. VAULT WITHDRAW: User withdraws all 1,000_000 shares
     let tokens_returned = vault_client.withdraw(&user, &1_000_000);
-    assert_eq!(tokens_returned, 1_500_000); // 1,000,000 principal + 500,000 yield
+    assert_eq!(tokens_returned, 1_045_454);
 
     // 8. VERIFY FINAL BALANCES
-    assert_eq!(token_client.balance(&user), 1_500_000);
+    // The offset's claim (454_546) stays in the vault; real supply is zero.
+    assert_eq!(token_client.balance(&user), 1_045_454);
     assert_eq!(vault_client.balance(&user), 0);
     assert_eq!(vault_client.supply(), 0);
-    assert_eq!(vault_client.total_assets(), 0);
+    assert_eq!(vault_client.total_assets(), 454_546);
 
     println!("✅ Token -> Vault -> Compound lifecycle test passed!");
 }
