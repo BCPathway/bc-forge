@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import React, { forwardRef } from 'react';
+import { theme } from '../theme';
 
 export type BadgeVariant = 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -13,12 +14,12 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 const VARIANT_STYLES: Record<BadgeVariant, React.CSSProperties> = {
-  default: { backgroundColor: '#f3f4f6', color: '#374151' },
-  primary: { backgroundColor: '#eff6ff', color: '#1e40af' },
-  success: { backgroundColor: '#f0fdf4', color: '#166534' },
-  warning: { backgroundColor: '#fffbeb', color: '#92400e' },
-  danger: { backgroundColor: '#fef2f2', color: '#991b1b' },
-  info: { backgroundColor: '#ecfeff', color: '#155e75' },
+  default: { backgroundColor: theme.neutralBackground, color: theme.neutralText },
+  primary: { backgroundColor: theme.primaryBackground, color: theme.primaryText },
+  success: { backgroundColor: theme.successBackground, color: theme.successText },
+  warning: { backgroundColor: theme.warningBackground, color: theme.warningText },
+  danger: { backgroundColor: theme.dangerBackground, color: theme.dangerText },
+  info: { backgroundColor: theme.infoBackground, color: theme.infoText },
 };
 
 const SIZE_STYLES: Record<BadgeSize, React.CSSProperties> = {

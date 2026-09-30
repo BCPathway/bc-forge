@@ -34,3 +34,12 @@ pub fn emit_vesting_revoked(env: &Env, schedule_id: u64, beneficiary: &Address, 
         (schedule_id, beneficiary.clone(), amount),
     );
 }
+
+/// Emitted when milestone tranches are attached to a schedule (#918).
+///
+/// @notice Publishes the schedule id and the summed tranche total.
+/// @dev Topic: `miles_set`. Data: `(schedule_id, total_amount)`.
+pub fn emit_milestones_set(env: &Env, schedule_id: u64, total_amount: i128) {
+    env.events()
+        .publish((symbol_short!("miles_set"),), (schedule_id, total_amount));
+}

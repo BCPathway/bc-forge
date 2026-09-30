@@ -1,0 +1,147 @@
+name: Publish Package (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      package-dir:
+        description: "Directory of the package to publish (sdk, cli, react, or indexer)"
+        required: true
+        type: string
+      package-name:
+        description: "npm package name (for example @bc-forge/sdk)"
+        required: true
+        type: string
+      build-command:
+        description: "Build command to run before publishing"
+        required: true
+        type: string
+      test-command:
+        description: "Test command to run before publishing"
+        required: true
+        type: string
+      tag-prefix:
+        description: "Tag prefix that triggers this workflow (for example sdk-v)"
+        required: true
+        type: string
+      dry-run:
+        description: "Run install, build, test, and npm publish --dry-run without writing to the registry"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      NPM_TOKEN:
+        description: "Optional npm token for fallback publishing. Omit it to use OIDC trusted publishing."
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate-tag:
+    name: Validate tag and package input
+    runs-on: ubuntu-latest
+    outputs:
+      should-publish: ${{ steps.check.outputs.should-publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate package input
+        run: |
+          set -euo pipefail
+          dir="${{ inputs.package-dir }}"
+          expected="${{ inputs.package-name }}"
+          prefix="${{ inputs.tag-prefix }}"
+          case "$dir" in
+            sdk|cli|react|indexer) ;;
+            *)
+              echo "::error::package-dir must be sdk, cli, react, or indexer"
+              exit 1
+              ;;
+          esac
+          if [[ "$prefix" != "$dir-v" ]]; then
+            echo "::error::tag-prefix ${prefix} does not match package-dir ${dir}"
+            exit 1
+          fi
+          name="$(node -p "require('./${dir}/package.json').name")"
+          if [[ "$name" != "$expected" ]]; then
+            echo "::error::${dir}/package.json name is ${name}, expected ${expected}"
+            exit 1
+          fi
+
+      - name: Check tag matches exactly one component
+        id: check
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+            echo "should-publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=dry-run" >> "$GITHUB_OUTPUT"
+            echo "Dry run: skipping tag gate and registry write."
+            exit 0
+          fi
+          result="$(node scripts/validate-tag.js "$GITHUB_REF_NAME")"
+          echo "$result"
+          case "$result" in
+            *"-> ${{ inputs.package-dir }} "*) ;;
+            *)
+              echo "::error::Tag does not route only to ${{ inputs.package-dir }}"
+              exit 1
+              ;;
+          esac
+          version="${GITHUB_REF_NAME#${{ inputs.tag-prefix }}}"
+          echo "should-publish=true" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Build, test, and publish
+    needs: validate-tag
+    if: inputs.dry-run || needs.validate-tag.outputs.should-publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: ${{ inputs.build-command }}
+
+      - name: Test package
+        run: ${{ inputs.test-command }}
+
+      - name: Validate packed tarballs
+        run: |
+          npm run build --workspace @bc-forge/sdk
+          npm run build --workspace @bc-forge/cli
+          npm run build --workspace @bc-forge/react
+          npm run test:tarball
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry-run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN}" ]]; then
+            unset NODE_AUTH_TOKEN
+          fi
+          npm config set provenance true
+          npm publish --workspace "${{ inputs.package-name }}" --access public --provenance
+
+      - name: Demonstrate publish without writing to the registry
+        if: ${{ inputs.dry-run }}
+        run: npm publish --workspace "${{ inputs.package-name }}" --dry-run --access public

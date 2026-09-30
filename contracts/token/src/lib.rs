@@ -179,6 +179,18 @@ pub enum TokenError {
     UnknownToken = 17,
     /// Metadata would change `decimals` after initialization (issue #911).
     DecimalsImmutable = 18,
+    /// A privileged action (fee-config change or ownership transfer) was
+    /// attempted while its proposal's timelock delay had not yet elapsed
+    /// (#914). Codes are append-only per this crate's ABI policy.
+    TimelockNotElapsed = 19,
+    /// No live privileged-action proposal exists for the requested action:
+    /// none was proposed, it was already consumed, or it was cancelled
+    /// (#914). Codes are append-only per this crate's ABI policy.
+    PrivilegeProposalNotFound = 20,
+    /// No lock record exists for the requested holder.
+    LockupNotFound = 21,
+    /// The holder's lock has not reached its unlock timestamp.
+    TokensStillLocked = 22,
 }
 
 #[contract]
@@ -329,7 +341,7 @@ impl BcForgeToken {
         amount: i128,
     ) -> Result<(), TokenError> {
         let from_balance = Self::read_balance(env, from);
-        if from_balance < amount {
+        if Self::get_spendable_balance(env, from) < amount {
             return Err(TokenError::InsufficientBalance);
         }
 
@@ -461,6 +473,15 @@ impl BcForgeToken {
             .unwrap_or(0)
     }
 
+    /// Returns the balance that may be spent without consuming a persisted
+    /// lock. Locks continue to reserve their amount after their timestamp has
+    /// expired until the holder explicitly withdraws them.
+    fn get_spendable_balance(env: &Env, user: &Address) -> i128 {
+        Self::read_balance(env, user)
+            .checked_sub(Self::get_locked_amount(env, user))
+            .unwrap_or(0)
+    }
+
     /// Returns `true` while the user has a lock whose unlock timestamp is still
     /// in the future. An expired lock no longer counts as locked, even though
     /// its tokens stay in storage until explicitly withdrawn.
@@ -474,6 +495,65 @@ impl BcForgeToken {
 
 #[contractimpl]
 impl BcForgeToken {
+    /// Restricts part of an existing holder balance until `unlock_timestamp`.
+    /// Existing locks accumulate and can only have their unlock time extended.
+    pub fn lock_tokens(
+        env: Env,
+        caller: Address,
+        user: Address,
+        amount: i128,
+        unlock_timestamp: u64,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let existing = Self::read_lockup(&env, &user);
+        let locked = existing.as_ref().map(|state| state.amount).unwrap_or(0);
+        let spendable = Self::read_balance(&env, &user)
+            .checked_sub(locked)
+            .ok_or(TokenError::InsufficientBalance)?;
+        if amount > spendable {
+            return Err(TokenError::InsufficientBalance);
+        }
+        let accumulated = locked
+            .checked_add(amount)
+            .ok_or(TokenError::InvalidAmount)?;
+        let stored_unlock = existing
+            .map(|state| state.unlock_timestamp.max(unlock_timestamp))
+            .unwrap_or(unlock_timestamp);
+        Self::write_lockup(
+            &env,
+            &user,
+            &LockupState {
+                amount: accumulated,
+                unlock_timestamp: stored_unlock,
+            },
+        );
+        events::emit_locked(&env, &user, amount, stored_unlock);
+        Ok(())
+    }
+
+    /// Removes a holder's complete lock after its unlock timestamp is reached.
+    ///
+    /// Does not change the holder's balance or total supply. The holder must
+    /// authorize the call; an admin signature is not required.
+    pub fn withdraw_locked(env: Env, user: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        user.require_auth();
+        let lock = Self::read_lockup(&env, &user).ok_or(TokenError::LockupNotFound)?;
+        if env.ledger().timestamp() < lock.unlock_timestamp {
+            return Err(TokenError::TokensStillLocked);
+        }
+        Self::remove_lockup(&env, &user);
+        events::emit_withdraw_locked(&env, &user, lock.amount);
+        Ok(())
+    }
+
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
@@ -623,7 +703,7 @@ impl BcForgeToken {
                 };
             }
 
-            if Self::read_balance(&env, &from) < total {
+            if Self::get_spendable_balance(&env, &from) < total {
                 return Err(TokenError::InsufficientBalance);
             }
 
@@ -692,9 +772,83 @@ impl BcForgeToken {
         Self::ensure_initialized(&env)?;
         let current_admin = admin::get_admin(&env);
         admin::require_admin(&env, &current_admin);
+        // #914: ownership transfer runs through the privileged-action
+        // timelock, so operators can pause/cancel a compromised rotation
+        // during the delay window.
+        admin::consume_privilege_proposal(
+            &env,
+            &admin::PrivilegeAction::TransferOwnership(new_admin.clone()),
+        )
+        .map_err(|e| match e {
+            admin::AdminError::PrivilegeTimelockActive => TokenError::TimelockNotElapsed,
+            _ => TokenError::PrivilegeProposalNotFound,
+        })?;
         admin::set_admin(&env, &new_admin);
         events::emit_ownership_transferred(&env, &current_admin, &new_admin);
         Ok(())
+    }
+
+    /// Proposes a privileged action (#914): a fee-config change or an
+    /// ownership transfer. Admin-only. The action becomes executable after
+    /// the 24h timelock and is applied by the matching effect function
+    /// (`set_fee_config` / `transfer_ownership`), which consumes the
+    /// proposal at the point of effect.
+    ///
+    /// @notice Proposes a privileged action under the #914 timelock.
+    /// @dev Admin-only. Rejects while a live proposal for the same action
+    ///      kind is pending; resubmitting after execution/cancellation
+    ///      restarts the clock.
+    /// @param env The Soroban environment.
+    /// @param submitter The admin proposing the action.
+    /// @param action The privileged action to schedule.
+    /// @return The unix timestamp at which the action becomes executable.
+    pub fn propose_privilege_action(
+        env: Env,
+        submitter: Address,
+        action: admin::PrivilegeAction,
+    ) -> Result<u64, TokenError> {
+        Self::ensure_initialized(&env)?;
+        // Admin check + authorization happen inside the admin library call;
+        // guarding here as well would authorize the same frame twice.
+        admin::propose_privilege_action(&env, submitter, action)
+            .map_err(|_| TokenError::PrivilegeProposalNotFound)
+    }
+
+    /// Cancels a pending privileged action (#914). Admin-only: cancellation
+    /// is the emergency brake, available to any admin during the delay
+    /// window — it must not be gated on the compromised key alone.
+    ///
+    /// @notice Cancels a pending privileged-action proposal.
+    /// @dev Admin-only. A cancelled proposal can never execute; a fresh one
+    ///      may be proposed afterwards.
+    /// @param env The Soroban environment.
+    /// @param caller The admin cancelling the action.
+    /// @param action The privileged action to cancel.
+    /// @return `Ok(())` on success, or [`TokenError::PrivilegeProposalNotFound`]
+    ///         if no live proposal exists for the action.
+    pub fn cancel_privilege_action(
+        env: Env,
+        caller: Address,
+        action: admin::PrivilegeAction,
+    ) -> Result<(), TokenError> {
+        Self::ensure_initialized(&env)?;
+        // See `propose_privilege_action`: the library call performs the
+        // admin check and authorization.
+        admin::cancel_privilege_action(&env, caller, action)
+            .map_err(|_| TokenError::PrivilegeProposalNotFound)
+    }
+
+    /// Read-only view of the privileged-action proposal for `action` (#914).
+    ///
+    /// @notice Returns the pending/executed/cancelled proposal for the action, if any.
+    /// @param env The Soroban environment.
+    /// @param action The privileged action to query.
+    /// @return The proposal state, or `None` when nothing was ever proposed.
+    pub fn get_privilege_proposal(
+        env: Env,
+        action: admin::PrivilegeAction,
+    ) -> Option<admin::PrivilegeProposal> {
+        admin::get_privilege_proposal(&env, action)
     }
 
     /// Rescues a foreign SEP-41 token balance out of the contract.
@@ -883,6 +1037,15 @@ impl BcForgeToken {
         if config.base_fee < 0 || config.max_fee < 0 {
             return Err(TokenError::InvalidAmount);
         }
+        // #914: fee-config changes run through the privileged-action timelock.
+        // The proposal must exist, be live, and have elapsed its delay; the
+        // consume marks it executed so the same proposal cannot be reused.
+        admin::consume_privilege_proposal(&env, &admin::PrivilegeAction::SetFeeConfig).map_err(
+            |e| match e {
+                admin::AdminError::PrivilegeTimelockActive => TokenError::TimelockNotElapsed,
+                _ => TokenError::PrivilegeProposalNotFound,
+            },
+        )?;
         Self::write_fee_config(&env, &config);
         events::emit_fee_config_set(&env, &caller, &config);
         Ok(())
@@ -1250,7 +1413,7 @@ impl TokenInterface for BcForgeToken {
         }
 
         let balance = Self::read_balance(&env, &from);
-        if balance < amount {
+        if Self::get_spendable_balance(&env, &from) < amount {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
@@ -1289,7 +1452,7 @@ impl TokenInterface for BcForgeToken {
 
         let allowance_data = Self::read_allowance_data(&env, &from, &spender);
         let balance = Self::read_balance(&env, &from);
-        if balance < amount {
+        if Self::get_spendable_balance(&env, &from) < amount {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 

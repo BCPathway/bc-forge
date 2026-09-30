@@ -280,6 +280,10 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Map sample release tags to one publisher
+        working-directory: .
+        run: node --test scripts/validate-tag.test.mjs
+
   # ─── React Package CI (#896) ────────────────────────────────────────────
   # @bc-forge/react wraps @bc-forge/sdk, so the workspace SDK is built first
   # to provide the type declarations the react build consumes.
@@ -311,6 +315,53 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # ─── React peer-version matrix (#1041) ─────────────────────────────────
+  # Packs @bc-forge/react (and the SDK it depends on) and installs those
+  # tarballs into a throwaway consumer. The minimum supported React 18 and a
+  # supported React 19 each run the consumer smoke test. React 17 must be
+  # rejected by npm's peer check. Installs use --no-package-lock in a temp
+  # directory, and the job fails if the repository lockfile changes.
+  react-peer-versions:
+    name: React peer compat (React ${{ matrix.react-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        react-version: ['18.0.0', '19.0.0']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SDK and React
+        run: |
+          npm run build --workspace @bc-forge/sdk
+          npm run build --workspace @bc-forge/react
+
+      - name: Pack tarballs
+        run: |
+          mkdir -p "$RUNNER_TEMP/react-peer-packs"
+          npm pack --workspace @bc-forge/sdk --pack-destination "$RUNNER_TEMP/react-peer-packs"
+          npm pack --workspace @bc-forge/react --pack-destination "$RUNNER_TEMP/react-peer-packs"
+
+      - name: Consumer smoke test on React ${{ matrix.react-version }}
+        run: node scripts/test-react-peers.mjs --react "${{ matrix.react-version }}" --packs "$RUNNER_TEMP/react-peer-packs"
+
+      - name: Incompatible React 17 peer fails the install
+        run: node scripts/test-react-peers.mjs --react 17.0.2 --packs "$RUNNER_TEMP/react-peer-packs" --expect-incompatible
+
+      - name: Confirm the repository lockfile was not modified
+        run: git diff --exit-code -- package-lock.json react/package-lock.json
 
   # ─── Dependency audit (#770) ────────────────────────────────────────────
   # Verifies the workspace dependency graph resolves cleanly: cargo metadata
@@ -361,6 +412,25 @@ jobs:
               (cd "$pkg" && npm audit --omit=dev --audit-level=high)
             fi
           done
+
+  # ─── README project tree (#1027) ─────────────────────────────────────────
+  readme-tree:
+    name: README project tree
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check project structure against the README
+        run: node scripts/checkReadmeTree.js
+
+      - name: Test the project-tree check
+        run: node --test scripts/checkReadmeTree.test.js
 
   # ─── Documentation link check (#348) ─────────────────────────────────────
   docs-links:

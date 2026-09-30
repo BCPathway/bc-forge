@@ -1,0 +1,18 @@
+# Root build context ignore list for `docker build -f indexer/Dockerfile .`.
+# The indexer Dockerfile COPYs only package manifests plus sdk/ and indexer/
+# sources, so everything else is excluded to keep the context small.
+node_modules
+**/node_modules
+dist
+**/dist
+target
+**/target
+.git
+.gitignore
+*.log
+npm-debug.log*
+.env
+.env.*
+!.env.example
+coverage
+.tarpaulin

@@ -221,6 +221,157 @@ pub fn get_threshold(env: &Env) -> u32 {
         .unwrap_or(1)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #917 — enumerable proposal listings (both flows)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Maximum proposal slots scanned per listing call (#917).
+///
+/// Ledger keys are not enumerable, so listings walk `0..counter` and read each
+/// slot. The cap bounds the per-invocation read cost; callers resume via
+/// `next_cursor` (see [`list_legacy_proposals`] / [`list_upgrade_proposals`]).
+pub const PROPOSAL_LIST_SCAN_CAP: u64 = 50;
+
+/// Pending + approved-not-executed ID lists for one page of the legacy
+/// [`Proposal`] flow (#917).
+///
+/// `next_cursor` is `Some(id)` when the counter exceeded the scan cap; pass it
+/// back as `start_after` to fetch the next page. `None` means the whole ID
+/// space has been scanned.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct LegacyProposalLists {
+    /// Proposals still collecting approvals (quorum not yet met).
+    pub pending_ids: soroban_sdk::Vec<u64>,
+    /// Proposals at/above threshold but not yet executed, cancelled or expired.
+    pub approved_ids: soroban_sdk::Vec<u64>,
+    /// Resume token: the next `start_after` value, when truncated.
+    pub next_cursor: Option<u64>,
+}
+
+/// Pending + approved-not-executed ID lists for one page of the
+/// [`UpgradeProposal`] flow (#917).
+///
+/// Same cursoring contract as [`LegacyProposalLists`].
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct UpgradeProposalLists {
+    /// Proposals still inside their voting window (`ProposalStatus::Pending`
+    /// with `expires_at` in the future). Closed-window `Pending` entries are
+    /// omitted until `expire_proposal` moves them to `Expired`.
+    pub pending_ids: soroban_sdk::Vec<u64>,
+    /// Proposals past quorum awaiting execution (`ProposalStatus::Approved`).
+    pub approved_ids: soroban_sdk::Vec<u64>,
+    /// Resume token: the next `start_after` value, when truncated.
+    pub next_cursor: Option<u64>,
+}
+
+/// Lists legacy [`Proposal`] IDs by state, oldest first (#917).
+///
+/// @notice Returns pending and approved-not-executed legacy proposal IDs, bounded by [`PROPOSAL_LIST_SCAN_CAP`].
+/// @dev Ledger keys are not enumerable, so this walks `start_after..min(counter, start_after + cap)`
+///      reading each `AdminKey::Proposal(id)` slot. Executed, cancelled and expired proposals are
+///      skipped. If `next_cursor` is `Some`, more IDs exist past the cap — call again with it.
+/// @param env The Soroban environment.
+/// @param start_after Exclusive lower bound to resume from; pass `0` for the first page.
+/// @return Pending and approved ID lists plus the resume cursor.
+pub fn list_legacy_proposals(env: &Env, start_after: u64) -> LegacyProposalLists {
+    let counter: u64 = env
+        .storage()
+        .instance()
+        .get(&AdminKey::ProposalIdCounter)
+        .unwrap_or(0);
+    let threshold = get_threshold(env);
+    let current_ledger = env.ledger().sequence();
+
+    let mut pending_ids = soroban_sdk::Vec::new(env);
+    let mut approved_ids = soroban_sdk::Vec::new(env);
+
+    let end = counter.min(start_after.saturating_add(PROPOSAL_LIST_SCAN_CAP));
+    let mut id = start_after;
+    while id < end {
+        if let Some(proposal) = env
+            .storage()
+            .instance()
+            .get::<AdminKey, Proposal>(&AdminKey::Proposal(id))
+        {
+            if !proposal.executed && !proposal.cancelled {
+                let expired = proposal
+                    .expiry_ledger
+                    .map(|expiry| expiry <= current_ledger)
+                    .unwrap_or(false);
+                if !expired {
+                    if proposal.approvals.len() >= threshold {
+                        approved_ids.push_back(id);
+                    } else {
+                        pending_ids.push_back(id);
+                    }
+                }
+            }
+        }
+        id += 1;
+    }
+
+    let next_cursor = if counter > end { Some(end) } else { None };
+    LegacyProposalLists {
+        pending_ids,
+        approved_ids,
+        next_cursor,
+    }
+}
+
+/// Lists [`UpgradeProposal`] IDs by state, oldest first (#917).
+///
+/// @notice Returns pending and approved-not-executed upgrade proposal IDs, bounded by [`PROPOSAL_LIST_SCAN_CAP`].
+/// @dev Walks `start_after..min(counter, start_after + cap)` reading each
+///      `AdminKey::UpgradeProposal(id)` persistent entry (extending each read
+///      entry's TTL). Terminal statuses (`Executed`, `Cancelled`, `Expired`) and
+///      closed-window `Pending` entries are skipped. Resume via `next_cursor`.
+/// @param env The Soroban environment.
+/// @param start_after Exclusive lower bound to resume from; pass `0` for the first page.
+/// @return Pending and approved ID lists plus the resume cursor.
+pub fn list_upgrade_proposals(env: &Env, start_after: u64) -> UpgradeProposalLists {
+    let counter: u64 = env
+        .storage()
+        .instance()
+        .get(&AdminKey::UpgradeProposalIdCounter)
+        .unwrap_or(0);
+    let now = env.ledger().timestamp();
+
+    let mut pending_ids = soroban_sdk::Vec::new(env);
+    let mut approved_ids = soroban_sdk::Vec::new(env);
+
+    let end = counter.min(start_after.saturating_add(PROPOSAL_LIST_SCAN_CAP));
+    let mut id = start_after;
+    while id < end {
+        let key = AdminKey::UpgradeProposal(id);
+        if let Some(proposal) = env
+            .storage()
+            .persistent()
+            .get::<AdminKey, UpgradeProposal>(&key)
+        {
+            crate::bump_persistent_key(env, &key);
+            match proposal.status {
+                ProposalStatus::Pending => {
+                    if proposal.expires_at > now {
+                        pending_ids.push_back(id);
+                    }
+                }
+                ProposalStatus::Approved => approved_ids.push_back(id),
+                ProposalStatus::Executed | ProposalStatus::Cancelled | ProposalStatus::Expired => {}
+            }
+        }
+        id += 1;
+    }
+
+    let next_cursor = if counter > end { Some(end) } else { None };
+    UpgradeProposalLists {
+        pending_ids,
+        approved_ids,
+        next_cursor,
+    }
+}
+
 /// Creates a new multi-sig governance proposal.
 ///
 /// @notice Creates a proposal authored by `creator` and records the creator as its first approval.

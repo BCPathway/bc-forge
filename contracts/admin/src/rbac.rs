@@ -225,6 +225,32 @@ fn load_role_mask(env: &Env, address: &Address) -> u32 {
     mask
 }
 
+/// Reads the address's RAW stored role mask without the implicit expansion.
+///
+/// `get_roles_bitmask` presents the *effective* view — an Admin-bit holder is
+/// reported as holding every role. Renounce (#915) needs the raw bits
+/// instead: only a directly granted role can be renounced, because the
+/// roles implied by the Admin bit have no separate storage to clear (admin
+/// authority is changed via `set_admin`, not per-role revokes).
+pub(crate) fn load_raw_role_mask(env: &Env, address: &Address) -> u32 {
+    let key = AdminKey::RoleMask(address.clone());
+    if let Some(mask) = env.storage().persistent().get::<_, u32>(&key) {
+        extend_storage_ttl_for_key(env, &key);
+        return mask;
+    }
+    // Legacy per-role boolean entries are the pre-mask storage format, so
+    // they ARE directly-held bits; mirror `load_role_mask`'s migration read.
+    let mut mask = 0u32;
+    for (role, bit) in ALL_ROLE_BITS {
+        let legacy_key = AdminKey::Role(role, address.clone());
+        if env.storage().persistent().has(&legacy_key) {
+            extend_storage_ttl_for_key(env, &legacy_key);
+            mask |= bit;
+        }
+    }
+    mask
+}
+
 /// Writes `mask` as the role bitmask for `address`, completing migration.
 ///
 /// Removes every legacy per-role boolean entry for `address` once the mask is

@@ -3,6 +3,7 @@ import { runIndexer } from './indexer';
 import apiRouter, { jsonErrorHandler } from './api';
 import { healthHandler } from './health';
 import { healthzHandler } from './healthz';
+import { versionHandler } from './version';
 import { disconnectPrismaClient } from './lib/prisma';
 import { logFatalIndexerError, logShutdown, logStartup } from './lib/lifecycle';
 import dotenv from 'dotenv';
@@ -25,6 +26,12 @@ app.get('/health', (req, res) => {
 
 app.get('/healthz', (req, res) => {
   void healthzHandler(req, res);
+});
+
+// Build metadata (version + git revision) — also unauthenticated and outside
+// the /api/v1 router. Reports only the BUILD_* allowlist, never other env vars.
+app.get('/version', (req, res) => {
+  versionHandler(req, res);
 });
 
 // JSON error handler (registered after all routes).

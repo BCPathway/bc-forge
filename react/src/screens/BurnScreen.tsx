@@ -83,6 +83,12 @@ export const BurnScreen: React.FC<BurnScreenProps> = ({
   return (
     <section className={className} style={{ display: 'grid', gap: 12, ...style }}>
       <div>
+        <h1 style={{ margin: '0 0 8px 0', fontSize: '24px', fontWeight: 700 }}>Burn Tokens</h1>
+        <p style={{ margin: 0, color: '#4b5563', fontSize: '14px' }}>
+          Burn tokens from the connected wallet.
+        </p>
+      </div>
+      <div>
         <div>Connected address</div>
         <div data-testid="burn-connected-address">{connectedAddress ?? 'Not connected'}</div>
       </div>
