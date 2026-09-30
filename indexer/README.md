@@ -199,7 +199,7 @@ Each published indexer release ships two artifacts built from the same commit
 | Container image | `ghcr.io/bcpathway/bc-forge-indexer` | runs the API and the background indexer |
 | `bc-forge-indexer-prisma-migrations-<version>.tar.gz` | GitHub Release assets | the migrations that match that image |
 
-`<version>` is the version in `indexer/package.json` at the released commit. The
+`<version>` is the semantic version from the `indexer-v<semver>` release tag, taken from the same commit as the image. The
 archive contains `prisma/migrations/`, `prisma/schema.prisma`, and
 `prisma/migration_lock.toml`, so operators can apply exactly the migrations that
 shipped with the image. The release notes record the archive name, its SHA-256

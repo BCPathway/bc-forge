@@ -1,32 +1,32 @@
 FROM node:20-alpine
 
-# Install openssl for Prisma engine support on Alpine
+# openssl is required by the Prisma query engine on Alpine.
 RUN apk add --no-cache openssl
 
+# Build from the repository root. @bc-forge/indexer depends on the
+# @bc-forge/sdk workspace, which is not published, so an indexer-only
+# context cannot npm ci.
 WORKDIR /app
 
-# Copy package manifests
 COPY package.json package-lock.json ./
+COPY sdk/package.json ./sdk/package.json
+COPY cli/package.json ./cli/package.json
+COPY react/package.json ./react/package.json
+COPY indexer/package.json ./indexer/package.json
 
-# Install production and build dependencies
-RUN npm ci
+RUN npm ci --workspace @bc-forge/indexer --include-workspace-root
 
-# Copy Prisma schema and source code required for generation and build
-COPY prisma ./prisma
-COPY tsconfig.json ./
-COPY src ./src
+COPY sdk ./sdk
+COPY indexer/prisma ./indexer/prisma
+COPY indexer/tsconfig.json ./indexer/tsconfig.json
+COPY indexer/src ./indexer/src
+COPY indexer/scripts ./indexer/scripts
 
-# Generate Prisma client
+WORKDIR /app/indexer
+
 RUN npx prisma generate
-
-# Build TypeScript source
 RUN npm run build
 
-# Expose default HTTP port
 EXPOSE 3000
-
-# Default port environment variable
 ENV PORT=3000
-
-# Start compiled server
 CMD ["npm", "start"]

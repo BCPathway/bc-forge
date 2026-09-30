@@ -94,7 +94,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./indexer
+          context: .
           file: ./indexer/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}

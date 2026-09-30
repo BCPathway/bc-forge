@@ -6,6 +6,12 @@ import { applyLedgerEventAggregates, type AggregateStore } from './aggregates';
 import type { LedgerEvent } from './ledger';
 import { logger } from './lib/logger';
 import { setLatestNetworkLedger } from './metrics';
+import {
+  hasContinuousParentChain,
+  reconcileLedgerCursor,
+  seedLedgerCheckpoints,
+  toLedgerCoordinate,
+} from './cursor';
 
 dotenv.config();
 
