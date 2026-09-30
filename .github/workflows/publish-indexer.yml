@@ -7,8 +7,11 @@ name: Publish indexer image
 # start Node, and Trivy can scan the amd64 image before any GHCR write.
 # Fixable critical vulnerabilities fail the job unless
 # .github/vulnerability-exceptions.yml names the advisory and an unexpired
-# expiry (#1052). The SARIF report is retained. Component tags (sdk-v*, cli-v*,
-# react-v*) do not match this filter, so they never push an image.
+# expiry (#1052). The SARIF report is retained. After a tag publish, a separate
+# job signs the immutable digest with Cosign keyless OIDC. That job is the only
+# one with id-token: write, and no private signing key is created (#1051).
+# Component tags (sdk-v*, cli-v*, react-v*) do not match this filter, so they
+# never push an image.
 #
 # Tag convention: indexer-v<semver>, e.g. indexer-v1.2.3 or indexer-v1.2.3-rc.1
 on:
@@ -42,6 +45,8 @@ jobs:
       contents: read
       packages: write
       security-events: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -363,3 +368,43 @@ jobs:
             echo "- Digest: \`${{ steps.push.outputs.digest }}\`"
             echo "- Vulnerability scan: fixable critical findings block this publish unless an unexpired advisory exception exists."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  sign:
+    name: Sign indexer image
+    needs: publish
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign image digest with keyless OIDC
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DIGEST}" || "${DIGEST}" != sha256:* ]]; then
+            echo "::error::Publish job did not emit an immutable image digest."
+            exit 1
+          fi
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          {
+            echo "### Indexer image signed"
+            echo ""
+            echo "- Image: \`${IMAGE}@${DIGEST}\`"
+            echo "- Identity: \`https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-indexer.yml@${GITHUB_REF}\`"
+            echo "- Issuer: \`https://token.actions.githubusercontent.com\`"
+            echo "- Private signing key: none (keyless GitHub OIDC)"
+          } >> "$GITHUB_STEP_SUMMARY"
+

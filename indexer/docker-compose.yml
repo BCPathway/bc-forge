@@ -18,7 +18,9 @@ services:
       retries: 10
 
   indexer:
-    build: .
+    build:
+      context: ..
+      dockerfile: indexer/Dockerfile
     container_name: bc-forge-indexer
     restart: unless-stopped
     depends_on:
