@@ -11,6 +11,7 @@ CLI deployment orchestrator and management toolkit for **bc-forge** Soroban smar
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Deployment Configuration (.bc-forge.json)](#deployment-configuration-bc-forgejson)
+  - [Address book](#address-book)
 - [Command Reference](#command-reference)
   - [`init`](#init)
   - [`check-status`](#check-status)
@@ -99,6 +100,22 @@ Place a `.bc-forge.json` file in your workspace root or specify a custom path wi
     }
   }
 }
+```
+
+### Address book
+
+Named accounts live in the CLI config (`~/.bc-forge-cli/config.json`, or `BC_FORGE_CLI_CONFIG`). A public key is stored only after the Stellar SDK StrKey checksum check. A bad checksum fails the command and is not written. The same `accounts` map may also be set in `.bc-forge.json`; those names override the user config.
+
+```bash
+bc-forge account add treasury GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+bc-forge account list
+bc-forge account remove treasury
+```
+
+Mint and transfer accept either a `G...` address or a saved name. That includes `batch-mint --recipient`, `smoke-test --recipient`, and other commands that take an account address (`init --admin`, `deploy --admin`, `pause --public-key`, `init-superadmin --deployer`).
+
+```bash
+bc-forge batch-mint --contract-id CXXX... --source SXXX... --recipient treasury:100
 ```
 
 ---
@@ -280,7 +297,7 @@ bc-forge smoke-test [options]
 - `--rpc-url <url>` **(Required)**: Soroban RPC endpoint URL.
 - `--source <secret>` **(Required)**: Admin/source secret key (`S...`).
 - `--network-passphrase <phrase>`: Stellar network passphrase (default: `"Test SDF Network ; September 2015"`).
-- `--recipient <address>`: Recipient public key (auto-generates a keypair if omitted).
+- `--recipient <address>`: Recipient public key or address-book name (auto-generates a keypair if omitted).
 - `--amount <amount>`: Amount to mint and transfer (default: `"1"`).
 - `--timeout <ms>`: Timeout for the entire test sequence in milliseconds (default: `30000`).
 
