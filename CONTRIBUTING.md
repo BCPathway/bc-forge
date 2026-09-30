@@ -169,6 +169,8 @@ Running `cargo test -p bc-forge-admin` regenerates `contracts/admin/test_snapsho
 
 CI also runs `cargo audit` against `Cargo.lock` in the Dependency Audit job: if any dependency matches a known RustSec advisory, the check fails and blocks the merge. Upgrade the affected crate (or, only when the advisory genuinely cannot apply, add a narrowly scoped, commented ignore) before opening your PR.
 
+The same job runs `cargo deny check`. That command fails when a dependency uses a license outside the allow-list in `deny.toml`, or when a crate comes from a registry or git source the lockfile does not already allow. Run `cargo deny check` locally before opening your PR. Change `deny.toml` only when the new license or source is an intentional policy decision.
+
 ### Coverage Gate
 
 Rust line coverage is measured with [cargo-tarpaulin](https://github.com/xd009642/tarpaulin). CI enforces two gates on every PR (issue #955):
@@ -205,6 +207,7 @@ Rust line coverage is measured with [cargo-tarpaulin](https://github.com/xd00964
 - [ ] All tests pass (`cargo test --tests`)
 - [ ] Coverage gates pass (project ≥ 85%, changed lines ≥ 85% — see [Coverage Gate](#coverage-gate))
 - [ ] `cargo audit` reports no advisories on `Cargo.lock`
+- [ ] `cargo deny check` passes before opening the PR
 - [ ] SDK compiles (`npm run build` in `sdk/`)
 - [ ] New functions have doc comments
 - [ ] README updated if applicable

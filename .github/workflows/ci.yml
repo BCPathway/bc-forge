@@ -389,7 +389,9 @@ jobs:
         run: cargo tree --workspace --all-features >/dev/null
 
       - name: Install cargo-audit and cargo-deny
-        run: cargo install cargo-audit cargo-deny --locked
+        run: |
+          cargo install cargo-audit --locked
+          cargo install cargo-deny --version 0.20.2 --locked
 
       # Fails the job when any crate in Cargo.lock matches a RustSec advisory.
       - name: Audit Cargo.lock against RustSec advisories (#883)
@@ -398,6 +400,10 @@ jobs:
       # Fails the job on security advisories via cargo-deny (#958)
       - name: Check Cargo advisories with cargo-deny (#958)
         run: cargo deny check advisories
+
+      # Fails the job on disallowed licenses, banned crates, or unknown sources (#884).
+      - name: Check licenses and sources with cargo-deny (#884)
+        run: cargo deny check
 
       # Fails the job on high or critical production vulnerability findings (#958)
       - name: Run npm audit gate on workspace packages (#958)
