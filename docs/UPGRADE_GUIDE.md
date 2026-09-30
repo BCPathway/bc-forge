@@ -410,9 +410,10 @@ cargo build -p bc-forge-token --target wasm32v1-none --release
 cargo test -p bc-forge-e2e-tests test_admin_governed_wasm_upgrade_preserves_state -- --exact
 ```
 
-N and N+1 are that artifact uploaded twice. The `WASM Upgrade E2E` CI job
-builds it and passes the path in `BC_FORGE_TOKEN_WASM`. An empty byte slice is
-not used: the test rejects a file smaller than the release artifact.
+The `WASM Upgrade E2E` CI job builds it, points `BC_FORGE_TOKEN_WASM` at the
+artifact, and runs the test with `--include-ignored`. The default `cargo test`
+suite skips it. An empty byte slice is not used: the test rejects a file
+smaller than the release artifact.
 
 ## Compatibility rules
 

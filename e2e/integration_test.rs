@@ -57,8 +57,12 @@ fn token_release_wasm() -> Vec<u8> {
 
 /// Deploy the built token WASM, then replace it through `execute_upgrade`.
 /// Balance, supply, and admin still read back from the upgraded contract.
+///
+/// Ignored in the default suite: the smart-contract job does not build the
+/// MVP artifact. The WASM Upgrade E2E job builds it and runs this test.
 #[cfg(test)]
 #[test]
+#[ignore = "needs BC_FORGE_TOKEN_WASM from cargo build -p bc-forge-token --target wasm32v1-none --release"]
 fn test_admin_governed_wasm_upgrade_preserves_state() {
     let env = Env::default();
     env.mock_all_auths();
