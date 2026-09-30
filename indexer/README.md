@@ -172,8 +172,8 @@ docker buildx build --platform linux/amd64,linux/arm64 -f indexer/Dockerfile -t 
 Images published for `indexer-v*` tags are signed with Cosign keyless signing.
 No private signing key is created or stored. The signature certificate is
 issued through GitHub Actions OIDC and is attached to the immutable image
-digest in GHCR. The signing job is the only job in
-`.github/workflows/publish-indexer.yml` with `id-token: write`.
+digest in GHCR. Only the signing job and the SBOM attestation job in
+`.github/workflows/publish-indexer.yml` have `id-token: write`.
 
 1. Copy the `sha256:` digest from the publish job summary (the same digest
    Buildx recorded for the smoked manifest).
@@ -199,6 +199,27 @@ Cosign prints the verified signature payload on success. Check that its image
 digest matches `DIGEST` and that its certificate identity and issuer match the
 values above. The tag is included in the identity check, while the signature
 verification target is the immutable digest rather than a mutable tag.
+
+### Release SBOM
+
+When an `indexer-v*` tag is pushed, the publish workflow generates a CycloneDX
+SBOM from the immutable GHCR image digest rather than a mutable tag. It checks
+that the SBOM lists operating-system and npm packages, rejects environment
+metadata and credential-like values, and uploads
+`indexer-<tag>-sbom.cdx.json` to the GitHub Release for that tag, creating the
+release when one does not exist yet. Cosign then attests the SBOM to the same
+digest with keyless GitHub OIDC. No private signing key is used, and pipeline
+credentials are not written into the SBOM.
+
+Using the same `IMAGE`, `TAG`, and `DIGEST` as the signature check above:
+
+```bash
+cosign verify-attestation \
+  --type cyclonedx \
+  --certificate-identity "https://github.com/BCPathway/bc-forge/.github/workflows/publish-indexer.yml@refs/tags/${TAG}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "${IMAGE}@${DIGEST}"
+```
 
 ### Running the Container
 
