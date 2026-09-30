@@ -5,6 +5,10 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+  // Ship Prisma engines for both image architectures so the same generate
+  // step works for linux/amd64 and linux/arm64 (#1049). Alpine uses musl with
+  // OpenSSL 3, hence the musl-openssl-3.0.x targets (amd64 + arm64).
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 model Mint {
@@ -33,6 +37,53 @@ model Burn {
   ledger    Int
   txHash    String   @unique
   createdAt DateTime @default(now())
+}
+
+/// Yield-vault and wrapper `deposit` events.
+/// Yield vault data is `(caller, assets, shares)`. Wrapper data appends a
+/// schema version that is not stored.
+model VaultDeposit {
+  id        String   @id @default(uuid())
+  caller    String
+  assets    String
+  shares    String
+  ledger    Int
+  txHash    String   @unique
+  createdAt DateTime @default(now())
+}
+
+/// Wrapper `wrap` and `unwrap` events.
+/// `kind` is the topic. `amount` is the input and `resultAmount` is the output.
+model WrapperUpdate {
+  id           String   @id @default(uuid())
+  kind         String
+  caller       String
+  amount       String
+  resultAmount String
+  ledger       Int
+  txHash       String   @unique
+  createdAt    DateTime @default(now())
+}
+
+/// Vesting `v_rel` events: tokens released to a beneficiary.
+model VestingClaim {
+  id          String   @id @default(uuid())
+  beneficiary String
+  amount      String
+  ledger      Int
+  txHash      String   @unique
+  createdAt   DateTime @default(now())
+}
+
+/// Split `pyo_succ` events: a successful invoice payout.
+model SplitDistribution {
+  id         String   @id @default(uuid())
+  invoiceId  String
+  recipient  String
+  amount     String
+  ledger     Int
+  txHash     String   @unique
+  createdAt  DateTime @default(now())
 }
 
 /// Aggregate holder balances, maintained transactionally by the indexer as

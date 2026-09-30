@@ -14,6 +14,7 @@ import {
 import { createDeployCommand } from "./commands/deploy.js";
 import { createExportDeploymentsCommand } from "./commands/export-deployments.js";
 import { createBatchMintCommand } from "./commands/batch-mint.js";
+import { createAccountCommand } from "./commands/account.js";
 import { createPauseCommand } from "./commands/pause.js";
 import { createInitCommand } from "./commands/init.js";
 import { createDeploymentsCommand } from "./commands/deployments.js";
@@ -53,6 +54,7 @@ export function buildProgram(): Command {
     .addCommand(createOrchestrateCommand())
     .addCommand(createExportDeploymentsCommand())
     .addCommand(createBatchMintCommand())
+    .addCommand(createAccountCommand())
     .addCommand(createPauseCommand("pause"))
     .addCommand(createPauseCommand("unpause"));
 

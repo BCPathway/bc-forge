@@ -6,6 +6,7 @@ import { getSecretKey } from "../utils/config.js";
 import { resolveContractIdOption } from "../utils/registry.js";
 import logger from "../utils/logger.js";
 import { runPauseCommand, type PauseAction } from "../utils/pause.js";
+import { resolveAccountReference } from "../utils/address-book.js";
 
 /**
  * Build the `pause` or `unpause` command.
@@ -25,7 +26,10 @@ export function createPauseCommand(action: PauseAction): Command {
     .option("--signature <file>", "Submit a pre-signed transaction XDR from a file")
     .option("--build-only", "Build an unsigned transaction without signing or submitting", false)
     .option("--out <file>", "Write the unsigned XDR to a file (used with --build-only)")
-    .option("--public-key <key>", "Caller public key (used with --build-only)");
+    .option(
+      "--public-key <key>",
+      "Caller public key (G...) or address-book name (used with --build-only)"
+    );
 
   addNetworkOptions(cmd);
 
@@ -51,7 +55,9 @@ export function createPauseCommand(action: PauseAction): Command {
         signatureFile: opts.signature,
         buildOnly: opts.buildOnly,
         outFile: opts.out,
-        publicKey: opts.publicKey,
+        publicKey: opts.publicKey
+          ? resolveAccountReference(opts.publicKey)
+          : opts.publicKey,
         secretKey: opts.source ?? getSecretKey() ?? undefined,
       });
 

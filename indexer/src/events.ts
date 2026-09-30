@@ -2,7 +2,14 @@ import { EventEmitter } from 'node:events';
 import { getPrismaClient } from './lib/prisma';
 import { logger } from './lib/logger';
 
-export type IndexerEventType = 'mint' | 'transfer' | 'burn';
+export type IndexerEventType =
+  | 'mint'
+  | 'transfer'
+  | 'burn'
+  | 'vaultDeposit'
+  | 'wrapperUpdate'
+  | 'vestingClaim'
+  | 'splitDistribution';
 
 export type IndexerEvent = {
   type: IndexerEventType;

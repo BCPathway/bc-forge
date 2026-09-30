@@ -185,6 +185,36 @@ async function persistEventRow(
   return run(client as never);
 }
 
+type IndexedEventModel = 'vaultDeposit' | 'wrapperUpdate' | 'vestingClaim' | 'splitDistribution';
+
+/**
+ * Stringify a decoded Soroban value. Amounts and ids arrive as bigint.
+ */
+function scValString(value: unknown): string {
+  if (value === null || value === undefined) {
+    throw new Error('missing event field');
+  }
+  return typeof value === 'bigint' ? value.toString() : String(value);
+}
+
+/**
+ * Persist a non-token event row. These families do not change holder or
+ * supply aggregates. A duplicate `txHash` is rejected by the unique index.
+ */
+async function persistIndexedRow(
+  client: PrismaClient,
+  model: IndexedEventModel,
+  data: Record<string, unknown>,
+): Promise<unknown> {
+  const delegate = (
+    client as unknown as Record<
+      IndexedEventModel,
+      { create: (args: { data: Record<string, unknown> }) => Promise<unknown> }
+    >
+  )[model];
+  return delegate.create({ data });
+}
+
 export async function processEvent(
   event: SorobanRpc.Api.EventResponse,
   database: PrismaClient = prisma,
@@ -298,6 +328,88 @@ export async function processEvent(
           event,
         );
         publishIndexerEvent({ type: 'transfer', data: row as unknown as Record<string, unknown> });
+        break;
+      }
+      case 'deposit': {
+        const decoded = scValToNative(data as any);
+        // yield_vault `deposit`: (caller, assets, shares)
+        // wrapper `deposit`: (caller, assets, shares, version)
+        const row = await persistIndexedRow(database, 'vaultDeposit', {
+          caller: scValString(decoded[0]),
+          assets: scValString(decoded[1]),
+          shares: scValString(decoded[2]),
+          ledger: event.ledger,
+          txHash: event.txHash,
+        });
+        publishIndexerEvent({
+          type: 'vaultDeposit',
+          data: row as unknown as Record<string, unknown>,
+        });
+        break;
+      }
+      case 'wrap': {
+        const decoded = scValToNative(data as any);
+        // wrapper `wrap`: (caller, amount, wrapped_amount)
+        const row = await persistIndexedRow(database, 'wrapperUpdate', {
+          kind: 'wrap',
+          caller: scValString(decoded[0]),
+          amount: scValString(decoded[1]),
+          resultAmount: scValString(decoded[2]),
+          ledger: event.ledger,
+          txHash: event.txHash,
+        });
+        publishIndexerEvent({
+          type: 'wrapperUpdate',
+          data: row as unknown as Record<string, unknown>,
+        });
+        break;
+      }
+      case 'unwrap': {
+        const decoded = scValToNative(data as any);
+        // wrapper `unwrap`: (caller, wrapped_amount, underlying_amount)
+        const row = await persistIndexedRow(database, 'wrapperUpdate', {
+          kind: 'unwrap',
+          caller: scValString(decoded[0]),
+          amount: scValString(decoded[1]),
+          resultAmount: scValString(decoded[2]),
+          ledger: event.ledger,
+          txHash: event.txHash,
+        });
+        publishIndexerEvent({
+          type: 'wrapperUpdate',
+          data: row as unknown as Record<string, unknown>,
+        });
+        break;
+      }
+      case 'v_rel': {
+        const decoded = scValToNative(data as any);
+        // vesting `v_rel`: (beneficiary, amount)
+        const row = await persistIndexedRow(database, 'vestingClaim', {
+          beneficiary: scValString(decoded[0]),
+          amount: scValString(decoded[1]),
+          ledger: event.ledger,
+          txHash: event.txHash,
+        });
+        publishIndexerEvent({
+          type: 'vestingClaim',
+          data: row as unknown as Record<string, unknown>,
+        });
+        break;
+      }
+      case 'pyo_succ': {
+        const decoded = scValToNative(data as any);
+        // split `pyo_succ` data: (invoice_id, recipient, amount)
+        const row = await persistIndexedRow(database, 'splitDistribution', {
+          invoiceId: scValString(decoded[0]),
+          recipient: scValString(decoded[1]),
+          amount: scValString(decoded[2]),
+          ledger: event.ledger,
+          txHash: event.txHash,
+        });
+        publishIndexerEvent({
+          type: 'splitDistribution',
+          data: row as unknown as Record<string, unknown>,
+        });
         break;
       }
     }
