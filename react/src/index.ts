@@ -8,3 +8,4 @@ export * from './screens/TransferScreen';
 export * from './screens/BurnScreen';
 export * from './screens/MintScreen';
 export * from './screens/RolesScreen';
+export { theme } from './theme';

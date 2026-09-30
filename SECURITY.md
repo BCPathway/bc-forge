@@ -170,3 +170,7 @@ We ask that researchers follow responsible disclosure practices:
 
 We appreciate the security community's efforts to help keep bc-forge secure.
 
+## Indexer image vulnerability scanning
+
+Before a stable indexer image tag is moved, `.github/workflows/publish-indexer.yml` scans the built image with Trivy. A fixable critical vulnerability blocks the tag move. An exception in `.github/vulnerability-exceptions.yml` is honored only when it names both an advisory id (`advisory`) and an expiry date (`expires`). Expired exceptions block the release. The SARIF report is uploaded as a workflow artifact.
+

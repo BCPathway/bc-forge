@@ -6,7 +6,7 @@ module.exports = {
   transform: {
     '^.+\\.tsx?$': [
       'ts-jest',
-      { tsconfig: { jsx: 'react-jsx', module: 'commonjs', esModuleInterop: true } },
+      { tsconfig: { jsx: 'react-jsx', module: 'commonjs', esModuleInterop: true, types: ['jest', '@testing-library/jest-dom'] } },
     ],
   },
 };

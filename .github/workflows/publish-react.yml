@@ -1,0 +1,68 @@
+name: Validate React package
+
+# Not a second npm publisher. @bc-forge/react is published only by
+# release.yml (Changesets on push to main, id-token: write, provenance).
+# This workflow_call lints, tests, builds, and validates the tarball.
+# It does not authenticate to npm and does not run npm publish.
+#
+# scripts/react-dist-tag.mjs maps the React version before that publish:
+# react-vX.Y.Z (and a stable package version) -> dist-tag latest;
+# react-vX.Y.Z-beta.N -> beta; react-vX.Y.Z-rc.N -> rc.
+# Any other prerelease identifier fails this job, so it never ships.
+# release.yml publishes beta and rc itself and then hides the package from
+# Changesets, which always passes --tag latest. Stable releases still go
+# through Changesets and update latest.
+#
+# Do not set defaults.run.working-directory to react/. Workspace commands
+# such as `npm run build --workspace` resolve from the repository root.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, test, and validate @bc-forge/react
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve the React npm dist-tag
+        run: node scripts/react-dist-tag.mjs
+
+      - name: Test React dist-tag mapping
+        run: node --test scripts/react-dist-tag.test.mjs
+
+      - name: Check the React version before publish
+        run: node scripts/check-version-tag.mjs --before-changeset-publish --component react
+
+      - name: Lint
+        run: npm run lint --workspace @bc-forge/react
+
+      - name: Test
+        run: npm test --workspace @bc-forge/react -- --runInBand
+
+      - name: Build SDK dependency
+        run: npm run build --workspace @bc-forge/sdk
+
+      - name: Build React package
+        run: npm run build --workspace @bc-forge/react
+
+      - name: Validate the packed tarball
+        run: node scripts/validate-react-tarball.mjs
+
+      - name: Test the tarball listing check
+        run: node --test scripts/validate-react-tarball.test.mjs

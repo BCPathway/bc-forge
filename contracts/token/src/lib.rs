@@ -187,6 +187,10 @@ pub enum TokenError {
     /// none was proposed, it was already consumed, or it was cancelled
     /// (#914). Codes are append-only per this crate's ABI policy.
     PrivilegeProposalNotFound = 20,
+    /// No lock record exists for the requested holder.
+    LockupNotFound = 21,
+    /// The holder's lock has not reached its unlock timestamp.
+    TokensStillLocked = 22,
 }
 
 #[contract]
@@ -337,7 +341,7 @@ impl BcForgeToken {
         amount: i128,
     ) -> Result<(), TokenError> {
         let from_balance = Self::read_balance(env, from);
-        if from_balance < amount {
+        if Self::get_spendable_balance(env, from) < amount {
             return Err(TokenError::InsufficientBalance);
         }
 
@@ -469,6 +473,15 @@ impl BcForgeToken {
             .unwrap_or(0)
     }
 
+    /// Returns the balance that may be spent without consuming a persisted
+    /// lock. Locks continue to reserve their amount after their timestamp has
+    /// expired until the holder explicitly withdraws them.
+    fn get_spendable_balance(env: &Env, user: &Address) -> i128 {
+        Self::read_balance(env, user)
+            .checked_sub(Self::get_locked_amount(env, user))
+            .unwrap_or(0)
+    }
+
     /// Returns `true` while the user has a lock whose unlock timestamp is still
     /// in the future. An expired lock no longer counts as locked, even though
     /// its tokens stay in storage until explicitly withdrawn.
@@ -482,6 +495,65 @@ impl BcForgeToken {
 
 #[contractimpl]
 impl BcForgeToken {
+    /// Restricts part of an existing holder balance until `unlock_timestamp`.
+    /// Existing locks accumulate and can only have their unlock time extended.
+    pub fn lock_tokens(
+        env: Env,
+        caller: Address,
+        user: Address,
+        amount: i128,
+        unlock_timestamp: u64,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let existing = Self::read_lockup(&env, &user);
+        let locked = existing.as_ref().map(|state| state.amount).unwrap_or(0);
+        let spendable = Self::read_balance(&env, &user)
+            .checked_sub(locked)
+            .ok_or(TokenError::InsufficientBalance)?;
+        if amount > spendable {
+            return Err(TokenError::InsufficientBalance);
+        }
+        let accumulated = locked
+            .checked_add(amount)
+            .ok_or(TokenError::InvalidAmount)?;
+        let stored_unlock = existing
+            .map(|state| state.unlock_timestamp.max(unlock_timestamp))
+            .unwrap_or(unlock_timestamp);
+        Self::write_lockup(
+            &env,
+            &user,
+            &LockupState {
+                amount: accumulated,
+                unlock_timestamp: stored_unlock,
+            },
+        );
+        events::emit_locked(&env, &user, amount, stored_unlock);
+        Ok(())
+    }
+
+    /// Removes a holder's complete lock after its unlock timestamp is reached.
+    ///
+    /// Does not change the holder's balance or total supply. The holder must
+    /// authorize the call; an admin signature is not required.
+    pub fn withdraw_locked(env: Env, user: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        user.require_auth();
+        let lock = Self::read_lockup(&env, &user).ok_or(TokenError::LockupNotFound)?;
+        if env.ledger().timestamp() < lock.unlock_timestamp {
+            return Err(TokenError::TokensStillLocked);
+        }
+        Self::remove_lockup(&env, &user);
+        events::emit_withdraw_locked(&env, &user, lock.amount);
+        Ok(())
+    }
+
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
@@ -631,7 +703,7 @@ impl BcForgeToken {
                 };
             }
 
-            if Self::read_balance(&env, &from) < total {
+            if Self::get_spendable_balance(&env, &from) < total {
                 return Err(TokenError::InsufficientBalance);
             }
 
@@ -1341,7 +1413,7 @@ impl TokenInterface for BcForgeToken {
         }
 
         let balance = Self::read_balance(&env, &from);
-        if balance < amount {
+        if Self::get_spendable_balance(&env, &from) < amount {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
@@ -1380,7 +1452,7 @@ impl TokenInterface for BcForgeToken {
 
         let allowance_data = Self::read_allowance_data(&env, &from, &spender);
         let balance = Self::read_balance(&env, &from);
-        if balance < amount {
+        if Self::get_spendable_balance(&env, &from) < amount {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 

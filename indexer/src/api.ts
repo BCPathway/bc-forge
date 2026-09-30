@@ -190,6 +190,27 @@ function buildTransferWhere(
  *
  * Burns have a `from` address field. An address filter matches that field.
  */
+/**
+ * Build a `where` filter for an indexed event row with one address column.
+ */
+function buildAddressFieldWhere(
+  field: string,
+  address: string | undefined,
+  fromLedger: number | undefined,
+): Record<string, unknown> | undefined {
+  const conditions: Record<string, unknown>[] = [];
+  if (address !== undefined) {
+    conditions.push({ [field]: address });
+  }
+  if (fromLedger !== undefined) {
+    conditions.push({ ledger: { gte: fromLedger } });
+  }
+  if (conditions.length === 0) {
+    return undefined;
+  }
+  return conditions.length === 1 ? conditions[0] : { AND: conditions };
+}
+
 function buildBurnWhere(
   address: string | undefined,
   fromLedger: number | undefined,
@@ -508,6 +529,78 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
       }
       const where = buildBurnWhere(address, fromLedger);
       await handlePaginatedList(req, res, getPrismaClient().burn, where);
+    }),
+  );
+
+  /**
+   * GET /vault-deposits
+   * Retrieve yield-vault and wrapper deposit logs.
+   */
+  router.get(
+    '/vault-deposits',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildAddressFieldWhere('caller', address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().vaultDeposit, where);
+    }),
+  );
+
+  /**
+   * GET /wrapper-updates
+   * Retrieve wrapper wrap and unwrap logs.
+   */
+  router.get(
+    '/wrapper-updates',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildAddressFieldWhere('caller', address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().wrapperUpdate, where);
+    }),
+  );
+
+  /**
+   * GET /vesting-claims
+   * Retrieve vesting token-release logs.
+   */
+  router.get(
+    '/vesting-claims',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildAddressFieldWhere('beneficiary', address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().vestingClaim, where);
+    }),
+  );
+
+  /**
+   * GET /split-distributions
+   * Retrieve successful split payout logs.
+   */
+  router.get(
+    '/split-distributions',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildAddressFieldWhere('recipient', address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().splitDistribution, where);
     }),
   );
 

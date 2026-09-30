@@ -28,6 +28,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 bc-forge/
 ├── contracts/                     # Soroban smart contracts (Rust)
 │   ├── admin/                     # Admin access control, proposals, multisig pool
+│   ├── flash_loan_guard/          # Flash-loan callback guard
 │   ├── lifecycle/                 # Pause/unpause lifecycle module
 │   ├── rate-limit/                # Rate limiting module
 │   ├── split/                     # Batch payout with per-recipient failure isolation
@@ -38,7 +39,7 @@ bc-forge/
 │   └── yield_vault/               # Yield-bearing vault with share accounting
 ├── cli/                           # TypeScript CLI (deploy, upgrade, multisig flows)
 ├── sdk/                           # TypeScript SDK consumed by dApps and the CLI
-├── react/                         # React hooks and components for the SDK
+├── react/                         # React hooks and components (see react/README.md)
 ├── indexer/                       # Event indexer and query API
 ├── e2e/                           # End-to-end integration tests
 ├── docs/                          # Long-form docs (architecture, vaults, upgrades)
@@ -58,6 +59,10 @@ bc-forge/
 ├── LICENSE                        # MIT
 └── README.md                      # This file
 ```
+
+The React package guide (install, provider, exports, peers, and a minimal SDK example) is [react/README.md](react/README.md).
+
+`scripts/checkReadmeTree.js` checks this Project Structure block in CI. Generated directories `node_modules`, `dist`, `target`, and `coverage` are ignored and are not required to appear here. Every other first-level contract crate and workspace package must be listed, and every directory listed in the block must exist on disk.
 
 > `contracts/yield_vault` is listed in the `exclude` array of the root
 > `Cargo.toml`. It is not part of the built workspace and is not shipped;

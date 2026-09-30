@@ -8,10 +8,10 @@ use soroban_sdk::{Address, Env, String};
 
 /// Helper fixture to set up environment, deploy and initialize token contract
 /// with designated Minter and Pauser roles assigned, along with user accounts.
-fn setup_roles_fixture<'a>(
-    env: &'a Env,
+fn setup_roles_fixture(
+    env: &Env,
 ) -> (
-    BcForgeTokenClient<'a>,
+    BcForgeTokenClient<'_>,
     Address, // Admin
     Address, // Minter (holds Minter role)
     Address, // Pauser (holds Pauser role)

@@ -81,6 +81,29 @@
 //!   `(Role, Address)`, `SuperAdmin(Address)` or `UpgradeProposal(u64)` entry has
 //!   its own lifecycle.
 //!
+//! ## Storage Monitoring & TTL
+//!
+//! - [`get_storage_info`] reports a recorded instance TTL and known singleton storage key counts:
+//!   - `instance_ttl`: Remaining ledgers until the live-until ledger this contract
+//!     recorded the last time it extended instance TTL. soroban-sdk 22.0.11 only
+//!     exposes `Instance::get_ttl` under `testutils`, and that method calls
+//!     `Host::get_contract_instance_live_until_ledger`, which is not a guest
+//!     host function. The 22 line has no later release that adds a guest read,
+//!     so this view cannot return the host's authoritative instance TTL.
+//!     Remaining ledgers are `stored_live_until.saturating_sub(current_ledger)`.
+//!     The value is `0` until this contract extends instance TTL, and it can
+//!     diverge from the host if another contract extends the instance or if the
+//!     instance was created with a different initial lifetime.
+//!   - `instance_keys`: The count of known singleton storage keys present in instance storage.
+//! - [`get_instance_ttl`] returns that recorded remaining TTL. No authorization.
+//! - [`get_storage_key_counts`] returns the count of known singleton admin storage keys.
+//! - **Scan Limit Notice**: Only known singleton keys stored under [`AdminKey`] in instance
+//!   storage (`Admin`, `AdminPool`, `Threshold`, `ProposalIdCounter`, `UpgradeProposalIdCounter`)
+//!   are counted. The bookkeeping key [`AdminKey::InstanceLiveUntil`] is excluded.
+//!   Persistent storage entries (such as role mappings and registered WASM hashes)
+//!   and parameterized proposal entries require unbounded scans, which cannot be enumerated
+//!   without unbounded gas usage.
+//!
 //! ## Invariants & Edge Cases
 //!
 //! ### Storage Slot Isolation
@@ -366,10 +389,109 @@ pub enum AdminKey {
     /// making it eligible to be referenced by an upgrade proposal. Checked by
     /// [`require_valid_wasm_hash`].
     InstalledWasmHash(soroban_sdk::BytesN<32>),
+    /// Ledger sequence recorded when this contract extends instance TTL.
+    /// Guest WASM on soroban-sdk 22.0.11 cannot read the host instance TTL, so
+    /// [`get_instance_ttl`] derives a non-negative remaining lifetime from this
+    /// value. It is not one of the five monitored singleton keys.
+    InstanceLiveUntil,
+}
+
+/// Instance TTL and the count of known singleton admin keys.
+///
+/// `instance_ttl` is the remaining lifetime, in ledgers, implied by the
+/// live-until ledger this contract stored the last time it extended instance
+/// TTL (`stored_live_until.saturating_sub(current_ledger)`). It is `0` before
+/// any such extension. soroban-sdk 22.0.11 cannot read the host's instance TTL
+/// from guest WASM (`Instance::get_ttl` is `testutils`-only and calls a host
+/// function that is not available to contracts), and 22.0.11 is the last
+/// release on the 22 line, so this field is that recorded remainder rather
+/// than the authoritative host TTL. It can be higher or lower than the host
+/// value if something else extends the instance, or if the instance was
+/// created with a different initial lifetime.
+///
+/// `instance_keys` counts only the singleton [`AdminKey`] variants stored in
+/// instance storage (`Admin`, `AdminPool`, `Threshold`, `ProposalIdCounter`,
+/// `UpgradeProposalIdCounter`). [`AdminKey::InstanceLiveUntil`], persistent
+/// entries, and parameterized keys are omitted so the view does not scan
+/// storage.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageInfo {
+    pub instance_ttl: u32,
+    pub instance_keys: u32,
+}
+
+fn singleton_instance_key_present(env: &Env, key: &AdminKey) -> bool {
+    env.storage().instance().has(key)
+}
+
+/// Count of known singleton admin keys currently stored on the instance.
+///
+/// This is not a scan of every ledger key. Only the five singleton variants
+/// listed on [`StorageInfo`] are checked.
+pub fn get_storage_key_counts(env: &Env) -> u32 {
+    let keys = [
+        AdminKey::Admin,
+        AdminKey::AdminPool,
+        AdminKey::Threshold,
+        AdminKey::ProposalIdCounter,
+        AdminKey::UpgradeProposalIdCounter,
+    ];
+    keys.iter()
+        .filter(|key| singleton_instance_key_present(env, key))
+        .count() as u32
+}
+
+/// Remaining ledgers until the recorded instance live-until ledger. No authorization.
+///
+/// This is `stored_live_until.saturating_sub(current_ledger)`, not a host read
+/// of the instance entry. See [`StorageInfo`].
+pub fn get_instance_ttl(env: &Env) -> u32 {
+    read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+}
+
+fn read_recorded_live_until(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&AdminKey::InstanceLiveUntil)
+        .unwrap_or(0)
+}
+
+/// Stores the live-until ledger an instance extension would set.
+///
+/// The host bumps only when the current remaining TTL is at or below
+/// `threshold` (`soroban-env-host` `storage::extend_ttl`). The same condition
+/// is applied to the recorded value. A missing record is treated as remaining
+/// `0`, so the first extension records `current_ledger + extend_to`.
+fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+    let current = env.ledger().sequence();
+    let stored = read_recorded_live_until(env);
+    let remaining = stored.saturating_sub(current);
+    if stored == 0 || remaining <= threshold {
+        let requested = current.saturating_add(extend_to);
+        if requested > stored {
+            env.storage()
+                .instance()
+                .set(&AdminKey::InstanceLiveUntil, &requested);
+        }
+    }
+}
+
+/// Instance TTL plus the singleton key count. No authorization.
+pub fn get_storage_info(env: &Env) -> StorageInfo {
+    StorageInfo {
+        instance_ttl: get_instance_ttl(env),
+        instance_keys: get_storage_key_counts(env),
+    }
 }
 
 fn extend_instance_ttl(env: &Env) {
     ttl::extend_instance_ttl(env);
+    remember_instance_extension(
+        env,
+        ttl::INSTANCE_LIFETIME_THRESHOLD,
+        ttl::INSTANCE_BUMP_AMOUNT,
+    );
 }
 
 /// pub(crate) re-export of the persistent-key TTL bump so the `privilege`
@@ -683,6 +805,18 @@ mod tests {
             action: PrivilegeAction,
         ) -> Result<(), AdminError> {
             super::consume_privilege_proposal(&env, &action)
+        }
+
+        pub fn get_storage_info(env: Env) -> StorageInfo {
+            super::get_storage_info(&env)
+        }
+
+        pub fn get_instance_ttl(env: Env) -> u32 {
+            super::get_instance_ttl(&env)
+        }
+
+        pub fn get_storage_key_counts(env: Env) -> u32 {
+            super::get_storage_key_counts(&env)
         }
     }
 
@@ -4398,5 +4532,105 @@ mod tests {
 
         // Should not panic for deployer
         client.require_deployer();
+    }
+
+    #[test]
+    fn test_storage_info_returns_non_negative_ttl_without_auth() {
+        let env = Env::default();
+        // Notice: env.mock_all_auths() is intentionally omitted to verify no auth is required.
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let info = client.get_storage_info();
+        assert_eq!(
+            info.instance_ttl, 0,
+            "fresh instance TTL is zero, which is non-negative, until an extension is recorded"
+        );
+        assert_eq!(
+            info.instance_keys, 0,
+            "fresh contract has 0 admin singleton keys"
+        );
+
+        let direct_ttl = client.get_instance_ttl();
+        assert_eq!(direct_ttl, info.instance_ttl);
+
+        let direct_keys = client.get_storage_key_counts();
+        assert_eq!(direct_keys, 0);
+    }
+
+    #[test]
+    fn test_storage_info_key_counts_tracks_singleton_keys() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+
+        assert_eq!(client.get_storage_key_counts(), 0);
+
+        // 1. Setting admin adds AdminKey::Admin
+        client.set_admin(&admin1);
+        assert_eq!(client.get_storage_key_counts(), 1);
+        let info = client.get_storage_info();
+        assert_eq!(info.instance_keys, 1);
+
+        // 2. Setting admin pool adds AdminKey::AdminPool and AdminKey::Threshold
+        let pool = vec![&env, admin1.clone(), admin2.clone()];
+        client.set_admin_pool(&pool, &2);
+        assert_eq!(client.get_storage_key_counts(), 3);
+
+        // 3. Creating proposal initializes AdminKey::ProposalIdCounter
+        let desc = String::from_str(&env, "Test Proposal");
+        client.create_proposal(&admin1, &desc);
+        assert_eq!(client.get_storage_key_counts(), 4);
+
+        // 4. Submitting upgrade proposal initializes AdminKey::UpgradeProposalIdCounter
+        let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+        client.register_wasm_hash(&admin1, &wasm_hash);
+        let upgrade_desc = String::from_str(&env, "Upgrade WASM");
+        let _ = client.submit_upgrade_proposal(&admin1, &wasm_hash, &upgrade_desc);
+        assert_eq!(client.get_storage_key_counts(), 5);
+
+        let final_info = client.get_storage_info();
+        assert_eq!(final_info.instance_keys, 5);
+        assert!(final_info.instance_ttl > 0);
+    }
+
+    #[test]
+    fn test_storage_info_ttl_after_extend_ttl() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let initial_ttl = client.get_instance_ttl();
+        assert!(initial_ttl > 0);
+        assert_eq!(initial_ttl, bc_forge_ttl::INSTANCE_BUMP_AMOUNT);
+
+        // Age the ledger so the recorded remaining TTL shrinks.
+        let sequence = env.ledger().sequence();
+        env.ledger().set_sequence_number(sequence + 5);
+        let aged_ttl = client.get_instance_ttl();
+        assert!(aged_ttl < initial_ttl);
+        assert_eq!(aged_ttl, initial_ttl - 5);
+
+        // Age until the recorded remainder is within the extension threshold,
+        // then extend through the contract path that records the new live-until.
+        let advance = initial_ttl - bc_forge_ttl::INSTANCE_LIFETIME_THRESHOLD;
+        env.ledger().set_sequence_number(sequence + advance);
+        let near_expiry = client.get_instance_ttl();
+        assert!(near_expiry <= bc_forge_ttl::INSTANCE_LIFETIME_THRESHOLD);
+        client.set_admin(&admin);
+        let extended_ttl = client.get_instance_ttl();
+        assert!(extended_ttl > near_expiry);
+        assert!(extended_ttl > 0);
+
+        let info = client.get_storage_info();
+        assert_eq!(info.instance_ttl, extended_ttl);
     }
 }

@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
+import { addNetworkOptions, explicitNetworkOverrides, formatContractIdWithExplorer } from '../network.js';
 import { getClientConfig } from '../utils/config.js';
 import { buildDeploymentArtifacts, exportDeploymentsToFile } from '../utils/deployments.js';
 import { resolveContractIdOption } from '../utils/registry.js';
@@ -306,9 +306,13 @@ export async function deployVault(opts: DeployVaultOptions): Promise<DeployVault
       }
     }
 
+    const printedVaultId =
+      vaultContractId && opts.network
+        ? formatContractIdWithExplorer(vaultContractId, opts.network)
+        : (vaultContractId ?? '(dry-run)');
     const message = dryRun
       ? 'Dry-run completed — no contracts were actually deployed.'
-      : `Vault deployment complete. Contract ID: ${vaultContractId ?? '(dry-run)'}`;
+      : `Vault deployment complete. Contract ID: ${printedVaultId}`;
 
     return {
       success: true,
@@ -372,10 +376,14 @@ export function createDeployCommand(): Command {
       if (result.success) {
         logger.success(result.message);
         if (result.vaultContractId) {
-          logger.info(`  Vault contract ID : ${result.vaultContractId}`);
+          logger.info(
+            `  Vault contract ID : ${formatContractIdWithExplorer(result.vaultContractId, netCfg.network)}`,
+          );
         }
         if (result.feeContractId) {
-          logger.info(`  Fee contract ID   : ${result.feeContractId}`);
+          logger.info(
+            `  Fee contract ID   : ${formatContractIdWithExplorer(result.feeContractId, netCfg.network)}`,
+          );
         }
         if (result.outPath) {
           logger.info(`  Artifact exported : ${result.outPath}`);

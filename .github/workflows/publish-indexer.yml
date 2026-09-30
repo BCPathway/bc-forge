@@ -1,0 +1,410 @@
+name: Publish indexer image
+
+# Builds indexer/Dockerfile and publishes the image to GHCR when an indexer
+# release tag lands. Buildx produces linux/amd64 and linux/arm64 under one
+# manifest list (#1049). That image is pushed to a local registry first so the
+# amd64 variant can be smoke-tested against fresh Postgres, both variants can
+# start Node, and Trivy can scan the amd64 image before any GHCR write.
+# Fixable critical vulnerabilities fail the job unless
+# .github/vulnerability-exceptions.yml names the advisory and an unexpired
+# expiry (#1052). The SARIF report is retained. After a tag publish, a separate
+# job signs the immutable digest with Cosign keyless OIDC. That job is the only
+# one with id-token: write, and no private signing key is created (#1051).
+# Component tags (sdk-v*, cli-v*, react-v*) do not match this filter, so they
+# never push an image.
+#
+# Tag convention: indexer-v<semver>, e.g. indexer-v1.2.3 or indexer-v1.2.3-rc.1
+on:
+  push:
+    tags:
+      - 'indexer-v*'
+  pull_request:
+    paths:
+      - 'indexer/**'
+      - '.github/workflows/publish-indexer.yml'
+      - '.github/vulnerability-exceptions.yml'
+      - 'SECURITY.md'
+      - 'package-lock.json'
+      - 'sdk/**'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: bcpathway/bc-forge-indexer
+  TAG_PREFIX: indexer-v
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  publish:
+    name: Smoke Test & Publish Indexer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: indexer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply Prisma migrations to fresh Postgres
+        working-directory: indexer
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/indexer?schema=public
+        run: npx prisma migrate deploy
+
+      - name: Resolve image tags
+        id: meta
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+
+          git_tag="${GITHUB_REF_NAME}"
+          if [[ "$git_tag" != "${TAG_PREFIX}"* ]]; then
+            echo "::error::Unexpected tag ${git_tag}; expected ${TAG_PREFIX}<semver>."
+            exit 1
+          fi
+
+          version="${git_tag#${TAG_PREFIX}}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag ${git_tag} does not carry a semantic version."
+            exit 1
+          fi
+
+          if [[ "$version" == *-* ]]; then
+            is_prerelease=true
+          else
+            is_prerelease=false
+          fi
+
+          tags="${REGISTRY}/${IMAGE_NAME}:${version}"
+          tags="${tags},${REGISTRY}/${IMAGE_NAME}:sha-${GITHUB_SHA}"
+          if [[ "$is_prerelease" == "false" ]]; then
+            tags="${tags},${REGISTRY}/${IMAGE_NAME}:latest"
+          fi
+
+          {
+            echo "version=${version}"
+            echo "is_prerelease=${is_prerelease}"
+            echo "tags=${tags}"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Start local registry
+        run: docker run -d --name registry -p 5000:5000 registry:2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          # host network so BuildKit and `imagetools inspect` both reach the
+          # registry at localhost:5000. A bridge alias (`registry`) is not
+          # resolvable from the runner, which is where inspect runs.
+          driver-opts: network=host
+          # The local registry speaks HTTP. Without this, BuildKit pushes to
+          # https://localhost:5000 and the registry answers with plain HTTP.
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+              insecure = true
+
+      - name: Build multi-arch indexer image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./indexer/Dockerfile
+          push: true
+          provenance: false
+          sbom: false
+          platforms: ${{ env.PLATFORMS }}
+          tags: localhost:5000/bc-forge-indexer:smoke
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version || 'smoke' }}
+          build-args: |
+            BUILD_NAME=bc-forge-indexer
+            BUILD_VERSION=${{ steps.meta.outputs.version || 'smoke' }}
+            BUILD_REVISION=${{ github.sha }}
+            BUILD_SOURCE=${{ github.server_url }}/${{ github.repository }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date || 'unknown' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify multi-arch manifest
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect localhost:5000/bc-forge-indexer:smoke --raw | tee /tmp/manifest.json
+          python3 - << 'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("/tmp/manifest.json").read_text(encoding="utf-8"))
+          manifests = data.get("manifests")
+          if not isinstance(manifests, list) or not manifests:
+              raise SystemExit("no manifests array in image index")
+          arches = set()
+          for entry in manifests:
+              platform = entry.get("platform") or {}
+              arch = platform.get("architecture")
+              os_name = platform.get("os")
+              if arch and os_name and arch != "unknown" and os_name != "unknown":
+                  arches.add(f"{os_name}/{arch}")
+          print(f"platforms found: {sorted(arches)}")
+          missing = {"linux/amd64", "linux/arm64"} - arches
+          if missing:
+              raise SystemExit(f"missing platforms in manifest: {sorted(missing)}")
+          print("multi-arch manifest OK: linux/amd64 and linux/arm64 present")
+          PY
+
+      - name: Load amd64 image for smoke test
+        run: |
+          docker pull --platform linux/amd64 localhost:5000/bc-forge-indexer:smoke
+          docker tag localhost:5000/bc-forge-indexer:smoke bc-forge-indexer:smoke
+
+      - name: Run final indexer container against fresh Postgres
+        run: |
+          docker run -d \
+            --name indexer-smoke-target \
+            --net=host \
+            -e DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/indexer?schema=public" \
+            -e CONTRACT_ID="CB64D3G7SM2RTH6JSGG34DDTFTRH4CFM6O4X222O7R7MVR3K2TEEEEEE" \
+            -e INDEXER_API_TOKEN="smoke-test-token" \
+            -e PORT=3000 \
+            bc-forge-indexer:smoke
+
+      - name: Poll /health probe until ready
+        run: |
+          echo "Polling indexer /health endpoint..."
+          max_attempts=30
+          attempt=0
+          until curl -s -f http://127.0.0.1:3000/health | grep -q '"status":"ok"'; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::Indexer /health probe failed to return ok within timeout"
+              docker logs indexer-smoke-target
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "Indexer /health probe succeeded!"
+
+      - name: Make authenticated /api/v1/stats request
+        run: |
+          response=$(curl -s -f -H "Authorization: Bearer smoke-test-token" http://127.0.0.1:3000/api/v1/stats)
+          echo "Response: $response"
+          if ! echo "$response" | grep -q '"mintCount"'; then
+            echo "::error::Authenticated /api/v1/stats probe returned unexpected payload: $response"
+            docker logs indexer-smoke-target
+            exit 1
+          fi
+
+      - name: Stop smoke test container
+        if: always()
+        run: docker rm -f indexer-smoke-target || true
+
+      - name: Confirm both architectures start Node
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            echo "--- ${platform}: node process starts ---"
+            docker run --rm --platform "${platform}" localhost:5000/bc-forge-indexer:smoke \
+              node -e "if (!process.version) process.exit(1); console.log('node ok', process.arch, process.version)"
+          done
+
+      - name: Scan image for critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: bc-forge-indexer:smoke
+          format: json
+          output: trivy-results.json
+          severity: CRITICAL
+          exit-code: '0'
+          vuln-type: os,library
+
+      - name: Write SARIF report
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: bc-forge-indexer:smoke
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          vuln-type: os,library
+
+      - name: Fail on fixable critical vulnerabilities
+        run: |
+          python3 - << 'PY'
+          import datetime
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          raw = Path(".github/vulnerability-exceptions.yml").read_text(encoding="utf-8")
+          lines = [line for line in raw.splitlines() if not line.strip().startswith("#")]
+          blocks = re.split(r"\n(?=  - )", "\n" + "\n".join(lines))
+          exceptions = {}
+          for block in blocks:
+              cve_match = re.search(r"(?m)^\s*- cve:\s*(\S+)\s*$", block)
+              if not cve_match:
+                  continue
+              cve = cve_match.group(1)
+              advisory_match = re.search(r"(?m)^\s*advisory:\s*(\S+)\s*$", block)
+              expires_match = re.search(r"(?m)^\s*expires:\s*(\d{4}-\d{2}-\d{2})\s*$", block)
+              if not advisory_match or not expires_match:
+                  print(f"::error::Exception {cve} must include an advisory id and an expiry date (YYYY-MM-DD).")
+                  sys.exit(1)
+              exceptions[cve] = (advisory_match.group(1), expires_match.group(1))
+
+          report = json.loads(Path("trivy-results.json").read_text(encoding="utf-8"))
+          today = datetime.date.today()
+          blocked = []
+          for result in report.get("Results") or []:
+              for vuln in result.get("Vulnerabilities") or []:
+                  if vuln.get("Severity") != "CRITICAL":
+                      continue
+                  fixed = (vuln.get("FixedVersion") or "").strip()
+                  if not fixed:
+                      continue
+                  vid = vuln.get("VulnerabilityID") or ""
+                  exception = exceptions.get(vid)
+                  if exception is None:
+                      blocked.append(f"{vid} in {vuln.get('PkgName')} is fixable in {fixed} and has no exception")
+                      continue
+                  advisory, expires = exception
+                  if datetime.date.fromisoformat(expires) < today:
+                      blocked.append(f"{vid} exception {advisory} expired on {expires}")
+          if blocked:
+              for item in blocked:
+                  print(f"::error::{item}")
+              sys.exit(1)
+          print(f"No blocking fixable critical vulnerabilities ({len(exceptions)} exception rule(s)).")
+          PY
+
+      - name: Upload scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-indexer-report
+          path: |
+            trivy-results.json
+            trivy-results.sarif
+          retention-days: 90
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-indexer
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push indexer image
+        id: push
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          args=(
+            -t "${REGISTRY}/${IMAGE_NAME}:${version}"
+            -t "${REGISTRY}/${IMAGE_NAME}:sha-${GITHUB_SHA}"
+          )
+          if [[ "${{ steps.meta.outputs.is_prerelease }}" == "false" ]]; then
+            args+=(-t "${REGISTRY}/${IMAGE_NAME}:latest")
+          fi
+          docker buildx imagetools create "${args[@]}" localhost:5000/bc-forge-indexer:smoke
+          echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize published tags
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Indexer image published"
+            echo ""
+            echo "- Image: \`${REGISTRY}/${IMAGE_NAME}\`"
+            echo "- Version: \`${{ steps.meta.outputs.version }}\`"
+            echo "- Prerelease: \`${{ steps.meta.outputs.is_prerelease }}\`"
+            echo "- Platforms: \`${PLATFORMS}\`"
+            echo "- Tags: \`${{ steps.meta.outputs.tags }}\`"
+            echo "- Digest: \`${{ steps.push.outputs.digest }}\`"
+            echo "- Vulnerability scan: fixable critical findings block this publish unless an unexpired advisory exception exists."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sign:
+    name: Sign indexer image
+    needs: publish
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign image digest with keyless OIDC
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DIGEST}" || "${DIGEST}" != sha256:* ]]; then
+            echo "::error::Publish job did not emit an immutable image digest."
+            exit 1
+          fi
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          {
+            echo "### Indexer image signed"
+            echo ""
+            echo "- Image: \`${IMAGE}@${DIGEST}\`"
+            echo "- Identity: \`https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-indexer.yml@${GITHUB_REF}\`"
+            echo "- Issuer: \`https://token.actions.githubusercontent.com\`"
+            echo "- Private signing key: none (keyless GitHub OIDC)"
+          } >> "$GITHUB_STEP_SUMMARY"
+

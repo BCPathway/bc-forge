@@ -1,0 +1,49 @@
+name: React visual snapshots
+
+on:
+  pull_request:
+    paths:
+      - "react/**"
+      - "sdk/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/react-visual.yml"
+  push:
+    branches: [main]
+    paths:
+      - "react/**"
+      - "sdk/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/react-visual.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.17.1"
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @bc-forge/sdk
+      - run: npm test --workspace @bc-forge/react -- --runInBand
+      - run: npm run build --workspace @bc-forge/react
+      - run: npm run typecheck:storybook --workspace @bc-forge/react
+      - run: npm run lint:storybook --workspace @bc-forge/react
+      - run: npm run test:visual --workspace @bc-forge/react
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: react-visual-differences
+          path: |
+            react/test-results/
+            react/playwright-report/
+          retention-days: 7

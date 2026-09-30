@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { installNetworkStubs } from './stubs';
 
 /**
  * Smoke spec for the bc-forge React demo harness (issue #908).
@@ -12,15 +13,16 @@ import { test, expect } from '@playwright/test';
 
 const SCREENS = [
   { hash: '#/', heading: 'Connect Control', testId: 'connect-control' },
-  { hash: '#/mint', heading: 'Mint Screen', testId: 'placeholder-mint' },
-  { hash: '#/transfer', heading: 'Transfer Screen', testId: 'screen-container' },
-  { hash: '#/burn', heading: 'Burn Screen', testId: 'placeholder-burn' },
-  { hash: '#/roles', heading: 'Roles Screen', testId: 'placeholder-roles' },
-  { hash: '#/vaults', heading: 'Vaults Screen', testId: 'screen-container' },
+  { hash: '#/mint', heading: 'Mint Tokens', testId: 'mint-screen' },
+  { hash: '#/transfer', heading: 'Transfer Tokens', testId: 'screen-container' },
+  { hash: '#/burn', heading: 'Burn Tokens', testId: 'screen-container' },
+  { hash: '#/roles', heading: 'Role Management', testId: 'roles-screen' },
+  { hash: '#/vaults', heading: 'Vaults Dashboard', testId: 'screen-container' },
 ];
 
 test.describe('Demo harness smoke tests', () => {
   test('loads the demo and shows the connect control by default', async ({ page }) => {
+    await installNetworkStubs(page);
     await page.goto('/');
 
     // Page title
@@ -38,6 +40,7 @@ test.describe('Demo harness smoke tests', () => {
 
   for (const { hash, heading, testId } of SCREENS) {
     test(`navigates to ${hash} and shows "${heading}"`, async ({ page }) => {
+      await installNetworkStubs(page);
       await page.goto(`/${hash}`);
 
       // The screen container must be in the DOM
@@ -50,6 +53,7 @@ test.describe('Demo harness smoke tests', () => {
   }
 
   test('passes without any wallet extension installed', async ({ page, context }) => {
+    await installNetworkStubs(page);
     // Confirm no extension APIs are injected
     const hasFreighter = await page.evaluate(
       () => typeof (window as Window & { freighter?: unknown }).freighter !== 'undefined',

@@ -78,6 +78,12 @@ export const TransferScreen: React.FC<TransferScreenProps> = ({
   return (
     <section className={className} style={{ display: 'grid', gap: 12, ...style }}>
       <div>
+        <h1 style={{ margin: '0 0 8px 0', fontSize: '24px', fontWeight: 700 }}>Transfer Tokens</h1>
+        <p style={{ margin: 0, color: '#4b5563', fontSize: '14px' }}>
+          Transfer tokens to a destination address.
+        </p>
+      </div>
+      <div>
         <div>Connected address</div>
         <div data-testid="transfer-connected-address">
           {connectedAddress ?? 'Not connected'}

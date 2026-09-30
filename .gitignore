@@ -47,3 +47,8 @@ issue_pr.txt
 docs/api/sdk/
 docs/public/api/
 docs/.vitepress/cache/
+
+# React Storybook and Playwright outputs (PNG baselines remain tracked)
+react/storybook-static/
+react/test-results/
+react/playwright-report/
