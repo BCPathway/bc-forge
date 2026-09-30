@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { Contract, xdr, rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import { getClientConfig } from '../utils/config.js';
 import logger from '../utils/logger.js';
+import { writeJson } from '../utils/output.js';
 import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
 import { resolveContractIdOption } from '../utils/registry.js';
 
@@ -140,7 +141,8 @@ export function createVerifyHashCommand(): Command {
     .description('Diff a local WASM build against the hash a deployed contract runs')
     .requiredOption('--wasm <path>', 'Path to the locally built .wasm artifact')
     .option('--contract-id <id>', 'Contract id or deployment alias (defaults to the configured contract)')
-    .option('--name <name>', 'Label for the contract in the report', 'contract');
+    .option('--name <name>', 'Label for the contract in the report', 'contract')
+    .option('--json', 'Print the local and on-chain hashes as JSON');
 
   addNetworkOptions(cmd);
 
@@ -158,11 +160,17 @@ export function createVerifyHashCommand(): Command {
         });
         const result = await verifyHash(server, options.name, contractId, options.wasm);
 
-        if (result.localHash) logger.info(`Local hash:    ${result.localHash}`);
-        if (result.onChainHash) logger.info(`On-chain hash: ${result.onChainHash}`);
+        if (options.json) {
+          writeJson(result);
+        } else {
+          if (result.localHash) logger.info(`Local hash:    ${result.localHash}`);
+          if (result.onChainHash) logger.info(`On-chain hash: ${result.onChainHash}`);
+        }
 
         if (result.verdict === 'match') {
-          logger.success(`${result.name}: local build matches the deployed contract`);
+          if (!options.json) {
+            logger.success(`${result.name}: local build matches the deployed contract`);
+          }
         } else {
           logger.error(`${result.name}: ${result.verdict}${result.error ? ` - ${result.error}` : ''}`);
           process.exitCode = 1;

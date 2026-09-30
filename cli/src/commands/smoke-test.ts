@@ -11,6 +11,7 @@ import {
 import { addNetworkOptions } from "../network.js";
 import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/soroban-tx.js";
 import logger from "../utils/logger.js";
+import { writeJson } from "../utils/output.js";
 import { resolveContractIdOption } from "../utils/registry.js";
 
 /** Default delay between passes in --watch mode (#940). */
@@ -73,7 +74,8 @@ export function createSmokeTestCommand(): Command {
     "--interval <ms>",
     "Delay between smoke test passes in --watch mode",
     "15000"
-  );
+  )
+  .option("--json", "Print balances and transaction hashes as JSON");
 
   addNetworkOptions(cmd);
 
@@ -88,11 +90,28 @@ export function createSmokeTestCommand(): Command {
         await watchSmokeTest({
           intervalMs: Number(opts.interval) || DEFAULT_WATCH_INTERVAL_MS,
           once: () => runSmokeTest(resolved),
-          onResult: reportSmokeTestResult,
+          onResult: (result, iteration) => {
+            if (opts.json) {
+              writeJson({ iteration, ...result });
+              if (!result.success) {
+                logger.error(result.message);
+                process.exitCode = 1;
+              }
+              return;
+            }
+            reportSmokeTestResult(result, iteration);
+          },
         });
         return;
       }
-      await runSmokeTest(resolved);
+      const result = await runSmokeTest(resolved);
+      if (opts.json) {
+        writeJson(result);
+        if (!result.success) {
+          logger.error(result.message);
+          process.exitCode = 1;
+        }
+      }
     } catch (err: unknown) {
       logger.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;

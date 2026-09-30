@@ -12,6 +12,8 @@ CLI deployment orchestrator and management toolkit for **bc-forge** Soroban smar
   - [Environment Variables](#environment-variables)
   - [Deployment Configuration (.bc-forge.json)](#deployment-configuration-bc-forgejson)
 - [Command Reference](#command-reference)
+  - [`--json` output](#json-output)
+  - [Shell completions](#shell-completions)
   - [`init`](#init)
   - [`check-status`](#check-status)
   - [`upgrade`](#upgrade)
@@ -104,6 +106,50 @@ Place a `.bc-forge.json` file in your workspace root or specify a custom path wi
 ---
 
 ## Command Reference
+
+### `--json` output
+
+Human-readable text is the default. Pass `--json` to print one JSON document on stdout instead, so scripts can parse contract ids, balances, and transaction hashes. Errors stay on stderr.
+
+Commands that accept `--json`:
+
+| Command | JSON fields |
+| --- | --- |
+| `deployments register` | `alias`, `contractId`, `network`, `filePath` |
+| `deployments resolve` | `contractId`, `network` |
+| `deploy` | vault and fee contract ids, WASM hashes, `linkTxHash` |
+| `upgrade` | `txHash`, `wasmHash`, fee estimate |
+| `pause` / `unpause` | `hash` when a transaction is submitted |
+| `check-status` | per-contract `contractId` and status |
+| `verify-hash` | `localHash`, `onChainHash` |
+| `smoke-test` | `balanceBefore`, `mintHash`, `transferHash` |
+| `export-deployments` | exported `contracts` and `txHashes` |
+| `init-superadmin` | `contractId`, `txHash` |
+| `connect` | `linkedContracts`, `txHashes` |
+| `orchestrate` | contract id, transaction hash, and linked contracts |
+
+```bash
+bc-forge deployments resolve token --network testnet --json
+```
+
+```json
+{"contractId":"CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX","network":"testnet"}
+```
+
+### Shell completions
+
+`completions` prints a completion script for bash, zsh, or fish. The script completes command names, subcommands, and flags.
+
+```bash
+# bash
+eval "$(bc-forge completions bash)"
+
+# zsh
+eval "$(bc-forge completions zsh)"
+
+# fish
+bc-forge completions fish | source
+```
 
 ### `init`
 

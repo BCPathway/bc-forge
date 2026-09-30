@@ -5,6 +5,7 @@ import { addNetworkOptions } from "../network.js";
 import { getSecretKey } from "../utils/config.js";
 import { resolveContractIdOption } from "../utils/registry.js";
 import logger from "../utils/logger.js";
+import { writeJson } from "../utils/output.js";
 import { runPauseCommand, type PauseAction } from "../utils/pause.js";
 
 /**
@@ -25,7 +26,8 @@ export function createPauseCommand(action: PauseAction): Command {
     .option("--signature <file>", "Submit a pre-signed transaction XDR from a file")
     .option("--build-only", "Build an unsigned transaction without signing or submitting", false)
     .option("--out <file>", "Write the unsigned XDR to a file (used with --build-only)")
-    .option("--public-key <key>", "Caller public key (used with --build-only)");
+    .option("--public-key <key>", "Caller public key (used with --build-only)")
+    .option("--json", "Print the transaction hash as JSON");
 
   addNetworkOptions(cmd);
 
@@ -53,9 +55,17 @@ export function createPauseCommand(action: PauseAction): Command {
         outFile: opts.out,
         publicKey: opts.publicKey,
         secretKey: opts.source ?? getSecretKey() ?? undefined,
+        log: opts.json ? () => {} : undefined,
       });
 
-      if (result.submitted) {
+      if (opts.json) {
+        writeJson({
+          action: result.action,
+          submitted: result.submitted,
+          hash: result.hash,
+          xdr: result.xdr,
+        });
+      } else if (result.submitted) {
         logger.info(`${verb} confirmed (tx ${result.hash})`);
       } else {
         logger.info(

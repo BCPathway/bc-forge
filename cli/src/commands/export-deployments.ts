@@ -9,6 +9,7 @@ import {
 } from '../utils/deployments.js';
 import { mergeNetworkAliases, networksFromDocument, readDeploymentsDocument } from '../utils/registry.js';
 import logger from '../utils/logger.js';
+import { writeJson } from '../utils/output.js';
 
 export interface ExportDeploymentsCommandOptions {
   out: string;
@@ -17,6 +18,7 @@ export interface ExportDeploymentsCommandOptions {
   feeId?: string;
   txHash?: string;
   network?: string;
+  json?: boolean;
 }
 
 export function createExportDeploymentsCommand(): Command {
@@ -27,7 +29,8 @@ export function createExportDeploymentsCommand(): Command {
     .option('-c, --config <file>', 'Path to deployment config file (e.g. .bc-forge.json)')
     .option('--vault-id <id>', 'Vault contract ID')
     .option('--fee-id <id>', 'Fee contract ID')
-    .option('--tx-hash <hash>', 'Transaction hash to include');
+    .option('--tx-hash <hash>', 'Transaction hash to include')
+    .option('--json', 'Print exported contract ids and transaction hashes as JSON');
 
   addNetworkOptions(cmd);
 
@@ -98,7 +101,16 @@ export function createExportDeploymentsCommand(): Command {
         opts.out,
       );
       if (exportResult.success) {
-        logger.success(`Successfully exported deployment artifacts to ${exportResult.filePath}`);
+        if (opts.json) {
+          writeJson({
+            filePath: exportResult.filePath,
+            network: netCfg.network,
+            contracts,
+            txHashes,
+          });
+        } else {
+          logger.success(`Successfully exported deployment artifacts to ${exportResult.filePath}`);
+        }
       } else {
         logger.error(`Export failed: ${exportResult.error}`);
         process.exitCode = 1;
