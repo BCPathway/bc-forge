@@ -17,18 +17,28 @@ const CONFIG_DIR = path.join(
 );
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
-interface StoredConfig {
+export interface StoredConfig {
   network?: string;
   rpcUrl?: string;
   networkPassphrase?: string;
   contractId?: string;
   secretKey?: string;
+  /** Named address book: account name to Ed25519 public key. */
+  accounts?: Record<string, string>;
+}
+
+/** CLI config file. `BC_FORGE_CLI_CONFIG` overrides the default `~/.bc-forge-cli/config.json`. */
+export function getCliConfigPath(): string {
+  const override = process.env.BC_FORGE_CLI_CONFIG?.trim();
+  if (override) return path.resolve(override);
+  return CONFIG_FILE;
 }
 
 function readStoredConfig(): StoredConfig {
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    const file = getCliConfigPath();
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8'));
     }
   } catch {
     // ignore
@@ -38,10 +48,12 @@ function readStoredConfig(): StoredConfig {
 
 function writeStoredConfig(config: StoredConfig): void {
   try {
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    const file = getCliConfigPath();
+    const dir = path.dirname(file);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    fs.writeFileSync(file, JSON.stringify(config, null, 2), 'utf-8');
   } catch {
     // ignore - config storage is best-effort
   }

@@ -172,8 +172,8 @@ docker buildx build --platform linux/amd64,linux/arm64 -f indexer/Dockerfile -t 
 Images published for `indexer-v*` tags are signed with Cosign keyless signing.
 No private signing key is created or stored. The signature certificate is
 issued through GitHub Actions OIDC and is attached to the immutable image
-digest in GHCR. The signing job is the only job in
-`.github/workflows/publish-indexer.yml` with `id-token: write`.
+digest in GHCR. Only the signing job and the SBOM attestation job in
+`.github/workflows/publish-indexer.yml` have `id-token: write`.
 
 1. Copy the `sha256:` digest from the publish job summary (the same digest
    Buildx recorded for the smoked manifest).
@@ -199,6 +199,27 @@ Cosign prints the verified signature payload on success. Check that its image
 digest matches `DIGEST` and that its certificate identity and issuer match the
 values above. The tag is included in the identity check, while the signature
 verification target is the immutable digest rather than a mutable tag.
+
+### Release SBOM
+
+When an `indexer-v*` tag is pushed, the publish workflow generates a CycloneDX
+SBOM from the immutable GHCR image digest rather than a mutable tag. It checks
+that the SBOM lists operating-system and npm packages, rejects environment
+metadata and credential-like values, and uploads
+`indexer-<tag>-sbom.cdx.json` to the GitHub Release for that tag, creating the
+release when one does not exist yet. Cosign then attests the SBOM to the same
+digest with keyless GitHub OIDC. No private signing key is used, and pipeline
+credentials are not written into the SBOM.
+
+Using the same `IMAGE`, `TAG`, and `DIGEST` as the signature check above:
+
+```bash
+cosign verify-attestation \
+  --type cyclonedx \
+  --certificate-identity "https://github.com/BCPathway/bc-forge/.github/workflows/publish-indexer.yml@refs/tags/${TAG}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "${IMAGE}@${DIGEST}"
+```
 
 ### Running the Container
 
@@ -257,6 +278,135 @@ base schema `init` migration tracked in #1056 has been applied yet.
 seed data (placeholder `SEED_DATA_ADDRESS`, amount `1`, ledger `0`,
 `seed-` txHashes). It contains no secrets. Run it with `npm run db:seed`,
 or automatically via `prisma migrate reset` / the Compose stack.
+
+## Release artifacts
+
+Each published indexer release ships two artifacts built from the same commit
+(`.github/workflows/publish-indexer.yml`):
+
+| Artifact | Where | Purpose |
+| --- | --- | --- |
+| Container image | `ghcr.io/bcpathway/bc-forge-indexer` | runs the API and the background indexer |
+| `bc-forge-indexer-prisma-migrations-<version>.tar.gz` | GitHub Release assets | the migrations that match that image |
+
+`<version>` is the semantic version from the `indexer-v<semver>` release tag, taken from the same commit as the image. The
+archive contains `prisma/migrations/`, `prisma/schema.prisma`, and
+`prisma/migration_lock.toml`, so operators can apply exactly the migrations that
+shipped with the image. The release notes record the archive name, its SHA-256
+checksum, the image digest, and the commit they were built from.
+
+The image is tagged with the immutable version (for example `1.2.3`) and the
+commit (`sha-<commit>`); `latest` moves only on stable releases, so a
+`1.2.3-rc.1` prerelease never takes it over.
+
+### Verify the migration archive
+
+Download the archive and its `.sha256` companion from the release into the same
+directory, then check it:
+
+```bash
+sha256sum -c bc-forge-indexer-prisma-migrations-<version>.tar.gz.sha256   # Linux
+shasum -a 256 -c bc-forge-indexer-prisma-migrations-<version>.tar.gz.sha256  # macOS
+```
+
+A match prints `OK`. A mismatch means the download is corrupt or was modified —
+do not apply its migrations.
+
+## Deploy, verify, and roll back an indexer release
+
+Production deployments pin an immutable image **digest**, never `latest` or a
+mutable tag, so the running image always matches a reviewed release:
+
+```bash
+IMAGE=ghcr.io/bcpathway/bc-forge-indexer
+# Copy the digest from the release notes (never deploy :latest in production).
+DIGEST=sha256:1f0c8f0b0d5a2c9e4b3a6d7f8e9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a
+```
+
+### 1. Back up the database
+
+`prisma migrate deploy` is forward-only, so take a backup before every rollout
+that carries a migration:
+
+```bash
+pg_dump --format=custom "$DATABASE_URL" > "bc-forge-$(date -u +%Y%m%dT%H%M%SZ).dump"
+```
+
+### 2. Apply the migrations
+
+The image does not migrate on start (`CMD ["npm", "start"]`), so run the deploy
+from the same digest as an explicit step before starting the new container:
+
+```bash
+docker pull "${IMAGE}@${DIGEST}"
+docker run --rm -e DATABASE_URL="$DATABASE_URL" \
+  "${IMAGE}@${DIGEST}" npx prisma migrate deploy
+```
+
+### 3. Roll out the new digest
+
+```bash
+docker run -d --name bc-forge-indexer --restart unless-stopped -p 3000:3000 \
+  -e DATABASE_URL="$DATABASE_URL" \
+  -e CONTRACT_ID="$CONTRACT_ID" \
+  -e RPC_URL="$RPC_URL" \
+  -e INDEXER_API_TOKEN="$INDEXER_API_TOKEN" \
+  "${IMAGE}@${DIGEST}"
+```
+
+### 4. Verify health
+
+The two probes defined in [Health and monitoring](#health-and-monitoring) are
+the success criteria — a rollout is done only when both pass:
+
+- `GET /health` returns `200 {"status":"ok"}`. A `503` means the database is
+  unreachable, which is a failed rollout.
+- `GET /healthz` returns `lag` (`latestNetworkLedger - lastIndexedLedger`). A
+  healthy indexer keeps `lag` below `INDEXER_LAG_THRESHOLD` (default `100`).
+
+```bash
+curl -fsS http://localhost:3000/health
+curl -fsS http://localhost:3000/healthz
+```
+
+If either check fails, roll back before the indexer falls further behind.
+
+### When a migration makes an image rollback unsafe
+
+Migrations are forward-only: rolling the image back does not undo them. Rolling
+back to the previous digest is safe only while that image still matches the
+schema left by the new image. A migration is **not** backward compatible — and
+therefore makes image rollback unsafe — when it
+
+- drops or renames a table or column the previous image reads or writes,
+- changes a column type, or adds a `NOT NULL` column, in a way the previous
+  image cannot produce,
+- rewrites or deletes existing rows.
+
+Purely additive migrations (new tables, nullable columns, indexes) leave the
+previous image working, so the old digest can simply be restarted. When a
+migration is not backward compatible, do not roll the image back against the
+migrated schema: restore the backup from step 1 and accept that writes made
+after the backup are lost.
+
+### 5. Roll back
+
+```bash
+# 1. Stop the new container.
+docker stop bc-forge-indexer && docker rm bc-forge-indexer
+
+# 2. Backward-compatible migration: start the previous digest as-is.
+docker run -d --name bc-forge-indexer \
+  -e DATABASE_URL="$DATABASE_URL" \
+  "${IMAGE}@${PREVIOUS_DIGEST}"
+
+# 3. Non-backward-compatible migration: restore the pre-rollout dump first,
+#    then start the previous digest.
+pg_restore --clean --if-exists --dbname "$DATABASE_URL" bc-forge-<timestamp>.dump
+
+# 4. Re-run the step 4 health checks and keep the deployed digests on record so
+#    the previous digest is known during an incident.
+```
 
 
 ## Production operations runbook

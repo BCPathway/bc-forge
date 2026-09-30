@@ -20,6 +20,22 @@
  * APY      = ((1 + growth) ^ periods) - 1   (compound interest)
  * ```
  *
+ * Nominal APR and effective APY convert with an explicit compounding
+ * frequency. `n` is the number of compounding periods per year:
+ *
+ * ```
+ * APY = (1 + APR / n) ^ n - 1
+ * APR = n * ((1 + APY) ^ (1 / n) - 1)
+ * ```
+ *
+ * - Per day (`"day"`): `n = 365`.
+ * - Per ledger (`"ledger"`): Stellar ledgers close about every 5 seconds, so
+ *   `n = 365.25 * 24 * 60 * 60 / 5`.
+ *
+ * `timeWeightedYield` geometrically links the same `ApySnapshot` share prices
+ * inside a caller-supplied ledger window. It returns that holding-period
+ * yield and does not annualise; `calculateApy` still does the annualisation.
+ *
  * The result is a decimal fraction (e.g. `0.12` = 12 % APY).  Callers can
  * multiply by 100 to get a percentage.
  *
@@ -94,6 +110,26 @@ export interface ApyResult {
   windowLedgers: number;
   /** Equivalent duration of the measurement window in days. */
   windowDays: number;
+}
+
+/**
+ * How often a nominal rate compounds when converting between APR and APY.
+ *
+ * - `"day"` — 365 compounding periods per year.
+ * - `"ledger"` — once per Stellar ledger. Ledgers are assumed to close every
+ *   5 seconds, so periods per year = `365.25 * 24 * 60 * 60 / 5`.
+ */
+export type CompoundingFrequency = 'day' | 'ledger';
+
+/**
+ * Inclusive ledger window for {@link timeWeightedYield}.
+ * Snapshots outside `[startLedger, endLedger]` are ignored.
+ */
+export interface YieldWindow {
+  /** First ledger included in the window. */
+  startLedger: number;
+  /** Last ledger included in the window. */
+  endLedger: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -195,6 +231,117 @@ async function readSnapshot(
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Compounding periods per year for an APR/APY conversion.
+ *
+ * Per day, `n = 365`. Per ledger, Stellar's ~5 second close time gives
+ * `n = 365.25 * 24 * 60 * 60 / 5` (the same ledger count `calculateApy` uses
+ * when it annualises a look-back window).
+ */
+export function compoundingPeriodsPerYear(frequency: CompoundingFrequency): number {
+  if (frequency === 'day') return 365;
+  if (frequency === 'ledger') return LEDGERS_PER_YEAR;
+  throw new RangeError(
+    `compounding frequency must be "day" or "ledger" (received ${JSON.stringify(frequency)})`,
+  );
+}
+
+function assertFiniteRate(name: string, rate: number): void {
+  if (!Number.isFinite(rate)) {
+    throw new RangeError(`${name} must be a finite number`);
+  }
+}
+
+/**
+ * Converts a nominal APR to an effective APY.
+ *
+ * ```
+ * APY = (1 + APR / n) ^ n - 1
+ * ```
+ *
+ * `apr` and the return value are decimal fractions (`0.12` = 12%).
+ * `frequency` selects `n`: 365 for `"day"`, or one period per Stellar ledger
+ * (`365.25 * 24 * 60 * 60 / 5`, assuming a 5 second ledger close) for `"ledger"`.
+ */
+export function aprToApy(apr: number, frequency: CompoundingFrequency): number {
+  assertFiniteRate('apr', apr);
+  const n = compoundingPeriodsPerYear(frequency);
+  const base = 1 + apr / n;
+  if (base < 0) {
+    throw new RangeError('1 + APR / n must be >= 0');
+  }
+  return Math.pow(base, n) - 1;
+}
+
+/**
+ * Converts an effective APY to a nominal APR.
+ *
+ * ```
+ * APR = n * ((1 + APY) ^ (1 / n) - 1)
+ * ```
+ *
+ * `apy` and the return value are decimal fractions (`0.12` = 12%).
+ * `frequency` selects `n`: 365 for `"day"`, or one period per Stellar ledger
+ * (`365.25 * 24 * 60 * 60 / 5`, assuming a 5 second ledger close) for `"ledger"`.
+ */
+export function apyToApr(apy: number, frequency: CompoundingFrequency): number {
+  assertFiniteRate('apy', apy);
+  if (apy < -1) {
+    throw new RangeError('APY must be >= -1');
+  }
+  const n = compoundingPeriodsPerYear(frequency);
+  return n * (Math.pow(1 + apy, 1 / n) - 1);
+}
+
+/**
+ * Time-weighted holding-period yield across `ApySnapshot` share prices.
+ *
+ * Sub-period price ratios are geometrically linked:
+ *
+ * ```
+ * r_i = P_i / P_{i-1} - 1
+ * TWY = Π (1 + r_i) - 1
+ * ```
+ *
+ * For share prices that product equals `P_last / P_first - 1`. It is not the
+ * arithmetic average of the sub-period returns. Snapshots are sorted by
+ * ledger. A snapshot is skipped when its ledger is outside the window or its
+ * `sharePrice` is null, non-finite, or not positive. Returns `null` when
+ * fewer than two priced snapshots remain.
+ *
+ * This is the yield over the caller-supplied window. It does not annualise;
+ * pass the same snapshots to `calculateApy` when an APY is required.
+ */
+export function timeWeightedYield(
+  snapshots: readonly ApySnapshot[],
+  window: YieldWindow,
+): number | null {
+  if (!Number.isFinite(window.startLedger) || !Number.isFinite(window.endLedger)) {
+    throw new RangeError('Yield window ledgers must be finite numbers');
+  }
+  if (window.endLedger < window.startLedger) {
+    throw new RangeError('Yield window endLedger must be >= startLedger');
+  }
+
+  const priced = snapshots
+    .filter(
+      (snapshot) =>
+        snapshot.ledger >= window.startLedger &&
+        snapshot.ledger <= window.endLedger &&
+        snapshot.sharePrice !== null &&
+        Number.isFinite(snapshot.sharePrice) &&
+        snapshot.sharePrice > 0,
+    )
+    .slice()
+    .sort((a, b) => a.ledger - b.ledger);
+
+  if (priced.length < 2) return null;
+
+  const first = priced[0].sharePrice as number;
+  const last = priced[priced.length - 1].sharePrice as number;
+  return last / first - 1;
+}
 
 /**
  * Calculates the current Annual Percentage Yield (APY) for a yield-bearing

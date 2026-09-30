@@ -7,9 +7,14 @@ name: Publish indexer image
 # start Node, and Trivy can scan the amd64 image before any GHCR write.
 # Fixable critical vulnerabilities fail the job unless
 # .github/vulnerability-exceptions.yml names the advisory and an unexpired
-# expiry (#1052). The SARIF report is retained. After a tag publish, a separate
-# job signs the immutable digest with Cosign keyless OIDC. That job is the only
-# one with id-token: write, and no private signing key is created (#1051).
+# expiry (#1052). The SARIF report is retained. After a tag publish, separate
+# jobs sign the immutable digest with Cosign keyless OIDC and generate a
+# CycloneDX SBOM from that digest, upload it to the GitHub Release, and attest
+# it. Only those jobs have id-token: write, and no private signing key is
+# created (#1051, #1050). The same tag run also archives prisma/schema.prisma
+# and prisma/migrations from that commit, attaches the archive and its SHA-256
+# to the GitHub Release, and records them in the release notes (#1054).
+# contents: write is limited to the jobs that upload release assets.
 # Component tags (sdk-v*, cli-v*, react-v*) do not match this filter, so they
 # never push an image.
 #
@@ -47,6 +52,7 @@ jobs:
       security-events: write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
+      version: ${{ steps.meta.outputs.version }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -408,3 +414,226 @@ jobs:
             echo "- Private signing key: none (keyless GitHub OIDC)"
           } >> "$GITHUB_STEP_SUMMARY"
 
+
+  sbom:
+    name: Generate, publish, and attest image SBOM
+    needs: publish
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.6
+        with:
+          version: v0.69.3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate CycloneDX SBOM from image digest
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          SBOM_FILE: ${{ runner.temp }}/indexer-${{ github.ref_name }}-sbom.cdx.json
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ -z "${DIGEST}" || "${DIGEST}" != sha256:* ]]; then
+            echo "::error::Publish job did not emit an immutable image digest."
+            exit 1
+          fi
+          trivy image --format cyclonedx --output "$SBOM_FILE" "${IMAGE}@${DIGEST}"
+
+      - name: Validate SBOM content and secret exclusion
+        env:
+          SBOM_FILE: ${{ runner.temp }}/indexer-${{ github.ref_name }}-sbom.cdx.json
+        run: |
+          node --input-type=commonjs - "$SBOM_FILE" <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const text = fs.readFileSync(file, 'utf8');
+          const bom = JSON.parse(text);
+
+          if (bom.bomFormat !== 'CycloneDX' || !Array.isArray(bom.components) || bom.components.length === 0) {
+            throw new Error('Expected a non-empty CycloneDX SBOM');
+          }
+
+          const purls = bom.components.map((component) => component.purl || '');
+          const npmCount = purls.filter((purl) => purl.startsWith('pkg:npm/')).length;
+          const osCount = bom.components.filter((component) => {
+            const purl = component.purl || '';
+            return component.type === 'operating-system'
+              || purl.startsWith('pkg:apk/')
+              || purl.startsWith('pkg:deb/')
+              || purl.startsWith('pkg:rpm/')
+              || purl.startsWith('pkg:alpm/');
+          }).length;
+          if (npmCount === 0 || osCount === 0) {
+            throw new Error(`SBOM must contain OS and npm packages (os=${osCount}, npm=${npmCount})`);
+          }
+
+          const properties = [bom.metadata, ...bom.components]
+            .flatMap((item) => item?.properties ?? []);
+          if (properties.some((property) => /(?:^|[.:/])(?:env|environment)(?:[.:/]|$)/i.test(property.name ?? ''))) {
+            throw new Error('SBOM contains environment-variable metadata');
+          }
+
+          const sensitiveValues = Object.entries(process.env)
+            .filter(([name, value]) => /token|password|secret|credential|private.?key/i.test(name) && value)
+            .map(([, value]) => value);
+          const credentialPattern = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b/;
+          if (sensitiveValues.some((value) => text.includes(value)) || credentialPattern.test(text)) {
+            throw new Error('SBOM contains a credential-like value');
+          }
+
+          console.log(`Validated CycloneDX SBOM with ${bom.components.length} components (${osCount} OS, ${npmCount} npm); no environment metadata or credential values found.`);
+          NODE
+
+      - name: Attach SBOM to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SBOM_FILE: ${{ runner.temp }}/indexer-${{ github.ref_name }}-sbom.cdx.json
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Indexer image ${IMAGE}@${DIGEST}"
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$SBOM_FILE" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.2
+
+      - name: Attest SBOM to image digest
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          SBOM_FILE: ${{ runner.temp }}/indexer-${{ github.ref_name }}-sbom.cdx.json
+        run: |
+          set -euo pipefail
+          cosign attest --yes --type cyclonedx --predicate "$SBOM_FILE" "${IMAGE}@${DIGEST}"
+          {
+            echo "### Indexer SBOM attested"
+            echo ""
+            echo "- Image: \`${IMAGE}@${DIGEST}\`"
+            echo "- Asset: \`indexer-${GITHUB_REF_NAME}-sbom.cdx.json\`"
+            echo "- Identity: \`https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-indexer.yml@${GITHUB_REF}\`"
+            echo "- Issuer: \`https://token.actions.githubusercontent.com\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  migrations:
+    name: Package and attach Prisma migration archive
+    needs: [publish, sbom]
+    if: github.event_name != 'pull_request' && needs.publish.result == 'success' && needs.sbom.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package migrations and schema
+        id: package
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          archive="bc-forge-indexer-prisma-migrations-${VERSION}.tar.gz"
+          mkdir -p release_assets
+
+          # Deterministic archive: sorted entries, fixed ownership, and a
+          # name-free gzip stream make the checksum reproducible for the same
+          # commit.
+          tar \
+            --create \
+            --sort=name \
+            --mtime='UTC 1980-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --use-compress-program='gzip -9n' \
+            --file "release_assets/${archive}" \
+            -C indexer \
+            prisma/schema.prisma \
+            prisma/migrations
+
+          ( cd release_assets && sha256sum "${archive}" > "${archive}.sha256" )
+
+          checksum="$(cut -d' ' -f1 "release_assets/${archive}.sha256")"
+          {
+            echo "archive=${archive}"
+            echo "checksum=${checksum}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Packaged release_assets/${archive} (sha256 ${checksum})"
+
+      - name: Attach archive to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Indexer image ${IMAGE}@${DIGEST}"
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            "release_assets/${ARCHIVE}" \
+            "release_assets/${ARCHIVE}.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Record the artifact in the release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          notes="$(mktemp)"
+          gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body --jq '.body // ""' > "$notes"
+
+          # Replace any previous copy of the section so re-running the job is
+          # idempotent instead of appending a duplicate.
+          awk '
+            /^<!-- indexer-migrations:end -->$/ { skip = 0; next }
+            /^<!-- indexer-migrations:start -->$/ { skip = 1; next }
+            skip != 1 { print }
+          ' "$notes" > "${notes}.next"
+          mv "${notes}.next" "$notes"
+
+          {
+            echo ""
+            echo "<!-- indexer-migrations:start -->"
+            echo "### Indexer Prisma migration archive"
+            echo ""
+            echo "- Artifact: \`${ARCHIVE}\`"
+            echo "- SHA-256: \`${CHECKSUM}\`"
+            echo "- Matches image digest: \`${DIGEST}\`"
+            echo "- Built from commit: \`${GITHUB_SHA}\`"
+            echo "<!-- indexer-migrations:end -->"
+          } >> "$notes"
+
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-file "$notes"

@@ -23,6 +23,7 @@ import {
   ContractError,
   parseContractError,
 } from './errors';
+import { decodeSimulationEvents, type bcForgeEvent } from './events';
 
 export interface SubmitTransactionOptions {
   maxAttempts?: number;
@@ -479,6 +480,50 @@ export function signTransaction(
   const tx = TransactionBuilder.fromXDR(txXdr, networkPassphrase);
   tx.sign(keypair);
   return tx.toXDR();
+}
+
+/**
+ * Ledger keys a simulated invocation would read and write.
+ */
+export interface DryRunFootprint {
+  readOnly: xdr.LedgerKey[];
+  readWrite: xdr.LedgerKey[];
+}
+
+/**
+ * Fee, footprint, and decoded events from a dry-run simulation.
+ * `fee` is the estimated Soroban resource fee in stroops (`minResourceFee`).
+ */
+export interface DryRunResult {
+  fee: string;
+  footprint: DryRunFootprint;
+  events: bcForgeEvent[];
+}
+
+/**
+ * Maps a successful Soroban simulation into the dry-run return value.
+ * Does not submit a transaction.
+ */
+export function simulationToDryRun(
+  simulated: SorobanRpc.Api.SimulateTransactionResponse,
+): DryRunResult {
+  if (!SorobanRpc.Api.isSimulationSuccess(simulated)) {
+    const details = SorobanRpc.Api.isSimulationError(simulated) ? simulated.error : undefined;
+    throw new SimulationError(
+      details ? `Dry-run failed: ${details}` : 'Dry-run returned no simulation result',
+      details,
+    );
+  }
+
+  const footprint = simulated.transactionData.getFootprint();
+  return {
+    fee: simulated.minResourceFee,
+    footprint: {
+      readOnly: footprint.readOnly(),
+      readWrite: footprint.readWrite(),
+    },
+    events: decodeSimulationEvents(simulated.events),
+  };
 }
 
 /**
