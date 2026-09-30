@@ -6,10 +6,17 @@ Supported Node, React, Stellar SDK, and package ranges are in the [compatibility
 
 ## Installation
 
-Install the package and its peer dependencies:
+Install the package and its peer dependencies. Stable releases (`react-vX.Y.Z`) publish to the npm `latest` dist-tag:
 
 ```bash
 npm install @bc-forge/react react react-dom @stellar/stellar-sdk
+```
+
+Prereleases do not replace `latest`. `react-vX.Y.Z-beta.N` publishes to the `beta` dist-tag, and `react-vX.Y.Z-rc.N` publishes to the `rc` dist-tag. Other prerelease identifiers are rejected and are not published.
+
+```bash
+npm install @bc-forge/react@beta
+npm install @bc-forge/react@rc
 ```
 
 Peer ranges are declared in `react/package.json`:

@@ -53,6 +53,14 @@
       "pattern": "^S[A-Z2-7]{55}$",
       "description": "Stellar secret seed key (optional, prefer ENV variables)"
     },
+    "accounts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^G[A-Z2-7]{55}$"
+      },
+      "description": "Named address book mapping an account name to a Stellar public key. Checksums are verified when the config is saved."
+    },
     "contracts": {
       "type": "object",
       "additionalProperties": {

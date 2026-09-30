@@ -21,8 +21,12 @@ LABEL org.opencontainers.image.title="bc-forge-indexer" \
       org.opencontainers.image.vendor="BCPathway" \
       org.opencontainers.image.source-name="${BUILD_SOURCE}"
 
-# openssl is required by the Prisma query engine on Alpine.
-RUN apk add --no-cache openssl
+# openssl is required by the Prisma query engine on Alpine. libc6-compat is
+# the glibc loader shim some Prisma native binaries probe for; it is harmless
+# on musl and lets the engines start on both amd64 and arm64 (#1049).
+# node:24.21.0-alpine is a multi-arch base, so Buildx can produce linux/amd64
+# and linux/arm64 from this Dockerfile under one manifest list.
+RUN apk add --no-cache openssl libc6-compat
 
 # Build from the repository root. @bc-forge/indexer depends on the
 # @bc-forge/sdk workspace, which is not published, so an indexer-only
@@ -48,6 +52,8 @@ COPY indexer/scripts ./indexer/scripts
 
 WORKDIR /app/indexer
 
+# Generate Prisma client. binaryTargets vendors engines for linux/amd64 and
+# linux/arm64, and this RUN executes per-platform under Buildx/QEMU (#1049).
 RUN npx prisma generate
 RUN npm run build
 

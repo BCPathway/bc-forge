@@ -5,6 +5,14 @@ name: Validate React package
 # This workflow_call lints, tests, builds, and validates the tarball.
 # It does not authenticate to npm and does not run npm publish.
 #
+# scripts/react-dist-tag.mjs maps the React version before that publish:
+# react-vX.Y.Z (and a stable package version) -> dist-tag latest;
+# react-vX.Y.Z-beta.N -> beta; react-vX.Y.Z-rc.N -> rc.
+# Any other prerelease identifier fails this job, so it never ships.
+# release.yml publishes beta and rc itself and then hides the package from
+# Changesets, which always passes --tag latest. Stable releases still go
+# through Changesets and update latest.
+#
 # Do not set defaults.run.working-directory to react/. Workspace commands
 # such as `npm run build --workspace` resolve from the repository root.
 
@@ -31,6 +39,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Resolve the React npm dist-tag
+        run: node scripts/react-dist-tag.mjs
+
+      - name: Test React dist-tag mapping
+        run: node --test scripts/react-dist-tag.test.mjs
 
       - name: Check the React version before publish
         run: node scripts/check-version-tag.mjs --before-changeset-publish --component react

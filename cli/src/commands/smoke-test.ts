@@ -13,6 +13,7 @@ import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/sor
 import logger from "../utils/logger.js";
 import { writeJson } from "../utils/output.js";
 import { resolveContractIdOption } from "../utils/registry.js";
+import { loadAccounts, resolveAccount } from "../utils/address-book.js";
 
 /** Default delay between passes in --watch mode (#940). */
 export const DEFAULT_WATCH_INTERVAL_MS = 15000;
@@ -62,7 +63,10 @@ export function createSmokeTestCommand(): Command {
       "Contract ID, or a deployment alias for the selected network"
     )
     .requiredOption("--source <secret>", "Admin/source account secret key")
-    .option("--recipient <address>", "Recipient address (auto-generated if omitted)")
+    .option(
+      "--recipient <address>",
+      "Recipient public key or address-book name (auto-generated if omitted)"
+    )
     .option("--amount <amount>", "Amount to mint and transfer (default: 1)", "1")
   .option(
     "--timeout <ms>",
@@ -82,9 +86,13 @@ export function createSmokeTestCommand(): Command {
   cmd.action(async (opts, command) => {
     try {
       const contractId = resolveContractIdOption(command, opts.contractId);
+      const accounts = loadAccounts();
       const resolved = {
         ...opts,
         contractId: contractId ?? opts.contractId,
+        recipient: opts.recipient
+          ? resolveAccount(opts.recipient, accounts)
+          : opts.recipient,
       };
       if (opts.watch) {
         await watchSmokeTest({

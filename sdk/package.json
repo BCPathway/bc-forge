@@ -2,10 +2,20 @@
   "name": "@bc-forge/sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for interacting with bc-forge token contracts on Stellar/Soroban",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/esm/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/esm/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && tsc && tsc -p tsconfig.esm.json && node scripts/prepare-esm.mjs",
     "dev": "tsc --watch",
     "test": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js --passWithNoTests",
     "lint": "eslint src",

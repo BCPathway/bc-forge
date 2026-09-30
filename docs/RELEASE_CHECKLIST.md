@@ -66,9 +66,9 @@ Any later component publisher must keep `permissions: {}` at the workflow root, 
 
 Use a granular npm token only when trusted publishing is unavailable (for example, the publisher record has not been created yet).
 
-1. On npm, create a **granular access token** that can publish only `@bc-forge/sdk`, `@bc-forge/cli`, and `@bc-forge/react`. Do not create a classic token with access to every package you own.
+1. On npm, create a **granular access token** that can publish only `@bc-forge/sdk`, `@bc-forge/cli`, `@bc-forge/react`, and `@bc-forge/indexer`. Do not create a classic token with access to every package you own.
 2. Store it as the `NPM_TOKEN` Actions secret on `BCPathway/bc-forge`.
-3. In `.github/workflows/release.yml`, add `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` to the Changesets step, publish the pending release, then remove that line so later releases go back to OIDC.
+3. The reusable workflow accepts `NPM_TOKEN` as an optional secret for fallback publishing.
 4. Rotate the secret after that publish, and after any exposure:
    - Revoke the token on npm (**Access Tokens → Revoke**).
    - Create a replacement granular token with the same package list.
@@ -108,8 +108,47 @@ Get-Content checksums.txt | ForEach-Object {
 
 A matching command prints `OK` for each file. A mismatch prints a checksum error and a non-zero exit status.
 
-The indexer entry in `manifest.json` uses `digest` (`sha256:...`) rather than a filename. Compare that value to `containerimage.digest` in the "Build indexer image and record its digest" log of the release workflow. That digest is the image built for the release; it is not a GHCR pull digest, because this repository does not push the indexer image.
+The indexer entry in `manifest.json` uses `digest` (`sha256:...`) rather than a filename. Compare that value to `containerimage.digest` in the "Build indexer image and record its digest" log of the release workflow. That digest is the image built for the release manifest. The image operators pull from GHCR is published by `.github/workflows/publish-indexer.yml` when an `indexer-v*` tag is pushed; deploy that image by the digest in the indexer release notes, not by `latest`.
 
+## Indexer image release
+
+Publishing a GitHub Release whose tag is `indexer-v<semver>` runs
+[`.github/workflows/publish-indexer.yml`](../.github/workflows/publish-indexer.yml).
+From that commit it builds `indexer/Dockerfile` and publishes the image to
+`ghcr.io/bcpathway/bc-forge-indexer` with:
+
+- an immutable `<version>` tag (for example `1.2.3`),
+- an immutable `sha-<commit>` tag, and
+- `latest`, updated only for stable releases — a `1.2.3-rc.1` prerelease never moves it.
+
+The same run packages the migrations for that commit — `prisma/migrations/`,
+`prisma/schema.prisma`, and `prisma/migration_lock.toml` — as
+`bc-forge-indexer-prisma-migrations-<version>.tar.gz`, attaches the archive and
+its `.sha256` companion to the Release, and appends the archive name, checksum,
+image digest, and commit to the release notes. Component tags for the other
+packages (`sdk-v*`, `cli-v*`, `react-v*`) are ignored.
+
+### Verify the migration archive
+
+Download the archive and its checksum into one directory, then recompute the
+hash:
+
+```bash
+sha256sum -c bc-forge-indexer-prisma-migrations-<version>.tar.gz.sha256   # Linux
+shasum -a 256 -c bc-forge-indexer-prisma-migrations-<version>.tar.gz.sha256  # macOS
+```
+
+A matching command prints `OK` for the archive. A mismatch means the download is
+corrupt or was modified; do not apply its migrations.
+
+### Deploy the indexer image
+
+Deploy by the immutable image digest recorded in the release notes, never by
+`latest`. The full rollout, health-verification, and rollback procedure — the
+pre-rollout backup, applying migrations with `prisma migrate deploy`, the
+`/health` and `/healthz` success criteria, and the point at which a migration
+makes an image rollback unsafe — is in
+[indexer/README.md](../indexer/README.md#deploy-verify-and-roll-back-an-indexer-release).
 ## Deliverable checklist
 
 Use this list before and after a release. Migration and upgrade steps stay in [UPGRADE_GUIDE.md](./UPGRADE_GUIDE.md); do not copy them here.
@@ -201,3 +240,13 @@ Before `changeset publish`, `scripts/check-version-tag.mjs --before-changeset-pu
 A direct tag check (`node scripts/check-version-tag.mjs sdk@1.2.3`) still rejects a version that is already on npm. The release path above is the one that treats a matching republish as a no-op.
 
 Re-run the failed Release workflow from the Actions tab after fixing the commit. A successful rerun of a commit whose versions are already on npm with the same version exits 0 and does not publish a second copy.
+
+## Component tags
+
+`scripts/validate-tag.js` maps a tag to exactly one component. CI runs `node --test scripts/validate-tag.test.mjs`.
+
+- `sdk-v*`, `cli-v*`, and `react-v*` name those npm packages. They do not start a second registry write. `@bc-forge/sdk`, `@bc-forge/cli`, and `@bc-forge/react` publish from [`release.yml`](../.github/workflows/release.yml).
+- `indexer-v*` selects [`publish-indexer.yml`](../.github/workflows/publish-indexer.yml) for the indexer image. It does not publish the npm packages.
+- Any other tag, including `v1.2.3`, selects no publisher.
+
+[`.github/workflows/publish-package.yml`](../.github/workflows/publish-package.yml) is a reusable `workflow_call` that validates the package input and can install, build, test, and publish. [`.github/workflows/publish-dry-run.yml`](../.github/workflows/publish-dry-run.yml) demonstrates it with `npm publish --dry-run` and does not write to the registry. There is no `publish-sdk.yml` or `publish-cli.yml`.

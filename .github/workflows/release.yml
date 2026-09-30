@@ -94,6 +94,7 @@ jobs:
             node scripts/validate-react-tarball.mjs
             npm config set provenance true
             node scripts/check-version-tag.mjs --before-changeset-publish
+            node scripts/react-dist-tag.mjs --publish-react
             npx changeset publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
