@@ -15,6 +15,7 @@ import { createDeployCommand } from "./commands/deploy.js";
 import { createExportDeploymentsCommand } from "./commands/export-deployments.js";
 import { createBatchMintCommand } from "./commands/batch-mint.js";
 import { createPauseCommand } from "./commands/pause.js";
+import { createMultisigCommand } from "./commands/multisig.js";
 import { createInitCommand } from "./commands/init.js";
 import { createDeploymentsCommand } from "./commands/deployments.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
@@ -54,7 +55,8 @@ export function buildProgram(): Command {
     .addCommand(createExportDeploymentsCommand())
     .addCommand(createBatchMintCommand())
     .addCommand(createPauseCommand("pause"))
-    .addCommand(createPauseCommand("unpause"));
+    .addCommand(createPauseCommand("unpause"))
+    .addCommand(createMultisigCommand());
 
   return program;
 }

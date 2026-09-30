@@ -15,6 +15,7 @@ CLI deployment orchestrator and management toolkit for **bc-forge** Soroban smar
   - [`init`](#init)
   - [`check-status`](#check-status)
   - [`upgrade`](#upgrade)
+  - [`multisig`](#multisig)
   - [`verify-hash`](#verify-hash)
   - [`smoke-test`](#smoke-test)
   - [`generate-bindings`](#generate-bindings)
@@ -229,6 +230,119 @@ bc-forge upgrade \
   --rpc-url https://soroban-testnet.stellar.org \
   --source SXXXXX... \
   --dry-run
+```
+
+---
+
+### `multisig`
+
+Drives the admin-contract upgrade ceremony: propose, collect approvals, then execute. Each step can be signed on a cold machine. `--offline` writes an unsigned transaction envelope and does not submit it. `--signature-file` submits an envelope that was signed offline.
+
+The CLI names map onto these admin contract functions:
+
+| CLI command | Contract function | Role |
+| --- | --- | --- |
+| `multisig propose` | `create_proposal(creator, description)` | Opens a governance proposal and returns its id. The creator is the first approver. |
+| `multisig approve` | `approve_proposal(admin, proposal_id)` | Records another pool member's approval. Quorum starts the timelock. |
+| `multisig execute` | `execute_upgrade(executor, proposal_id, wasm_hash)` | Installs the WASM hash after quorum and the timelock. |
+
+`submit_upgrade_proposal` and `approve_upgrade` store a separate upgrade-proposal record. `execute_upgrade` reads the proposal created by `create_proposal`, so the ceremony above is the one that changes contract code.
+
+```bash
+bc-forge multisig propose [options]
+bc-forge multisig approve [options]
+bc-forge multisig execute [options]
+```
+
+#### Options
+
+Shared:
+
+- `--contract-id <id>`: Admin contract ID, or a deployment alias for the selected network.
+- `--source <secret>`: Hot pool-member secret key. Omit this when using `--offline` or `--signature-file`.
+- `--public-key <key>`: Pool-member public key. Required with `--offline`.
+- `--offline`: Build an unsigned XDR and write it to `--out`. Does not submit.
+- `--out <file>`: Destination for the unsigned XDR. Required with `--offline`.
+- `--signature-file <file>`: Submit a pre-signed transaction XDR. Does not build a new transaction.
+- `--rpc-url <url>`, `--network <name>`, `--network-passphrase <phrase>`: Network selection, same as the other commands.
+
+`propose`:
+
+- `--description <text>` **(Required)** unless `--signature-file` is set.
+
+`approve` and `execute`:
+
+- `--proposal-id <id>` **(Required)** unless `--signature-file` is set.
+
+`execute`:
+
+- `--wasm-hash <hex>` **(Required)** unless `--signature-file` is set. 32-byte hash, 64 hex characters.
+
+#### Offline ceremony
+
+1. On an online machine, build the unsigned proposal. Nothing is submitted.
+
+   ```bash
+   bc-forge multisig propose \
+     --contract-id CADMIN... \
+     --description "Upgrade to v2.1.0" \
+     --public-key GPOOL_MEMBER_A \
+     --offline \
+     --out propose.unsigned.xdr
+   ```
+
+2. On the cold machine, sign `propose.unsigned.xdr` and carry `propose.signed.xdr` back.
+
+3. Submit the signed envelope. The command prints the proposal id returned by `create_proposal`.
+
+   ```bash
+   bc-forge multisig propose \
+     --contract-id CADMIN... \
+     --signature-file propose.signed.xdr
+   ```
+
+4. Each additional signer repeats that pattern for `approve`:
+
+   ```bash
+   bc-forge multisig approve \
+     --contract-id CADMIN... \
+     --proposal-id 0 \
+     --public-key GPOOL_MEMBER_B \
+     --offline \
+     --out approve.unsigned.xdr
+   ```
+
+   ```bash
+   bc-forge multisig approve \
+     --contract-id CADMIN... \
+     --signature-file approve.signed.xdr
+   ```
+
+5. After the timelock, execute the upgrade the same way:
+
+   ```bash
+   bc-forge multisig execute \
+     --contract-id CADMIN... \
+     --proposal-id 0 \
+     --wasm-hash <64-hex-chars> \
+     --public-key GPOOL_MEMBER_C \
+     --offline \
+     --out execute.unsigned.xdr
+   ```
+
+   ```bash
+   bc-forge multisig execute \
+     --contract-id CADMIN... \
+     --signature-file execute.signed.xdr
+   ```
+
+A hot key can skip the files. That path signs and submits in one step:
+
+```bash
+bc-forge multisig propose \
+  --contract-id CADMIN... \
+  --description "Upgrade to v2.1.0" \
+  --source SPOOL_MEMBER_A
 ```
 
 ---

@@ -1146,6 +1146,146 @@ export class bcForgeClient {
     );
   }
 
+  /**
+   * Open a governance proposal on the admin contract (`create_proposal`).
+   *
+   * The creator must be an admin-pool member. The contract records that
+   * address as the first approval and returns the new proposal id.
+   *
+   * @param creator     - Pool member creating the proposal
+   * @param description - Human-readable description stored on the proposal
+   * @param source      - Creator keypair. Omit when a wallet adapter signs.
+   */
+  async createProposal(
+    creator: string,
+    description: string,
+    source?: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'create_proposal',
+      [addressToScVal(creator), stringToScVal(description)],
+      source,
+    );
+  }
+
+  /**
+   * Build an unsigned `create_proposal` transaction for offline signing.
+   *
+   * @param creator          - Pool member who will authorize the proposal
+   * @param description      - Human-readable description
+   * @param sourcePublicKey  - Transaction source account public key
+   * @returns Unsigned transaction XDR. Nothing is submitted.
+   */
+  async buildCreateProposalTx(
+    creator: string,
+    description: string,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'create_proposal',
+      [addressToScVal(creator), stringToScVal(description)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned `approve_proposal` transaction for offline signing.
+   *
+   * @param admin            - Pool member casting the approval
+   * @param proposalId       - Governance proposal id from `create_proposal`
+   * @param sourcePublicKey  - Transaction source account public key
+   * @returns Unsigned transaction XDR. Nothing is submitted.
+   */
+  async buildApproveProposalTx(
+    admin: string,
+    proposalId: bigint,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'approve_proposal',
+      [addressToScVal(admin), nativeToScVal(proposalId, { type: 'u64' })],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Execute a quorum-approved governance proposal as a WASM upgrade
+   * (`execute_upgrade`).
+   *
+   * This is the admin-contract entry point that installs `wasmHash` after
+   * `create_proposal` / `approve_proposal` have met the threshold and the
+   * timelock has elapsed. It does not call `submit_upgrade_proposal`.
+   *
+   * @param executor   - Pool member performing the upgrade
+   * @param proposalId - Approved governance proposal id
+   * @param wasmHash   - 32-byte WASM hash (hex string or raw buffer)
+   * @param source     - Executor keypair. Omit when a wallet adapter signs.
+   */
+  async executeUpgrade(
+    executor: string,
+    proposalId: bigint,
+    wasmHash: string | Buffer,
+    source?: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'execute_upgrade',
+      [
+        addressToScVal(executor),
+        nativeToScVal(proposalId, { type: 'u64' }),
+        hashToScVal(wasmHash),
+      ],
+      source,
+    );
+  }
+
+  /**
+   * Build an unsigned `execute_upgrade` transaction for offline signing.
+   *
+   * @param executor         - Pool member who will authorize execution
+   * @param proposalId       - Approved governance proposal id
+   * @param wasmHash         - 32-byte WASM hash (hex string or raw buffer)
+   * @param sourcePublicKey  - Transaction source account public key
+   * @returns Unsigned transaction XDR. Nothing is submitted.
+   */
+  async buildExecuteUpgradeTx(
+    executor: string,
+    proposalId: bigint,
+    wasmHash: string | Buffer,
+    sourcePublicKey: string,
+  ): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'execute_upgrade',
+      [
+        addressToScVal(executor),
+        nativeToScVal(proposalId, { type: 'u64' }),
+        hashToScVal(wasmHash),
+      ],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Submit a pre-signed multisig execute envelope.
+   *
+   * Cold signers attach their signature to the unsigned `execute_upgrade`
+   * XDR on an offline machine. This broadcasts that envelope and does not
+   * build a new invocation.
+   *
+   * @param signedXdr - Signed transaction XDR
+   */
+  async execute(signedXdr: string): Promise<TransactionResult> {
+    return this.submitSignedTransaction(signedXdr);
+  }
+
   // ─── RBAC / Role Management ────────────────────────────────────────────────
 
   /**
