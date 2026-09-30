@@ -157,17 +157,22 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.96.0
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: bc-forge-upgrade-e2e
 
+      # rustc 1.96's wasm32-unknown-unknown output enables reference-types.
+      # soroban-env-host 22.1.3 rejects that module. wasm32v1-none is the MVP
+      # build of the same token crate, and the test installs this file.
       - name: Build token WASM
-        run: cargo build -p bc-forge-token --target wasm32-unknown-unknown --release
+        run: cargo build -p bc-forge-token --target wasm32v1-none --release
 
       - name: Run upgrade E2E tests
+        env:
+          BC_FORGE_TOKEN_WASM: target/wasm32v1-none/release/bc_forge_token.wasm
         run: cargo test -p bc-forge-e2e-tests
 
   # ─── TypeScript SDK CI ──────────────────────────────────────────────────

@@ -394,28 +394,25 @@ No migration is needed for storage — only the contract code is replaced.
 
 ## Automated WASM upgrade verification
 
-`e2e/integration_test.rs` deploys the current token on the Soroban test host,
-writes a balance and a two-member admin pool, then upgrades through
-`execute_upgrade` (proposal, second approval, 24-hour timelock). After the
-upgrade it reads the balance, supply, admin, super-admin role, pool, and
-threshold back from contract storage.
+`e2e/integration_test.rs` deploys the built token WASM, writes a balance and a
+two-member admin pool, then upgrades through `execute_upgrade` (proposal,
+second approval, 24-hour timelock). After the upgrade, `balance`, `supply`, and
+`admin` are read back through the upgraded contract. The pool, threshold, and
+super-admin role are read back from storage.
 
-`soroban-env-host` 22.1.3 instantiates uploaded modules with reference types,
-floats, and multi-value disabled. A token WASM produced by current rustc fails
-that check (`reference-types not enabled`). An empty byte slice is not an
-upgrade either: the host treats it as a test placeholder and never instantiates
-it. The harness uploads a non-empty module whose only section is the
-`contractenvmetav0` custom section (protocol 22, pre-release 0), which this host
-accepts. That module has no token exports, so the test reads surviving storage
-with `env.as_contract` instead of calling the replaced executable. Run it with:
+`soroban-env-host` 22.1.3 instantiates modules with reference types disabled, so
+`cargo build -p bc-forge-token --target wasm32-unknown-unknown --release` on
+rustc 1.96 fails upload (`reference-types not enabled`). The harness installs
+the same crate built for MVP WASM instead:
 
 ```bash
+cargo build -p bc-forge-token --target wasm32v1-none --release
 cargo test -p bc-forge-e2e-tests test_admin_governed_wasm_upgrade_preserves_state -- --exact
 ```
 
-The `WASM Upgrade E2E` CI job still builds `bc_forge_token.wasm` and then runs
-the e2e package. Installing that release artifact needs a host that accepts
-reference types.
+N and N+1 are that artifact uploaded twice. The `WASM Upgrade E2E` CI job
+builds it and passes the path in `BC_FORGE_TOKEN_WASM`. An empty byte slice is
+not used: the test rejects a file smaller than the release artifact.
 
 ## Compatibility rules
 

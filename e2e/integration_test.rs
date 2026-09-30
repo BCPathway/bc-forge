@@ -21,36 +21,52 @@ use soroban_sdk::testutils::Ledger;
 #[cfg(test)]
 use soroban_sdk::{vec, Address, Env, String};
 
-/// WASM the soroban-env-host 22.1.3 test VM can instantiate.
+/// Release WASM of this token crate, built for the Soroban test host.
 ///
-/// The host disables reference types, floats, and multi-value, so a token
-/// artifact from current rustc fails upload. An empty slice is also skipped
-/// and never installed. This module is only the `contractenvmetav0` custom
-/// section: interface version protocol 22, pre-release 0.
+/// `soroban-env-host` 22.1.3 rejects `wasm32-unknown-unknown` output from
+/// current rustc (`reference-types not enabled`). `wasm32v1-none` is the same
+/// crate compiled to MVP WASM, which this host can install. CI sets
+/// `BC_FORGE_TOKEN_WASM` to that artifact. N and N+1 are that file uploaded
+/// twice: there is no separate next version yet.
 #[cfg(test)]
-fn host_compatible_upgrade_wasm() -> Vec<u8> {
-    let meta: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 22, 0, 0, 0, 0];
-    let name = b"contractenvmetav0";
-    let section_len = 1 + name.len() + meta.len();
-    let mut wasm = Vec::with_capacity(8 + 2 + section_len);
-    wasm.extend_from_slice(&[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-    wasm.push(0x00);
-    wasm.push(section_len as u8);
-    wasm.push(name.len() as u8);
-    wasm.extend_from_slice(name);
-    wasm.extend_from_slice(meta);
-    wasm
+fn token_release_wasm() -> Vec<u8> {
+    let path = std::env::var("BC_FORGE_TOKEN_WASM").unwrap_or_else(|_| {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/wasm32v1-none/release/bc_forge_token.wasm")
+            .to_string_lossy()
+            .into_owned()
+    });
+    let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "read {path}: {error}. Build it with: cargo build -p bc-forge-token --target wasm32v1-none --release"
+        )
+    });
+    assert!(
+        bytes.len() > 10_000,
+        "token WASM at {path} is {} bytes; expected the release artifact, not a stub",
+        bytes.len()
+    );
+    assert!(
+        bytes
+            .windows(b"contractenvmetav0".len())
+            .any(|window| window == b"contractenvmetav0"),
+        "token WASM at {path} is missing the contractenvmetav0 section"
+    );
+    bytes
 }
 
-/// Deploy the current token, then replace its code through `execute_upgrade`.
-/// Balance, supply, and admin survive in storage.
+/// Deploy the built token WASM, then replace it through `execute_upgrade`.
+/// Balance, supply, and admin still read back from the upgraded contract.
 #[cfg(test)]
 #[test]
 fn test_admin_governed_wasm_upgrade_preserves_state() {
     let env = Env::default();
     env.mock_all_auths();
+    // Instantiating the release WASM exceeds the default test CPU budget.
+    env.cost_estimate().budget().reset_unlimited();
 
-    let contract_id = env.register(BcForgeToken, ());
+    let wasm_n = token_release_wasm();
+    let contract_id = env.register(wasm_n.as_slice(), ());
     let client = BcForgeTokenClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let second_admin = Address::generate(&env);
@@ -67,13 +83,13 @@ fn test_admin_governed_wasm_upgrade_preserves_state() {
     assert_eq!(client.supply(), 1_234_567);
     assert_eq!(client.admin(), admin);
 
-    let wasm = host_compatible_upgrade_wasm();
-    assert!(!wasm.is_empty());
-    let wasm_hash = env.deployer().upload_contract_wasm(wasm.as_slice());
+    // Same source, second upload: N+1 may hash-equal N when the bytes match.
+    let wasm_n1 = token_release_wasm();
+    let wasm_hash = env.deployer().upload_contract_wasm(wasm_n1.as_slice());
 
     let proposal_id = client.create_proposal(
         &admin,
-        &String::from_str(&env, "upgrade with host-compatible WASM"),
+        &String::from_str(&env, "upgrade to the built token WASM"),
     );
     client.approve_proposal(&second_admin, &proposal_id);
     let mut ledger = env.ledger().get();
@@ -82,30 +98,17 @@ fn test_admin_governed_wasm_upgrade_preserves_state() {
 
     client.execute_upgrade(&admin, &proposal_id, &wasm_hash);
 
-    let (balance, supply, stored_admin, admin_pool, threshold, is_super_admin) =
-        env.as_contract(&contract_id, || {
-            let balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&bc_forge_token::DataKey::Balance(holder.clone()))
-                .unwrap();
-            let supply: i128 = env
-                .storage()
-                .instance()
-                .get(&bc_forge_token::DataKey::Supply)
-                .unwrap();
-            (
-                balance,
-                supply,
-                bc_forge_admin::get_admin(&env),
-                bc_forge_admin::get_admin_pool(&env),
-                bc_forge_admin::get_threshold(&env),
-                bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &admin),
-            )
-        });
-    assert_eq!(balance, 1_234_567);
-    assert_eq!(supply, 1_234_567);
-    assert_eq!(stored_admin, admin);
+    assert_eq!(client.balance(&holder), 1_234_567);
+    assert_eq!(client.supply(), 1_234_567);
+    assert_eq!(client.admin(), admin);
+
+    let (admin_pool, threshold, is_super_admin) = env.as_contract(&contract_id, || {
+        (
+            bc_forge_admin::get_admin_pool(&env),
+            bc_forge_admin::get_threshold(&env),
+            bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &admin),
+        )
+    });
     assert_eq!(admin_pool, vec![&env, admin, second_admin]);
     assert_eq!(threshold, 2);
     assert!(is_super_admin);
