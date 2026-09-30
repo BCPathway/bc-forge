@@ -209,4 +209,16 @@ mod tests {
             Some(2_333_333)
         );
     }
+
+    #[test]
+    fn test_exchange_rate_rejects_negative_inputs() {
+        assert_eq!(convert_to_shares(0, 0, 0), None);
+        assert_eq!(convert_to_shares(-1, 0, 0), None);
+        assert_eq!(convert_to_shares(1, -1, 0), None);
+        assert_eq!(convert_to_assets(0, 0, 0), None);
+        assert_eq!(convert_to_assets(-1, 0, 0), None);
+        assert_eq!(convert_to_assets(1, 0, -1), None);
+        assert_eq!(share_price(-1, 0), None);
+        assert_eq!(share_price(0, -1), None);
+    }
 }
