@@ -57,8 +57,20 @@ export { WrapperClient } from './wrapperClient';
 export type { WrapperClientConfig } from './wrapperClient';
 
 // ─── APY helpers (#745) ──────────────────────────────────────────────────────
-export { calculateApy } from './apy';
-export type { ApyOptions, ApyResult, ApySnapshot } from './apy';
+export {
+  calculateApy,
+  aprToApy,
+  apyToApr,
+  compoundingPeriodsPerYear,
+  timeWeightedYield,
+} from './apy';
+export type {
+  ApyOptions,
+  ApyResult,
+  ApySnapshot,
+  CompoundingFrequency,
+  YieldWindow,
+} from './apy';
 
 // ─── Generated Contract Bindings (#926) ──────────────────────────────────────
 // Auto-generated TypeScript bindings from `stellar contract bindings typescript`.
