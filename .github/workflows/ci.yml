@@ -169,6 +169,24 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check published ESM entry size (#932)
+        # Measured dist/esm/index.mjs at 2282 bytes.
+        # Budget is ceil(2282 * 1.10) = 2511 bytes.
+        run: |
+          set -euo pipefail
+          entry="dist/esm/index.mjs"
+          budget=2511
+          if [[ ! -f "$entry" ]]; then
+            echo "::error::Published ESM entry not found: ${entry}"
+            exit 1
+          fi
+          size="$(wc -c < "$entry" | tr -d '[:space:]')"
+          echo "Published ESM entry ${entry} is ${size} bytes (budget ${budget})."
+          if (( size > budget )); then
+            echo "::error::ESM entry is ${size} bytes, which exceeds the ${budget} byte budget"
+            exit 1
+          fi
+
       - name: Run tests
         run: npm test
 
