@@ -170,15 +170,9 @@ jobs:
       - name: Build token WASM
         run: |
           cargo build -p bc-forge-token --target wasm32v1-none --release
-          echo "release dir:"
-          ls -la target/wasm32v1-none/release
-          wasm=$(find target/wasm32v1-none/release -maxdepth 2 -type f -name '*.wasm' | head -n 1)
-          if [ -z "$wasm" ]; then
-            echo "no .wasm under target/wasm32v1-none/release"
-            find target/wasm32v1-none -type f | head -n 80
-            exit 1
-          fi
-          echo "using $wasm"
+          wasm=target/wasm32v1-none/release/bc_forge_token.wasm
+          test -f "$wasm"
+          echo "using $wasm ($(wc -c < "$wasm") bytes)"
           echo "BC_FORGE_TOKEN_WASM=$wasm" >> "$GITHUB_ENV"
 
       - name: Run upgrade E2E tests
