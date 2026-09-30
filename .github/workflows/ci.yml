@@ -170,7 +170,7 @@ jobs:
       - name: Build token WASM
         run: |
           cargo build -p bc-forge-token --target wasm32v1-none --release
-          wasm=target/wasm32v1-none/release/bc_forge_token.wasm
+          wasm="$GITHUB_WORKSPACE/target/wasm32v1-none/release/bc_forge_token.wasm"
           test -f "$wasm"
           echo "using $wasm ($(wc -c < "$wasm") bytes)"
           echo "BC_FORGE_TOKEN_WASM=$wasm" >> "$GITHUB_ENV"

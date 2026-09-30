@@ -36,6 +36,18 @@ fn token_release_wasm() -> Vec<u8> {
             .to_string_lossy()
             .into_owned()
     });
+    let path = {
+        let given = std::path::PathBuf::from(&path);
+        if given.is_file() {
+            path
+        } else {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join(&given)
+                .to_string_lossy()
+                .into_owned()
+        }
+    };
     let bytes = std::fs::read(&path).unwrap_or_else(|error| {
         panic!(
             "read {path}: {error}. Build it with: cargo build -p bc-forge-token --target wasm32v1-none --release"
