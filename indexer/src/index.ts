@@ -2,6 +2,7 @@ import express from 'express';
 import { runIndexer } from './indexer';
 import apiRouter, { jsonErrorHandler } from './api';
 import { healthHandler } from './health';
+import { healthzHandler } from './healthz';
 import { disconnectPrismaClient } from './lib/prisma';
 import { logFatalIndexerError, logShutdown, logStartup } from './lib/lifecycle';
 import dotenv from 'dotenv';
@@ -20,6 +21,10 @@ app.use('/api/v1', apiRouter);
 // so hosting probes never need the API token.
 app.get('/health', (req, res) => {
   void healthHandler(req, res);
+});
+
+app.get('/healthz', (req, res) => {
+  void healthzHandler(req, res);
 });
 
 // JSON error handler (registered after all routes).

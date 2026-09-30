@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * MockBcForgeClient — In-memory mock for bcForgeClient
  *

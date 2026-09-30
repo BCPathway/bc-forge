@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/sdk — TypeScript SDK for bc-forge Token Contracts
  *
@@ -29,8 +30,8 @@ export type {
   TransactionResult,
 } from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
-export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents } from './events';
-export type { bcForgeEvent, SubscriptionOptions } from './events';
+export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents, onMint, onTransfer, onVaultDeposit } from './events';
+export type { bcForgeEvent, SubscriptionOptions, EventListenerOptions } from './events';
 export * from './errors';
 export * from './mockClient';
 

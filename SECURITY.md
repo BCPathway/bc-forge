@@ -71,6 +71,7 @@ The following components represent key security-sensitive areas within the codeb
 
 - **Mint and supply changes**: `contracts/token/src/lib.rs`
 - **Admin roles, quorum, timelock, and upgrade execution (`execute_upgrade`, `execute_upgrade_batch`)**: `contracts/admin/src/lib.rs`
+- **Privileged-action timelock (#914)**: `set_fee_config` and `transfer_ownership` on the token contract consume a proposed-and-elapsed privilege proposal (`contracts/admin/src/privilege.rs`, consumed at the effect point in `contracts/token/src/lib.rs`), so a fee change or ownership rotation cannot land in one transaction: it waits a 24-hour delay during which any admin can cancel (`cancel_privilege_action`). Role holders can renounce their own roles (#915); the last SuperAdmin cannot.
 - **Reentrancy gap**: Module-level note in `contracts/admin/src/lib.rs`: "Proposal lifecycle entry points share a persistent RAII guard. The guard is entered before authorization callbacks and remains held through WASM deployment, preventing callbacks from creating, changing, cancelling, or executing proposals while a lifecycle operation is active."
 - **Workspace-excluded crates not built in CI**: `contracts/yield_vault` (in the `exclude` array in root `Cargo.toml`). #923 removed the `contracts/compound_fees` stub and promoted `contracts/flash_loan_guard` into the workspace.
 - **Admin rescue hatch (`rescue_tokens`)**: `contracts/token/src/lib.rs` and `contracts/wrapper/src/lib.rs` (see [Admin rescue hatch](#admin-rescue-hatch) below)
@@ -113,6 +114,40 @@ does not itself issue or account — are rescuable.
 `InsufficientBalance` if the contract holds less than `amount` of the foreign
 token, and every successful rescue emits a `rescue` event naming the caller,
 the rescued token, the recovery address, and the amount.
+
+## Security Documentation
+
+Operational and audit documentation that supports this policy:
+
+- [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) — spec-to-code traceability matrix mapping `.kiro/specs/` requirements and the mint, role, and upgrade entry points to implementing functions and tests.
+- [`docs/ADMIN_KEYS.md`](docs/ADMIN_KEYS.md) — production admin key hygiene, multisig policy, and hardware-wallet/offline signing.
+- [`docs/UPGRADE_GUIDE.md`](docs/UPGRADE_GUIDE.md) — how to build, upload, verify, and roll back a contract upgrade, including the multisig governance path.
+- [`docs/ACCESS_CONTROL.md`](docs/ACCESS_CONTROL.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — role hierarchy and module boundaries.
+
+## Incident Response
+
+The contract exposes `BcForgeToken::pause` (`contracts/token/src/lib.rs`),
+restricted to the admin or a `Pauser` role holder. The `bc-forge` CLI can pause
+or unpause without writing a new script, using an existing signer or a
+pre-signed transaction file:
+
+```bash
+# Hot key from CLI config / flags (testnet or local only)
+bc-forge pause --contract-id <CONTRACT_ID> --source <S...>
+bc-forge unpause --contract-id <CONTRACT_ID> --source <S...>
+
+# Production: build unsigned, sign on a hardware wallet, then submit
+bc-forge pause --contract-id <CONTRACT_ID> --build-only \
+  --public-key <ADMIN_OR_PAUSER_PUBKEY> --out pause-unsigned.xdr
+stellar tx sign --sign-with-ledger --network mainnet pause-unsigned.xdr > pause-signed.xdr
+bc-forge pause --contract-id <CONTRACT_ID> --signature pause-signed.xdr
+
+# Same flow for unpause with `bc-forge unpause`.
+```
+
+No secret key is stored in the repository or in the pauser tool. The
+`--signature` path submits a transaction that was already signed elsewhere. See
+[ADMIN_KEYS.md](docs/ADMIN_KEYS.md) for the signing and key-rotation policy.
 
 ## Response Timeline
 

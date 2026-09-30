@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::{CooldownConfig, VaultState, WrapperContract, WrapperContractClient, WrapperError};
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;

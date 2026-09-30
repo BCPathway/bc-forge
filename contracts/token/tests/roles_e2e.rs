@@ -1,4 +1,5 @@
 #![cfg(test)]
+// SPDX-License-Identifier: MIT
 
 use bc_forge_admin::Role;
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient, TokenError};

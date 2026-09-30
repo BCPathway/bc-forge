@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React, { useMemo, useState } from 'react';
 import { useWallet } from '../context';
 import { useBalance, useBurn } from '../hooks';

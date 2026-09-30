@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
@@ -28,6 +29,14 @@ fn setup(
     let vesting_id = env.register(VestingContract, ());
     let vesting = VestingContractClient::new(env, &vesting_id);
     vesting.initialize(&admin, &token_id);
+    // Ownership transfer runs through the #914 privilege timelock.
+    token.propose_privilege_action(
+        &admin,
+        &bc_forge_admin::PrivilegeAction::TransferOwnership(vesting_id.clone()),
+    );
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
     token.transfer_ownership(&vesting_id);
 
     (token, vesting, admin, beneficiary, vesting_id)

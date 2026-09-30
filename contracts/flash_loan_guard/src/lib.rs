@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Flash Loan Guard Contract
 //!
 //! Same-ledger deposit/withdraw reentrancy guard (#923).

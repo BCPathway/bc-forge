@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Property-based (fuzz) tests for `mint` access control.
 //!
 //! Complements the unit tests in `test.rs` by exercising `mint` across a wide

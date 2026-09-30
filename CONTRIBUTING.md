@@ -18,6 +18,11 @@ bc-forge is maintained on [drips.network](https://www.drips.network). As a contr
 3. Browse the bc-forge project for available issues
 4. Claim and work on issues that match your skills
 
+The linked account is where rewards are paid, so set it up before opening your
+PR. The README summarizes the same flow in [How we fund contributors](README.md#how-we-fund-contributors).
+
+Release ownership, review counts, and escalation are in [docs/MAINTAINERS.md](docs/MAINTAINERS.md).
+
 ## 🛠️ Development Setup
 
 ### Prerequisites
@@ -76,7 +81,7 @@ git rebase upstream/main
 
 - Check the [Issues](https://github.com/BCPathway/bc-forge/issues) tab
 - Look for labels:
-  - `good-first-issue` — Perfect for newcomers
+  - `good first issue` — Perfect for newcomers
   - `smart-contract` — Rust/Soroban contract work
   - `sdk` — TypeScript SDK improvements
   - `documentation` — Docs and guides
@@ -109,6 +114,8 @@ git checkout -b docs/15-sdk-api-reference
 ```
 
 ### 3. Code Style
+
+All Rust and TypeScript source files in monitored trees must include an SPDX license identifier line (`// SPDX-License-Identifier: MIT` unless another license is explicitly declared). Generated code, dependency lockfiles, and test snapshots are excluded from this requirement and its CI check.
 
 #### Rust (Smart Contracts)
 
@@ -162,6 +169,25 @@ Running `cargo test -p bc-forge-admin` regenerates `contracts/admin/test_snapsho
 
 CI also runs `cargo audit` against `Cargo.lock` in the Dependency Audit job: if any dependency matches a known RustSec advisory, the check fails and blocks the merge. Upgrade the affected crate (or, only when the advisory genuinely cannot apply, add a narrowly scoped, commented ignore) before opening your PR.
 
+### Coverage Gate
+
+Rust line coverage is measured with [cargo-tarpaulin](https://github.com/xd009642/tarpaulin). CI enforces two gates on every PR (issue #955):
+
+| Gate | Threshold | Effect |
+|------|-----------|--------|
+| Project (total) coverage | **85%** | `cargo tarpaulin --fail-under 85` fails the CI job when workspace line coverage falls below 85%. Codecov additionally fails the PR when total coverage drops by more than 1 percentage point versus the base branch. |
+| Patch (diff) coverage | **85%** | `scripts/check_patch_coverage.py` fails the CI job when fewer than 85% of the changed, instrumented Rust lines are covered in `lcov.info`. |
+
+- The workspace currently measures **89.35% line coverage** (2627/2940 lines, cargo-tarpaulin 0.37.4 with `bc-forge-e2e-tests` excluded), so the 85% gate has headroom — keep it that way. The long-term goal is to keep total coverage ≥ 85% and raise patch coverage toward 100%.
+- Reports are emitted in Cobertura XML and LCOV and uploaded to Codecov, which computes patch coverage against the PR diff.
+- To check coverage locally:
+
+  ```bash
+  cargo tarpaulin --workspace --exclude bc-forge-e2e-tests --out Stdout
+  ```
+
+  (`bc-forge-e2e-tests` is excluded — like CI, which runs it separately — because the e2e suite targets the Stellar testnet.)
+
 ### 5. Pull Request Process
 
 1. **Push your branch** to your fork
@@ -177,6 +203,7 @@ CI also runs `cargo audit` against `Cargo.lock` in the Dependency Audit job: if 
 - [ ] Branch follows naming convention
 - [ ] Code passes `cargo fmt` and `cargo clippy`
 - [ ] All tests pass (`cargo test --tests`)
+- [ ] Coverage gates pass (project ≥ 85%, changed lines ≥ 85% — see [Coverage Gate](#coverage-gate))
 - [ ] `cargo audit` reports no advisories on `Cargo.lock`
 - [ ] SDK compiles (`npm run build` in `sdk/`)
 - [ ] New functions have doc comments

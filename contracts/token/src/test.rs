@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::{AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
@@ -25,6 +26,21 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let (client, _) = setup_contract(env);
     let admin = init_default(env, &client);
     (client, admin)
+}
+
+/// Proposes a privileged action and advances the ledger past the #914
+/// timelock delay, so a test can execute the matching effect function
+/// (`set_fee_config` / `transfer_ownership`) in the same test.
+fn propose_and_wait(
+    env: &Env,
+    client: &BcForgeTokenClient,
+    admin: &Address,
+    action: &bc_forge_admin::PrivilegeAction,
+) {
+    client.propose_privilege_action(admin, action);
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
 }
 
 #[test]
@@ -476,6 +492,47 @@ fn test_admin_can_set_fee_config() {
     let (client, admin) = setup(&env);
     let config = sample_fee_config();
 
+    propose_and_wait(
+        &env,
+        &client,
+        &admin,
+        &bc_forge_admin::PrivilegeAction::SetFeeConfig,
+    );
+    client.set_fee_config(&admin, &config);
+    assert_eq!(client.get_fee_config(), config);
+}
+
+#[test]
+fn test_privilege_timelock_gates_set_fee_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let config = sample_fee_config();
+
+    // With no proposal at all the effect function reports a missing
+    // proposal, distinct from "still inside the delay".
+    assert_eq!(
+        client.try_set_fee_config(&admin, &config),
+        Err(Ok(TokenError::PrivilegeProposalNotFound))
+    );
+
+    // Propose and execute immediately: the 24h delay is still running.
+    client.propose_privilege_action(&admin, &bc_forge_admin::PrivilegeAction::SetFeeConfig);
+    assert_eq!(
+        client.try_set_fee_config(&admin, &config),
+        Err(Ok(TokenError::TimelockNotElapsed))
+    );
+
+    // A non-admin cannot propose a privileged action.
+    let outsider = Address::generate(&env);
+    assert!(client
+        .try_propose_privilege_action(&outsider, &bc_forge_admin::PrivilegeAction::SetFeeConfig)
+        .is_err());
+
+    // After the delay the SAME proposal executes the change.
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
     client.set_fee_config(&admin, &config);
     assert_eq!(client.get_fee_config(), config);
 }

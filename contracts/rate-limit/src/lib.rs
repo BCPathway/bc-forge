@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! # bc-forge Rate Limiting Contract
 //!
 //! Implements rate limiting for token operations to prevent abuse.

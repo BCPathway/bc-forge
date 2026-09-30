@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Rate Limit Integration Module
 //!
 //! Integrates the bc-forge-rate-limit contract with the token contract

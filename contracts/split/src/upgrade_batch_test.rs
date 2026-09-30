@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for multi-contract upgrade batching (#674).
 //!
 //! Covers: batch proposals on token + split → sequential execute →

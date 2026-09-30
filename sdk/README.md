@@ -2,6 +2,8 @@
 
 TypeScript SDK for interacting with bc-forge token contracts deployed on the Stellar/Soroban network.
 
+Supported Node, Stellar SDK, and package ranges are in the [compatibility matrix](../docs/COMPATIBILITY.md).
+
 ## Installation
 
 ```bash

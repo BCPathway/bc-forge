@@ -1,0 +1,121 @@
+name: Publish Release Manifest
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  manifest:
+    name: Generate and Upload Release Manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build published packages
+        run: |
+          npm run build --workspace @bc-forge/sdk
+          npm run build --workspace @bc-forge/cli
+          npm run build --workspace @bc-forge/react
+
+      - name: Pack npm tarballs
+        run: |
+          set -euo pipefail
+          mkdir -p release_assets
+          npm pack --workspace @bc-forge/sdk --pack-destination release_assets
+          npm pack --workspace @bc-forge/cli --pack-destination release_assets
+          npm pack --workspace @bc-forge/react --pack-destination release_assets
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+
+      - name: Build token WASM
+        run: cargo build -p bc-forge-token --target wasm32-unknown-unknown --release
+
+      - name: Stage token WASM
+        run: |
+          set -euo pipefail
+          cp target/wasm32-unknown-unknown/release/bc_forge_token.wasm release_assets/bc_forge_token.wasm
+
+      - name: Prepare a standalone indexer image context
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/indexer-image
+          mkdir -p /tmp/indexer-image
+          cp -a indexer/. /tmp/indexer-image/
+          rm -f /tmp/indexer-image/package-lock.json
+          npm install --package-lock-only --ignore-scripts --prefix /tmp/indexer-image
+
+      - name: Build indexer image and record its digest
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --provenance=false \
+            --sbom=false \
+            --metadata-file release_assets/indexer-build.json \
+            --output type=oci,dest=release_assets/indexer-image.tar \
+            -t bc-forge-indexer:release \
+            /tmp/indexer-image
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("release_assets/indexer-build.json").read_text(encoding="utf-8"))
+          digest = data.get("containerimage.digest")
+          if not isinstance(digest, str) or not digest.startswith("sha256:"):
+              raise SystemExit(f"indexer image digest missing: {data}")
+          print(digest)
+          PY
+
+      - name: Generate checksum manifest
+        run: |
+          set -euo pipefail
+          python3 scripts/generate_release_manifest.py --self-test
+          sdk_version="$(node -p "require('./sdk/package.json').version")"
+          cli_version="$(node -p "require('./cli/package.json').version")"
+          react_version="$(node -p "require('./react/package.json').version")"
+          token_version="$(python3 - <<'PY'
+          from pathlib import Path
+          for line in Path("contracts/token/Cargo.toml").read_text(encoding="utf-8").splitlines():
+              if line.startswith("version"):
+                  print(line.split("=", 1)[1].strip().strip('"'))
+                  break
+          PY
+          )"
+          indexer_version="$(node -p "require('./indexer/package.json').version")"
+          sdk_tarball="$(find release_assets -maxdepth 1 -name 'bc-forge-sdk-*.tgz' -printf '%f\n')"
+          cli_tarball="$(find release_assets -maxdepth 1 -name 'bc-forge-cli-*.tgz' -printf '%f\n')"
+          react_tarball="$(find release_assets -maxdepth 1 -name 'bc-forge-react-*.tgz' -printf '%f\n')"
+          python3 scripts/generate_release_manifest.py \
+            --output-dir release_assets \
+            --file sdk "$sdk_version" "release_assets/${sdk_tarball}" \
+            --file cli "$cli_version" "release_assets/${cli_tarball}" \
+            --file react "$react_version" "release_assets/${react_tarball}" \
+            --file token "$token_version" release_assets/bc_forge_token.wasm \
+            --image indexer "$indexer_version" bc-forge-indexer release_assets/indexer-build.json
+          test -s release_assets/checksums.txt
+          test -s release_assets/manifest.json
+
+      - name: Upload assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            release_assets/checksums.txt
+            release_assets/manifest.json
+            release_assets/*.tgz
+            release_assets/bc_forge_token.wasm

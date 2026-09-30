@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @bc-forge/sdk — bcForgeClient
  *
@@ -58,7 +59,7 @@ import {
   hashToScVal,
 } from './utils';
 
-import { SimulationError, RPCError, SignerRequiredError } from './errors';
+import { SimulationError, RPCError, SignerRequiredError, ContractError, parseContractError } from './errors';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,10 @@ export interface bcForgeClientConfig {
   contractId: string;
   /** Optional wallet adapter for browser-based signing flows */
   walletAdapter?: WalletAdapter;
+  /** Max retry attempts for transient sequence or fee errors (default: 3) */
+  maxRetryAttempts?: number;
+  /** Maximum fee cap in stroops for fee bump retries (default: 10000000) */
+  maxFeeCap?: string | number | bigint;
 }
 
 export interface TransactionResult {
@@ -135,6 +140,57 @@ function roleToScVal(role: Role): xdr.ScVal {
   return xdr.ScVal.scvSymbol(role);
 }
 
+/**
+ * Per-address role membership across the whole hierarchy (#915).
+ *
+ * Mirrors the contract's `RoleHierarchy` struct: `isAdmin` means the address
+ * is the configured admin, which implicitly holds every other role, so a
+ * UI reading this view sees the full truth rather than raw storage bits.
+ */
+export interface RoleHierarchy {
+  /** The address that was queried. */
+  address: string;
+  /** Holds the Admin role (implies all roles below). */
+  isAdmin: boolean;
+  /** Holds the SuperAdmin role. */
+  isSuperAdmin: boolean;
+  /** Holds the Minter role. */
+  isMinter: boolean;
+  /** Holds the Pauser role. */
+  isPauser: boolean;
+}
+
+/**
+ * One page of the #917 proposal listings.
+ *
+ * Ledger keys are not enumerable on-chain, so the contract walks proposal
+ * slots from `startAfter` and returns at most 50 per call. When
+ * `nextCursor` is non-null, more IDs exist past the cap — pass it back as
+ * `startAfter` to fetch the next page.
+ */
+export interface ProposalLists {
+  /** Proposals still collecting approvals/quorum. */
+  pendingIds: bigint[];
+  /** Proposals at/above threshold (or past quorum) not yet executed/cancelled. */
+  approvedIds: bigint[];
+  /** Resume token for the next page, or null when the ID space is exhausted. */
+  nextCursor: bigint | null;
+}
+
+/** Normalize a native-decoded proposal-listing struct into {@link ProposalLists}. */
+function parseProposalLists(native: Record<string, unknown>): ProposalLists {
+  const asIds = (value: unknown): bigint[] =>
+    Array.isArray(value) ? value.map((id) => BigInt(id as string | number | bigint)) : [];
+  const pending = native.pending_ids ?? native.pendingIds;
+  const approved = native.approved_ids ?? native.approvedIds;
+  const cursor = native.next_cursor ?? native.nextCursor;
+  return {
+    pendingIds: asIds(pending),
+    approvedIds: asIds(approved),
+    nextCursor: cursor === null || cursor === undefined ? null : BigInt(cursor as string | number | bigint),
+  };
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class bcForgeClient {
@@ -144,6 +200,10 @@ export class bcForgeClient {
   private server: SorobanRpc.Server;
   private contract: Contract;
   private walletAdapter?: WalletAdapter;
+  private maxRetryAttempts?: number;
+  private maxFeeCap?: string | number | bigint;
+  private readCache = new Map<string, { value: unknown; ledger: number }>();
+  private cachedLedgerSequence: number = 0;
 
   constructor(config: bcForgeClientConfig) {
     this.rpcUrl = config.rpcUrl;
@@ -152,6 +212,8 @@ export class bcForgeClient {
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
     this.walletAdapter = config.walletAdapter;
+    this.maxRetryAttempts = config.maxRetryAttempts;
+    this.maxFeeCap = config.maxFeeCap;
   }
 
   /** Replace or set the wallet adapter at runtime */
@@ -177,6 +239,57 @@ export class bcForgeClient {
     await this.walletAdapter.disconnect();
   }
 
+  // ─── Ledger Cache Helpers ──────────────────────────────────────────────────
+
+  /** Get current ledger sequence number */
+  async getLatestLedgerSequence(): Promise<number> {
+    if (this.cachedLedgerSequence > 0) {
+      return this.cachedLedgerSequence;
+    }
+    try {
+      const latest = await this.server.getLatestLedger();
+      return latest.sequence;
+    } catch {
+      return this.cachedLedgerSequence;
+    }
+  }
+
+  /** Set ledger sequence manually for testing or mock control */
+  setLedgerSequence(sequence: number): void {
+    this.cachedLedgerSequence = sequence;
+  }
+
+  /** Clear all cached read responses */
+  clearCache(): void {
+    this.readCache.clear();
+  }
+
+  /** Helper to execute a ledger-cached read query */
+  private async getCachedRead<T>(
+    method: string,
+    strArgs: string[],
+    fetcher: () => Promise<T>,
+  ): Promise<T> {
+    const currentLedger = await this.getLatestLedgerSequence();
+    const cacheKey = `${this.contractId}:${method}:${strArgs.join(':')}:${currentLedger}`;
+
+    const existing = this.readCache.get(cacheKey);
+    if (existing && existing.ledger === currentLedger) {
+      return existing.value as T;
+    }
+
+    // Invalidate entries from old ledgers
+    for (const [k, entry] of this.readCache.entries()) {
+      if (entry.ledger !== currentLedger) {
+        this.readCache.delete(k);
+      }
+    }
+
+    const val = await fetcher();
+    this.readCache.set(cacheKey, { value: val, ledger: currentLedger });
+    return val;
+  }
+
   // ─── Read-Only Queries ───────────────────────────────────────────────────
 
   /**
@@ -186,8 +299,10 @@ export class bcForgeClient {
    * @returns Token balance as a fixed-scale decimal string.
    */
   async getBalance(address: string): Promise<bigint> {
-    const result = await this.queryContract('balance', [addressToScVal(address)]);
-    return BigInt(scValToNative(result) as string | number | bigint);
+    return this.getCachedRead('balance', [address], async () => {
+      const result = await this.queryContract('balance', [addressToScVal(address)]);
+      return BigInt(scValToNative(result) as string | number | bigint);
+    });
   }
 
   /**
@@ -228,11 +343,13 @@ export class bcForgeClient {
    * Get the spending allowance from `owner` to `spender`.
    */
   async getAllowance(owner: string, spender: string): Promise<bigint> {
-    const result = await this.queryContract('allowance', [
-      addressToScVal(owner),
-      addressToScVal(spender),
-    ]);
-    return BigInt(scValToNative(result) as string | number | bigint);
+    return this.getCachedRead('allowance', [owner, spender], async () => {
+      const result = await this.queryContract('allowance', [
+        addressToScVal(owner),
+        addressToScVal(spender),
+      ]);
+      return BigInt(scValToNative(result) as string | number | bigint);
+    });
   }
 
   /**
@@ -594,6 +711,60 @@ export class bcForgeClient {
   async unpause(source?: Keypair): Promise<TransactionResult> {
     const signerAddress = this.getSignerAddress(source);
     return this.invokeContract('unpause', [addressToScVal(signerAddress)], source);
+  }
+
+  /**
+   * Build an unsigned pause transaction for offline signing.
+   *
+   * @param sourcePublicKey - Pauser/admin public key that will sign the transaction
+   * @returns Unsigned transaction XDR string
+   */
+  async buildPauseTx(sourcePublicKey: string): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'pause',
+      [addressToScVal(sourcePublicKey)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Build an unsigned unpause transaction for offline signing.
+   *
+   * @param sourcePublicKey - Pauser/admin public key that will sign the transaction
+   * @returns Unsigned transaction XDR string
+   */
+  async buildUnpauseTx(sourcePublicKey: string): Promise<string> {
+    return buildUnsignedTransaction(
+      this.rpcUrl,
+      this.networkPassphrase,
+      this.contractId,
+      'unpause',
+      [addressToScVal(sourcePublicKey)],
+      sourcePublicKey,
+    );
+  }
+
+  /**
+   * Submit an already-signed transaction XDR (for example one signed on a
+   * hardware wallet or offline machine).
+   *
+   * @param txXdr - Signed transaction XDR string
+   */
+  async submitSignedTransaction(txXdr: string): Promise<TransactionResult> {
+    const response = await submitTransaction(this.rpcUrl, txXdr, {
+      networkPassphrase: this.networkPassphrase,
+    });
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: response.txHash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+    return { success: false, hash: response.txHash };
   }
 
   // ─── Offline Transaction Builders ──────────────────────────────────────────
@@ -1059,6 +1230,84 @@ export class bcForgeClient {
   }
 
   /**
+   * Renounce a role the caller holds, dropping it from themself (#915).
+   *
+   * No SuperAdmin counter-signature is needed — that is the point: a holder
+   * can give up their own privilege. The contract reverts if the caller does
+   * not directly hold the role (`RoleNotHeldForRenounce`) and, for
+   * SuperAdmin, if no other holder would remain (`LastSuperAdmin`).
+   *
+   * @param role   - Role to renounce
+   * @param source - Keypair of the role holder renouncing the role
+   * @throws {ContractError} If the caller does not hold the role (`RoleNotHeldForRenounce`)
+   * @throws {ContractError} If the caller is the last SuperAdmin (`LastSuperAdmin`)
+   */
+  async renounceRole(role: Role, source?: Keypair): Promise<TransactionResult> {
+    const signerAddress = this.getSignerAddress(source);
+    return this.invokeContract(
+      'renounce_role',
+      [addressToScVal(signerAddress), roleToScVal(role)],
+      source,
+    );
+  }
+
+  /**
+   * One-call role-hierarchy view for an address (#915).
+   *
+   * Cheaper and more truthful than four `hasRole` calls: the configured
+   * admin is reported as holding every role, matching the contract's own
+   * authorization semantics.
+   *
+   * @param address - Stellar public key or contract address to inspect
+   */
+  async getRoleHierarchy(address: string): Promise<RoleHierarchy> {
+    const result = await this.queryContract('get_role_hierarchy', [addressToScVal(address)]);
+    const native = scValToNative(result) as Record<string, unknown>;
+    // Struct field keys arrive snake_case from the XDR map; older SDK
+    // versions camelCase them, so accept both spellings.
+    const pick = (snake: string, camel: string): unknown => native[snake] ?? native[camel];
+    return {
+      address: (pick('address', 'address') as string) ?? address,
+      isAdmin: Boolean(pick('is_admin', 'isAdmin')),
+      isSuperAdmin: Boolean(pick('is_super_admin', 'isSuperAdmin')),
+      isMinter: Boolean(pick('is_minter', 'isMinter')),
+      isPauser: Boolean(pick('is_pauser', 'isPauser')),
+    };
+  }
+
+  /**
+   * List legacy proposal IDs by state, oldest first (#917).
+   *
+   * Bounded scan: at most 50 slots per call; resume via `nextCursor`.
+   *
+   * @param startAfter - Exclusive lower bound; pass the previous page's
+   *                     `nextCursor` (or 0 for the first page).
+   */
+  async listLegacyProposals(startAfter: bigint | number = 0): Promise<ProposalLists> {
+    const result = await this.queryContract('list_legacy_proposals', [
+      nativeToScVal(BigInt(startAfter), { type: 'u64' }),
+    ]);
+    return parseProposalLists(scValToNative(result) as Record<string, unknown>);
+  }
+
+  /**
+   * List upgrade-proposal IDs by state, oldest first (#917).
+   *
+   * Same bounded-scan and cursoring contract as {@link listLegacyProposals}.
+   * Terminal proposals (executed, cancelled, expired) and closed-window
+   * pending ones are omitted.
+   *
+   * @param startAfter - Exclusive lower bound; pass the previous page's
+   *                     `nextCursor` (or 0 for the first page).
+   */
+  async listUpgradeProposals(startAfter: bigint | number = 0): Promise<ProposalLists> {
+    const result = await this.queryContract('list_upgrade_proposals', [
+      nativeToScVal(BigInt(startAfter), { type: 'u64' }),
+    ]);
+    return parseProposalLists(scValToNative(result) as Record<string, unknown>);
+  }
+
+  /**
    * Grant the Minter role to an address. Admin-only.
    *
    * @remarks
@@ -1360,12 +1609,15 @@ export class bcForgeClient {
       try {
         return await fn();
       } catch (error) {
-        if (error instanceof SimulationError || error instanceof SignerRequiredError) {
+        if (
+          error instanceof ContractError ||
+          error instanceof SimulationError ||
+          error instanceof SignerRequiredError
+        ) {
           throw error;
         }
         lastError = error;
         // Only retry on certain errors (e.g., network/RPC errors)
-        // For now, we retry on any error that isn't a known terminal error
         if (i < retries - 1) {
           await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
         }
@@ -1396,6 +1648,8 @@ export class bcForgeClient {
         const simulated = await this.server.simulateTransaction(tx);
 
         if (SorobanRpc.Api.isSimulationError(simulated)) {
+          const parsed = parseContractError(simulated.error, method);
+          if (parsed) throw parsed;
           throw new SimulationError(`Query failed: ${simulated.error}`, simulated.error);
         }
 
@@ -1405,7 +1659,7 @@ export class bcForgeClient {
 
         return simulated.result.retval;
       } catch (error: unknown) {
-        if (error instanceof SimulationError) throw error;
+        if (error instanceof ContractError || error instanceof SimulationError) throw error;
         throw new RPCError('RPC call failed', error);
       }
     });
@@ -1421,6 +1675,16 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.withRetry(async () => {
       try {
+        const submitOpts = {
+          maxAttempts: this.maxRetryAttempts,
+          maxFeeCap: this.maxFeeCap,
+          sourceKeypair: source,
+          networkPassphrase: this.networkPassphrase,
+          contractId: this.contractId,
+          method,
+          args,
+        };
+
         // If an explicit Keypair is provided, use the existing signed builder
         if (source) {
           const txXdr = await buildInvokeTransaction(
@@ -1432,9 +1696,10 @@ export class bcForgeClient {
             source,
           );
 
-          const response = await submitTransaction(this.rpcUrl, txXdr);
+          const response = await submitTransaction(this.rpcUrl, txXdr, submitOpts);
 
           if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+            this.clearCache();
             return {
               success: true,
               hash: (response as unknown as { hash: string }).hash,
@@ -1467,11 +1732,14 @@ export class bcForgeClient {
           this.walletAdapter.publicKey,
         );
 
-        const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr);
+        const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr, {
+          networkPassphrase: this.networkPassphrase,
+        });
 
-        const response = await submitTransaction(this.rpcUrl, signedXdr);
+        const response = await submitTransaction(this.rpcUrl, signedXdr, submitOpts);
 
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+          this.clearCache();
           return {
             success: true,
             hash: (response as unknown as { hash: string }).hash,
@@ -1485,7 +1753,13 @@ export class bcForgeClient {
         };
       } catch (error: unknown) {
         // Don't retry on simulation errors or missing signer errors
-        if (error instanceof SimulationError || error instanceof SignerRequiredError) throw error;
+        if (
+          error instanceof ContractError ||
+          error instanceof SimulationError ||
+          error instanceof SignerRequiredError
+        ) {
+          throw error;
+        }
         throw error;
       }
     });
@@ -1500,6 +1774,7 @@ export class bcForgeClient {
     const response = await responsePromise;
 
     if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      this.clearCache();
       return {
         success: true,
         hash: (response as unknown as { hash: string }).hash,

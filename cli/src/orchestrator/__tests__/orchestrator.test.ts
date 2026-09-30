@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Keypair } from '@stellar/stellar-sdk';
 import { runDeploymentOrchestrator } from '../orchestrator.js';

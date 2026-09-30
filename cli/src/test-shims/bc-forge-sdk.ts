@@ -1,4 +1,11 @@
+// SPDX-License-Identifier: MIT
 /** Test/build shim so CLI unit tests do not hit live Soroban RPC. */
+export interface TransactionResult {
+  success: boolean;
+  hash: string;
+  returnValue?: unknown;
+}
+
 export enum Role {
   Admin = "Admin",
   SuperAdmin = "SuperAdmin",
@@ -43,5 +50,25 @@ export class bcForgeClient {
     _source: unknown
   ): Promise<{ success: boolean; hash: string }> {
     return { success: true, hash: "mock-set-dependent-token" };
+  }
+
+  async pause(_source?: unknown): Promise<TransactionResult> {
+    return { success: true, hash: "mock-pause" };
+  }
+
+  async unpause(_source?: unknown): Promise<TransactionResult> {
+    return { success: true, hash: "mock-unpause" };
+  }
+
+  async buildPauseTx(_sourcePublicKey: string): Promise<string> {
+    return "mock-unsigned-pause";
+  }
+
+  async buildUnpauseTx(_sourcePublicKey: string): Promise<string> {
+    return "mock-unsigned-unpause";
+  }
+
+  async submitSignedTransaction(_txXdr: string): Promise<TransactionResult> {
+    return { success: true, hash: "mock-submitted" };
   }
 }

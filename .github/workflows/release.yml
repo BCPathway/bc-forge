@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Release packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate packages before publish
+        run: npm run release:validate
+
+      - name: Version and publish with Changesets
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          commit: 'chore: release packages'
+          title: 'chore: release packages'
+          publish: |
+            npm run build --workspace @bc-forge/sdk
+            npm run build --workspace @bc-forge/cli
+            npm run build --workspace @bc-forge/react
+            npm config set provenance true
+            npx changeset publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check release status
+        run: |
+          echo "Published packages: ${{ steps.changesets.outputs.publishedPackages || 'none' }}"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Command } from "commander";
 import {
   Keypair,
@@ -148,7 +149,11 @@ export async function runSmokeTest(
     checkDeadline();
     sequence.push("mint_start");
 
+    // The token contract mints via `mint(minter, to, amount)` and requires the
+    // `minter` to hold the Minter role and authorize the call. The operator's
+    // source account is both minter and recipient of the smoke-test mint.
     const mintArgs = [
+      Address.fromString(sourcePublicKey).toScVal(),
       Address.fromString(sourcePublicKey).toScVal(),
       nativeToScVal(amount, { type: "i128" }),
     ];

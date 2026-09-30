@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for RBAC error naming conventions (#751), unauthorized-access error
 //! codes (#752), and role bitmask helper functions (#753).
 

@@ -33,6 +33,8 @@ CLI deployment orchestrator and management toolkit for **bc-forge** Soroban smar
 
 The `@bc-forge/cli` package provides a unified command-line tool (`bc-forge`) to deploy, monitor, verify, and upgrade Soroban contracts within the bc-forge ecosystem. It also automates SDK bindings generation and executes automated smoke tests against deployed contract instances.
 
+Supported Node, Stellar SDK, and package ranges are in the [compatibility matrix](../docs/COMPATIBILITY.md).
+
 ---
 
 ## Installation

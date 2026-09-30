@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * Regression test for the SDK build script not cleaning `dist` (#349).
  *

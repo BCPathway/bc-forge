@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Zero-address helpers for the admin access-control module (#922).
 //!
 //! Extracted from `lib.rs` so shared address checks can be reviewed and

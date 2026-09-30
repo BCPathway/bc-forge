@@ -42,3 +42,8 @@ issue_pr.txt
 
 /target/
 **/target/
+
+# Generated docs site artifacts (built by the root docs:* scripts)
+docs/api/sdk/
+docs/public/api/
+docs/.vitepress/cache/

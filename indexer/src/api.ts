@@ -208,6 +208,44 @@ function buildBurnWhere(
 }
 
 /**
+ * Build the Prisma `where` filter object for a Holder row.
+ *
+ * Holders are keyed by `address`; an address filter matches that field and a
+ * `from_ledger` filter matches holders last touched at or after the ledger.
+ */
+function buildHolderWhere(
+  address: string | undefined,
+  fromLedger: number | undefined,
+): Record<string, unknown> | undefined {
+  const conditions: Record<string, unknown>[] = [];
+  if (address !== undefined) {
+    conditions.push({ address });
+  }
+  if (fromLedger !== undefined) {
+    conditions.push({ ledger: { gte: fromLedger } });
+  }
+  if (conditions.length === 0) {
+    return undefined;
+  }
+  return conditions.length === 1 ? conditions[0] : { AND: conditions };
+}
+
+/**
+ * Build the Prisma `where` filter object for a SupplyPoint row.
+ *
+ * Supply points carry a ledger sequence; a `from_ledger` filter matches
+ * points at or after the given ledger.
+ */
+function buildSupplyPointWhere(
+  fromLedger: number | undefined,
+): Record<string, unknown> | undefined {
+  if (fromLedger === undefined) {
+    return undefined;
+  }
+  return { ledger: { gte: fromLedger } };
+}
+
+/**
  * Shared cursor-paginated list handler.
  *
  * Ordering is `createdAt DESC, id DESC` so pages stay stable when several
@@ -470,6 +508,47 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
       }
       const where = buildBurnWhere(address, fromLedger);
       await handlePaginatedList(req, res, getPrismaClient().burn, where);
+    }),
+  );
+
+  /**
+   * GET /holders
+   * Retrieve current holder balances (paginated, optionally filtered).
+   *
+   * Balances are derived from the indexed mint, transfer, and burn events at
+   * ingestion time; holders with a zero balance are not listed.
+   */
+  router.get(
+    '/holders',
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildHolderWhere(address, fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().holder, where);
+    }),
+  );
+
+  /**
+   * GET /supply-history
+   * Retrieve timestamped supply points (paginated, optionally filtered).
+   *
+   * One supply point is recorded per supply-changing event (mint or burn)
+   * with the authoritative supply reported by the indexed event.
+   */
+  router.get(
+    '/supply-history',
+    asyncHandler(async (req, res) => {
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        return;
+      }
+      const where = buildSupplyPointWhere(fromLedger);
+      await handlePaginatedList(req, res, getPrismaClient().supplyPoint, where);
     }),
   );
 

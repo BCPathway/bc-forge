@@ -394,22 +394,28 @@ No migration is needed for storage — only the contract code is replaced.
 
 ## Automated WASM upgrade verification
 
-The E2E harness builds the current token WASM, creates an initialized token with
-balances and a two-member admin pool, executes the timelocked
-`execute_upgrade` route, and verifies balances, supply, admin, super-admin role,
-pool, and threshold afterward. Soroban's native test host cannot validate the
-compiled token WASM's reference-types section, so the state-preservation test
-uses the same empty-WASM test placeholder as the admin crate's upgrade tests;
-the compiled token artifact is still built in CI. Run it locally with:
+`e2e/integration_test.rs` deploys the current token on the Soroban test host,
+writes a balance and a two-member admin pool, then upgrades through
+`execute_upgrade` (proposal, second approval, 24-hour timelock). After the
+upgrade it reads the balance, supply, admin, super-admin role, pool, and
+threshold back from contract storage.
+
+`soroban-env-host` 22.1.3 instantiates uploaded modules with reference types,
+floats, and multi-value disabled. A token WASM produced by current rustc fails
+that check (`reference-types not enabled`). An empty byte slice is not an
+upgrade either: the host treats it as a test placeholder and never instantiates
+it. The harness uploads a non-empty module whose only section is the
+`contractenvmetav0` custom section (protocol 22, pre-release 0), which this host
+accepts. That module has no token exports, so the test reads surviving storage
+with `env.as_contract` instead of calling the replaced executable. Run it with:
 
 ```bash
-cargo build -p bc-forge-token --target wasm32-unknown-unknown --release
-cargo test -p bc-forge-e2e-tests
+cargo test -p bc-forge-e2e-tests test_admin_governed_wasm_upgrade_preserves_state -- --exact
 ```
 
-CI runs these commands in the dedicated `WASM Upgrade E2E` job. The token WASM
-build and the admin-governed state-preservation execution are separate checks
-until the test host supports the compiled artifact's reference-types section.
+The `WASM Upgrade E2E` CI job still builds `bc_forge_token.wasm` and then runs
+the e2e package. Installing that release artifact needs a host that accepts
+reference types.
 
 ## Compatibility rules
 
@@ -443,6 +449,48 @@ release note.
 - **Reset:** The unlock time is never reset once set.
 - **Storage:** Stored under `AdminKey::ProposalTimelock(proposal_id)` in
   instance storage.
+
+## Delayed privileged actions (#914)
+
+Fee-config changes and ownership transfers on the token contract run through
+the same review-window discipline as WASM upgrades, but with single-admin
+bookkeeping instead of the pool quorum:
+
+1. **Propose** — an admin calls `propose_privilege_action` with
+   `SetFeeConfig` or `TransferOwnership(new_admin)`. The proposal records
+   `executable_at = now + 86,400`.
+2. **Review window** — during the 24-hour delay any admin can
+   `cancel_privilege_action` (the emergency brake against a compromised
+   key). UIs surface the pending state via `get_privilege_proposal`.
+3. **Execute** — after the delay, the matching effect function
+   (`set_fee_config` / `transfer_ownership`) consumes the proposal and
+   applies the change. Executing without a live, elapsed proposal fails:
+   - `TokenError::TimelockNotElapsed` (18) — the proposal is still inside
+     the delay;
+   - `TokenError::PrivilegeProposalNotFound` (19) — nothing was proposed,
+     or the proposal was already consumed or cancelled.
+
+Resubmitting a consumed or cancelled action starts a fresh 24-hour clock.
+
+## Role renounce (#915)
+
+Role holders can drop their own role with `renounce_role(caller, role)` —
+no SuperAdmin counter-signature needed, which is the point: a holder can
+give up their own privilege. Renouncing is rejected with
+`RoleNotHeldForRenounce` for a role the caller does not directly hold (a
+role held only implicitly via the Admin bit has no separate storage to
+clear), and the last SuperAdmin can never renounce (`LastSuperAdmin`) —
+recovery must not depend on a chain with nobody able to grant roles. The
+one-call `get_role_hierarchy` view reports an address's full role set.
+
+## Proposal listing (#917)
+
+`list_legacy_proposals(start_after)` and `list_upgrade_proposals(start_after)`
+return the pending and approved-not-executed proposal IDs for both proposal
+flows, oldest first. Ledger keys are not enumerable, so the on-chain scan is
+capped at 50 slots per call: when `next_cursor` is present, pass it back as
+`start_after` for the next page. `get_threshold` and `get_admin_pool` expose
+the configured quorum for UIs.
 
 ## Rolling back a bad upgrade
 

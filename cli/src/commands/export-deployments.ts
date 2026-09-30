@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Command } from 'commander';
 import { addNetworkOptions, explicitNetworkOverrides } from '../network.js';
 import { getClientConfig, loadConfigFile } from '../utils/config.js';

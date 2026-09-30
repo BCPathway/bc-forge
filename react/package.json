@@ -18,7 +18,8 @@
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --watch --dts",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
-    "test": "jest"
+    "test": "jest",
+    "e2e": "playwright test"
   },
   "peerDependencies": {
     "@stellar/stellar-sdk": "^16.0.1",
@@ -29,6 +30,7 @@
     "@bc-forge/sdk": "^0.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.0",
     "@eslint/js": "^10.0.1",
     "@stellar/stellar-sdk": "^16.0.1",
     "@testing-library/dom": "^10.4.2",

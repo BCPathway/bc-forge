@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { Keypair } from '@stellar/stellar-sdk';
 import { Role } from '@bc-forge/sdk';
 
