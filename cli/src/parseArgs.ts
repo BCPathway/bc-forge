@@ -25,6 +25,18 @@ import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 const VERSION = "0.1.0";
 
 /**
+ * Help and version are normal exits. Commander 15 uses `commander.help` when
+ * no subcommand was given, and `commander.helpDisplayed` for `--help`.
+ */
+function isUsageExit(err: CommanderError): boolean {
+  return (
+    err.code === "commander.help" ||
+    err.code === "commander.helpDisplayed" ||
+    err.code === "commander.version"
+  );
+}
+
+/**
  * Build and return the top-level CLI program.
  * Extracted so tests can call it without process.exit side-effects.
  */
@@ -83,10 +95,7 @@ export async function parseArgs(
   try {
     await program.parseAsync(argv);
   } catch (err) {
-    if (
-      err instanceof CommanderError &&
-      (err.code === "commander.helpDisplayed" || err.code === "commander.version")
-    ) {
+    if (err instanceof CommanderError && isUsageExit(err)) {
       return undefined;
     }
     throw err;
