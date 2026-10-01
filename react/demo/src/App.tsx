@@ -21,7 +21,7 @@ const providerConfig = {
   networkPassphrase:
     import.meta.env.VITE_NETWORK_PASSPHRASE ??
     'Test SDF Network ; September 2015',
-  contractId: import.meta.env.VITE_CONTRACT_ID ?? 'CCW67B452GD67B452GD67B452GD67B452GD67B452GD67B452GD67B452',
+  contractId: import.meta.env.VITE_CONTRACT_ID ?? 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
 };
 
 const ROUTES: Record<string, React.ReactNode> = {
