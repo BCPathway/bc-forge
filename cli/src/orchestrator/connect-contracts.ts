@@ -234,7 +234,8 @@ export async function connectContractIds(
   }
 
   // ── Step 5: Persist Linked Contract Mappings to .bc-forge.json ────────────
-  if (fileConfigResult.filePath) {
+  const shouldWriteConfig = fileConfigResult.success || Boolean(options.configPath);
+  if (shouldWriteConfig && fileConfigResult.filePath) {
     try {
       const existingContracts = fileConfig?.contracts || {};
 

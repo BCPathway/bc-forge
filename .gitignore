@@ -20,6 +20,9 @@ dist/
 sdk/*.tgz
 *.tsbuildinfo
 
+# Local CLI deployment config (tests and `bc-forge config` write this)
+.bc-forge.json
+
 # Environment
 .env
 .env.local
