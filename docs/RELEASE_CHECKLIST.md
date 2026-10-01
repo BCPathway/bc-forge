@@ -57,6 +57,8 @@ Publish workflows set top-level `permissions: {}` so every unspecified `GITHUB_T
   - `contents: write` (push release commits and tags)
   - `id-token: write` (OIDC token for npm provenance)
   - `pull-requests: write` (open and update the Changesets version PR)
+- **`release.yml`** (`react-prepublish` and `verify-react-release` jobs):
+  - `contents: read` on the calling job. These jobs call reusable workflows that request `contents: read`. A `uses` job that inherits `permissions: {}` is rejected at startup with `contents: none`.
 - **`publish-release-manifest.yml`** (`manifest` job, environment `container`):
   - `contents: write` (upload the indexer image digest, checksums, and release assets)
 
