@@ -1,6 +1,6 @@
 {
   "name": "@bc-forge/indexer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Server indexer microservice for bc-forge",
   "main": "dist/index.js",
   "type": "module",
@@ -17,7 +17,7 @@
     "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
-    "@bc-forge/sdk": "^0.1.0",
+    "@bc-forge/sdk": "^0.2.0",
     "@prisma/client": "^5.10.0",
     "@stellar/stellar-sdk": "^16.0.1",
     "dotenv": "^16.4.5",
