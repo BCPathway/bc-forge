@@ -6,8 +6,9 @@ import { addNetworkOptions, explicitNetworkOverrides, formatContractIdWithExplor
 import { getClientConfig } from '../utils/config.js';
 import { buildDeploymentArtifacts, exportDeploymentsToFile } from '../utils/deployments.js';
 import { resolveContractIdOption } from '../utils/registry.js';
+import logger, { silenceInformationalLogs } from '../utils/logger.js';
+import { writeJson } from '../utils/output.js';
 import { resolveAccountReference } from '../utils/address-book.js';
-import logger from '../utils/logger.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -349,11 +350,13 @@ export function createDeployCommand(): Command {
     .requiredOption('--symbol <symbol>', 'Ticker symbol for the wrapped token')
     .option('--decimals <n>', 'Decimal places (default: 7)', '7')
     .option('-o, --out <path>', 'Output file path to export deployment artifact JSON (e.g. deployments.json)')
-    .option('--dry-run', 'Print commands but do not execute them', false);
+    .option('--dry-run', 'Print commands but do not execute them', false)
+    .option('--json', 'Print contract ids and transaction hashes as JSON');
 
   addNetworkOptions(cmd);
 
   cmd.action(async (opts, command) => {
+    const restore = opts.json ? silenceInformationalLogs() : undefined;
     try {
       const netCfg = getClientConfig(explicitNetworkOverrides(command));
       const underlyingToken = resolveContractIdOption(command, opts.underlyingToken) ?? opts.underlyingToken;
@@ -374,7 +377,19 @@ export function createDeployCommand(): Command {
         out: opts.out,
       });
 
-      if (result.success) {
+      if (opts.json) {
+        writeJson({
+          success: result.success,
+          message: result.message,
+          vaultContractId: result.vaultContractId,
+          feeContractId: result.feeContractId,
+          vaultWasmHash: result.vaultWasmHash,
+          feeWasmHash: result.feeWasmHash,
+          linkTxHash: result.linkTxHash,
+          outPath: result.outPath,
+          steps: result.steps,
+        });
+      } else if (result.success) {
         logger.success(result.message);
         if (result.vaultContractId) {
           logger.info(
@@ -389,7 +404,8 @@ export function createDeployCommand(): Command {
         if (result.outPath) {
           logger.info(`  Artifact exported : ${result.outPath}`);
         }
-      } else {
+      }
+      if (!result.success) {
         logger.error(result.message);
         process.exitCode = 1;
       }
@@ -397,6 +413,8 @@ export function createDeployCommand(): Command {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`Error: ${msg}`);
       process.exitCode = 1;
+    } finally {
+      restore?.();
     }
   });
 

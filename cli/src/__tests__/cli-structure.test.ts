@@ -34,6 +34,7 @@ describe("CLI TypeScript project structure (#683)", () => {
         "orchestrate",
         "batch-mint",
         "account",
+        "completions",
       ])
     );
   });
