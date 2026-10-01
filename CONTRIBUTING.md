@@ -55,6 +55,23 @@ npm install
 npm run build
 ```
 
+### Git hooks
+
+Install the pre-commit hook from the repository root:
+
+```bash
+npm install
+```
+
+That install runs the `prepare` script, which sets up [Husky](https://typicode.github.io/husky/). After it, `.husky/pre-commit` runs on every commit.
+
+The hook does two things:
+
+1. **TypeScript** — [lint-staged](https://github.com/lint-staged/lint-staged) runs Prettier on staged files in `sdk`, `cli`, `react`, and `indexer`. Prettier is the formatter `@bc-forge/sdk` already uses (`npm run format` in `sdk/`, config in `sdk/.prettierrc`). `cli`, `react`, and `indexer` do not define a formatter of their own, so the hook runs that same Prettier on their staged sources. Generated bindings under `sdk/src/generated/` are left untouched.
+2. **Rust** — staged `.rs` files are formatted with `cargo fmt`. A badly formatted file is rewritten and included in the commit. If formatting fails, the commit is rejected.
+
+`cargo clippy` is not part of the hook. It stays in CI (`cargo clippy --all-targets --all-features -- -D warnings` in `.github/workflows/ci.yml`) because a full clippy run is too slow to block every commit. Run clippy locally before you open a PR; the PR checklist below still requires it.
+
 ### Keeping Your Fork in Sync & Resetting Local Clones
 
 If upstream history is updated or rewritten:
@@ -119,8 +136,8 @@ All Rust and TypeScript source files in monitored trees must include an SPDX lic
 
 #### Rust (Smart Contracts)
 
-- Follow standard Rust formatting: `cargo fmt --all`
-- Pass all clippy lints: `cargo clippy --all-targets -- -D warnings`
+- Follow standard Rust formatting: `cargo fmt --all` (also applied to staged `.rs` files by the pre-commit hook)
+- Pass all clippy lints: `cargo clippy --all-targets -- -D warnings` (CI only; not a pre-commit hook, because clippy is too slow to run on every commit)
 - Add NatSpec-style doc comments to all public functions:
 
 ```rust

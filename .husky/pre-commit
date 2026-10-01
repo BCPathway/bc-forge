@@ -1,0 +1,17 @@
+# Format staged TypeScript/JavaScript with Prettier (lint-staged) and staged Rust with cargo fmt.
+# cargo clippy stays in CI; it is too slow for a pre-commit hook.
+
+npx lint-staged
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+if [ -n "$files" ]; then
+  old_ifs=$IFS
+  IFS='
+'
+  for file in $files; do
+    [ -n "$file" ] || continue
+    cargo fmt -- "$file"
+    git add -- "$file"
+  done
+  IFS=$old_ifs
+fi
