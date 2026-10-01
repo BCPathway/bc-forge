@@ -35,13 +35,12 @@ sdk/*.tgz
 # OS
 .DS_Store
 Thumbs.db
+# Windows reserved device name created by accidental shell redirection
+nul
 
 # PR text
 issue_pr.txt
 .opencode
-
-/target/
-**/target/
 
 # Generated docs site artifacts (built by the root docs:* scripts)
 docs/api/sdk/

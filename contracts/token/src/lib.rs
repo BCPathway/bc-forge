@@ -430,11 +430,8 @@ impl BcForgeToken {
 
 /// Lockup period state storage helpers (#719).
 ///
-/// These back the upcoming `lock_tokens` / `withdraw_locked` entry points
-/// (see `.kiro/specs/token-locking-vesting`); until those land they are
-/// exercised only by the `lockup` unit-test module, so dead-code analysis is
-/// silenced for library builds.
-#[allow(dead_code)]
+/// `lock_tokens` and `withdraw_locked` on the contract implementation use these
+/// helpers. `is_locked` is test-only.
 impl BcForgeToken {
     fn read_lockup(env: &Env, user: &Address) -> Option<LockupState> {
         let key = DataKey::Lockup(user.clone());
@@ -485,6 +482,7 @@ impl BcForgeToken {
     /// Returns `true` while the user has a lock whose unlock timestamp is still
     /// in the future. An expired lock no longer counts as locked, even though
     /// its tokens stay in storage until explicitly withdrawn.
+    #[cfg(test)]
     fn is_locked(env: &Env, user: &Address) -> bool {
         match Self::read_lockup(env, user) {
             Some(state) => env.ledger().timestamp() < state.unlock_timestamp,

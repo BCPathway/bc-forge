@@ -55,7 +55,7 @@ bc-forge/
 ├── config.example.json            # Example CLI/indexer configuration
 ├── CONTRIBUTING.md                # Contributor guide (drips.network)
 ├── SECURITY.md                    # Security policy and disclosure
-├── VAULTS.md                      # Vault integration guide
+├── VAULTS.md                      # Pointer to docs/VAULTS.md
 ├── LICENSE                        # MIT
 └── README.md                      # This file
 ```
