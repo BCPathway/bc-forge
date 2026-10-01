@@ -1,6 +1,6 @@
 {
   "name": "@bc-forge/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "CLI deployment orchestrator for bc-forge Soroban contracts",
   "type": "module",
@@ -25,7 +25,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@bc-forge/sdk": "^0.1.0",
+    "@bc-forge/sdk": "^0.2.0",
     "@stellar/stellar-sdk": "^17.2.0",
     "ajv": "^8.17.0",
     "chalk": "^6.0.0",

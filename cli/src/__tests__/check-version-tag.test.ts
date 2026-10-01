@@ -17,39 +17,49 @@ const __filename = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(__filename, '../../../../');
 const scriptPath = path.resolve(rootDir, 'scripts/check-version-tag.mjs');
 
+function manifestVersion(component: string): string {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(rootDir, component, 'package.json'), 'utf8'),
+  ) as { version: string };
+  return manifest.version;
+}
+
 describe('scripts/check-version-tag.mjs', () => {
   const mockUnpublishedRegistry = () => false;
   const mockPublishedRegistry = () => true;
 
   describe('validateVersionTag logic', () => {
     it('passes for a valid tag matching the manifest version', () => {
-      const result = validateVersionTag('sdk@0.1.0', {
+      const version = manifestVersion('sdk');
+      const result = validateVersionTag(`sdk@${version}`, {
         rootDir,
         checkRegistry: mockUnpublishedRegistry,
       });
       expect(result.success).toBe(true);
       expect(result.component).toBe('sdk');
-      expect(result.version).toBe('0.1.0');
+      expect(result.version).toBe(version);
     });
 
     it('handles ref/tags/ prefix in GITHUB_REF tag format', () => {
-      const result = validateVersionTag('refs/tags/cli@0.1.0', {
+      const version = manifestVersion('cli');
+      const result = validateVersionTag(`refs/tags/cli@${version}`, {
         rootDir,
         checkRegistry: mockUnpublishedRegistry,
       });
       expect(result.success).toBe(true);
       expect(result.component).toBe('cli');
-      expect(result.version).toBe('0.1.0');
+      expect(result.version).toBe(version);
     });
 
     it('passes for react package version', () => {
-      const result = validateVersionTag('react@1.0.0', {
+      const version = manifestVersion('react');
+      const result = validateVersionTag(`react@${version}`, {
         rootDir,
         checkRegistry: mockUnpublishedRegistry,
       });
       expect(result.success).toBe(true);
       expect(result.component).toBe('react');
-      expect(result.version).toBe('1.0.0');
+      expect(result.version).toBe(version);
     });
 
     it('keeps the prerelease suffix on a React tag', () => {
@@ -145,7 +155,9 @@ describe('scripts/check-version-tag.mjs', () => {
     });
 
     it('passes component-v and Changesets tag forms when the version matches', () => {
-      for (const tag of ['sdk-v0.1.0', '@bc-forge/sdk@0.1.0', 'refs/tags/cli-v0.1.0']) {
+      const sdk = manifestVersion('sdk');
+      const cli = manifestVersion('cli');
+      for (const tag of [`sdk-v${sdk}`, `@bc-forge/sdk@${sdk}`, `refs/tags/cli-v${cli}`]) {
         const result = validateVersionTag(tag, {
           rootDir,
           checkRegistry: mockUnpublishedRegistry,
@@ -258,7 +270,7 @@ describe('scripts/check-version-tag.mjs', () => {
 
     it('fails when version is already published (mocked registry check)', () => {
       expect(() => {
-        validateVersionTag('sdk@0.1.0', {
+        validateVersionTag(`sdk@${manifestVersion('sdk')}`, {
           rootDir,
           checkRegistry: mockPublishedRegistry,
         });
@@ -268,12 +280,13 @@ describe('scripts/check-version-tag.mjs', () => {
 
   describe('CLI execution exit codes', () => {
     it('exits 0 on valid tag', () => {
-      const output = execSync(`node "${scriptPath}" sdk@0.1.0`, {
+      const tag = `sdk@${manifestVersion('sdk')}`;
+      const output = execSync(`node "${scriptPath}" ${tag}`, {
         cwd: rootDir,
         encoding: 'utf8',
         timeout: 15000,
       });
-      expect(output).toContain('Tag "sdk@0.1.0" is valid');
+      expect(output).toContain(`Tag "${tag}" is valid`);
     }, 20000);
 
     it('exits non-zero on tag with wrong version', () => {
