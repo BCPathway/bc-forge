@@ -130,7 +130,9 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
   ]);
 
   useEffect(() => {
-    loadData();
+    void (async () => {
+      await loadData();
+    })();
   }, [loadData]);
 
   const handleDeposit = async (e: React.FormEvent) => {

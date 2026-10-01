@@ -78,7 +78,9 @@ export function useBalance(address: string | undefined) {
   }, [client, address]);
 
   useEffect(() => {
-    fetchBalance();
+    void (async () => {
+      await fetchBalance();
+    })();
   }, [fetchBalance]);
 
   return { data, loading, error, refetch: fetchBalance };
@@ -137,7 +139,9 @@ export function useTotalSupply() {
   }, [client]);
 
   useEffect(() => {
-    fetchTotalSupply();
+    void (async () => {
+      await fetchTotalSupply();
+    })();
   }, [fetchTotalSupply]);
 
   return { data, loading, error, refetch: fetchTotalSupply };
@@ -257,7 +261,9 @@ export function useAllowance(owner: string | undefined, spender: string | undefi
   }, [client, owner, spender]);
 
   useEffect(() => {
-    fetchAllowance();
+    void (async () => {
+      await fetchAllowance();
+    })();
   }, [fetchAllowance]);
 
   return { data, loading, error, refetch: fetchAllowance };
