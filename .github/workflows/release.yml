@@ -75,6 +75,14 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      # Node 22 ships npm 10.x. npm trusted publishing (OIDC) needs npm
+      # 11.5.1 or later; with an older npm the registry answers the publish
+      # PUT with a bare E404. See docs/RELEASE_CHECKLIST.md.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@^11
+          npm --version
+
       - name: Install dependencies
         run: npm ci
 

@@ -14,8 +14,35 @@ the normal publish path.
 
 ## One-time npm trusted-publisher setup
 
-Do this once per package (`@bc-forge/sdk`, `@bc-forge/cli`, `@bc-forge/react`)
-in the npm organization that owns the scope:
+Do this once per package (`@bc-forge/sdk`, `@bc-forge/cli`, `@bc-forge/react`,
+`@bc-forge/indexer`) in the npm organization that owns the scope.
+
+### First publish of a new package
+
+Trusted publishing cannot create a package. A publish PUT for a name that is
+not yet on the registry fails with a bare `E404 Not Found`, which is what the
+`Release packages` job reports until the package exists. Bootstrap each new
+package once with a credential, then switch to OIDC:
+
+1. As an owner of the `bc-forge` npm organization, create a granular access
+   token with publish rights on the `@bc-forge` scope (bypass 2FA, short
+   expiry). Delete it after this step.
+2. Either publish locally from a clean checkout of `main` (`npm ci`, then
+   `npm run build --workspace <pkg>` and `npm publish --workspace <pkg>
+   --access public`; for `@bc-forge/indexer` run `npm run prisma:generate
+   --workspace @bc-forge/indexer` before the build), or store the token as
+   `NPM_TOKEN` on the `npm` environment and add
+   `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` to the Changesets step's `env`
+   for one run of `release.yml`. Remove that line again afterwards.
+3. With the package on the registry, continue with the trusted publisher
+   steps below, then revoke the token.
+
+The release job also upgrades to npm 11 (`Upgrade npm for trusted
+publishing`) because OIDC needs npm 11.5.1+, and each package sets
+`repository.url` to `git+https://github.com/BCPathway/bc-forge.git`, which npm
+checks against the OIDC claims. Keep both in place.
+
+### Trusted publisher record
 
 1. Sign in to [npmjs.com](https://www.npmjs.com) as an owner of the `bc-forge` organization.
 2. Open the package, then **Settings → Trusted Publisher**.
@@ -24,7 +51,7 @@ in the npm organization that owns the scope:
    - Repository: `bc-forge`
    - Workflow filename: `release.yml`
    - Environment name: `npm`
-4. Save. Repeat for the other two packages.
+4. Save. Repeat for the other packages.
 5. Confirm **Access** is public for each package. The changesets config sets `"access": "public"`.
 6. After the next release, open the package's **Versions** page and confirm the version shows a provenance attestation. The statement is also linked from the GitHub Actions run of `Release packages`.
 

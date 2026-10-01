@@ -56,6 +56,11 @@
   "publishConfig": {
     "access": "public"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BCPathway/bc-forge.git",
+    "directory": "sdk"
+  },
   "engines": {
     "node": ">=18.0.0"
   }
