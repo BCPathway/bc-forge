@@ -2,8 +2,11 @@
 
 `@bc-forge/sdk`, `@bc-forge/cli`, and `@bc-forge/react` publish from
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) on a push to
-`main`. Changesets opens the version PR, and the publish step builds each
-package, sets `npm config set provenance true`, and runs `npx changeset publish`.
+`main`. Changesets opens the version PR, and the publish step runs
+`npm run release:publish` ([`scripts/release-publish.mjs`](../scripts/release-publish.mjs)),
+which builds each package, sets `npm config set provenance true`, and runs
+`npx changeset publish`. It is one command because `changesets/action` execs
+its `publish` input directly rather than through a shell.
 
 The workflow grants `id-token: write` so npm can verify the GitHub Actions OIDC
 token. It does not pass `NODE_AUTH_TOKEN`. A long-lived npm token is not part of

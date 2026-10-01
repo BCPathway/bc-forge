@@ -84,23 +84,18 @@ jobs:
       # react-prepublish already linted, tested, built, and validated the
       # React tarball. This step builds again and re-checks that tarball
       # immediately before the only registry write (Changesets).
+      #
+      # `publish` must be a single command: changesets/action splits the
+      # string on whitespace and execs it once, so a multi-line block fails
+      # with "No workspaces found". The full build/guard/publish sequence
+      # lives in scripts/release-publish.mjs.
       - name: Version and publish with Changesets
         id: changesets
         uses: changesets/action@v1
         with:
           commit: 'chore: release packages'
           title: 'chore: release packages'
-          publish: |
-            npm run build --workspace @bc-forge/sdk
-            npm run build --workspace @bc-forge/cli
-            npm run build --workspace @bc-forge/react
-            npm run prisma:generate --workspace @bc-forge/indexer
-            npm run build --workspace @bc-forge/indexer
-            node scripts/validate-react-tarball.mjs
-            npm config set provenance true
-            node scripts/check-version-tag.mjs --before-changeset-publish
-            node scripts/react-dist-tag.mjs --publish-react
-            npx changeset publish
+          publish: npm run release:publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
