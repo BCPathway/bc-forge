@@ -25,14 +25,21 @@ flowchart TD
    - **Shares** (`supply`): The total quantity of vault tokens minted to depositors.
 
 2. **Exchange Rate Dynamics**:
-   $$\text{Share Price} = \frac{\text{Total Assets}}{\text{Total Shares}}$$
-   - **First Deposit**: Bootstraps the vault at a 1:1 exchange rate ($\text{shares} = \text{assets}$).
-   - **Yield Accrual**: When protocol fees or rewards are injected into the vault via `distribute_rewards`, `total_assets` increases while `supply` remains constant. This increases the exchange rate ($\text{Share Price} > 1$).
+   $$\text{Share Price} = \frac{\text{Total Assets} + \text{OFFSET}}{\text{Total Shares} + \text{OFFSET}}$$
+   where $\text{OFFSET} = 10^{7} = 10{,}000{,}000$ (`math::VIRTUAL_OFFSET` in the wrapper). This is the same virtual-share offset used when minting and burning shares:
+   $$\text{shares\_out} = \left\lfloor \frac{\text{assets} \times (\text{total\_shares} + \text{OFFSET})}{\text{total\_assets} + \text{OFFSET}} \right\rfloor$$
+   - **First Deposit**: On an empty vault the offset cancels, so the vault still bootstraps at 1:1 ($\text{shares} = \text{assets}$).
+   - **Yield Accrual**: When protocol fees or rewards are injected into the vault via `distribute_rewards`, `total_assets` increases while `supply` remains constant. This increases the exchange rate.
 
 3. **Pro-Rata Withdrawal Payouts**:
    - When a user burns shares to withdraw, their asset entitlement is calculated as:
-     $$\text{tokens\_out} = \lfloor \frac{\text{shares} \times \text{total\_assets}}{\text{total\_shares}} \rfloor$$
-   - Because yield increases `total_assets`, withdrawing returns **more tokens than the original deposit** ($\text{tokens\_out} > \text{initial\_deposit}$).
+     $$\text{tokens\_out} = \left\lfloor \frac{\text{shares} \times (\text{total\_assets} + \text{OFFSET})}{\text{total\_shares} + \text{OFFSET}} \right\rfloor$$
+   - Because yield increases `total_assets`, withdrawing returns **more tokens than the original deposit** ($\text{tokens\_out} > \text{initial\_deposit}$). The virtual offset keeps a slice of the pool in the vault, so a full exit does not always drain `total_assets` to zero.
+
+4. **Donation inflation protection**:
+   An empty vault can be inflated by transferring underlying tokens straight to the contract before anyone deposits. That donation raises `total_assets` without minting shares. Pricing the first deposit as $\text{assets} \times \text{total\_shares} / \text{total\_assets}$ (or as a flat 1:1 that ignores the donation) lets the donation seize the depositor's assets on the way back out. The offset closes that. The donor receives no shares, so they have nothing to withdraw. The depositor is minted
+   $$\text{shares} = \left\lfloor \frac{\text{assets} \times \text{OFFSET}}{\text{donation} + \text{OFFSET}} \right\rfloor$$
+   and burning those shares returns their own assets (minus floor dust). The donated tokens stay attributed to the virtual shares and are not paid to the donor.
 
 ---
 
@@ -53,7 +60,7 @@ The vault logic is implemented in `WrapperContract` (`contracts/wrapper/src/lib.
 | `get_queued_withdrawal(env, user)` | Read | Returns pending `QueuedWithdrawal` details (shares, amount, release_ledger) for `user`. |
 | `total_assets(env)` | Read | Returns the total underlying asset balance owned by the vault contract. |
 | `supply(env)` | Read | Returns the total number of outstanding vault shares. |
-| `calculate_share_price(env)` | Read | Returns integer floor share price ($\text{total\_assets} / \text{total\_shares}$). |
+| `calculate_share_price(env)` | Read | Returns integer floor share price $((\text{total\_assets} + \text{OFFSET}) / (\text{total\_shares} + \text{OFFSET}))$, with $\text{OFFSET} = 10^{7}$. |
 | `calculate_rewards(env, user_shares)` | Read | Returns exact pro-rata payout preview for `user_shares` without executing a transaction. |
 | `share_balance(env, user)` | Read | Returns the vault share balance held by `user`. |
 | `pending_rewards(env)` | Read | Returns cumulative undistributed rewards. |
@@ -105,7 +112,8 @@ If your frontend dApp performs custom RPC calls using `@stellar/stellar-sdk`, fo
 ### Mathematical APY Formula
 
 1. **Calculate Historical and Current Share Prices**:
-   $$\text{SharePrice} = \frac{\text{total\_assets}}{\text{total\_shares}}$$
+   $$\text{SharePrice} = \frac{\text{total\_assets} + \text{OFFSET}}{\text{total\_shares} + \text{OFFSET}}$$
+   with $\text{OFFSET} = 10^{7}$, matching `calculate_share_price`.
 
 2. **Compute Growth Rate**:
    $$\text{Growth} = \frac{\text{SharePrice}_{\text{current}} - \text{SharePrice}_{\text{historical}}}{\text{SharePrice}_{\text{historical}}}$$
@@ -222,7 +230,7 @@ sequenceDiagram
     Token-->>Frontend: Approval Transaction Confirmed
     Frontend->>Vault: deposit(user, assets)
     Vault->>Token: transfer_from(vault, user, vault, assets)
-    Vault->>Vault: Mint shares = assets * total_shares / total_assets
+    Vault->>Vault: Mint shares = assets * (total_shares + OFFSET) / (total_assets + OFFSET)
     Vault-->>Frontend: Shares Minted
 
     Note over Vault: Yield compounder calls distribute_rewards(caller, yield_amount)

@@ -1084,11 +1084,16 @@ fn test_share_price_increases_with_rewards() {
     wrapper.wrap(&user, &2_000_000);
     assert_eq!(wrapper.calculate_share_price(), 1);
 
-    // Rewards add assets without minting shares, so the price rises to 2.
+    // Rewards add assets without minting shares.
+    // Price = (4_000_000 + OFFSET) / (2_000_000 + OFFSET)
+    //       = 14_000_000 / 12_000_000 = 1, with OFFSET = 10_000_000.
+    // The integer price stays 1. The claim on those assets still rises:
+    // 2_000_000 * 14_000_000 / 12_000_000 = 2_333_333.
     wrapper.distribute_rewards(&rewarder, &2_000_000);
     assert_eq!(wrapper.total_assets(), 4_000_000);
     assert_eq!(wrapper.supply(), 2_000_000);
-    assert_eq!(wrapper.calculate_share_price(), 2);
+    assert_eq!(wrapper.calculate_share_price(), 1);
+    assert_eq!(wrapper.calculate_rewards(&2_000_000), 2_333_333);
 }
 
 #[test]
@@ -1105,8 +1110,9 @@ fn test_share_price_rounds_down_on_inexact_division() {
     wrapper.wrap(&user, &2_000_000);
     wrapper.distribute_rewards(&rewarder, &3_000_000);
 
-    // 5,000,000 assets / 2,000,000 shares = 2.5 -> integer division floors to 2.
-    assert_eq!(wrapper.calculate_share_price(), 2);
+    // (5_000_000 + 10_000_000) / (2_000_000 + 10_000_000) = 15_000_000 / 12_000_000
+    // = 1.25, which floors to 1.
+    assert_eq!(wrapper.calculate_share_price(), 1);
 }
 
 #[test]
@@ -1177,10 +1183,11 @@ fn test_calculate_rewards_reflects_distributed_yield() {
     wrapper.wrap(&user, &2_000_000);
     wrapper.distribute_rewards(&rewarder, &1_000_000);
 
-    // 3,000,000 total assets / 2,000,000 total shares: each user share is now
-    // worth 1.5 underlying tokens.
-    assert_eq!(wrapper.calculate_rewards(&2_000_000), 3_000_000);
-    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_500_000);
+    // assets = 3_000_000, shares = 2_000_000, OFFSET = 10_000_000.
+    // 2_000_000 * 13_000_000 / 12_000_000 = 2_166_666
+    // 1_000_000 * 13_000_000 / 12_000_000 = 1_083_333
+    assert_eq!(wrapper.calculate_rewards(&2_000_000), 2_166_666);
+    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_083_333);
 }
 
 #[test]
@@ -1202,7 +1209,8 @@ fn test_calculate_rewards_matches_withdraw_payout_exactly() {
     let previewed = wrapper.calculate_rewards(&2_000_000);
     let tokens_out = wrapper.withdraw(&user, &2_000_000);
     assert_eq!(previewed, tokens_out);
-    assert_eq!(previewed, 2_666_666);
+    // 2_000_000 * (4_000_000 + 10_000_000) / (3_000_000 + 10_000_000) = 2_153_846
+    assert_eq!(previewed, 2_153_846);
 }
 
 #[test]
@@ -1216,15 +1224,18 @@ fn test_calculate_rewards_more_precise_than_share_price_times_shares() {
     underlying.mint(&admin, &rewarder, &2_000_000);
     underlying.approve(&rewarder, &wrapper_id, &2_000_000, &u32::MAX);
 
-    // 3 total shares, 5 total assets (in whole-token units) after yield.
-    wrapper.wrap(&user, &3);
-    wrapper.distribute_rewards(&rewarder, &2);
+    // Amounts are on the same scale as OFFSET (10^7). A 3-unit pool would be
+    // dominated by the virtual offset and would hide the rounding difference.
+    // 3_000_000 shares, 5_000_000 assets after yield.
+    wrapper.wrap(&user, &3_000_000);
+    wrapper.distribute_rewards(&rewarder, &2_000_000);
 
-    // Per-share price floors 5/3 = 1.66... down to 1, so pricing a 2-share
-    // redemption via `calculate_share_price() * shares` under-reports it as 2.
+    // Price floors (5_000_000 + 10_000_000) / (3_000_000 + 10_000_000)
+    // = 15_000_000 / 13_000_000 = 1, so price * 2_000_000 shares = 2_000_000.
     assert_eq!(wrapper.calculate_share_price(), 1);
-    // The direct pro-rata formula floors only once: (2 * 5) / 3 = 3.33... -> 3.
-    assert_eq!(wrapper.calculate_rewards(&2), 3);
+    // The direct formula floors only once:
+    // 2_000_000 * 15_000_000 / 13_000_000 = 2_307_692.
+    assert_eq!(wrapper.calculate_rewards(&2_000_000), 2_307_692);
 }
 
 #[test]
@@ -1248,10 +1259,11 @@ fn test_calculate_rewards_multiple_users_pro_rata() {
     wrapper.wrap(&user_b, &1_000_000);
     wrapper.distribute_rewards(&rewarder, &1_000_000);
 
-    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000 â€” weighted by share,
-    // not split evenly.
-    assert_eq!(wrapper.calculate_rewards(&3_000_000), 3_750_000);
-    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_250_000);
+    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000. OFFSET = 10_000_000.
+    // 3_000_000 * 15_000_000 / 14_000_000 = 3_214_285
+    // 1_000_000 * 15_000_000 / 14_000_000 = 1_071_428
+    assert_eq!(wrapper.calculate_rewards(&3_000_000), 3_214_285);
+    assert_eq!(wrapper.calculate_rewards(&1_000_000), 1_071_428);
 }
 
 #[test]
@@ -1508,14 +1520,15 @@ fn test_withdraw_returns_proportional_tokens_plus_yield() {
     wrapper.distribute_rewards(&rewarder, &1_000_000);
     assert_eq!(wrapper.total_assets(), 3_000_000);
 
-    // Withdraw half the shares -> half of the assets (1,500,000)
+    // Withdraw half the shares.
+    // 1_000_000 * (3_000_000 + 10_000_000) / (2_000_000 + 10_000_000) = 1_083_333
     let tokens_out = wrapper.withdraw(&user, &1_000_000);
 
-    assert_eq!(tokens_out, 1_500_000);
-    assert_eq!(underlying.balance(&user), user_balance_before + 1_500_000);
+    assert_eq!(tokens_out, 1_083_333);
+    assert_eq!(underlying.balance(&user), user_balance_before + 1_083_333);
     assert_eq!(wrapper.balance(&user), 1_000_000);
     assert_eq!(wrapper.supply(), 1_000_000);
-    assert_eq!(wrapper.total_assets(), 1_500_000);
+    assert_eq!(wrapper.total_assets(), 1_916_667);
 }
 
 #[test]
@@ -1536,14 +1549,15 @@ fn test_withdraw_after_yield_returns_more_than_deposit() {
     // Compound 500,000 underlying tokens as yield
     wrapper.distribute_rewards(&rewarder, &500_000);
 
-    // Withdraw everything and verify the payout exceeds the initial deposit
+    // Withdraw everything. OFFSET keeps a slice of the yield in the vault:
+    // 1_000_000 * (1_500_000 + 10_000_000) / (1_000_000 + 10_000_000) = 1_045_454
     let tokens_out = wrapper.withdraw(&user, &1_000_000);
 
-    assert_eq!(tokens_out, 1_500_000);
+    assert_eq!(tokens_out, 1_045_454);
     assert!(tokens_out > 1_000_000);
-    assert_eq!(underlying.balance(&user), user_balance_before + 1_500_000);
+    assert_eq!(underlying.balance(&user), user_balance_before + 1_045_454);
     assert_eq!(wrapper.supply(), 0);
-    assert_eq!(wrapper.total_assets(), 0);
+    assert_eq!(wrapper.total_assets(), 454_546);
 }
 
 #[test]
@@ -1587,15 +1601,18 @@ fn test_withdraw_multiple_users_receive_pro_rata_share() {
     wrapper.wrap(&user_b, &1_000_000);
     wrapper.distribute_rewards(&rewarder, &1_000_000);
 
-    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000
+    // shares: a=3,000,000, b=1,000,000; assets: 5,000,000, OFFSET = 10_000_000.
+    // A is paid 3_000_000 * 15_000_000 / 14_000_000 = 3_214_285.
+    // B is then paid against the reduced totals: 1_071_428.
+    // The virtual offset retains 714_287 in the vault.
     let tokens_a = wrapper.withdraw(&user_a, &3_000_000);
-    assert_eq!(tokens_a, 3_750_000);
+    assert_eq!(tokens_a, 3_214_285);
 
     let tokens_b = wrapper.withdraw(&user_b, &1_000_000);
-    assert_eq!(tokens_b, 1_250_000);
+    assert_eq!(tokens_b, 1_071_428);
 
     assert_eq!(wrapper.supply(), 0);
-    assert_eq!(wrapper.total_assets(), 0);
+    assert_eq!(wrapper.total_assets(), 714_287);
 }
 
 #[test]
@@ -1613,10 +1630,10 @@ fn test_withdraw_rounds_down_in_favor_of_protocol() {
     wrapper.wrap(&user, &3_000_000);
     wrapper.distribute_rewards(&rewarder, &1_000_000);
 
-    // Exact payout = 2,000,000 * 4,000,000 / 3,000,000 = 2,666,666.66...
-    // Must round down to 2,666,666, never up.
+    // Exact payout = 2_000_000 * (4_000_000 + 10_000_000) / (3_000_000 + 10_000_000)
+    // = 2_153_846.153..., which must floor to 2_153_846, never up.
     let tokens_out = wrapper.withdraw(&user, &2_000_000);
-    assert_eq!(tokens_out, 2_666_666);
+    assert_eq!(tokens_out, 2_153_846);
 }
 
 #[test]
@@ -1887,13 +1904,66 @@ fn test_deposit_first_deposit_mints_one_to_one() {
     env.mock_all_auths();
     let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
 
-    // First deposit: vault is empty so shares == assets (1:1 bootstrap).
+    // First deposit: vault is empty, so
+    // shares = assets * OFFSET / OFFSET = assets (the offset cancels, 1:1).
     let shares_out = wrapper.deposit(&user, &5_000_000);
 
     assert_eq!(shares_out, 5_000_000);
     assert_eq!(wrapper.balance(&user), 5_000_000);
     assert_eq!(wrapper.supply(), 5_000_000);
     assert_eq!(wrapper.total_assets(), 5_000_000);
+}
+
+#[test]
+fn test_donation_before_first_deposit_does_not_steal_depositor_assets() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let attacker = Address::generate(&env);
+
+    // A direct transfer into an empty vault mints no shares. Without the
+    // virtual offset, that donation is what the first depositor's shares are
+    // priced against, and a later withdraw can hand the depositor's assets to
+    // whoever captured the inflated rate. OFFSET = 10_000_000 absorbs the
+    // donation into virtual shares instead.
+    let donation: i128 = 50_000_000;
+    underlying.mint(&admin, &attacker, &donation);
+    underlying.transfer(&attacker, &wrapper.address, &donation);
+
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), donation);
+    assert_eq!(wrapper.balance(&attacker), 0);
+
+    let deposit: i128 = 5_000_000;
+    // shares = 5_000_000 * (0 + 10_000_000) / (50_000_000 + 10_000_000) = 833_333
+    let shares_out = wrapper.deposit(&user, &deposit);
+    assert_eq!(shares_out, 833_333);
+    assert_eq!(wrapper.balance(&user), 833_333);
+
+    // Once supply is non-zero the price includes the offset:
+    // (55_000_000 + 10_000_000) / (833_333 + 10_000_000) = 6.
+    assert_eq!(wrapper.supply(), shares_out);
+    assert_eq!(wrapper.total_assets(), donation + deposit);
+    assert_eq!(wrapper.calculate_share_price(), 6);
+    assert_eq!(wrapper.calculate_rewards(&shares_out), 4_999_998);
+
+    let attacker_underlying = underlying.balance(&attacker);
+    let tokens_out = wrapper.withdraw(&user, &shares_out);
+
+    // The depositor is paid their own assets. Floor division leaves 2 units
+    // in the vault; the donation is not part of the payout.
+    assert_eq!(tokens_out, 4_999_998);
+    assert!(tokens_out + 2 >= deposit);
+
+    // The attacker holds no shares, so they cannot withdraw the deposit.
+    assert_eq!(underlying.balance(&attacker), attacker_underlying);
+    assert_eq!(wrapper.balance(&attacker), 0);
+    assert_eq!(
+        wrapper.try_withdraw(&attacker, &1),
+        Err(Ok(WrapperError::InsufficientBalance))
+    );
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), donation + 2);
 }
 
 #[test]
@@ -1917,13 +1987,13 @@ fn test_deposit_proportional_shares_after_rewards() {
     underlying.mint(&admin, &user_b, &4_000_000);
     underlying.approve(&user_b, &wrapper_id, &4_000_000, &u32::MAX);
 
-    // At price 2, depositing 4 M assets should yield 2 M shares:
-    //   shares = 4_000_000 * 2_000_000 / 4_000_000 = 2_000_000
+    // At the offset exchange rate, depositing 4_000_000 assets yields
+    // 4_000_000 * (2_000_000 + 10_000_000) / (4_000_000 + 10_000_000) = 3_428_571.
     let shares_out = wrapper.deposit(&user_b, &4_000_000);
 
-    assert_eq!(shares_out, 2_000_000);
-    assert_eq!(wrapper.balance(&user_b), 2_000_000);
-    assert_eq!(wrapper.supply(), 4_000_000); // 2 M (user) + 2 M (user_b)
+    assert_eq!(shares_out, 3_428_571);
+    assert_eq!(wrapper.balance(&user_b), 3_428_571);
+    assert_eq!(wrapper.supply(), 5_428_571); // 2 M (user) + 3_428_571 (user_b)
     assert_eq!(wrapper.total_assets(), 8_000_000); // 4 M + 4 M
 }
 
@@ -2030,20 +2100,21 @@ fn test_withdrawal_math_deposit_compound_yield_withdraw_returns_greater_than_ini
     // 3. Withdraw all shares
     let tokens_returned = wrapper.withdraw(&user, &shares_minted);
 
-    // 4. Assert tokens returned > initial deposit
+    // 4. Assert tokens returned > initial deposit. The virtual offset retains
+    // the rest of the yield: 1_000_000 * 11_500_000 / 11_000_000 = 1_045_454.
     assert!(
         tokens_returned > initial_deposit,
         "Expected tokens returned ({}) to be greater than initial deposit ({})",
         tokens_returned,
         initial_deposit
     );
-    assert_eq!(tokens_returned, initial_deposit + yield_amount);
+    assert_eq!(tokens_returned, 1_045_454);
     assert_eq!(
         underlying.balance(&user),
         user_underlying_balance_after_deposit + tokens_returned
     );
     assert_eq!(wrapper.supply(), 0);
-    assert_eq!(wrapper.total_assets(), 0);
+    assert_eq!(wrapper.total_assets(), 454_546);
 }
 
 #[test]
@@ -2071,18 +2142,19 @@ fn test_withdrawal_math_multi_user_pro_rata_payout_with_compounded_yield() {
     // Compound yield
     wrapper.distribute_rewards(&rewarder, &yield_amount);
 
-    // User A withdraws all shares -> 1/3 of total pool
+    // User A withdraws all shares. OFFSET = 10_000_000, so
+    // 2_000_000 * (9_000_000 + 10_000_000) / (6_000_000 + 10_000_000) = 2_375_000.
     let tokens_a = wrapper.withdraw(&user_a, &shares_a);
-    assert_eq!(tokens_a, 3_000_000); // 2M principal + 1M yield
+    assert_eq!(tokens_a, 2_375_000);
     assert!(tokens_a > deposit_a);
 
-    // User B withdraws all shares -> 2/3 of total pool
+    // User B is paid against the reduced totals: 4_750_000.
     let tokens_b = wrapper.withdraw(&user_b, &shares_b);
-    assert_eq!(tokens_b, 6_000_000); // 4M principal + 2M yield
+    assert_eq!(tokens_b, 4_750_000);
     assert!(tokens_b > deposit_b);
 
     assert_eq!(wrapper.supply(), 0);
-    assert_eq!(wrapper.total_assets(), 0);
+    assert_eq!(wrapper.total_assets(), 1_875_000);
 }
 
 #[test]
@@ -2102,20 +2174,24 @@ fn test_withdrawal_math_sequential_partial_withdrawals_after_compounding() {
     let total_shares = wrapper.deposit(&user, &initial_deposit);
     wrapper.distribute_rewards(&rewarder, &yield_amount);
 
-    // Partial withdrawal 1: withdraw 25% shares
+    // Partial withdrawal 1: withdraw 25% shares.
+    // 2_500_000 * (15_000_000 + 10_000_000) / (10_000_000 + 10_000_000) = 3_125_000.
     let quarter_shares = total_shares / 4;
     let payout_1 = wrapper.withdraw(&user, &quarter_shares);
-    assert_eq!(payout_1, 3_750_000); // 2.5M principal + 1.25M yield
+    assert_eq!(payout_1, 3_125_000);
     assert!(payout_1 > initial_deposit / 4);
 
-    // Partial withdrawal 2: withdraw remaining 75% shares
+    // Partial withdrawal 2: the remaining shares are priced on the reduced totals.
+    // 7_500_000 * 21_875_000 / 17_500_000 = 9_375_000.
     let remaining_shares = wrapper.balance(&user);
     let payout_2 = wrapper.withdraw(&user, &remaining_shares);
-    assert_eq!(payout_2, 11_250_000); // 7.5M principal + 3.75M yield
+    assert_eq!(payout_2, 9_375_000);
     assert!(payout_2 > (initial_deposit * 3) / 4);
 
-    assert_eq!(payout_1 + payout_2, initial_deposit + yield_amount);
+    // Virtual offset retains 2_500_000 of the 15_000_000 pool.
+    assert_eq!(payout_1 + payout_2, 12_500_000);
     assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), 2_500_000);
 }
 
 #[test]
@@ -2233,20 +2309,21 @@ fn test_reward_distribution_rounding_prime_deposits_never_insolvent() {
     let total_deposits = deposit_a + deposit_b + deposit_c;
     assert_eq!(wrapper.total_assets(), total_deposits + reward);
 
-    // Each payout is at most the user's pro-rata entitlement: rounding is
-    // always down (in favor of the protocol), so the vault is never insolvent.
+    // Each payout is at most the user's pro-rata entitlement, including the
+    // virtual offset. Rounding is always down, so the vault is never insolvent.
+    let offset = crate::math::VIRTUAL_OFFSET;
     let shares_a = wrapper.balance(&user_a);
-    let entitlement_a = shares_a * wrapper.total_assets() / wrapper.supply();
+    let entitlement_a = shares_a * (wrapper.total_assets() + offset) / (wrapper.supply() + offset);
     let payout_a = wrapper.withdraw(&user_a, &shares_a);
     assert!(payout_a <= entitlement_a);
 
     let shares_b = wrapper.balance(&user_b);
-    let entitlement_b = shares_b * wrapper.total_assets() / wrapper.supply();
+    let entitlement_b = shares_b * (wrapper.total_assets() + offset) / (wrapper.supply() + offset);
     let payout_b = wrapper.withdraw(&user_b, &shares_b);
     assert!(payout_b <= entitlement_b);
 
     let shares_c = wrapper.balance(&user_c);
-    let entitlement_c = shares_c * wrapper.total_assets() / wrapper.supply();
+    let entitlement_c = shares_c * (wrapper.total_assets() + offset) / (wrapper.supply() + offset);
     let payout_c = wrapper.withdraw(&user_c, &shares_c);
     assert!(payout_c <= entitlement_c);
 
