@@ -8,6 +8,7 @@ import {
   mergeNetworkOptions,
 } from '../network.js';
 import logger from '../utils/logger.js';
+import { writeJson } from '../utils/output.js';
 import {
   DEFAULT_REGISTRY_PATH,
   registerDeploymentAlias,
@@ -30,11 +31,12 @@ export function createDeploymentsCommand(): Command {
     .description('Save an alias for a contract id on the selected network')
     .argument('<alias>', 'Short name used in later commands, such as "token"')
     .argument('<id>', 'Deployed contract id (C...)')
-    .option('-f, --file <path>', 'Registry JSON path', DEFAULT_REGISTRY_PATH);
+    .option('-f, --file <path>', 'Registry JSON path', DEFAULT_REGISTRY_PATH)
+    .option('--json', 'Print the registered contract id as JSON');
 
   addNetworkOptions(register);
 
-  register.action(async (alias: string, id: string, opts: { file: string }, command: Command) => {
+  register.action(async (alias: string, id: string, opts: { file: string; json?: boolean }, command: Command) => {
     try {
       const result = registerDeploymentAlias({
         alias,
@@ -42,10 +44,19 @@ export function createDeploymentsCommand(): Command {
         network: selectedNetwork(command),
         filePath: opts.file,
       });
-      logger.success(
-        `Registered alias "${result.alias}" on ${result.network} → ${formatContractIdWithExplorer(result.contractId, result.network)}`,
-      );
-      logger.info(`Saved ${result.filePath}`);
+      if (opts.json) {
+        writeJson({
+          alias: result.alias,
+          contractId: result.contractId,
+          network: result.network,
+          filePath: result.filePath,
+        });
+      } else {
+        logger.success(
+          `Registered alias "${result.alias}" on ${result.network} → ${formatContractIdWithExplorer(result.contractId, result.network)}`,
+        );
+        logger.info(`Saved ${result.filePath}`);
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error(message);
@@ -69,7 +80,7 @@ export function createDeploymentsCommand(): Command {
         filePath: opts.file,
       });
       if (opts.json) {
-        process.stdout.write(`${JSON.stringify({ contractId, network })}\n`);
+        writeJson({ contractId, network });
       } else {
         process.stdout.write(
           `${formatContractIdWithExplorer(contractId, network, getBlockExplorerBaseUrl(network))}\n`,

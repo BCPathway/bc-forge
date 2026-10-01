@@ -11,6 +11,7 @@ import {
 import { addNetworkOptions } from "../network.js";
 import { prepareSignAndSubmit } from "../utils/soroban-tx.js";
 import logger from "../utils/logger.js";
+import { writeJson } from "../utils/output.js";
 import { resolveContractIdOption } from "../utils/registry.js";
 import { appendUpgradeHistory, getLastGoodHash } from "../utils/upgrade-history.js";
 
@@ -70,7 +71,8 @@ export function createUpgradeCommand(): Command {
       "--to-last-good",
       "Propose the previous WASM hash stored in local upgrade history (rollback)",
       false
-    );
+    )
+    .option("--json", "Print the transaction hash and WASM hash as JSON");
 
   addNetworkOptions(cmd);
 
@@ -80,12 +82,19 @@ export function createUpgradeCommand(): Command {
     }
     try {
       const contractId = resolveContractIdOption(command, opts.contractId);
-      await runUpgrade({
+      const result = await runUpgrade({
         ...opts,
         contractId: contractId ?? opts.contractId,
         wasmPath: opts.wasmPath ?? opts.wasm ?? "",
         toLastGood: opts.toLastGood ?? false,
       });
+      if (opts.json) {
+        writeJson(result);
+        if (!result.success) {
+          logger.error(result.message);
+          process.exitCode = 1;
+        }
+      }
     } catch (err: unknown) {
       logger.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;

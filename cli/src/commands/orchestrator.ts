@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { Command } from "commander";
-import logger from "../utils/logger.js";
+import logger, { silenceInformationalLogs } from "../utils/logger.js";
+import { writeJson } from "../utils/output.js";
 import { addNetworkOptions } from "../network.js";
 import { resolveContractIdOption } from "../utils/registry.js";
 import { resolveAccountReference } from "../utils/address-book.js";
@@ -22,7 +23,9 @@ export function createInitSuperAdminCommand(): Command {
     .option("--symbol <string>", "Token symbol")
     .option("--decimals <number>", "Decimal places")
     .option("--no-verify", "Skip on-chain SuperAdmin verification")
+    .option("--json", "Print the contract id and transaction hash as JSON")
     .action(async (options, command: Command) => {
+      const restore = options.json ? silenceInformationalLogs() : undefined;
       try {
         const result = await initializeSuperAdmin({
           contractId: resolveId(command, options.contractId),
@@ -35,6 +38,16 @@ export function createInitSuperAdminCommand(): Command {
           decimals: options.decimals ? parseInt(options.decimals, 10) : undefined,
           verify: options.verify,
         });
+        if (options.json) {
+          writeJson({
+            success: result.success,
+            contractId: result.contractId,
+            deployer: result.deployer,
+            txHash: result.txHash,
+            isSuperAdminVerified: result.isSuperAdminVerified,
+            error: result.error,
+          });
+        }
         if (!result.success) {
           logger.error(`Failed to initialize SuperAdmin: ${result.error}`);
           process.exitCode = 1;
@@ -42,6 +55,8 @@ export function createInitSuperAdminCommand(): Command {
       } catch (err: any) {
         logger.error(`Error: ${err.message}`);
         process.exitCode = 1;
+      } finally {
+        restore?.();
       }
     });
 
@@ -58,7 +73,9 @@ export function createConnectCommand(): Command {
     .option("--wrapper <string>", "Wrapper contract ID or deployment alias")
     .option("--secret-key <string>", "Deployer secret key")
     .option("--file [file]", "Path to .bc-forge.json")
+    .option("--json", "Print linked contract ids and transaction hashes as JSON")
     .action(async (options, command: Command) => {
+      const restore = options.json ? silenceInformationalLogs() : undefined;
       try {
         const result = await connectContractIds({
           adminContractId: resolveId(command, options.admin),
@@ -68,6 +85,14 @@ export function createConnectCommand(): Command {
           secretKey: options.secretKey,
           configPath: options.file,
         });
+        if (options.json) {
+          writeJson({
+            success: result.success,
+            linkedContracts: result.linkedContracts,
+            txHashes: result.txHashes,
+            errors: result.errors,
+          });
+        }
         if (!result.success) {
           logger.error("Failed to connect contract IDs:");
           result.errors?.forEach((err) => logger.error(`  - ${err}`));
@@ -76,6 +101,8 @@ export function createConnectCommand(): Command {
       } catch (err: any) {
         logger.error(`Error: ${err.message}`);
         process.exitCode = 1;
+      } finally {
+        restore?.();
       }
     });
 
@@ -95,7 +122,9 @@ export function createOrchestrateCommand(): Command {
     .option("--secret-key <string>", "Deployer secret key")
     .option("--file [file]", "Path to .bc-forge.json")
     .option("--skip-verify", "Skip on-chain verification steps")
+    .option("--json", "Print contract ids and transaction hashes as JSON")
     .action(async (options, command: Command) => {
+      const restore = options.json ? silenceInformationalLogs() : undefined;
       try {
         const result = await runDeploymentOrchestrator({
           adminContractId: resolveId(command, options.admin),
@@ -109,6 +138,16 @@ export function createOrchestrateCommand(): Command {
           configPath: options.file,
           skipVerify: options.skipVerify,
         });
+        if (options.json) {
+          writeJson({
+            success: result.success,
+            contractId: result.initResult?.contractId,
+            txHash: result.initResult?.txHash,
+            linkedContracts: result.connectResult?.linkedContracts,
+            txHashes: result.connectResult?.txHashes,
+            errors: result.errors,
+          });
+        }
         if (!result.success) {
           logger.error("Orchestration encountered errors.");
           process.exitCode = 1;
@@ -116,6 +155,8 @@ export function createOrchestrateCommand(): Command {
       } catch (err: any) {
         logger.error(`Error: ${err.message}`);
         process.exitCode = 1;
+      } finally {
+        restore?.();
       }
     });
 

@@ -19,6 +19,7 @@ import { createPauseCommand } from "./commands/pause.js";
 import { createMultisigCommand } from "./commands/multisig.js";
 import { createInitCommand } from "./commands/init.js";
 import { createDeploymentsCommand } from "./commands/deployments.js";
+import { createCompletionsCommand } from "./commands/completions.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
 
 const VERSION = "0.1.0";
@@ -58,7 +59,8 @@ export function buildProgram(): Command {
     .addCommand(createAccountCommand())
     .addCommand(createPauseCommand("pause"))
     .addCommand(createPauseCommand("unpause"))
-    .addCommand(createMultisigCommand());
+    .addCommand(createMultisigCommand())
+    .addCommand(createCompletionsCommand());
 
   return program;
 }

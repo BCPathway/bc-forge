@@ -35,6 +35,7 @@ describe("CLI TypeScript project structure (#683)", () => {
         "batch-mint",
         "account",
         "multisig",
+        "completions",
       ])
     );
   });

@@ -170,12 +170,12 @@ jobs:
         run: npm run build
 
       - name: Check published ESM entry size (#932)
-        # Measured dist/esm/index.mjs at 2282 bytes.
-        # Budget is ceil(2282 * 1.10) = 2511 bytes.
+        # Measured dist/esm/index.mjs at 2541 bytes after the wallet adapters,
+        # dry-run API, and APR helpers. Budget is ceil(2541 * 1.10) = 2796 bytes.
         run: |
           set -euo pipefail
           entry="dist/esm/index.mjs"
-          budget=2511
+          budget=2796
           if [[ ! -f "$entry" ]]; then
             echo "::error::Published ESM entry not found: ${entry}"
             exit 1

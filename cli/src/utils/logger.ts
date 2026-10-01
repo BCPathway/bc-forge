@@ -71,6 +71,18 @@ export function setLogLevel(level: LogLevel) {
   winstonLogger.level = level;
 }
 
+/**
+ * Hide info, success, and warning lines while a command writes JSON.
+ * Errors stay on stderr. Call the returned function to restore the previous level.
+ */
+export function silenceInformationalLogs(): () => void {
+  const previous = winstonLogger.level;
+  winstonLogger.level = 'error';
+  return () => {
+    winstonLogger.level = previous;
+  };
+}
+
 export function enableDebugMode(enabled = true) {
   if (enabled) {
     winstonLogger.level = 'debug';
