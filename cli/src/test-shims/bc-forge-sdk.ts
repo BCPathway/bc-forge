@@ -71,4 +71,58 @@ export class bcForgeClient {
   async submitSignedTransaction(_txXdr: string): Promise<TransactionResult> {
     return { success: true, hash: "mock-submitted" };
   }
+
+  async createProposal(
+    _creator: string,
+    _description: string,
+    _source?: unknown
+  ): Promise<TransactionResult> {
+    return { success: true, hash: "mock-propose", returnValue: 1n };
+  }
+
+  async approveProposal(
+    _admin: string,
+    _proposalId: bigint,
+    _source?: unknown
+  ): Promise<TransactionResult> {
+    return { success: true, hash: "mock-approve" };
+  }
+
+  async executeUpgrade(
+    _executor: string,
+    _proposalId: bigint,
+    _wasmHash: string,
+    _source?: unknown
+  ): Promise<TransactionResult> {
+    return { success: true, hash: "mock-execute-upgrade" };
+  }
+
+  async buildCreateProposalTx(
+    _creator: string,
+    _description: string,
+    _sourcePublicKey: string
+  ): Promise<string> {
+    return "mock-unsigned-propose";
+  }
+
+  async buildApproveProposalTx(
+    _admin: string,
+    _proposalId: bigint,
+    _sourcePublicKey: string
+  ): Promise<string> {
+    return "mock-unsigned-approve";
+  }
+
+  async buildExecuteUpgradeTx(
+    _executor: string,
+    _proposalId: bigint,
+    _wasmHash: string,
+    _sourcePublicKey: string
+  ): Promise<string> {
+    return "mock-unsigned-execute";
+  }
+
+  async execute(signedXdr: string): Promise<TransactionResult> {
+    return this.submitSignedTransaction(signedXdr);
+  }
 }
