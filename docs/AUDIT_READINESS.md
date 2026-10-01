@@ -14,13 +14,13 @@ The following workspace crates are in scope for audit:
 - `contracts/ttl` - `bc-forge-ttl`
 - `contracts/vesting` - `bc-forge-vesting`
 - `contracts/wrapper` - `bc-forge-wrapper`
+- `contracts/flash_loan_guard` - `bc-forge-flash-loan-guard`
 
 ### Out of Scope
 
-The following contracts are out of scope. They are in the workspace exclude list and are not built or tested in CI:
-- `contracts/compound_fees`
-- `contracts/flash_loan_guard`
-- `contracts/yield_vault`
+`contracts/yield_vault` is out of scope. It is listed in the root `Cargo.toml` `exclude` array and is not built or tested in CI.
+
+`contracts/compound_fees` is not part of this tree. The placeholder crate was removed.
 
 ## Authority Inventory
 
@@ -68,6 +68,11 @@ The following contracts are out of scope. They are in the workspace exclude list
   - `create_vesting`
   - `release`
   - `revoke`
+
+### Flash Loan Guard (`contracts/flash_loan_guard/src/lib.rs`)
+- **Same-ledger guard** (caller must authorize the address they pass; there is no admin):
+  - `deposit`
+  - `withdraw`
 
 ## Prior Findings
 
