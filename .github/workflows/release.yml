@@ -39,7 +39,12 @@ jobs:
 
   # Lint, test, build, and tarball checks for @bc-forge/react. This job
   # does not publish. The release job below is the only npm registry write.
+  # Workflow-level permissions are none, so this call must grant contents: read.
+  # Without it GitHub rejects the run at startup: publish-react.yml requests
+  # contents: read and is only allowed contents: none.
   react-prepublish:
+    permissions:
+      contents: read
     uses: ./.github/workflows/publish-react.yml
 
   release:
@@ -126,6 +131,8 @@ jobs:
     name: Verify React release from a clean install (#1046)
     needs: release
     if: needs.release.outputs.react_version != ''
+    permissions:
+      contents: read
     uses: ./.github/workflows/verify-react-release.yml
     with:
       version: ${{ needs.release.outputs.react_version }}
