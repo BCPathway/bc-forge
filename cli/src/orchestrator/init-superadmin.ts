@@ -193,8 +193,11 @@ export async function initializeSuperAdmin(
     isSuperAdminVerified = true;
   }
 
-  // Update local deployment configuration file if present or provided
-  if (fileConfigResult.filePath) {
+  // Update an existing deployment config, or a path the caller passed explicitly.
+  // A missing default `.bc-forge.json` is not created; tests and release
+  // validation run from the package directory and must not write one there.
+  const shouldWriteConfig = fileConfigResult.success || Boolean(options.configPath);
+  if (shouldWriteConfig && fileConfigResult.filePath) {
     try {
       const updatedConfig: BcForgeConfig = {
         ...(fileConfig || {
