@@ -52,11 +52,13 @@ jobs:
       - name: Lint
         run: npm run lint --workspace @bc-forge/react
 
-      - name: Test
-        run: npm test --workspace @bc-forge/react -- --runInBand
-
+      # Jest resolves @bc-forge/sdk from the workspace package, whose
+      # exports point at dist/. Build it before the tests, matching ci.yml.
       - name: Build SDK dependency
         run: npm run build --workspace @bc-forge/sdk
+
+      - name: Test
+        run: npm test --workspace @bc-forge/react -- --runInBand
 
       - name: Build React package
         run: npm run build --workspace @bc-forge/react
