@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { Contract, rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import { getClientConfig, loadConfigFile } from '../utils/config.js';
 import logger from '../utils/logger.js';
+import { writeJson } from '../utils/output.js';
 import type { BcForgeConfig, ContractDeploymentConfig } from '../utils/config-parser.js';
 import { addNetworkOptions, explicitNetworkOverrides, formatContractIdWithExplorer } from '../network.js';
 
@@ -131,7 +132,8 @@ export async function checkStatus(
 export function createCheckStatusCommand(): Command {
   const cmd = new Command('check-status')
     .description('Ping all deployed contracts and report latency and status')
-    .option('-c, --config <file>', 'Path to a .bc-forge.json deployment configuration file');
+    .option('-c, --config <file>', 'Path to a .bc-forge.json deployment configuration file')
+    .option('--json', 'Print contract ids and status as JSON');
 
   addNetworkOptions(cmd);
 
@@ -152,18 +154,28 @@ export function createCheckStatusCommand(): Command {
         const status = await checkStatus(server, parsed.config, clientConfig.rpcUrl);
 
         if (status.reports.length === 0) {
-          logger.warn('No contracts declared under "contracts" in the configuration file.');
+          if (options.json) {
+            writeJson(status);
+          } else {
+            logger.warn('No contracts declared under "contracts" in the configuration file.');
+          }
           return;
         }
 
-        logger.info(`Network: ${status.network ?? 'unknown'} (${status.rpcUrl})`);
+        if (options.json) {
+          writeJson(status);
+        } else {
+          logger.info(`Network: ${status.network ?? 'unknown'} (${status.rpcUrl})`);
+        }
         for (const report of status.reports) {
           const latency = report.latencyMs !== undefined ? ` ${report.latencyMs}ms` : '';
           const target = report.contractId
             ? formatContractIdWithExplorer(report.contractId, clientConfig.network)
             : 'no contract id';
           if (report.status === 'responsive') {
-            logger.success(`${report.name}: responsive${latency} [${target}]`);
+            if (!options.json) {
+              logger.success(`${report.name}: responsive${latency} [${target}]`);
+            }
           } else {
             logger.error(`${report.name}: ${report.status}${latency} [${target}] - ${report.error}`);
           }
