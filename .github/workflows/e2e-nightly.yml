@@ -123,8 +123,16 @@ jobs:
 
           echo "Funded testnet account: ${PUBLIC_KEY}"
 
+      # `stellar contract build` targets wasm32v1-none and runs wasm-opt. Both
+      # matter for the upload: the plain cargo artifact is ~180 KB, above
+      # testnet's contract_max_size_bytes / tx_max_size_bytes (~128 KB), and
+      # stellar-core rejects the upload with TxSorobanInvalid even though the
+      # simulation succeeds. The optimized module is ~75 KB.
       - name: Build token contract WASM
-        run: cargo build --target wasm32v1-none --release -p bc-forge-token
+        run: |
+          set -euo pipefail
+          stellar contract build --package bc-forge-token --out-dir e2e-wasm
+          ls -l e2e-wasm/bc_forge_token.wasm
 
       # Deploy a fresh token instance and initialize it with the funded account
       # as admin, then hand its contract ID to the live suite. Deploying is what
@@ -133,7 +141,7 @@ jobs:
       - name: Deploy and initialize token contract on testnet
         run: |
           set -euo pipefail
-          WASM="target/wasm32v1-none/release/bc_forge_token.wasm"
+          WASM="e2e-wasm/bc_forge_token.wasm"
 
           CONTRACT_ID="$(stellar contract deploy \
             --wasm "$WASM" \
