@@ -26,16 +26,19 @@ package once with a credential, then switch to OIDC:
 
 1. As an owner of the `bc-forge` npm organization, create a granular access
    token with publish rights on the `@bc-forge` scope (bypass 2FA, short
-   expiry). Delete it after this step.
-2. Either publish locally from a clean checkout of `main` (`npm ci`, then
-   `npm run build --workspace <pkg>` and `npm publish --workspace <pkg>
-   --access public`; for `@bc-forge/indexer` run `npm run prisma:generate
-   --workspace @bc-forge/indexer` before the build), or store the token as
-   `NPM_TOKEN` on the `npm` environment and add
-   `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` to the Changesets step's `env`
-   for one run of `release.yml`. Remove that line again afterwards.
-3. With the package on the registry, continue with the trusted publisher
-   steps below, then revoke the token.
+   expiry). Store it as `NPM_TOKEN` on the `npm` GitHub environment
+   (**Settings → Environments → npm → Environment secrets**), not as a
+   repository secret.
+2. Run **Actions → Bootstrap npm packages (first publish) → Run workflow**
+   ([`bootstrap-npm-publish.yml`](../.github/workflows/bootstrap-npm-publish.yml)).
+   Leave `dry_run` on for the first run and check the log; it lists what
+   would be published. Run it again with `dry_run` off. It only publishes
+   packages that are not on the registry yet, so it is safe to rerun and
+   does nothing once the bootstrap is complete.
+3. With the packages on the registry, add the trusted publisher record for
+   each one (next section), then delete `NPM_TOKEN` from the environment and
+   revoke the token on npmjs.com. `release.yml` publishes every later version
+   through OIDC; the bootstrap workflow is not a second publisher.
 
 The release job also upgrades to npm 11 (`Upgrade npm for trusted
 publishing`) because OIDC needs npm 11.5.1+, and each package sets
@@ -91,6 +94,10 @@ Publish workflows set top-level `permissions: {}` so every unspecified `GITHUB_T
   - `contents: read` on the calling job. These jobs call reusable workflows that request `contents: read`. A `uses` job that inherits `permissions: {}` is rejected at startup with `contents: none`.
 - **`publish-release-manifest.yml`** (`manifest` job, environment `container`):
   - `contents: write` (upload the indexer image digest, checksums, and release assets)
+- **`bootstrap-npm-publish.yml`** (`bootstrap` job, environment `npm`, manual `workflow_dispatch` only):
+  - `contents: read` (checkout)
+  - `id-token: write` (provenance on the first publish)
+  - Authenticates with the `NPM_TOKEN` environment secret and publishes only packages that do not exist on npm yet. Inert once every package has been bootstrapped.
 
 Any later component publisher must keep `permissions: {}` at the workflow root, declare job permissions explicitly, and select `environment: npm` or `environment: container`. It must not grant `packages: write` to an npm job or `id-token: write` to a container job unless that job needs it.
 
@@ -99,8 +106,8 @@ Any later component publisher must keep `permissions: {}` at the workflow root, 
 Use a granular npm token only when trusted publishing is unavailable (for example, the publisher record has not been created yet).
 
 1. On npm, create a **granular access token** that can publish only `@bc-forge/sdk`, `@bc-forge/cli`, `@bc-forge/react`, and `@bc-forge/indexer`. Do not create a classic token with access to every package you own.
-2. Store it as the `NPM_TOKEN` Actions secret on `BCPathway/bc-forge`.
-3. The reusable workflow accepts `NPM_TOKEN` as an optional secret for fallback publishing.
+2. Store it as `NPM_TOKEN` on the `npm` environment of `BCPathway/bc-forge`.
+3. `bootstrap-npm-publish.yml` reads it for the first publish of a package. `release.yml` does not read it; wire `NODE_AUTH_TOKEN` into the Changesets step by hand only for a one-off fallback publish and remove it afterwards.
 4. Rotate the secret after that publish, and after any exposure:
    - Revoke the token on npm (**Access Tokens → Revoke**).
    - Create a replacement granular token with the same package list.

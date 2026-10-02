@@ -1,0 +1,82 @@
+name: Bootstrap npm packages (first publish)
+
+# One-time, manual. npm trusted publishing cannot create a package, so each
+# @bc-forge/* package needs a single token-authenticated publish before
+# release.yml can publish it through OIDC. This workflow does exactly that and
+# nothing else: scripts/bootstrap-npm-publish.mjs skips any package that is
+# already on the registry, so rerunning it after the bootstrap publishes
+# nothing. Changesets in release.yml remains the publisher for every later
+# version. Steps and the token lifecycle: docs/RELEASE_CHECKLIST.md.
+#
+# Requires NPM_TOKEN on the `npm` environment (a granular token with publish
+# rights on the @bc-forge scope). Remove the token again when the bootstrap
+# is done and the trusted publisher records exist.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report what would be published without writing to npm'
+        type: boolean
+        default: true
+      only:
+        description: 'Comma-separated subset to publish (sdk,cli,react,indexer). Empty = all missing packages.'
+        type: string
+        default: ''
+
+permissions: {}
+
+# Same group as the Changesets job in release.yml so a bootstrap and a
+# release cannot write to the registry at the same time.
+concurrency:
+  group: publish-changesets
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: First publish of missing @bc-forge packages
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Upgrade npm
+        run: |
+          npm install -g npm@^11
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages
+        run: |
+          npm run build --workspace @bc-forge/sdk
+          npm run build --workspace @bc-forge/cli
+          npm run build --workspace @bc-forge/react
+          npm run prisma:generate --workspace @bc-forge/indexer
+          npm run build --workspace @bc-forge/indexer
+          node scripts/validate-react-tarball.mjs
+
+      - name: Publish packages that are not on npm yet
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
+          node scripts/bootstrap-npm-publish.mjs "${args[@]}"
