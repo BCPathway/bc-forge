@@ -39,13 +39,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Rust toolchain + wasm target (CONTRIBUTING.md: Rust 1.74+ with
-      # wasm32-unknown-unknown; pin to the version used across CI).
+      # Rust toolchain pinned to the version used across CI. The deployable
+      # artifact is built for wasm32v1-none: rustc >= 1.82 enables Wasm
+      # reference-types on wasm32-unknown-unknown, and the Soroban host
+      # rejects such modules at upload ("reference-types not enabled").
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.96.0
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -127,7 +129,7 @@ jobs:
           echo "Funded testnet account: ${PUBLIC_KEY}"
 
       - name: Build token contract WASM
-        run: cargo build --target wasm32-unknown-unknown --release -p bc-forge-token
+        run: cargo build --target wasm32v1-none --release -p bc-forge-token
 
       # Deploy a fresh token instance and initialize it with the funded account
       # as admin, then hand its contract ID to the live suite. Deploying is what
@@ -136,7 +138,7 @@ jobs:
       - name: Deploy and initialize token contract on testnet
         run: |
           set -euo pipefail
-          WASM="target/wasm32-unknown-unknown/release/bc_forge_token.wasm"
+          WASM="target/wasm32v1-none/release/bc_forge_token.wasm"
 
           CONTRACT_ID="$(stellar contract deploy \
             --wasm "$WASM" \
