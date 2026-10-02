@@ -8,21 +8,53 @@ import { resolveAccountReference } from "../utils/address-book.js";
 import { initializeSuperAdmin } from "../orchestrator/init-superadmin.js";
 import { connectContractIds } from "../orchestrator/connect-contracts.js";
 import { runDeploymentOrchestrator } from "../orchestrator/orchestrator.js";
+import { defaultConfigPath } from "../utils/config-parser.js";
 
-function resolveId(command: Command, value: string | undefined): string | undefined {
+function resolveId(
+  command: Command,
+  value: string | undefined,
+): string | undefined {
   return resolveContractIdOption(command, value);
+}
+
+/**
+ * Resolves the `--file [file]` option to an explicit config path.
+ *
+ * The CLI always passes a concrete path so the orchestrator creates
+ * `.bc-forge.json` in the working directory when none exists yet (the
+ * behaviour before #1129). Omitting `--file`, or passing it without a value,
+ * selects `./.bc-forge.json`.
+ */
+export function resolveConfigFileOption(
+  file: string | boolean | undefined,
+): string {
+  return typeof file === "string" && file.length > 0
+    ? file
+    : defaultConfigPath();
 }
 
 export function createInitSuperAdminCommand(): Command {
   const command = new Command("init-superadmin")
-    .description("Initialize contract natively with deployer as SuperAdmin and verify on-chain")
-    .option("--contract-id <string>", "Contract ID or deployment alias to initialize")
-    .option("--deployer <string>", "Deployer public key (G...) or an address-book name")
+    .description(
+      "Initialize contract natively with deployer as SuperAdmin and verify on-chain",
+    )
+    .option(
+      "--contract-id <string>",
+      "Contract ID or deployment alias to initialize",
+    )
+    .option(
+      "--deployer <string>",
+      "Deployer public key (G...) or an address-book name",
+    )
     .option("--secret-key <string>", "Deployer secret key (S...)")
     .option("--name <string>", "Token name")
     .option("--symbol <string>", "Token symbol")
     .option("--decimals <number>", "Decimal places")
     .option("--no-verify", "Skip on-chain SuperAdmin verification")
+    .option(
+      "--file [file]",
+      "Path to .bc-forge.json (default: ./.bc-forge.json, created if missing)",
+    )
     .option("--json", "Print the contract id and transaction hash as JSON")
     .action(async (options, command: Command) => {
       const restore = options.json ? silenceInformationalLogs() : undefined;
@@ -35,8 +67,11 @@ export function createInitSuperAdminCommand(): Command {
           secretKey: options.secretKey,
           name: options.name,
           symbol: options.symbol,
-          decimals: options.decimals ? parseInt(options.decimals, 10) : undefined,
+          decimals: options.decimals
+            ? parseInt(options.decimals, 10)
+            : undefined,
           verify: options.verify,
+          configPath: resolveConfigFileOption(options.file),
         });
         if (options.json) {
           writeJson({
@@ -72,8 +107,14 @@ export function createConnectCommand(): Command {
     .option("--vesting <string>", "Vesting contract ID or deployment alias")
     .option("--wrapper <string>", "Wrapper contract ID or deployment alias")
     .option("--secret-key <string>", "Deployer secret key")
-    .option("--file [file]", "Path to .bc-forge.json")
-    .option("--json", "Print linked contract ids and transaction hashes as JSON")
+    .option(
+      "--file [file]",
+      "Path to .bc-forge.json (default: ./.bc-forge.json, created if missing)",
+    )
+    .option(
+      "--json",
+      "Print linked contract ids and transaction hashes as JSON",
+    )
     .action(async (options, command: Command) => {
       const restore = options.json ? silenceInformationalLogs() : undefined;
       try {
@@ -83,7 +124,7 @@ export function createConnectCommand(): Command {
           vestingContractId: resolveId(command, options.vesting),
           wrapperContractId: resolveId(command, options.wrapper),
           secretKey: options.secretKey,
-          configPath: options.file,
+          configPath: resolveConfigFileOption(options.file),
         });
         if (options.json) {
           writeJson({
@@ -111,7 +152,9 @@ export function createConnectCommand(): Command {
 
 export function createOrchestrateCommand(): Command {
   const command = new Command("orchestrate")
-    .description("Run full deployment orchestrator: initialize SuperAdmin and connect contract IDs")
+    .description(
+      "Run full deployment orchestrator: initialize SuperAdmin and connect contract IDs",
+    )
     .option("--admin <string>", "Admin contract ID or deployment alias")
     .option("--token <string>", "Token contract ID or deployment alias")
     .option("--vesting <string>", "Vesting contract ID or deployment alias")
@@ -120,7 +163,10 @@ export function createOrchestrateCommand(): Command {
     .option("--symbol <string>", "Token symbol")
     .option("--decimals <number>", "Token decimals")
     .option("--secret-key <string>", "Deployer secret key")
-    .option("--file [file]", "Path to .bc-forge.json")
+    .option(
+      "--file [file]",
+      "Path to .bc-forge.json (default: ./.bc-forge.json, created if missing)",
+    )
     .option("--skip-verify", "Skip on-chain verification steps")
     .option("--json", "Print contract ids and transaction hashes as JSON")
     .action(async (options, command: Command) => {
@@ -133,9 +179,11 @@ export function createOrchestrateCommand(): Command {
           wrapperContractId: resolveId(command, options.wrapper),
           name: options.name,
           symbol: options.symbol,
-          decimals: options.decimals ? parseInt(options.decimals, 10) : undefined,
+          decimals: options.decimals
+            ? parseInt(options.decimals, 10)
+            : undefined,
           secretKey: options.secretKey,
-          configPath: options.file,
+          configPath: resolveConfigFileOption(options.file),
           skipVerify: options.skipVerify,
         });
         if (options.json) {
