@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: MIT
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { StrKey } from '@stellar/stellar-sdk';
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { StrKey } from "@stellar/stellar-sdk";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-let schemaPath = path.resolve(__dirname, '../schema/bc-forge.schema.json');
+let schemaPath = path.resolve(__dirname, "../schema/bc-forge.schema.json");
 if (!fs.existsSync(schemaPath)) {
-  const srcSchemaPath = path.resolve(__dirname, '../../src/schema/bc-forge.schema.json');
+  const srcSchemaPath = path.resolve(
+    __dirname,
+    "../../src/schema/bc-forge.schema.json",
+  );
   if (fs.existsSync(srcSchemaPath)) {
     schemaPath = srcSchemaPath;
   }
 }
 const bcForgeSchema = fs.existsSync(schemaPath)
-  ? JSON.parse(fs.readFileSync(schemaPath, 'utf-8'))
+  ? JSON.parse(fs.readFileSync(schemaPath, "utf-8"))
   : {};
 
 export interface ContractDeploymentConfig {
@@ -34,7 +37,14 @@ export interface BcForgeConfig {
   decimals?: number;
   admin?: string;
   superAdmin?: string;
-  network?: 'mainnet' | 'testnet' | 'futurenet' | 'standalone' | 'local' | 'custom' | string;
+  network?:
+    | "mainnet"
+    | "testnet"
+    | "futurenet"
+    | "standalone"
+    | "local"
+    | "custom"
+    | string;
   rpcUrl?: string;
   networkPassphrase?: string;
   secretKey?: string;
@@ -57,7 +67,18 @@ export interface ConfigParseResult {
   filePath?: string;
 }
 
-const DEFAULT_CONFIG_FILENAME = '.bc-forge.json';
+export const DEFAULT_CONFIG_FILENAME = ".bc-forge.json";
+
+/**
+ * Absolute path of the default `.bc-forge.json` in the current working directory.
+ *
+ * CLI commands pass this explicitly so a missing config is created on first
+ * use. Library callers that omit `configPath` only update a config that
+ * already exists; see `initializeSuperAdmin` and `connectContractIds`.
+ */
+export function defaultConfigPath(cwd: string = process.cwd()): string {
+  return path.resolve(cwd, DEFAULT_CONFIG_FILENAME);
+}
 const ACCOUNT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
 /**
@@ -66,27 +87,33 @@ const ACCOUNT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
  */
 function validateAccountBook(accounts: unknown): string[] {
   if (accounts === undefined) return [];
-  if (accounts === null || typeof accounts !== 'object' || Array.isArray(accounts)) {
-    return ['accounts: must be an object mapping names to public keys'];
+  if (
+    accounts === null ||
+    typeof accounts !== "object" ||
+    Array.isArray(accounts)
+  ) {
+    return ["accounts: must be an object mapping names to public keys"];
   }
 
   const errors: string[] = [];
-  for (const [name, key] of Object.entries(accounts as Record<string, unknown>)) {
+  for (const [name, key] of Object.entries(
+    accounts as Record<string, unknown>,
+  )) {
     if (!ACCOUNT_NAME_PATTERN.test(name)) {
       errors.push(
-        `accounts/${name}: invalid account name. Use a letter followed by letters, digits, "_" or "-".`
+        `accounts/${name}: invalid account name. Use a letter followed by letters, digits, "_" or "-".`,
       );
     }
-    if (typeof key !== 'string' || !StrKey.isValidEd25519PublicKey(key)) {
+    if (typeof key !== "string" || !StrKey.isValidEd25519PublicKey(key)) {
       errors.push(
-        `accounts/${name}: invalid public key "${String(key)}". Stellar StrKey checksum check failed.`
+        `accounts/${name}: invalid public key "${String(key)}". Stellar StrKey checksum check failed.`,
       );
     }
   }
   return errors;
 }
 
-import { Ajv } from 'ajv';
+import { Ajv } from "ajv";
 
 const ajv = new Ajv({ allErrors: true, useDefaults: true });
 const validate = ajv.compile(bcForgeSchema);
@@ -96,31 +123,31 @@ const validate = ajv.compile(bcForgeSchema);
  */
 function formatValidationErrors(errors: any[] | null | undefined): string[] {
   if (!errors || errors.length === 0) {
-    return ['Configuration validation failed.'];
+    return ["Configuration validation failed."];
   }
 
   return errors.map((error) => {
-    const path = error.instancePath || '/';
+    const path = error.instancePath || "/";
     const keyword = error.keyword;
     const params = error.params;
 
     switch (keyword) {
-      case 'type':
-        return `${path || 'root'}: expected ${params.type}, got ${typeof error.data}`;
-      case 'required':
+      case "type":
+        return `${path || "root"}: expected ${params.type}, got ${typeof error.data}`;
+      case "required":
         return `Missing required field: "${params.missingProperty}"`;
-      case 'enum':
-        return `${path}: must be one of [${params.allowedValues.join(', ')}], got "${error.data}"`;
-      case 'pattern':
+      case "enum":
+        return `${path}: must be one of [${params.allowedValues.join(", ")}], got "${error.data}"`;
+      case "pattern":
         return `${path}: invalid format. Expected pattern: ${params.pattern}`;
-      case 'minimum':
+      case "minimum":
         return `${path}: must be >= ${params.limit}, got ${error.data}`;
-      case 'maximum':
+      case "maximum":
         return `${path}: must be <= ${params.limit}, got ${error.data}`;
-      case 'additionalProperties':
+      case "additionalProperties":
         return `${path}: unexpected additional property "${params.additionalProperty}"`;
       default:
-        return `${path || 'root'}: ${error.message}`;
+        return `${path || "root"}: ${error.message}`;
     }
   });
 }
@@ -129,17 +156,17 @@ function formatValidationErrors(errors: any[] | null | undefined): string[] {
  * Validates a configuration object against the .bc-forge.json schema.
  */
 export function validateConfig(data: unknown): ConfigValidationResult {
-  if (data === null || typeof data !== 'object') {
+  if (data === null || typeof data !== "object") {
     return {
       valid: false,
-      errors: ['Configuration must be a valid JSON object, got ' + typeof data]
+      errors: ["Configuration must be a valid JSON object, got " + typeof data],
     };
   }
 
   if (Array.isArray(data)) {
     return {
       valid: false,
-      errors: ['Configuration must be a JSON object, not an array']
+      errors: ["Configuration must be a JSON object, not an array"],
     };
   }
 
@@ -147,7 +174,7 @@ export function validateConfig(data: unknown): ConfigValidationResult {
   if (!valid) {
     return {
       valid: false,
-      errors: formatValidationErrors(validate.errors)
+      errors: formatValidationErrors(validate.errors),
     };
   }
 
@@ -164,11 +191,11 @@ export function validateConfig(data: unknown): ConfigValidationResult {
     valid: true,
     errors: [],
     config: {
-      version: '1.0.0',
+      version: "1.0.0",
       decimals: 7,
-      network: 'testnet',
-      ...config
-    }
+      network: "testnet",
+      ...config,
+    },
   };
 }
 
@@ -186,24 +213,24 @@ export function loadConfigFile(customPath?: string): ConfigParseResult {
       return {
         success: false,
         errors: [`Configuration file not found at path: ${targetPath}`],
-        filePath: targetPath
+        filePath: targetPath,
       };
     }
     return {
       success: false,
       errors: [`Configuration file ${DEFAULT_CONFIG_FILENAME} not found.`],
-      filePath: targetPath
+      filePath: targetPath,
     };
   }
 
   let rawContent: string;
   try {
-    rawContent = fs.readFileSync(targetPath, 'utf-8');
+    rawContent = fs.readFileSync(targetPath, "utf-8");
   } catch (err: any) {
     return {
       success: false,
       errors: [`Failed to read configuration file: ${err.message}`],
-      filePath: targetPath
+      filePath: targetPath,
     };
   }
 
@@ -213,8 +240,10 @@ export function loadConfigFile(customPath?: string): ConfigParseResult {
   } catch (err: any) {
     return {
       success: false,
-      errors: [`Invalid JSON syntax in ${path.basename(targetPath)}: ${err.message}`],
-      filePath: targetPath
+      errors: [
+        `Invalid JSON syntax in ${path.basename(targetPath)}: ${err.message}`,
+      ],
+      filePath: targetPath,
     };
   }
 
@@ -223,14 +252,14 @@ export function loadConfigFile(customPath?: string): ConfigParseResult {
     return {
       success: false,
       errors: validation.errors,
-      filePath: targetPath
+      filePath: targetPath,
     };
   }
 
   return {
     success: true,
     config: validation.config,
-    filePath: targetPath
+    filePath: targetPath,
   };
 }
 
@@ -239,7 +268,7 @@ export function loadConfigFile(customPath?: string): ConfigParseResult {
  */
 export function saveConfigFile(
   config: BcForgeConfig,
-  customPath?: string
+  customPath?: string,
 ): { success: boolean; filePath: string; errors?: string[] } {
   const targetPath = customPath
     ? path.resolve(customPath)
@@ -250,22 +279,22 @@ export function saveConfigFile(
     return {
       success: false,
       filePath: targetPath,
-      errors: validation.errors
+      errors: validation.errors,
     };
   }
 
   try {
     const jsonString = JSON.stringify(validation.config, null, 2);
-    fs.writeFileSync(targetPath, jsonString, 'utf-8');
+    fs.writeFileSync(targetPath, jsonString, "utf-8");
     return {
       success: true,
-      filePath: targetPath
+      filePath: targetPath,
     };
   } catch (err: any) {
     return {
       success: false,
       filePath: targetPath,
-      errors: [`Failed to write configuration file: ${err.message}`]
+      errors: [`Failed to write configuration file: ${err.message}`],
     };
   }
 }

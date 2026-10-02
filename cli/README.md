@@ -85,6 +85,8 @@ The CLI resolves connection settings and contract metadata from environment vari
 
 Place a `.bc-forge.json` file in your workspace root or specify a custom path with `--config`.
 
+`init-superadmin`, `connect`, and `orchestrate` read and update this file through `--file [path]`. Without `--file` they use `./.bc-forge.json` and create it if it does not exist yet; with an explicit path they create that file. Programmatic callers of `initializeSuperAdmin` / `connectContractIds` that omit `configPath` only update a config that already exists.
+
 ```json
 {
   "version": "1.0.0",
