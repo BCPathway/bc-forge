@@ -93,17 +93,29 @@ jobs:
       - name: Create and fund testnet account with friendbot
         run: |
           set -euo pipefail
-          stellar keys generate e2e-nightly --network testnet --overwrite
+          # `--fund` asks friendbot for the new account as part of generation.
+          # Do not call friendbot a second time for the same address: it
+          # answers 400 (createAccountAlreadyExist) once the account is funded,
+          # which `curl -f` turned into a hard failure on every nightly run.
+          stellar keys generate e2e-nightly --network testnet --overwrite --fund
           PUBLIC_KEY="$(stellar keys address e2e-nightly)"
           SECRET_KEY="$(stellar keys show e2e-nightly)"
 
           # Never echo the secret into the job log.
           echo "::add-mask::${SECRET_KEY}"
 
-          # Explicitly fund through friendbot (idempotent on testnet) and wait
-          # until Horizon reports the account before deploying on top of it.
-          curl -sS -f "${FRIENDBOT_URL}/?addr=${PUBLIC_KEY}" > /dev/null
-          curl -sS -f "https://horizon-testnet.stellar.org/accounts/${PUBLIC_KEY}" > /dev/null
+          # Wait until Horizon reports the funded account before deploying on
+          # top of it; friendbot's transaction can take a few ledgers to land.
+          for attempt in $(seq 1 12); do
+            if curl -sS -f "https://horizon-testnet.stellar.org/accounts/${PUBLIC_KEY}" > /dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo "::error::Account ${PUBLIC_KEY} was not visible on Horizon after funding."
+              exit 1
+            fi
+            sleep 5
+          done
 
           {
             echo "E2E_TESTNET_PUBLIC_KEY=${PUBLIC_KEY}"
