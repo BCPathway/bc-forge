@@ -15,7 +15,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "paths": {
       "@bc-forge/sdk": ["../../sdk/src/index.ts"],
       "@bc-forge/react": ["../../react/src/index.ts"]
