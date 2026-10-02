@@ -279,11 +279,24 @@ describe('scripts/check-version-tag.mjs', () => {
   });
 
   describe('CLI execution exit codes', () => {
+    // The script's default registry check shells out to `npm view`. Point npm
+    // at an unreachable registry so the lookup fails fast and resolves to
+    // "not published"; otherwise this test depends on the live npm state and
+    // fails as soon as the manifest version is actually released.
+    const offlineRegistryEnv = {
+      ...process.env,
+      npm_config_registry: 'http://127.0.0.1:9/',
+      npm_config_fetch_retries: '0',
+      npm_config_fetch_retry_mintimeout: '0',
+      npm_config_fetch_retry_maxtimeout: '0',
+    };
+
     it('exits 0 on valid tag', () => {
       const tag = `sdk@${manifestVersion('sdk')}`;
       const output = execSync(`node "${scriptPath}" ${tag}`, {
         cwd: rootDir,
         encoding: 'utf8',
+        env: offlineRegistryEnv,
         timeout: 15000,
       });
       expect(output).toContain(`Tag "${tag}" is valid`);
