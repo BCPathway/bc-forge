@@ -575,12 +575,14 @@ impl BcForgeToken {
         symbol: String,
     ) -> Result<(), TokenError> {
         Self::extend_instance_ttl_for_call(&env);
-        // Ensure only the deployer can initialize the contract
-        env.current_contract_address().require_auth();
-
+        // Reject a second initialize before any auth or write. stellar-cli
+        // cannot sign an auth entry for a contract address, so the admin
+        // account authorizes the first call (the same key the nightly job
+        // and the README use as `--source`).
         if admin::has_admin(&env) {
             return Err(TokenError::AlreadyInitialized);
         }
+        admin_address.require_auth();
 
         admin::set_admin(&env, &admin_address);
         env.storage().instance().set(&DataKey::Decimals, &decimal);
