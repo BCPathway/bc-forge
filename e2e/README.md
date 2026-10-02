@@ -51,7 +51,7 @@ stellar keys generate e2e-local --network testnet --fund
 export RUN_E2E_TESTNET=true
 export E2E_TESTNET_RPC_URL=https://soroban-testnet.stellar.org
 export E2E_TESTNET_PASSPHRASE="Test SDF Network ; September 2015"
-export E2E_TESTNET_SECRET="$(stellar keys show e2e-local)"
+export E2E_TESTNET_SECRET="$(stellar keys secret e2e-local)"
 export E2E_TOKEN_CONTRACT_ID=C...
 
 # Run just the live suite

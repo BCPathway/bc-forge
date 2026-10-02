@@ -62,21 +62,16 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # Stellar CLI (CONTRIBUTING.md: 22.0+). Used here to generate/fund the
-      # testnet identity and to deploy and initialize the token contract.
-      - name: Install Stellar CLI system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libdbus-1-dev \
-            libudev-dev \
-            pkg-config
-
+      # Stellar CLI. Used here to generate/fund the testnet identity and to
+      # deploy and initialize the token contract. Installed as a prebuilt
+      # binary via the official action; the version must track the live
+      # testnet protocol. An old CLI (22.0.0 against protocol 29) builds an
+      # envelope stellar-core rejects with TxSorobanInvalid.
       - name: Install Stellar CLI
-        run: |
-          cargo install stellar-cli --version 22.0.0 --locked \
-            || cargo install stellar-cli --locked \
-            || cargo install soroban-cli --locked
+        uses: stellar/stellar-cli@v28.1.0
+
+      - name: Show Stellar CLI version
+        run: stellar --version
 
       - name: Install Node dependencies
         run: npm ci
@@ -100,8 +95,8 @@ jobs:
           # answers 400 (createAccountAlreadyExist) once the account is funded,
           # which `curl -f` turned into a hard failure on every nightly run.
           stellar keys generate e2e-nightly --network testnet --overwrite --fund
-          PUBLIC_KEY="$(stellar keys address e2e-nightly)"
-          SECRET_KEY="$(stellar keys show e2e-nightly)"
+          PUBLIC_KEY="$(stellar keys public-key e2e-nightly)"
+          SECRET_KEY="$(stellar keys secret e2e-nightly)"
 
           # Never echo the secret into the job log.
           echo "::add-mask::${SECRET_KEY}"
