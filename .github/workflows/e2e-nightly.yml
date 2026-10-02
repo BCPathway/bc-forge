@@ -143,16 +143,21 @@ jobs:
           set -euo pipefail
           WASM="e2e-wasm/bc_forge_token.wasm"
 
+          # Sign with the saved identity, not the raw secret. `initialize`
+          # calls `current_contract_address().require_auth()`, a non-root
+          # auth entry the deployer must approve. `--auto-sign` does that
+          # without a prompt, which CI does not have.
           CONTRACT_ID="$(stellar contract deploy \
             --wasm "$WASM" \
-            --source-account "$E2E_TESTNET_SECRET_KEY" \
+            --source-account e2e-nightly \
             --rpc-url "$STELLAR_TESTNET_RPC_URL" \
             --network-passphrase "$STELLAR_TESTNET_PASSPHRASE")"
           echo "Deployed token contract: ${CONTRACT_ID}"
 
           stellar contract invoke \
-            --id "$CONTRACT_ID" \
-            --source-account "$E2E_TESTNET_SECRET_KEY" \
+            --contract-id "$CONTRACT_ID" \
+            --source-account e2e-nightly \
+            --auto-sign \
             --rpc-url "$STELLAR_TESTNET_RPC_URL" \
             --network-passphrase "$STELLAR_TESTNET_PASSPHRASE" \
             -- \
