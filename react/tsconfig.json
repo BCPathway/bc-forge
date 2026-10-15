@@ -18,6 +18,7 @@
     "ignoreDeprecations": "6.0",
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
+    "rootDir": "./src",
     "outDir": "./dist"
   },
   "include": ["src"]
