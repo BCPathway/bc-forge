@@ -59,15 +59,20 @@ jobs:
       - name: Regenerate baselines
         run: npm run test:visual:update --workspace @bc-forge/react
 
+      # The container runs git against a checkout owned by another uid, and the
+      # later steps do not inherit the checkout's working directory, so both are
+      # pinned explicitly here.
       - name: Commit regenerated baselines
         run: |
           set -eu
-          if git diff --quiet -- react/visual/__screenshots__; then
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ -z "$(git status --porcelain -- react/visual/__screenshots__)" ]; then
             echo "No baseline changes to commit."
             exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add react/visual/__screenshots__
-          git commit -m 'chore(react): regenerate visual baselines'
+          git commit --no-verify -m 'chore(react): regenerate visual baselines'
           git push origin "HEAD:${{ github.ref_name }}"
