@@ -3,6 +3,7 @@ export * from './context';
 export * from './utils';
 export * from './hooks';
 export * from './components';
+export * from './wallets';
 export * from './screens/VaultsScreen';
 export * from './screens/TransferScreen';
 export * from './screens/BurnScreen';

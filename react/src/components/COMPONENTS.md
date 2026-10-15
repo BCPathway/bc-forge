@@ -30,6 +30,33 @@ Inline notification banner. The ARIA role is derived from the variant:
 <Alert variant="danger" onDismiss={() => setError(null)}>Mint failed.</Alert>
 ```
 
+## WalletSelectModal
+
+Wallet picker dialog. It is self-contained — it portals into `document.body`
+through `react-dom`, traps `Tab`, closes on Escape or a backdrop click, and
+returns focus to the trigger — and it reads `useWallet()` itself, so it only
+needs `open` and `onClose` from the host.
+
+Each wallet is a `<button>` with a stable accessible name ("Connect with
+Freighter") plus a description carrying the installation state. The state is
+never colour-only: the badge reads `Installed` / `Not installed`, and a missing
+wallet gets an install link. A missing wallet stays clickable — Albedo's intent
+script is injected on demand, and Freighter reports a readable error — so the
+link is an offer, not a gate. Closing is blocked while a wallet prompt is open.
+
+| Prop          | Type              | Default                 | Description                                     |
+| ------------- | ----------------- | ----------------------- | ----------------------------------------------- |
+| `open`        | `boolean`         | — (required)            | Renders the dialog only when true.              |
+| `onClose`     | `() => void`      | — (required)            | Escape, backdrop click, and the close button.   |
+| `title`       | `string`          | `'Connect a wallet'`    | Heading and accessible name.                    |
+| `description` | `React.ReactNode` | `'Choose how …'`        | Line under the heading; `null` hides it.        |
+
+```tsx
+const [open, setOpen] = useState(false);
+<button onClick={() => setOpen(true)}>Connect</button>
+<WalletSelectModal open={open} onClose={() => setOpen(false)} />
+```
+
 ## Badge
 
 Small label used for statuses, counts, or categories. When `onClick` is

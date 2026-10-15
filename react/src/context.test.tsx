@@ -94,6 +94,11 @@ describe('wallet state machine', () => {
     mockVaultSetWalletAdapter.mockClear();
     mockVaultGetWalletAdapter.mockReset().mockReturnValue(undefined);
     mockMint.mockReset();
+    // `WalletProvider` persists the connected wallet so a reload can restore it
+    // (#1172), and jsdom keeps one `localStorage` for the whole file. Without
+    // this, a session saved by one test would be silently reconnected at the
+    // start of the next one and race the assertions below.
+    localStorage.clear();
   });
 
   it('moves from disconnected through connecting to connected with the public key', async () => {

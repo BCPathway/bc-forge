@@ -92,7 +92,16 @@ Components:
 
 - `Alert`, `Badge`, `Dropdown`, `ConnectWallet`, `TokenCard`, `MintForm`
 - `VaultDepositWidget`, `APYChart`, `ProposalVotingPanel`, `TransactionToast`
+- `WalletSelectModal`, `WALLET_INSTALL_LABELS`
 - `MINT_FORM_ERRORS`, `VAULT_DEPOSIT_NO_ACCOUNT`, `VAULT_DEPOSIT_NO_CLIENT`
+
+Wallet detection and session persistence:
+
+- `useWalletDetection`, `detectWallets`, `isFreighterInstalled`, `isAlbedoAvailable`
+- `whenFreighterReady`, `loadAlbedoScript`
+- `FREIGHTER_INSTALL_URL`, `ALBEDO_INSTALL_URL`, `ALBEDO_SCRIPT_URL`
+- `loadWalletSession`, `saveWalletSession`, `clearWalletSession`, `onWalletSessionChange`
+- `WALLET_SESSION_KEY`, `WALLET_PREFERENCE_KEY`
 
 Screens:
 

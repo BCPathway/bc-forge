@@ -11,6 +11,9 @@ export type { DropdownProps, DropdownVariant, DropdownSize, DropdownItem } from 
 export { ConnectWallet } from './ConnectWallet';
 export type { ConnectWalletProps } from './ConnectWallet';
 
+export { WalletSelectModal, WALLET_INSTALL_LABELS } from './WalletSelectModal';
+export type { WalletSelectModalProps } from './WalletSelectModal';
+
 export { TokenCard } from './TokenCard';
 export type { TokenCardProps } from './TokenCard';
 
