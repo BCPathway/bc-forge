@@ -2,7 +2,10 @@
 import { useState, type ReactNode } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
-import { WalletSelectModal } from "../src/components/WalletSelectModal";
+import {
+  WalletSelectModal,
+  WALLET_INSTALL_LABELS,
+} from "../src/components/WalletSelectModal";
 import { WalletFixture } from "./fixtures";
 
 const meta = {
@@ -80,8 +83,15 @@ export const Default: Story = {
     ).toBeVisible();
     await expect(canvas.getByTestId("wallet-option-freighter")).toBeVisible();
     await expect(canvas.getByTestId("wallet-option-albedo")).toBeVisible();
-    // Every row carries its own badge, so the label appears once per wallet.
-    await expect(canvas.getAllByText("Installed")).toHaveLength(2);
+    // `WalletFixture` mounts `WalletProvider` without `adapterFactories`, so the
+    // real SDK adapters are used and neither extension exists in the preview
+    // browser. Every row is therefore badged as missing and links out to an
+    // install page, which is the state a visitor without a wallet extension
+    // actually sees.
+    await expect(
+      canvas.getAllByText(WALLET_INSTALL_LABELS.missing),
+    ).toHaveLength(2);
+    await expect(canvas.getByTestId("wallet-install-freighter")).toBeVisible();
   },
 };
 
