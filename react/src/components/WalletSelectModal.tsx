@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: MIT
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 
-import { useWallet } from '../hooks';
-import type { WalletName } from '../context';
+import { useWallet } from "../hooks";
+import type { WalletName } from "../context";
 import {
   ALBEDO_EXTENSION_URL,
   FREIGHTER_INSTALL_URL,
@@ -12,10 +19,10 @@ import {
   // and this standalone probe is only the fallback for an unpopulated provider.
   detectWallets as probeWallets,
   type WalletAvailability,
-} from '../wallets/detection';
-import { theme } from '../theme';
-import { Alert } from './Alert';
-import { Badge } from './Badge';
+} from "../wallets/detection";
+import { theme } from "../theme";
+import { Alert } from "./Alert";
+import { Badge } from "./Badge";
 
 export interface WalletSelectModalProps {
   /** Whether the dialog is visible. Nothing is rendered while `false`. */
@@ -34,22 +41,30 @@ export interface WalletSelectModalProps {
    * @default 'Choose how you would like to connect.'
    */
   description?: React.ReactNode;
+  /**
+   * Host element the dialog portals into. Defaults to `document.body`.
+   *
+   * Mirrors `ConfirmationDialog`. Pointing it at an element inside the app lets
+   * the dialog be positioned, clipped and asserted relative to that subtree
+   * instead of the viewport.
+   */
+  portalContainer?: HTMLElement | null;
 }
 
 const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
-].join(',');
+].join(",");
 
 /** Visible descendants that can hold focus, in document order. */
 function getFocusableElements(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (element) => element.getAttribute('aria-hidden') !== 'true',
-  );
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((element) => element.getAttribute("aria-hidden") !== "true");
 }
 
 /**
@@ -59,40 +74,42 @@ function getFocusableElements(root: HTMLElement): HTMLElement[] {
  */
 function focusKeyOf(target: EventTarget | null): string | null {
   if (!(target instanceof HTMLElement)) return null;
-  return target.closest<HTMLElement>('[data-focus-key]')?.dataset.focusKey ?? null;
+  return (
+    target.closest<HTMLElement>("[data-focus-key]")?.dataset.focusKey ?? null
+  );
 }
 
 /** Ring drawn around a wallet row while it holds focus. */
 const FOCUS_RING_STYLE: React.CSSProperties = {
-  outline: 'none',
+  outline: "none",
   borderColor: theme.primary,
   boxShadow: `0 0 0 2px ${theme.primaryFocusRing}`,
 };
 
 /** Lighter ring for the small inline links. */
 const LINK_FOCUS_RING_STYLE: React.CSSProperties = {
-  outline: 'none',
+  outline: "none",
   borderRadius: 4,
   boxShadow: `0 0 0 2px ${theme.focusRing}`,
 };
 
 const BACKDROP_STYLE: React.CSSProperties = {
-  position: 'fixed',
+  position: "fixed",
   inset: 0,
   zIndex: 1000,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   padding: 16,
-  backgroundColor: 'rgba(17, 24, 39, 0.55)',
+  backgroundColor: "rgba(17, 24, 39, 0.55)",
 };
 
 const DIALOG_STYLE: React.CSSProperties = {
-  width: '100%',
+  width: "100%",
   maxWidth: 420,
-  maxHeight: 'calc(100vh - 32px)',
-  overflowY: 'auto',
-  boxSizing: 'border-box',
+  maxHeight: "calc(100vh - 32px)",
+  overflowY: "auto",
+  boxSizing: "border-box",
   padding: 20,
   borderRadius: 12,
   border: `1px solid ${theme.border}`,
@@ -109,27 +126,27 @@ const TITLE_STYLE: React.CSSProperties = {
 };
 
 const DESCRIPTION_STYLE: React.CSSProperties = {
-  margin: '4px 0 0',
+  margin: "4px 0 0",
   fontSize: 13,
   lineHeight: 1.5,
   color: theme.neutralText,
 };
 
 const CLOSE_BUTTON_STYLE: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   width: 30,
   height: 30,
   flexShrink: 0,
   padding: 0,
-  border: '1px solid transparent',
+  border: "1px solid transparent",
   borderRadius: 6,
-  backgroundColor: 'transparent',
+  backgroundColor: "transparent",
   color: theme.neutralText,
   fontSize: 18,
   lineHeight: 1,
-  cursor: 'pointer',
+  cursor: "pointer",
 };
 
 const CLOSE_FOCUS_STYLE: React.CSSProperties = {
@@ -138,36 +155,36 @@ const CLOSE_FOCUS_STYLE: React.CSSProperties = {
 };
 
 const LIST_STYLE: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
+  display: "flex",
+  flexDirection: "column",
   gap: 10,
   margin: 0,
   padding: 0,
-  listStyle: 'none',
+  listStyle: "none",
 };
 
 const OPTION_BASE_STYLE: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
+  display: "flex",
+  alignItems: "center",
   gap: 12,
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '12px 14px',
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
   borderRadius: 10,
-  fontFamily: 'inherit',
+  fontFamily: "inherit",
   fontSize: 14,
-  textAlign: 'left',
-  cursor: 'pointer',
-  transition: 'border-color 0.15s, box-shadow 0.15s',
+  textAlign: "left",
+  cursor: "pointer",
+  transition: "border-color 0.15s, box-shadow 0.15s",
 };
 
 const OPTION_DISABLED_STYLE: React.CSSProperties = {
   opacity: 0.55,
-  cursor: 'not-allowed',
+  cursor: "not-allowed",
 };
 
 const FOOTER_STYLE: React.CSSProperties = {
-  margin: '14px 0 0',
+  margin: "14px 0 0",
   fontSize: 12,
   lineHeight: 1.5,
   color: theme.neutralText,
@@ -178,9 +195,9 @@ const SPINNER_STYLE: React.CSSProperties = {
   width: 14,
   height: 14,
   flexShrink: 0,
-  borderRadius: '50%',
+  borderRadius: "50%",
   border: `2px solid ${theme.primary}`,
-  borderTopColor: 'transparent',
+  borderTopColor: "transparent",
 };
 
 /** Icon for Freighter: a wallet body with its clasp. */
@@ -237,21 +254,24 @@ const WALLET_ICONS: Readonly<Record<WalletName, React.FC>> = {
  * the exact wording instead of re-wording the badge.
  */
 export const WALLET_INSTALL_LABELS = {
-  installed: 'Installed',
-  missing: 'Not installed',
-  loadFailed: 'Could not load',
+  installed: "Installed",
+  missing: "Not installed",
+  loadFailed: "Could not load",
 } as const;
 
 /** Where the "Get it" affordance for a missing wallet points. */
 function extensionUrlFor(wallet: WalletAvailability): string {
-  return wallet.name === 'freighter' ? (wallet.installUrl ?? FREIGHTER_INSTALL_URL) : ALBEDO_EXTENSION_URL;
+  return wallet.name === "freighter"
+    ? (wallet.installUrl ?? FREIGHTER_INSTALL_URL)
+    : ALBEDO_EXTENSION_URL;
 }
 
 /** Second line of a wallet row: what happens next, and what it needs. */
 function optionHint(wallet: WalletAvailability, connecting: boolean): string {
-  if (connecting) return 'Waiting for the wallet to approve…';
-  if (wallet.loadFailed) return 'The Albedo script could not be loaded from its CDN.';
-  if (wallet.installed) return 'Detected in this browser.';
+  if (connecting) return "Waiting for the wallet to approve…";
+  if (wallet.loadFailed)
+    return "The Albedo script could not be loaded from its CDN.";
+  if (wallet.installed) return "Detected in this browser.";
   return `Not installed. Open ${wallet.label} in a new tab, or use a Stellar browser extension.`;
 }
 
@@ -302,7 +322,7 @@ function WalletOption({
       data-testid={`wallet-option-${wallet.name}`}
       data-installed={String(wallet.installed)}
       data-focus-key={`option-${wallet.name}`}
-      data-modal-autofocus={autoFocus ? 'true' : undefined}
+      data-modal-autofocus={autoFocus ? "true" : undefined}
       aria-label={`Connect with ${wallet.label}`}
       aria-describedby={hintId}
       aria-busy={connecting}
@@ -311,7 +331,9 @@ function WalletOption({
       style={{
         ...OPTION_BASE_STYLE,
         border: `1px solid ${wallet.installed ? theme.primaryBorder : theme.border}`,
-        backgroundColor: wallet.installed ? theme.primaryBackground : theme.surface,
+        backgroundColor: wallet.installed
+          ? theme.primaryBackground
+          : theme.surface,
         color: theme.text,
         ...(busy ? OPTION_DISABLED_STYLE : null),
         ...(focused ? FOCUS_RING_STYLE : null),
@@ -319,14 +341,22 @@ function WalletOption({
     >
       <span
         aria-hidden="true"
-        style={{ color: wallet.installed ? theme.primary : theme.neutralText, flexShrink: 0 }}
+        style={{
+          color: wallet.installed ? theme.primary : theme.neutralText,
+          flexShrink: 0,
+        }}
       >
         <Icon />
       </span>
 
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontWeight: 600 }}>{wallet.label}</span>
-        <span id={hintId} style={{ display: 'block', fontSize: 12, color: theme.neutralText }}>
+        <span style={{ display: "block", fontWeight: 600 }}>
+          {wallet.label}
+        </span>
+        <span
+          id={hintId}
+          style={{ display: "block", fontSize: 12, color: theme.neutralText }}
+        >
           {optionHint(wallet, connecting)}
         </span>
       </span>
@@ -338,7 +368,14 @@ function WalletOption({
           {badgeText}
         </Badge>
       ) : (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
           <Badge variant="warning" size="sm">
             {badgeText}
           </Badge>
@@ -352,7 +389,9 @@ function WalletOption({
             style={{
               fontSize: 12,
               color: theme.primary,
-              ...(focusedKey === `install-${wallet.name}` ? LINK_FOCUS_RING_STYLE : null),
+              ...(focusedKey === `install-${wallet.name}`
+                ? LINK_FOCUS_RING_STYLE
+                : null),
             }}
           >
             Get it
@@ -360,7 +399,10 @@ function WalletOption({
         </span>
       )}
 
-      <span aria-hidden="true" style={{ fontSize: 16, color: theme.neutralText }}>
+      <span
+        aria-hidden="true"
+        style={{ fontSize: 16, color: theme.neutralText }}
+      >
         ›
       </span>
     </button>
@@ -369,7 +411,7 @@ function WalletOption({
 
 /** Narrow the loose `name` from {@link useWallet} back to a known wallet. */
 function isWalletLabel(value: string | null | undefined): value is WalletName {
-  return value === 'freighter' || value === 'albedo';
+  return value === "freighter" || value === "albedo";
 }
 
 /**
@@ -391,10 +433,27 @@ function isWalletLabel(value: string | null | undefined): value is WalletName {
 export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
   open,
   onClose,
-  title = 'Connect a wallet',
-  description = 'Choose how you would like to connect.',
+  title = "Connect a wallet",
+  description = "Choose how you would like to connect.",
+  portalContainer,
 }) => {
-  const { availableWallets, connectWallet, detectWallets, status, error, name } = useWallet();
+  const {
+    availableWallets,
+    connectWallet,
+    detectWallets,
+    status,
+    error,
+    name,
+  } = useWallet();
+
+  // Stay safe when there is no `document` at all (SSR), and let an explicit
+  // `null` opt out of rendering rather than silently falling back.
+  const host =
+    portalContainer !== null && portalContainer !== undefined
+      ? portalContainer
+      : typeof document === "undefined"
+        ? null
+        : document.body;
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -405,9 +464,10 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
   // The provider owns detection so every consumer shares one probe; fall back
   // to a one-off snapshot when this renders without a populated provider.
   const fallbackWallets = useMemo(() => probeWallets().wallets, []);
-  const wallets = availableWallets.length > 0 ? availableWallets : fallbackWallets;
+  const wallets =
+    availableWallets.length > 0 ? availableWallets : fallbackWallets;
 
-  const connecting = status === 'connecting';
+  const connecting = status === "connecting";
   const connectingWallet = connecting && isWalletLabel(name) ? name : null;
   // Closing mid-handshake would orphan the wallet popup the user is looking at.
   const closeBlocked = connecting;
@@ -443,7 +503,7 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
     if (!open || !isBrowser()) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         // Swallow Escape while a prompt is open rather than letting it reach an
         // ancestor dialog that would close over the wallet popup.
         if (closeBlocked) {
@@ -454,7 +514,7 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
         requestClose();
         return;
       }
-      if (event.key !== 'Tab') return;
+      if (event.key !== "Tab") return;
 
       const dialog = dialogRef.current;
       if (!dialog) return;
@@ -475,8 +535,8 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [closeBlocked, open, requestClose]);
 
   // Keep the badges honest if an extension was installed in another tab (#1169).
@@ -495,9 +555,14 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
   if (!open || !isBrowser()) return null;
 
   // Focus lands on the first detected wallet; the close button is the fallback.
-  const autofocusName = wallets.find((wallet) => wallet.installed)?.name ?? null;
+  const autofocusName =
+    wallets.find((wallet) => wallet.installed)?.name ?? null;
   const errorTitle =
-    status === 'wrong-network' ? 'Wallet is on another network' : 'Could not connect';
+    status === "wrong-network"
+      ? "Wallet is on another network"
+      : "Could not connect";
+
+  if (!open || host === null) return null;
 
   return createPortal(
     <div
@@ -524,7 +589,7 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
         }}
         style={DIALOG_STYLE}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h2 id={titleId} style={TITLE_STYLE}>
               {title}
@@ -545,7 +610,7 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
             style={{
               ...CLOSE_BUTTON_STYLE,
               ...(closeBlocked ? OPTION_DISABLED_STYLE : null),
-              ...(focusedKey === 'close' ? CLOSE_FOCUS_STYLE : null),
+              ...(focusedKey === "close" ? CLOSE_FOCUS_STYLE : null),
             }}
           >
             <span aria-hidden="true">&times;</span>
@@ -577,11 +642,11 @@ export const WalletSelectModal: React.FC<WalletSelectModalProps> = ({
 
         <p style={FOOTER_STYLE}>
           {connecting
-            ? 'Finish the request in your wallet window. This dialog stays open until it settles.'
-            : 'Your connection is remembered on this device, so the next visit reconnects automatically.'}
+            ? "Finish the request in your wallet window. This dialog stays open until it settles."
+            : "Your connection is remembered on this device, so the next visit reconnects automatically."}
         </p>
       </div>
     </div>,
-    document.body,
+    host,
   );
 };
