@@ -99,9 +99,10 @@ describe('ConnectWallet', () => {
     });
 
     expect(mockSetWalletAdapter).toHaveBeenCalledTimes(1);
-    const adapter = mockSetWalletAdapter.mock.calls[0][0];
-    expect(adapter.name).toBe('freighter');
-    expect(adapter.publicKey).toBe(FREIGHTER_KEY);
+    const [firstCall] = mockSetWalletAdapter.mock.calls;
+    const adapter = firstCall?.[0];
+    expect(adapter?.name).toBe('freighter');
+    expect(adapter?.publicKey).toBe(FREIGHTER_KEY);
 
     expect(screen.getByTestId('probe-name')).toHaveTextContent('freighter');
     expect(screen.getByTestId('probe-pubkey')).toHaveTextContent(FREIGHTER_KEY);
@@ -120,9 +121,10 @@ describe('ConnectWallet', () => {
     });
 
     expect(mockSetWalletAdapter).toHaveBeenCalledTimes(1);
-    const adapter = mockSetWalletAdapter.mock.calls[0][0];
-    expect(adapter.name).toBe('albedo');
-    expect(adapter.publicKey).toBe(ALBEDO_KEY);
+    const [firstCall] = mockSetWalletAdapter.mock.calls;
+    const adapter = firstCall?.[0];
+    expect(adapter?.name).toBe('albedo');
+    expect(adapter?.publicKey).toBe(ALBEDO_KEY);
 
     expect(screen.getByTestId('probe-name')).toHaveTextContent('albedo');
     expect(screen.getByTestId('probe-pubkey')).toHaveTextContent(ALBEDO_KEY);

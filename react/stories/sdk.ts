@@ -64,7 +64,7 @@ export class FreighterAdapter implements WalletAdapter {
   }
 }
 export class AlbedoAdapter extends FreighterAdapter {
-  name = 'albedo';
+  override name = 'albedo';
 }
 
 export async function calculateApy(): Promise<never> {

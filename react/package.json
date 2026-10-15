@@ -55,6 +55,7 @@
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --watch --dts",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:consumer": "node test-consumer/run-smoke-test.mjs",
     "e2e": "playwright test",

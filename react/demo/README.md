@@ -22,6 +22,14 @@ they can be browsed manually and driven by Playwright end-to-end tests.
 Create a `.env` file inside `react/demo/` (or set the variables in your shell)
 before starting the dev server or running e2e tests.
 
+Every variable is validated on boot by `src/config.ts` (zod, #1146). Unset
+variables fall back to the public testnet values shown below, so a fresh clone
+runs with no `.env` at all. A variable that is **set but malformed** — a
+relative RPC URL, a blank passphrase, a contract id that is not a `C…` strkey —
+stops the demo and renders a configuration error screen instead of a broken
+page. The screen lists each problem with the value that was received, what is
+expected and how to fix it, plus a copy-pasteable `.env` template.
+
 | Variable                   | Required | Description                                          |
 | -------------------------- | -------- | ---------------------------------------------------- |
 | `VITE_RPC_URL`             | No       | Soroban RPC endpoint. Defaults to the public testnet.|
@@ -30,6 +38,19 @@ before starting the dev server or running e2e tests.
 | `VITE_WALLET_ADDRESS`      | No       | Stellar address pre-filled as the connected wallet.  |
 | `VITE_TOKEN_NAME`          | No       | Display name used by the mock provider.              |
 | `VITE_TOKEN_SYMBOL`        | No       | Token symbol used by the mock provider.              |
+
+Validation rules:
+
+| Variable                  | Rule                                                                |
+| ------------------------- | ------------------------------------------------------------------- |
+| `VITE_RPC_URL`            | Absolute `http://` or `https://` URL with a host.                   |
+| `VITE_NETWORK_PASSPHRASE` | Non-blank; must match the endpoint and the wallet's network.        |
+| `VITE_CONTRACT_ID`        | Matches `^C[A-Z0-9]{55}$`.                                          |
+
+`loadConfig(env)` returns a discriminated result — `{ ok: true, config }` or
+`{ ok: false, issues }` — and never throws, so the app can render the error
+screen. `describeConfigError(issues)` renders the same problems as plain text
+for a console or a CI step.
 
 Example `.env`:
 

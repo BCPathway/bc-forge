@@ -138,31 +138,31 @@ const CHEVRON: React.CSSProperties = {
 
 function findFirstEnabled(items: DropdownItem[], start = 0): number {
   for (let i = start; i < items.length; i++) {
-    if (!items[i].disabled) return i;
+    if (!items[i]?.disabled) return i;
   }
   for (let i = 0; i < start; i++) {
-    if (!items[i].disabled) return i;
+    if (!items[i]?.disabled) return i;
   }
   return -1;
 }
 
 function findLastEnabled(items: DropdownItem[]): number {
   for (let i = items.length - 1; i >= 0; i--) {
-    if (!items[i].disabled) return i;
+    if (!items[i]?.disabled) return i;
   }
   return -1;
 }
 
 function findPrevEnabled(items: DropdownItem[], current: number): number {
   for (let i = current - 1; i >= 0; i--) {
-    if (!items[i].disabled) return i;
+    if (!items[i]?.disabled) return i;
   }
   return findLastEnabled(items);
 }
 
 function findNextEnabled(items: DropdownItem[], current: number): number {
   for (let i = current + 1; i < items.length; i++) {
-    if (!items[i].disabled) return i;
+    if (!items[i]?.disabled) return i;
   }
   return findFirstEnabled(items);
 }
@@ -291,7 +291,10 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(function Dropd
       case ' ':
         e.preventDefault();
         if (activeIndex >= 0 && activeIndex < items.length) {
-          selectItem(items[activeIndex]);
+          // `items` can shrink between the keystroke that moved the highlight
+          // and this one, so the element is re-read rather than trusted.
+          const item = items[activeIndex];
+          if (item) selectItem(item);
         }
         break;
     }

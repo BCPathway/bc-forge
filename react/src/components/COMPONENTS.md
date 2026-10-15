@@ -7,7 +7,7 @@ import or Tailwind setup required).
 import { Alert } from '@bc-forge/react';
 ```
 
-The **primitives** below (`Alert`, `Badge`, `Dropdown`) take no SDK
+The **primitives** below (`Alert`, `Badge`, `Dropdown`, `Modal`) take no SDK
 configuration. The **product components** further down (#950) read from the
 chain through the SDK and accept props as an override.
 
@@ -47,6 +47,49 @@ provided the badge becomes a keyboard-focusable interactive control
 <Badge variant="primary">Live</Badge>
 <Badge variant="success" size="sm">Verified</Badge>
 <Badge variant="warning" onClick={() => alert('clicked')}>Dismiss</Badge>
+```
+
+## Modal
+
+Accessible modal dialog (#1149). Rendered through a portal on `document.body`
+behind a blurred backdrop, with `role="dialog"` and `aria-modal="true"`.
+
+While open it moves focus into the dialog, cycles `Tab` / `Shift+Tab` inside it,
+dismisses on `Escape` and on a backdrop click, restores focus to the trigger on
+close, and locks the page behind it from scrolling. `onClose` is called for every
+dismissal path — the consumer owns `open`, so the dialog never closes itself.
+Stacked dialogs cooperate: only the topmost one traps focus and reacts to
+`Escape`, and the scroll lock is released when the last one closes.
+
+| Prop                   | Type                                | Default          | Description                                            |
+| ---------------------- | ----------------------------------- | ---------------- | ------------------------------------------------------ |
+| `open`                 | `boolean`                           | — (required)     | Mounts the dialog.                                     |
+| `onClose`              | `() => void`                        | — (required)     | Called for every dismissal path.                       |
+| `title`                | `React.ReactNode`                   | —                | Heading; becomes the dialog's accessible name.         |
+| `description`          | `React.ReactNode`                   | —                | Wired through `aria-describedby`.                     |
+| `children`             | `React.ReactNode`                   | —                | Dialog body.                                           |
+| `footer`               | `React.ReactNode`                   | —                | Actions under the body.                                |
+| `size`                 | `'sm' \| 'md' \| 'lg'`              | `'md'`           | Maximum width of the dialog surface.                   |
+| `closeOnBackdropClick` | `boolean`                           | `true`           | Dismiss on a backdrop click.                           |
+| `closeOnEscape`        | `boolean`                           | `true`           | Dismiss on `Escape`.                                   |
+| `initialFocusRef`      | `RefObject<HTMLElement \| null>`    | first focusable  | Element focused when the dialog opens.                 |
+| `labelledBy`           | `string`                            | —                | `id` of an external label; overrides `title`.          |
+| `ariaLabel`            | `string`                            | `'Dialog'`       | Accessible name when there is no title.                |
+| `closeLabel`           | `string`                            | `'Close dialog'` | Accessible name of the close button.                   |
+| `className` / `style`  | `string` / `React.CSSProperties`    | —                | Merged into the dialog surface.                        |
+
+```tsx
+const [open, setOpen] = useState(false);
+<button onClick={() => setOpen(true)}>Open</button>
+<Modal
+  open={open}
+  onClose={() => setOpen(false)}
+  title="Confirm deposit"
+  description="Deposits cannot be reversed."
+  footer={<button onClick={() => setOpen(false)}>Confirm</button>}
+>
+  <DepositForm />
+</Modal>
 ```
 
 ## Product components (#950)

@@ -6,7 +6,9 @@ import React, {
   useMemo,
   useReducer,
   useRef,
-  ReactNode,
+  useState,
+  useEffect,
+  type ReactNode,
 } from 'react';
 import {
   bcForgeClient,
@@ -23,33 +25,306 @@ interface BcForgeContextType {
   client: bcForgeClient | null;
   vaultClient: VaultClient | null;
   networkPassphrase: string | null;
+  /** Active network, or `null` while the provider is driven purely by `config`. */
+  network: NetworkDescriptor | null;
+  /** Id of the active network, or `null` while no network has been selected. */
+  networkId: NetworkId | null;
+  /** Every network offered by `useNetwork`'s `setNetwork`. */
+  networks: readonly NetworkDescriptor[];
+  /** Effective Soroban RPC endpoint of the active network. */
+  rpcUrl: string;
+  /** Switch the active network; rebuilds the client and refetches consumers. */
+  setNetwork: (id: NetworkId) => Promise<void>;
+  /** `true` while a network switch is being applied. */
+  isSwitching: boolean;
+  /** Last network switch failure, if any. */
+  switchError: Error | null;
+}
+
+// ─── Multi-network switching (#1148) ────────────────────────────────────────
+
+/** Networks {@link BcForgeProvider} can switch between (#1148). */
+export type NetworkId = 'testnet' | 'futurenet' | 'local';
+
+/** Static description of one selectable Stellar network (#1148). */
+export interface NetworkDescriptor {
+  /** Stable id used by {@link NetworkState.setNetwork}. */
+  id: NetworkId;
+  /** Human readable name for a switcher control. */
+  label: string;
+  /** Stellar network passphrase used for signing and network validation. */
+  networkPassphrase: string;
+  /** Public Soroban RPC endpoint, unless `rpcUrls` overrides it. */
+  defaultRpcUrl: string;
+}
+
+/** The networks {@link BcForgeProvider} offers by default (#1148). */
+export const STELLAR_NETWORKS: readonly NetworkDescriptor[] = [
+  {
+    id: 'testnet',
+    label: 'Testnet',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+    defaultRpcUrl: 'https://soroban-testnet.stellar.org',
+  },
+  {
+    id: 'futurenet',
+    label: 'Futurenet',
+    networkPassphrase: 'Test SDF Future Network ; October 2022',
+    defaultRpcUrl: 'https://soroban-futurenet.stellar.org',
+  },
+  {
+    id: 'local',
+    label: 'Local standalone',
+    networkPassphrase: 'Local Sandbox Stellar Network ; September 2022',
+    defaultRpcUrl: 'http://localhost:8000',
+  },
+];
+
+/**
+ * Matches a passphrase against the known networks.
+ *
+ * Returns `null` for a passphrase that is not one of the descriptors — for
+ * example a custom devnet — which leaves the provider's own `config` in charge.
+ */
+function findNetworkByPassphrase(
+  passphrase: string | null,
+  networks: readonly NetworkDescriptor[],
+): NetworkDescriptor | null {
+  if (passphrase === null) return null;
+  return networks.find((candidate) => candidate.networkPassphrase === passphrase) ?? null;
+}
+
+/** Network selection state and actions exposed by {@link useNetwork} (#1148). */
+export interface NetworkState {
+  /** Active network metadata, or `null` when driven purely by `config`. */
+  network: NetworkDescriptor | null;
+  /** Id of the active network, or `null` when none has been selected. */
+  networkId: NetworkId | null;
+  /** Every selectable network, in switcher order. */
+  networks: readonly NetworkDescriptor[];
+  /** Effective Soroban RPC endpoint of the active network. */
+  rpcUrl: string;
+  /** Effective network passphrase; `null` outside a provider. */
+  networkPassphrase: string | null;
+  /**
+   * Switch to another network. Rebuilds the `bcForgeClient` (and the
+   * `VaultClient` when configured) so every consumer hook refetches, and
+   * propagates the new passphrase to {@link WalletProvider} so an adapter
+   * connected to the previous network surfaces as `wrong-network`.
+   *
+   * Resolves rather than throwing: an unknown id, or a failure raised while
+   * applying the switch, is reported through {@link NetworkState.error}.
+   */
+  setNetwork: (id: NetworkId) => Promise<void>;
+  /** `true` between calling `setNetwork` and the switch being applied. */
+  isSwitching: boolean;
+  /** Last switch failure, or `null`. */
+  error: Error | null;
 }
 
 const bcForgeContext = createContext<BcForgeContextType>({
   client: null,
   vaultClient: null,
   networkPassphrase: null,
+  network: null,
+  networkId: null,
+  networks: STELLAR_NETWORKS,
+  rpcUrl: '',
+  setNetwork: async () => {},
+  isSwitching: false,
+  switchError: null,
 });
 
 export interface BcForgeProviderProps {
   config: bcForgeClientConfig;
   vaultConfig?: VaultClientConfig;
   children: ReactNode;
+  /**
+   * Network to start on (#1148). Omit to stay on the `config` passphrase until
+   * {@link NetworkState.setNetwork} is called, which keeps existing single-network
+   * apps byte-for-byte unchanged.
+   */
+  defaultNetwork?: NetworkId;
+  /** Extra networks appended to the selectable list (#1148). */
+  networks?: readonly NetworkDescriptor[];
+  /** Per-network RPC endpoint override; the selected network's entry wins (#1148). */
+  rpcUrls?: Partial<Record<NetworkId, string>>;
+  /** Per-network contract id override, applied to the token and vault clients (#1148). */
+  contractIds?: Partial<Record<NetworkId, string>>;
+  /** Called after the active network changes (#1148). */
+  onNetworkChange?: (network: NetworkDescriptor) => void;
 }
 
-export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({ config, vaultConfig, children }) => {
-  const client = useMemo(() => new bcForgeClient(config), [config]);
-  const vaultClient = useMemo(
-    () => (vaultConfig ? new VaultClient(vaultConfig) : null),
-    [vaultConfig],
+export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({
+  config,
+  vaultConfig,
+  children,
+  defaultNetwork,
+  networks: extraNetworks,
+  rpcUrls,
+  contractIds,
+  onNetworkChange,
+}) => {
+  const [selectedNetworkId, setSelectedNetworkId] = useState<NetworkId | null>(defaultNetwork ?? null);
+  const [switchingId, setSwitchingId] = useState<NetworkId | null>(null);
+  const [switchError, setSwitchError] = useState<Error | null>(null);
+
+  const networks = useMemo(
+    () =>
+      extraNetworks && extraNetworks.length > 0
+        ? [...STELLAR_NETWORKS, ...extraNetworks]
+        : STELLAR_NETWORKS,
+    [extraNetworks],
   );
+  const networkIndex = useMemo(
+    () =>
+      new Map<NetworkId, NetworkDescriptor>(networks.map((entry) => [entry.id, entry] as const)),
+    [networks],
+  );
+
+  // `null` means "use the provider's own config verbatim": that is the state
+  // every existing consumer is in until a network is explicitly selected.
+  const selectedNetwork =
+    selectedNetworkId === null ? null : (networkIndex.get(selectedNetworkId) ?? null);
+
+  const rpcUrl =
+    selectedNetwork === null
+      ? config.rpcUrl
+      : (rpcUrls?.[selectedNetwork.id] ?? selectedNetwork.defaultRpcUrl);
+  const passphrase =
+    selectedNetwork === null ? config.networkPassphrase : selectedNetwork.networkPassphrase;
+  const contractId =
+    selectedNetwork === null || contractIds === undefined
+      ? config.contractId
+      : contractIds[selectedNetwork.id] ?? config.contractId;
+
+  // Only a selected network overrides the caller's config, and the override is a
+  // new object whenever the effective values change, so `client` (and every
+  // hook keyed on it) is rebuilt exactly once per real configuration change.
+  const effectiveConfig = useMemo<bcForgeClientConfig>(() => {
+    if (selectedNetwork === null) return config;
+    return { ...config, rpcUrl, networkPassphrase: passphrase, contractId };
+  }, [config, selectedNetwork, rpcUrl, passphrase, contractId]);
+  const client = useMemo(() => new bcForgeClient(effectiveConfig), [effectiveConfig]);
+
+  // The vault follows the same network so vault reads hit the new endpoint.
+  const effectiveVaultConfig = useMemo<VaultClientConfig | undefined>(() => {
+    if (!vaultConfig) return undefined;
+    if (selectedNetwork === null) return vaultConfig;
+    return { ...vaultConfig, rpcUrl, networkPassphrase: passphrase };
+  }, [vaultConfig, selectedNetwork, rpcUrl, passphrase]);
+  const vaultClient = useMemo(
+    () => (effectiveVaultConfig ? new VaultClient(effectiveVaultConfig) : null),
+    [effectiveVaultConfig],
+  );
+
+  const setNetwork = useCallback(
+    async (id: NetworkId) => {
+      const target = networkIndex.get(id);
+      if (!target) {
+        setSwitchError(
+          new Error(
+            `Unknown network "${id}". Add it to BcForgeProvider's "networks" prop to make it selectable.`,
+          ),
+        );
+        return;
+      }
+      setSwitchError(null);
+      setSwitchingId(id);
+      try {
+        // Yield once so consumers can render the pending state before the
+        // client is rebuilt underneath them.
+        await Promise.resolve();
+        setSelectedNetworkId(id);
+      } catch (err) {
+        setSwitchError(err instanceof Error ? err : new Error(String(err)));
+      } finally {
+        setSwitchingId(null);
+      }
+    },
+    [networkIndex],
+  );
+
+  // Reported after the switch has been applied, so listeners see the new network.
+  useEffect(() => {
+    if (selectedNetwork === null || !onNetworkChange) return;
+    onNetworkChange(selectedNetwork);
+  }, [selectedNetwork, onNetworkChange]);
+
   const value = useMemo(
-    () => ({ client, vaultClient, networkPassphrase: config.networkPassphrase }),
-    [client, vaultClient, config.networkPassphrase],
+    () => ({
+      client,
+      vaultClient,
+      // The effective passphrase, so WalletProvider validates the adapter
+      // against the network that is actually active.
+      networkPassphrase: passphrase,
+      network: selectedNetwork ?? findNetworkByPassphrase(passphrase, networks),
+      networkId: selectedNetwork?.id ?? null,
+      networks,
+      rpcUrl,
+      setNetwork,
+      isSwitching: switchingId !== null,
+      switchError,
+    }),
+    [
+      client,
+      vaultClient,
+      passphrase,
+      selectedNetwork,
+      networks,
+      rpcUrl,
+      setNetwork,
+      switchingId,
+      switchError,
+    ],
   );
 
   return <bcForgeContext.Provider value={value}>{children}</bcForgeContext.Provider>;
 };
+
+/**
+ * Active Stellar network and the switcher that changes it (#1148).
+ *
+ * With no {@link BcForgeProvider} mounted this returns inert defaults rather
+ * than throwing, so a component can render standalone. With a provider that has
+ * not selected a network it reports the network inferred from `config`'s
+ * passphrase when that passphrase is a known one, and `networkId: null` when it
+ * is not.
+ */
+export function useNetwork(): NetworkState {
+  const {
+    network,
+    networkId,
+    networks,
+    rpcUrl,
+    networkPassphrase,
+    setNetwork,
+    isSwitching,
+    switchError,
+  } = useContext(bcForgeContext);
+  return useMemo<NetworkState>(
+    () => ({
+      network,
+      networkId,
+      networks,
+      rpcUrl,
+      networkPassphrase,
+      setNetwork,
+      isSwitching,
+      error: switchError,
+    }),
+    [
+      network,
+      networkId,
+      networks,
+      rpcUrl,
+      networkPassphrase,
+      setNetwork,
+      isSwitching,
+      switchError,
+    ],
+  );
+}
 
 export const useBcForgeClient = () => {
   const context = useContext(bcForgeContext);

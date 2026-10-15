@@ -41,7 +41,13 @@ export default tseslint.config(
       ...reactPlugin.configs.recommended.rules,
       ...hooksPlugin.configs.recommended.rules,
       'react/react-in-jsx-scope': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }]
+      // Errors, not warnings: `npm run lint` has to be silent to pass (#1145).
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // A published library never logs to the consumer's console; a leftover
+      // `console.log` in a component is a bug, not a feature.
+      'no-console': ['error', { allow: ['warn', 'error'] }],
     },
     settings: {
       react: {
