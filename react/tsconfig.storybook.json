@@ -4,5 +4,5 @@
     "moduleResolution": "bundler",
     "noEmit": true
   },
-  "include": [".storybook", "stories", "visual", "playwright.visual.config.ts"]
+  "include": [".storybook", "stories", "visual", "playwright.visual.config.ts", "src/styles.d.ts"]
 }

@@ -1,12 +1,20 @@
 module.exports = {
-  preset: 'ts-jest',
-  testEnvironment: 'jsdom',
-  testMatch: ['**/*.test.ts', '**/*.test.tsx'],
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  preset: "ts-jest",
+  testEnvironment: "jsdom",
+  testMatch: ["**/*.test.ts", "**/*.test.tsx"],
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
+  testPathIgnorePatterns: ["\\.vitest\\.test\\.tsx?$"],
   transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
-      { tsconfig: { jsx: 'react-jsx', module: 'commonjs', esModuleInterop: true, types: ['jest', '@testing-library/jest-dom'] } },
+    "^.+\\.tsx?$": [
+      "ts-jest",
+      {
+        tsconfig: {
+          jsx: "react-jsx",
+          module: "commonjs",
+          esModuleInterop: true,
+          types: ["jest", "@testing-library/jest-dom"],
+        },
+      },
     ],
   },
 };

@@ -1,7 +1,9 @@
 # @bc-forge/react components
 
-Reusable, accessible, dependency-free React components (inline styles, no CSS
-import or Tailwind setup required).
+Reusable, accessible React components. The existing primitives use inline
+styles; skeleton loaders include a small stylesheet for pulse animation. Set
+`--bc-forge-skeleton-color` and `--bc-forge-skeleton-border` on a theme
+container to customize their colors, including for dark mode.
 
 ```tsx
 import { Alert } from '@bc-forge/react';
@@ -10,6 +12,28 @@ import { Alert } from '@bc-forge/react';
 The **primitives** below (`Alert`, `Badge`, `Dropdown`) take no SDK
 configuration. The **product components** further down (#950) read from the
 chain through the SDK and accept props as an override.
+
+## Skeleton loaders
+
+`SkeletonText`, `SkeletonCircle`, and `SkeletonCard` provide decorative
+placeholders while content loads. They are hidden from assistive technology,
+respect reduced-motion preferences, and accept standard div props.
+
+```tsx
+<SkeletonText lines={3} />
+<SkeletonCircle size={40} />
+<SkeletonCard />
+```
+
+## AddressInput
+
+`AddressInput` validates checksummed Stellar account (`G...`) and contract
+(`C...`) addresses as the user types. Invalid non-empty values display an
+accessible inline error; valid values display an announced checkmark.
+
+```tsx
+<AddressInput aria-label="Recipient address" placeholder="G... or C..." />
+```
 
 ## Alert
 
@@ -173,4 +197,3 @@ neither available the controls stay disabled.
 | `source`     | `Keypair`             | —                  | Omit to sign with the wallet adapter.          |
 | `showExecute`| `boolean`             | `true`             | Show Execute once quorum is reached.           |
 | `onVote` / `onExecute` | `(id: bigint) => void` | —     | Handle the id yourself instead of the SDK.    |
-

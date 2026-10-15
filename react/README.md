@@ -90,7 +90,8 @@ Hooks and client access:
 
 Components:
 
-- `Alert`, `Badge`, `Dropdown`, `ConnectWallet`, `TokenCard`, `MintForm`
+- `Alert`, `Badge`, `Dropdown`, `AddressInput`, `SkeletonText`, `SkeletonCircle`, `SkeletonCard`
+- `ConnectWallet`, `TokenCard`, `MintForm`
 - `VaultDepositWidget`, `APYChart`, `ProposalVotingPanel`, `TransactionToast`
 - `MINT_FORM_ERRORS`, `VAULT_DEPOSIT_NO_ACCOUNT`, `VAULT_DEPOSIT_NO_CLIENT`
 
@@ -113,11 +114,13 @@ npm test --workspace @bc-forge/react
 npm run build --workspace @bc-forge/react
 ```
 
-The same scripts exist in `react/package.json` (`npm test`, `npm run build`) when that directory's dependencies are already installed.
+`npm test --workspace @bc-forge/react` runs the existing Jest suite and the Vitest component suite. Use `npm run test:jest --workspace @bc-forge/react` or `npm run test:vitest --workspace @bc-forge/react` to run one runner.
+
+Playwright E2E smoke tests run with `npm run e2e --workspace @bc-forge/react`. The command starts the demo server and writes HTML and JUnit reports; CI also retains video and trace artifacts for failures.
 
 ## Visual snapshots
 
-Storybook stories for Alert, Badge, Dropdown, and the product components live in `react/stories/`. Playwright compares each story to a committed baseline under `react/visual/__screenshots__/`.
+Storybook stories for the primitives and product components live in `react/stories/`. Playwright compares each story to a committed baseline under `react/visual/__screenshots__/`.
 
 From the repository root:
 
