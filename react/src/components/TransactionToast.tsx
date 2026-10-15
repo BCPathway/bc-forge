@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
-import React, { useEffect } from 'react';
+import React, { useEffect } from "react";
 
-import { truncateMiddle } from '../utils';
+import { truncateMiddle } from "../utils";
+import { ExternalLink } from "./ExternalLink";
 
 /** Lifecycle of the transaction a {@link TransactionToast} reports on. */
-export type TransactionToastStatus = 'pending' | 'success' | 'error';
+export type TransactionToastStatus = "pending" | "success" | "error";
 
-export interface TransactionToastProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'title'> {
+export interface TransactionToastProps extends Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  "title"
+> {
   /** Current transaction state. @default 'pending' */
   status?: TransactionToastStatus;
   /** Transaction hash. Rendered as text, and as a link when `explorerUrl` is set. */
@@ -33,31 +37,46 @@ export interface TransactionToastProps extends Omit<React.HTMLAttributes<HTMLDiv
 }
 
 const STATUS_STYLES: Record<TransactionToastStatus, React.CSSProperties> = {
-  pending: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', color: '#1e40af' },
-  success: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', color: '#166534' },
-  error: { backgroundColor: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' },
+  pending: {
+    backgroundColor: "#eff6ff",
+    borderColor: "#bfdbfe",
+    color: "#1e40af",
+  },
+  success: {
+    backgroundColor: "#f0fdf4",
+    borderColor: "#bbf7d0",
+    color: "#166534",
+  },
+  error: {
+    backgroundColor: "#fef2f2",
+    borderColor: "#fecaca",
+    color: "#991b1b",
+  },
 };
 
 /** Message shown when the consumer supplies no `error` for the error status. */
-const FALLBACK_ERROR_MESSAGE = 'The transaction failed.';
+const FALLBACK_ERROR_MESSAGE = "The transaction failed.";
 
 const SPINNER: React.CSSProperties = {
   width: 14,
   height: 14,
   flexShrink: 0,
-  borderRadius: '50%',
-  border: '2px solid currentColor',
-  borderTopColor: 'transparent',
+  borderRadius: "50%",
+  border: "2px solid currentColor",
+  borderTopColor: "transparent",
 };
 
-function messageFor(status: TransactionToastStatus, error?: string | Error | null): string {
+function messageFor(
+  status: TransactionToastStatus,
+  error?: string | Error | null,
+): string {
   // `error` describes the failure only; pending and success keep their own copy.
-  if (status === 'error') {
+  if (status === "error") {
     if (!error) return FALLBACK_ERROR_MESSAGE;
     return error instanceof Error ? error.message : error;
   }
-  if (status === 'success') return 'Transaction confirmed.';
-  return 'Submitting transaction…';
+  if (status === "success") return "Transaction confirmed.";
+  return "Submitting transaction…";
 }
 
 /**
@@ -70,14 +89,14 @@ function messageFor(status: TransactionToastStatus, error?: string | Error | nul
  * `role="status"` (polite). Pass `role` to override.
  */
 export const TransactionToast: React.FC<TransactionToastProps> = ({
-  status = 'pending',
+  status = "pending",
   hash,
   error,
   label,
   explorerUrl,
   autoDismissMs,
   onDismiss,
-  dismissLabel = 'Dismiss notification',
+  dismissLabel = "Dismiss notification",
   style,
   children,
   ...rest
@@ -88,42 +107,49 @@ export const TransactionToast: React.FC<TransactionToastProps> = ({
     return () => clearTimeout(timer);
   }, [autoDismissMs, onDismiss]);
 
-  const href = hash && explorerUrl ? `${explorerUrl.replace(/\/$/, '')}/${hash}` : undefined;
+  const href =
+    hash && explorerUrl
+      ? `${explorerUrl.replace(/\/$/, "")}/${hash}`
+      : undefined;
 
   return (
     <div
       data-testid="transaction-toast"
       data-status={status}
-      role={status === 'error' ? 'alert' : 'status'}
-      aria-live={status === 'error' ? 'assertive' : 'polite'}
+      role={status === "error" ? "alert" : "status"}
+      aria-live={status === "error" ? "assertive" : "polite"}
       style={{
-        display: 'flex',
-        alignItems: 'flex-start',
+        display: "flex",
+        alignItems: "flex-start",
         gap: 10,
         maxWidth: 420,
-        padding: '12px 14px',
-        border: '1px solid',
+        padding: "12px 14px",
+        border: "1px solid",
         borderRadius: 8,
-        boxShadow: '0 6px 16px rgba(0, 0, 0, 0.12)',
+        boxShadow: "0 6px 16px rgba(0, 0, 0, 0.12)",
         fontSize: 14,
-        fontFamily: 'inherit',
+        fontFamily: "inherit",
         ...STATUS_STYLES[status],
         ...style,
       }}
       {...rest}
     >
-      {status === 'pending' ? <span aria-hidden="true" style={SPINNER} /> : null}
+      {status === "pending" ? (
+        <span aria-hidden="true" style={SPINNER} />
+      ) : null}
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {label ? <div style={{ fontWeight: 700 }}>{label}</div> : null}
-        <div data-testid="transaction-toast-message">{messageFor(status, error)}</div>
+        <div data-testid="transaction-toast-message">
+          {messageFor(status, error)}
+        </div>
         {children}
         {hash ? (
-          <div style={{ marginTop: 4, fontSize: 12, wordBreak: 'break-all' }}>
+          <div style={{ marginTop: 4, fontSize: 12, wordBreak: "break-all" }}>
             {href ? (
-              <a href={href} target="_blank" rel="noreferrer noopener" style={{ color: 'inherit' }}>
+              <ExternalLink href={href} style={{ color: "inherit" }}>
                 {truncateMiddle(hash, { lead: 10, tail: 8 })}
-              </a>
+              </ExternalLink>
             ) : (
               // Kept unabridged so it stays selectable and copyable.
               <code data-testid="transaction-toast-hash">{hash}</code>
@@ -139,10 +165,10 @@ export const TransactionToast: React.FC<TransactionToastProps> = ({
           aria-label={dismissLabel}
           style={{
             flexShrink: 0,
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            color: 'inherit',
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            color: "inherit",
             fontSize: 18,
             lineHeight: 1,
             padding: 2,
