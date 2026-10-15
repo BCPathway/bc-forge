@@ -61,7 +61,7 @@ jobs:
 
       - name: Commit regenerated baselines
         run: |
-          set -euo pipefail
+          set -eu
           if git diff --quiet -- react/visual/__screenshots__; then
             echo "No baseline changes to commit."
             exit 0
