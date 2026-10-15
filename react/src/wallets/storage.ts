@@ -26,17 +26,20 @@ import {
   removeStoredValue,
   subscribeToStoredKeys,
   writeStoredValue,
-} from './detection';
-import type { WalletName } from '../context';
+} from "./detection";
+import type { WalletName } from "../context";
 
 /** localStorage key holding the wallet the user connected with (#1172). */
-export const WALLET_SESSION_KEY = 'bc-forge:wallet-session';
+export const WALLET_SESSION_KEY = "bc-forge:wallet-session";
 
 /** localStorage key holding the wallet last offered in the picker (#1172). */
-export const WALLET_PREFERENCE_KEY = 'bc-forge:wallet-preference';
+export const WALLET_PREFERENCE_KEY = "bc-forge:wallet-preference";
 
 /** Every key this module owns; watched by {@link onWalletSessionChange}. */
-const WALLET_STORAGE_KEYS: readonly string[] = [WALLET_SESSION_KEY, WALLET_PREFERENCE_KEY];
+const WALLET_STORAGE_KEYS: readonly string[] = [
+  WALLET_SESSION_KEY,
+  WALLET_PREFERENCE_KEY,
+];
 
 /** What {@link saveWalletSession} records. */
 export interface WalletSession {
@@ -63,7 +66,10 @@ export interface WalletSession {
  * value can never reach `connect`.
  */
 export function isWalletName(value: unknown): value is WalletName {
-  return typeof value === 'string' && (WALLET_NAMES as readonly string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (WALLET_NAMES as readonly string[]).includes(value)
+  );
 }
 
 function parseSession(raw: string): WalletSession | null {
@@ -76,7 +82,12 @@ function parseSession(raw: string): WalletSession | null {
   } catch {
     return null;
   }
-  if (typeof parsed !== 'object' || parsed === null) return null;
+  // Tolerate the same name serialised on its own — `JSON.stringify('albedo')`
+  // yields `"albedo"` — which is what a truncated or hand-written store can
+  // leave behind. Any other non-object value is simply not a session.
+  if (typeof parsed === "string")
+    return isWalletName(parsed) ? { wallet: parsed } : null;
+  if (typeof parsed !== "object" || parsed === null) return null;
 
   const record = parsed as { wallet?: unknown; networkPassphrase?: unknown };
   if (!isWalletName(record.wallet)) return null;
@@ -84,7 +95,9 @@ function parseSession(raw: string): WalletSession | null {
   return {
     wallet: record.wallet,
     networkPassphrase:
-      typeof record.networkPassphrase === 'string' ? record.networkPassphrase : undefined,
+      typeof record.networkPassphrase === "string"
+        ? record.networkPassphrase
+        : undefined,
   };
 }
 
@@ -121,10 +134,15 @@ export function loadWalletPreference(): WalletName | null {
  * Returns whether the value reached a durable store; `false` means storage is
  * blocked and the session will not survive a reload, which is not an error.
  */
-export function saveWalletSession(wallet: WalletName, networkPassphrase?: string): boolean {
+export function saveWalletSession(
+  wallet: WalletName,
+  networkPassphrase?: string,
+): boolean {
   if (!isWalletName(wallet) || !isBrowser()) return false;
   const session: WalletSession =
-    networkPassphrase === undefined ? { wallet } : { wallet, networkPassphrase };
+    networkPassphrase === undefined
+      ? { wallet }
+      : { wallet, networkPassphrase };
   return writeStoredValue(WALLET_SESSION_KEY, JSON.stringify(session));
 }
 
