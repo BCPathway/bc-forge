@@ -7,9 +7,9 @@ import or Tailwind setup required).
 import { Alert } from '@bc-forge/react';
 ```
 
-The **primitives** below (`Alert`, `Badge`, `Dropdown`) take no SDK
-configuration. The **product components** further down (#950) read from the
-chain through the SDK and accept props as an override.
+The **primitives** below take no SDK configuration. The **product components**
+further down (#950) read from the chain through the SDK and accept props as an
+override.
 
 ## Alert
 
@@ -28,6 +28,72 @@ Inline notification banner. The ARIA role is derived from the variant:
 ```tsx
 <Alert variant="success" title="Saved">Your changes were stored.</Alert>
 <Alert variant="danger" onDismiss={() => setError(null)}>Mint failed.</Alert>
+```
+
+## Accordion and Collapsible
+
+`Accordion` renders a data-driven set of disclosure sections. It allows one
+open section at a time by default; set `multiple` to allow several. `value` and
+`defaultValue` accept one id or an array of ids, and `onValueChange` receives
+the selected value. `Collapsible` is the standalone controlled-or-uncontrolled
+version.
+
+```tsx
+<Accordion items={[
+	{ id: 'fees', title: 'Fees', content: <p>Network fees apply.</p> },
+	{ id: 'limits', title: 'Limits', content: <p>Review the vault limits.</p> },
+]} />
+<Collapsible title="Advanced settings" defaultOpen={false}>
+	<AdvancedSettings />
+</Collapsible>
+```
+
+Both components use native buttons, `aria-expanded`, and labelled regions.
+
+## ExternalLink
+
+External destinations open in a new tab with `noopener noreferrer` by default.
+Set `target` to opt into another browsing context, and `showIcon={false}` to
+hide the decorative external-link mark.
+
+```tsx
+<ExternalLink href={`${explorerBaseUrl}/tx/${hash}`}>View transaction</ExternalLink>
+```
+
+## TopNavigationBar
+
+Responsive top-level navigation. The links collapse behind a labelled menu
+button below `mobileBreakpoint` pixels (768 by default). Mark the active link
+with `current`, and use `external` for links that should open safely in a new
+tab.
+
+```tsx
+<TopNavigationBar
+	brand={<a href="/">BC Forge</a>}
+	items={[
+		{ label: 'Vaults', href: '/vaults', current: true },
+		{ label: 'Explorer', href: explorerUrl, external: true },
+	]}
+	actions={<ConnectWallet />}
+/>
+```
+
+## ToastProvider
+
+Wrap the part of the app that creates notifications, then call `showToast`
+from `useToast`. `duration: 0` keeps a toast visible until dismissed. Errors
+and warnings use assertive alerts; informational and success messages use
+polite status announcements.
+
+```tsx
+<ToastProvider position="top-right" defaultDuration={5000}>
+	<App />
+</ToastProvider>
+
+function SaveButton() {
+	const { showToast } = useToast();
+	return <button onClick={() => showToast({ message: 'Changes saved', variant: 'success' })}>Save</button>;
+}
 ```
 
 ## Badge
