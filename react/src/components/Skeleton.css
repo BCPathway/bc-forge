@@ -1,0 +1,57 @@
+.bc-forge-skeleton {
+  display: block;
+  background-color: var(--bc-forge-skeleton-color, #e5e7eb);
+  border-radius: 4px;
+  animation: bc-forge-skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.bc-forge-skeleton-text {
+  display: grid;
+  gap: 8px;
+}
+
+.bc-forge-skeleton-text > .bc-forge-skeleton {
+  width: 100%;
+  height: 12px;
+}
+
+.bc-forge-skeleton-circle {
+  flex: none;
+  border-radius: 50%;
+}
+
+.bc-forge-skeleton-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--bc-forge-skeleton-border, #d1d5db);
+  border-radius: 12px;
+}
+
+.bc-forge-skeleton-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bc-forge-skeleton-card-header .bc-forge-skeleton-text {
+  flex: 1;
+}
+
+.bc-forge-skeleton-card-content {
+  width: 100%;
+  height: 96px;
+  border-radius: 8px;
+}
+
+@keyframes bc-forge-skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bc-forge-skeleton {
+    animation: none;
+  }
+}
