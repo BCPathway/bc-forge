@@ -30,6 +30,55 @@ Inline notification banner. The ARIA role is derived from the variant:
 <Alert variant="danger" onDismiss={() => setError(null)}>Mint failed.</Alert>
 ```
 
+## Button
+
+Button primitive with `primary`, `secondary`, `danger`, and `ghost` variants.
+`loading` disables interaction and announces the busy state; `loadingText` can
+replace the button label while work is in progress. Native button props and a
+ref are forwarded.
+
+```tsx
+<Button variant="primary" loading={saving} loadingText="Saving...">Save</Button>
+```
+
+## Breadcrumbs
+
+Provide ordered `{ label, href? }` items. The final item is marked as the
+current page and rendered as text, while earlier items with an `href` are
+links. `ariaLabel` and `separator` customize the navigation landmark.
+
+```tsx
+<Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Vaults' }]} />
+```
+
+## Footer
+
+Compact footer with optional children and a network latency indicator. Pass
+`latencyMs` to show a reading, or `null`/omit it to show unavailable status.
+`latencyWarningMs` and `latencyErrorMs` set the warning and error thresholds.
+
+```tsx
+<Footer network="Testnet" latencyMs={84}>Build 42</Footer>
+```
+
+## Tabs and SegmentedControl
+
+`Tabs` accepts `{ label, value, content, disabled? }` items and supports
+controlled (`value`/`onChange`) or uncontrolled (`defaultValue`) selection.
+Arrow keys move between enabled tabs; Home and End select the first and last.
+`SegmentedControl` uses `{ label, value, disabled? }` options in an accessible
+radio group and supports the same controlled/uncontrolled selection pattern.
+
+```tsx
+<Tabs items={[
+	{ label: 'Overview', value: 'overview', content: <Overview /> },
+	{ label: 'Activity', value: 'activity', content: <Activity /> },
+]} />
+<SegmentedControl ariaLabel="View" options={[
+	{ label: 'List', value: 'list' }, { label: 'Grid', value: 'grid' },
+]} />
+```
+
 ## Badge
 
 Small label used for statuses, counts, or categories. When `onClick` is
