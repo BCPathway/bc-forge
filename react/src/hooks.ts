@@ -1,21 +1,31 @@
 // SPDX-License-Identifier: MIT
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useBcForgeClient, useOptionalBcForgeClient, useVaultClient, useWallet } from './context';
-import { formatTokenAmount } from './utils';
-import { StrKey } from '@stellar/stellar-sdk';
-import type { Keypair } from '@stellar/stellar-sdk';
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  useBcForgeClient,
+  useOptionalBcForgeClient,
+  useVaultClient,
+  useWallet,
+} from "./context";
+import { formatTokenAmount } from "./utils";
+import type { Keypair } from "@stellar/stellar-sdk";
 import {
   Role,
-  ZERO_ADDRESS,
   parseContractError,
   type TransactionResult,
   type VaultClient,
   type bcForgeClient,
-} from '@bc-forge/sdk';
+} from "@bc-forge/sdk";
 
-export { Role } from '@bc-forge/sdk';
+export { Role } from "@bc-forge/sdk";
 
 // ─── Shared Hook Helpers (#1185, #1186, #1188) ──────────────────────────────
+
+/** Canonical zero-address sentinel on Stellar. */
+export const ZERO_ADDRESS =
+  "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+/** Base32 StrKey pattern for Stellar Ed25519 public keys (`G...`) and contracts (`C...`). */
+const STELLAR_STRKEY_REGEX = /^[GC][A-Z2-7]{55}$/;
 
 /** Default polling interval in milliseconds (10 seconds). */
 export const DEFAULT_POLLING_INTERVAL_MS = 10_000;
@@ -26,13 +36,13 @@ export const DEFAULT_TOKEN_DECIMALS = 7;
 /** All valid RBAC role values for runtime validation. */
 const VALID_ROLES: readonly string[] = Role
   ? Object.values(Role)
-  : ['Admin', 'SuperAdmin', 'Minter', 'Pauser'];
+  : ["Admin", "SuperAdmin", "Minter", "Pauser"];
 
 /** Event name dispatched when an approval transaction confirms on-chain. */
-export const APPROVE_CONFIRMED_EVENT = 'bc-forge:approve-confirmed';
+export const APPROVE_CONFIRMED_EVENT = "bc-forge:approve-confirmed";
 
 /** Event name dispatched when a balance-changing transaction confirms on-chain. */
-export const BALANCE_UPDATED_EVENT = 'bc-forge:balance-updated';
+export const BALANCE_UPDATED_EVENT = "bc-forge:balance-updated";
 
 /**
  * Validates whether a given string is a syntactically valid Stellar public key
@@ -43,13 +53,8 @@ export const BALANCE_UPDATED_EVENT = 'bc-forge:balance-updated';
  */
 export function isValidStellarAddress(address: string): boolean {
   const trimmed = address.trim();
-  const zeroAddr = ZERO_ADDRESS ?? 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
-  if (!trimmed || trimmed === zeroAddr) return false;
-  try {
-    return StrKey.isValidEd25519PublicKey(trimmed) || StrKey.isValidContract(trimmed);
-  } catch {
-    return false;
-  }
+  if (!trimmed || trimmed === ZERO_ADDRESS) return false;
+  return STELLAR_STRKEY_REGEX.test(trimmed);
 }
 
 /**
@@ -61,7 +66,8 @@ export function isValidStellarAddress(address: string): boolean {
  * @returns Normalized `Error` (or typed `ContractError` when matched).
  */
 export function normalizeHookError(err: unknown, method?: string): Error {
-  const parser = typeof parseContractError === 'function' ? parseContractError : null;
+  const parser =
+    typeof parseContractError === "function" ? parseContractError : null;
   if (err instanceof Error) {
     const parsed = parser ? parser(err.message, method) : null;
     if (parsed) return parsed;
@@ -78,8 +84,14 @@ export function normalizeHookError(err: unknown, method?: string): Error {
  * dependent read hooks (`useTokenAllowance`, `useAccountBalance`) automatically
  * refresh after confirmed write transactions.
  */
-function notifyTransactionConfirmed(eventName: string, detail?: Record<string, unknown>): void {
-  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+function notifyTransactionConfirmed(
+  eventName: string,
+  detail?: Record<string, unknown>,
+): void {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.dispatchEvent === "function"
+  ) {
     try {
       window.dispatchEvent(new CustomEvent(eventName, { detail }));
     } catch {
@@ -95,15 +107,17 @@ function notifyTransactionConfirmed(eventName: string, detail?: Record<string, u
  * required. Defined in `./context`; re-exported here alongside the write
  * hooks.
  */
-export { useWallet } from './context';
+export { useWallet } from "./context";
 
 /** A write hook must be backed by the shared connected-wallet state. */
 function useRequireConnectedWallet() {
   const { status } = useWallet();
 
   return useCallback(() => {
-    if (status !== 'connected') {
-      throw new Error(`Cannot submit a transaction while wallet status is "${status}".`);
+    if (status !== "connected") {
+      throw new Error(
+        `Cannot submit a transaction while wallet status is "${status}".`,
+      );
     }
   }, [status]);
 }
@@ -113,7 +127,11 @@ function useRequireConnectedWallet() {
  */
 export function useBcForgeToken() {
   const client = useBcForgeClient();
-  const [data, setData] = useState<{ name: string; symbol: string; decimals: number } | null>(null);
+  const [data, setData] = useState<{
+    name: string;
+    symbol: string;
+    decimals: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -182,24 +200,27 @@ export function useMint() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const mint = useCallback(async (to: string, amount: bigint, source?: Keypair) => {
-    try {
-      setLoading(true);
-      setError(null);
-      requireConnectedWallet();
-      const result = await client.mint(to, amount, source);
-      if (result?.success) {
-        notifyTransactionConfirmed(BALANCE_UPDATED_EVENT, { to, amount });
+  const mint = useCallback(
+    async (to: string, amount: bigint, source?: Keypair) => {
+      try {
+        setLoading(true);
+        setError(null);
+        requireConnectedWallet();
+        const result = await client.mint(to, amount, source);
+        if (result?.success) {
+          notifyTransactionConfirmed(BALANCE_UPDATED_EVENT, { to, amount });
+        }
+        return result;
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        setError(error);
+        throw error;
+      } finally {
+        setLoading(false);
       }
-      return result;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setError(error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [client, requireConnectedWallet]);
+    },
+    [client, requireConnectedWallet],
+  );
 
   return { mint, loading, error };
 }
@@ -246,24 +267,31 @@ export function useTransfer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const transfer = useCallback(async (from: string, to: string, amount: bigint, source?: Keypair) => {
-    try {
-      setLoading(true);
-      setError(null);
-      requireConnectedWallet();
-      const result = await client.transfer(from, to, amount, source);
-      if (result?.success) {
-        notifyTransactionConfirmed(BALANCE_UPDATED_EVENT, { from, to, amount });
+  const transfer = useCallback(
+    async (from: string, to: string, amount: bigint, source?: Keypair) => {
+      try {
+        setLoading(true);
+        setError(null);
+        requireConnectedWallet();
+        const result = await client.transfer(from, to, amount, source);
+        if (result?.success) {
+          notifyTransactionConfirmed(BALANCE_UPDATED_EVENT, {
+            from,
+            to,
+            amount,
+          });
+        }
+        return result;
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        setError(error);
+        throw error;
+      } finally {
+        setLoading(false);
       }
-      return result;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setError(error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [client, requireConnectedWallet]);
+    },
+    [client, requireConnectedWallet],
+  );
 
   return { transfer, loading, error };
 }
@@ -277,24 +305,31 @@ export function useApprove() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const approve = useCallback(async (from: string, spender: string, amount: bigint, source?: Keypair) => {
-    try {
-      setLoading(true);
-      setError(null);
-      requireConnectedWallet();
-      const result = await client.approve(from, spender, amount, source);
-      if (result?.success) {
-        notifyTransactionConfirmed(APPROVE_CONFIRMED_EVENT, { owner: from, spender, amount });
+  const approve = useCallback(
+    async (from: string, spender: string, amount: bigint, source?: Keypair) => {
+      try {
+        setLoading(true);
+        setError(null);
+        requireConnectedWallet();
+        const result = await client.approve(from, spender, amount, source);
+        if (result?.success) {
+          notifyTransactionConfirmed(APPROVE_CONFIRMED_EVENT, {
+            owner: from,
+            spender,
+            amount,
+          });
+        }
+        return result;
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        setError(error);
+        throw error;
+      } finally {
+        setLoading(false);
       }
-      return result;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setError(error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [client, requireConnectedWallet]);
+    },
+    [client, requireConnectedWallet],
+  );
 
   return { approve, loading, error };
 }
@@ -311,24 +346,27 @@ export function useBurn() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const burn = useCallback(async (from: string, amount: bigint, source?: Keypair) => {
-    try {
-      setLoading(true);
-      setError(null);
-      requireConnectedWallet();
-      const result = await client.burn(from, amount, source);
-      if (result?.success) {
-        notifyTransactionConfirmed(BALANCE_UPDATED_EVENT, { from, amount });
+  const burn = useCallback(
+    async (from: string, amount: bigint, source?: Keypair) => {
+      try {
+        setLoading(true);
+        setError(null);
+        requireConnectedWallet();
+        const result = await client.burn(from, amount, source);
+        if (result?.success) {
+          notifyTransactionConfirmed(BALANCE_UPDATED_EVENT, { from, amount });
+        }
+        return result;
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        setError(error);
+        throw error;
+      } finally {
+        setLoading(false);
       }
-      return result;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setError(error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [client, requireConnectedWallet]);
+    },
+    [client, requireConnectedWallet],
+  );
 
   return { burn, loading, error };
 }
@@ -336,7 +374,10 @@ export function useBurn() {
 /**
  * Hook to fetch the allowance between owner and spender.
  */
-export function useAllowance(owner: string | undefined, spender: string | undefined) {
+export function useAllowance(
+  owner: string | undefined,
+  spender: string | undefined,
+) {
   const client = useBcForgeClient();
   const [data, setData] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(false);
@@ -477,7 +518,10 @@ export function useProposalVoting() {
   const [error, setError] = useState<Error | null>(null);
 
   const run = useCallback(
-    async (id: string, action: (source?: Keypair) => Promise<TransactionResult>) => {
+    async (
+      id: string,
+      action: (source?: Keypair) => Promise<TransactionResult>,
+    ) => {
       setPendingId(id);
       setError(null);
       try {
@@ -496,9 +540,11 @@ export function useProposalVoting() {
   const approve = useCallback(
     async (admin: string, proposalId: bigint, source?: Keypair) => {
       if (!client) {
-        throw new Error('useProposalVoting requires a BcForgeProvider client');
+        throw new Error("useProposalVoting requires a BcForgeProvider client");
       }
-      return run(proposalId.toString(), () => client.approveProposal(admin, proposalId, source));
+      return run(proposalId.toString(), () =>
+        client.approveProposal(admin, proposalId, source),
+      );
     },
     [client, run],
   );
@@ -506,9 +552,11 @@ export function useProposalVoting() {
   const execute = useCallback(
     async (proposalId: bigint, source?: Keypair) => {
       if (!client) {
-        throw new Error('useProposalVoting requires a BcForgeProvider client');
+        throw new Error("useProposalVoting requires a BcForgeProvider client");
       }
-      return run(proposalId.toString(), () => client.executeProposal(proposalId, source));
+      return run(proposalId.toString(), () =>
+        client.executeProposal(proposalId, source),
+      );
     },
     [client, run],
   );
@@ -605,13 +653,15 @@ export function useAccountBalance(
     trimFormatted = true,
   } = options;
 
-  const intervalMs = pollingIntervalMs ?? pollingInterval ?? DEFAULT_POLLING_INTERVAL_MS;
-  const resolvedAddress = (address ?? wallet.publicKey ?? '').trim();
+  const intervalMs =
+    pollingIntervalMs ?? pollingInterval ?? DEFAULT_POLLING_INTERVAL_MS;
+  const resolvedAddress = (address ?? wallet.publicKey ?? "").trim();
 
   const [rawBalance, setRawBalance] = useState<bigint | null>(null);
-  const [resolvedDecimals, setResolvedDecimals] = useState<number>(
-    decimalsOption ?? DEFAULT_TOKEN_DECIMALS,
+  const [fetchedDecimals, setFetchedDecimals] = useState<number>(
+    DEFAULT_TOKEN_DECIMALS,
   );
+  const resolvedDecimals = decimalsOption ?? fetchedDecimals;
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
@@ -626,22 +676,18 @@ export function useAccountBalance(
     };
   }, []);
 
-  useEffect(() => {
-    if (decimalsOption !== undefined) {
-      setResolvedDecimals(decimalsOption);
-    }
-  }, [decimalsOption]);
-
   const fetchBalance = useCallback(async (): Promise<bigint | null> => {
     if (!enabled) {
       return null;
     }
 
     if (!client) {
-      const err = new Error('BcForgeProvider client is not configured.');
+      const err = new Error("BcForgeProvider client is not configured.");
       if (mountedRef.current) {
         setError(err);
-        setAlertMessage('Unable to fetch balance: SDK client is not configured.');
+        setAlertMessage(
+          "Unable to fetch balance: SDK client is not configured.",
+        );
         setLoading(false);
       }
       return null;
@@ -651,14 +697,18 @@ export function useAccountBalance(
       if (mountedRef.current) {
         setRawBalance(null);
         setError(null);
-        setAlertMessage('Connect a wallet or provide an address to view balance.');
+        setAlertMessage(
+          "Connect a wallet or provide an address to view balance.",
+        );
         setLoading(false);
       }
       return null;
     }
 
     if (!isValidStellarAddress(resolvedAddress)) {
-      const err = new Error(`Invalid Stellar address format: "${resolvedAddress}".`);
+      const err = new Error(
+        `Invalid Stellar address format: "${resolvedAddress}".`,
+      );
       if (mountedRef.current) {
         setRawBalance(null);
         setError(err);
@@ -676,7 +726,7 @@ export function useAccountBalance(
     }
 
     try {
-      if (typeof client.clearCache === 'function') {
+      if (typeof client.clearCache === "function") {
         client.clearCache();
       }
 
@@ -684,24 +734,29 @@ export function useAccountBalance(
       const decimalsPromise =
         decimalsOption !== undefined
           ? Promise.resolve(decimalsOption)
-          : typeof client.getDecimals === 'function'
+          : typeof client.getDecimals === "function"
             ? client.getDecimals().catch(() => DEFAULT_TOKEN_DECIMALS)
             : Promise.resolve(DEFAULT_TOKEN_DECIMALS);
 
-      const [nextBalance, nextDecimals] = await Promise.all([balancePromise, decimalsPromise]);
+      const [nextBalance, nextDecimals] = await Promise.all([
+        balancePromise,
+        decimalsPromise,
+      ]);
 
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setRawBalance(nextBalance);
-        setResolvedDecimals(nextDecimals);
+        setFetchedDecimals(nextDecimals);
         setError(null);
         setAlertMessage(null);
       }
       return nextBalance;
     } catch (err) {
-      const normalized = normalizeHookError(err, 'balance');
+      const normalized = normalizeHookError(err, "balance");
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setError(normalized);
-        setAlertMessage(`Failed to load account balance: ${normalized.message}`);
+        setAlertMessage(
+          `Failed to load account balance: ${normalized.message}`,
+        );
       }
       return null;
     } finally {
@@ -713,11 +768,10 @@ export function useAccountBalance(
 
   // Initial fetch & reactive re-fetch on dependency change
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
-    void fetchBalance();
+    if (!enabled) return;
+    void (async () => {
+      await fetchBalance();
+    })();
   }, [enabled, fetchBalance]);
 
   // Configurable polling interval with unmount cleanup
@@ -748,7 +802,7 @@ export function useAccountBalance(
       !client ||
       !resolvedAddress ||
       !isValidStellarAddress(resolvedAddress) ||
-      typeof window === 'undefined'
+      typeof window === "undefined"
     ) {
       return;
     }
@@ -766,10 +820,10 @@ export function useAccountBalance(
   const balance = rawBalance ?? 0n;
   const formatted =
     rawBalance === null
-      ? '0'
+      ? "0"
       : formatTokenAmount(rawBalance, resolvedDecimals, {
           trim: trimFormatted,
-          placeholder: '0',
+          placeholder: "0",
         });
 
   return {
@@ -835,7 +889,10 @@ export interface UseTokenAllowanceResult {
    * Submits an `approve` transaction for `(owner, spender, amount)` and
    * automatically refetches the allowance once confirmed.
    */
-  approveAndRefetch: (amount: bigint, source?: Keypair) => Promise<TransactionResult>;
+  approveAndRefetch: (
+    amount: bigint,
+    source?: Keypair,
+  ) => Promise<TransactionResult>;
 }
 
 /**
@@ -861,8 +918,8 @@ export function useTokenAllowance(
   const { pollingInterval, pollingIntervalMs, enabled = true } = options;
   const intervalMs = pollingIntervalMs ?? pollingInterval ?? 0;
 
-  const resolvedOwner = (owner ?? wallet.publicKey ?? '').trim();
-  const resolvedSpender = (spender ?? '').trim();
+  const resolvedOwner = (owner ?? wallet.publicKey ?? "").trim();
+  const resolvedSpender = (spender ?? "").trim();
 
   const [rawAllowance, setRawAllowance] = useState<bigint | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -885,10 +942,12 @@ export function useTokenAllowance(
     }
 
     if (!client) {
-      const err = new Error('BcForgeProvider client is not configured.');
+      const err = new Error("BcForgeProvider client is not configured.");
       if (mountedRef.current) {
         setError(err);
-        setAlertMessage('Unable to fetch token allowance: SDK client is not configured.');
+        setAlertMessage(
+          "Unable to fetch token allowance: SDK client is not configured.",
+        );
         setLoading(false);
       }
       return null;
@@ -900,8 +959,8 @@ export function useTokenAllowance(
         setError(null);
         setAlertMessage(
           !resolvedOwner
-            ? 'Connect a wallet or provide an owner address to check allowance.'
-            : 'Provide a spender address to check allowance.',
+            ? "Connect a wallet or provide an owner address to check allowance."
+            : "Provide a spender address to check allowance.",
         );
         setLoading(false);
       }
@@ -909,7 +968,9 @@ export function useTokenAllowance(
     }
 
     if (!isValidStellarAddress(resolvedOwner)) {
-      const err = new Error(`Invalid owner Stellar address format: "${resolvedOwner}".`);
+      const err = new Error(
+        `Invalid owner Stellar address format: "${resolvedOwner}".`,
+      );
       if (mountedRef.current) {
         setRawAllowance(null);
         setError(err);
@@ -920,7 +981,9 @@ export function useTokenAllowance(
     }
 
     if (!isValidStellarAddress(resolvedSpender)) {
-      const err = new Error(`Invalid spender Stellar address format: "${resolvedSpender}".`);
+      const err = new Error(
+        `Invalid spender Stellar address format: "${resolvedSpender}".`,
+      );
       if (mountedRef.current) {
         setRawAllowance(null);
         setError(err);
@@ -938,10 +1001,13 @@ export function useTokenAllowance(
     }
 
     try {
-      if (typeof client.clearCache === 'function') {
+      if (typeof client.clearCache === "function") {
         client.clearCache();
       }
-      const nextAllowance = await client.getAllowance(resolvedOwner, resolvedSpender);
+      const nextAllowance = await client.getAllowance(
+        resolvedOwner,
+        resolvedSpender,
+      );
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setRawAllowance(nextAllowance);
         setError(null);
@@ -949,10 +1015,12 @@ export function useTokenAllowance(
       }
       return nextAllowance;
     } catch (err) {
-      const normalized = normalizeHookError(err, 'allowance');
+      const normalized = normalizeHookError(err, "allowance");
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setError(normalized);
-        setAlertMessage(`Failed to load token allowance: ${normalized.message}`);
+        setAlertMessage(
+          `Failed to load token allowance: ${normalized.message}`,
+        );
       }
       return null;
     } finally {
@@ -963,11 +1031,10 @@ export function useTokenAllowance(
   }, [client, enabled, resolvedOwner, resolvedSpender]);
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
-    void fetchAllowance();
+    if (!enabled) return;
+    void (async () => {
+      await fetchAllowance();
+    })();
   }, [enabled, fetchAllowance]);
 
   // Optional polling interval with unmount cleanup
@@ -991,7 +1058,14 @@ export function useTokenAllowance(
     return () => {
       clearInterval(timerId);
     };
-  }, [client, enabled, fetchAllowance, intervalMs, resolvedOwner, resolvedSpender]);
+  }, [
+    client,
+    enabled,
+    fetchAllowance,
+    intervalMs,
+    resolvedOwner,
+    resolvedSpender,
+  ]);
 
   // Automatically refetch when an approve transaction confirms
   useEffect(() => {
@@ -1002,13 +1076,15 @@ export function useTokenAllowance(
       !resolvedSpender ||
       !isValidStellarAddress(resolvedOwner) ||
       !isValidStellarAddress(resolvedSpender) ||
-      typeof window === 'undefined'
+      typeof window === "undefined"
     ) {
       return;
     }
 
     const handleApproveConfirmed = (event: Event) => {
-      const detail = (event as CustomEvent<{ owner?: string; spender?: string }>).detail;
+      const detail = (
+        event as CustomEvent<{ owner?: string; spender?: string }>
+      ).detail;
       if (
         !detail ||
         ((!detail.owner || detail.owner === resolvedOwner) &&
@@ -1020,22 +1096,27 @@ export function useTokenAllowance(
 
     window.addEventListener(APPROVE_CONFIRMED_EVENT, handleApproveConfirmed);
     return () => {
-      window.removeEventListener(APPROVE_CONFIRMED_EVENT, handleApproveConfirmed);
+      window.removeEventListener(
+        APPROVE_CONFIRMED_EVENT,
+        handleApproveConfirmed,
+      );
     };
   }, [client, enabled, fetchAllowance, resolvedOwner, resolvedSpender]);
 
   const approveAndRefetch = useCallback(
     async (amount: bigint, source?: Keypair): Promise<TransactionResult> => {
       if (!client) {
-        const err = new Error('BcForgeProvider client is not configured.');
+        const err = new Error("BcForgeProvider client is not configured.");
         if (mountedRef.current) {
           setError(err);
-          setAlertMessage('Unable to approve allowance: SDK client is not configured.');
+          setAlertMessage(
+            "Unable to approve allowance: SDK client is not configured.",
+          );
         }
         throw err;
       }
 
-      if (wallet.status !== 'connected' && !source) {
+      if (wallet.status !== "connected" && !source) {
         const err = new Error(
           `Cannot submit a transaction while wallet status is "${wallet.status}".`,
         );
@@ -1047,7 +1128,9 @@ export function useTokenAllowance(
       }
 
       if (!resolvedOwner || !isValidStellarAddress(resolvedOwner)) {
-        const err = new Error(`Invalid owner Stellar address format: "${resolvedOwner}".`);
+        const err = new Error(
+          `Invalid owner Stellar address format: "${resolvedOwner}".`,
+        );
         if (mountedRef.current) {
           setError(err);
           setAlertMessage(err.message);
@@ -1056,7 +1139,9 @@ export function useTokenAllowance(
       }
 
       if (!resolvedSpender || !isValidStellarAddress(resolvedSpender)) {
-        const err = new Error(`Invalid spender Stellar address format: "${resolvedSpender}".`);
+        const err = new Error(
+          `Invalid spender Stellar address format: "${resolvedSpender}".`,
+        );
         if (mountedRef.current) {
           setError(err);
           setAlertMessage(err.message);
@@ -1070,7 +1155,12 @@ export function useTokenAllowance(
           setError(null);
           setAlertMessage(null);
         }
-        const result = await client.approve(resolvedOwner, resolvedSpender, amount, source);
+        const result = await client.approve(
+          resolvedOwner,
+          resolvedSpender,
+          amount,
+          source,
+        );
         if (result.success) {
           notifyTransactionConfirmed(APPROVE_CONFIRMED_EVENT, {
             owner: resolvedOwner,
@@ -1082,7 +1172,7 @@ export function useTokenAllowance(
           const txError = new Error(
             result.hash
               ? `Approve transaction failed with hash: ${result.hash}`
-              : 'Approve transaction failed',
+              : "Approve transaction failed",
           );
           if (mountedRef.current) {
             setError(txError);
@@ -1091,10 +1181,12 @@ export function useTokenAllowance(
         }
         return result;
       } catch (err) {
-        const normalized = normalizeHookError(err, 'approve');
+        const normalized = normalizeHookError(err, "approve");
         if (mountedRef.current) {
           setError(normalized);
-          setAlertMessage(`Failed to approve token allowance: ${normalized.message}`);
+          setAlertMessage(
+            `Failed to approve token allowance: ${normalized.message}`,
+          );
         }
         throw normalized;
       } finally {
@@ -1187,7 +1279,9 @@ export function useHasRole(
 
   // Support both (role, address?, options?) and (address, role, options?) signatures
   const isSecondArgOptions =
-    typeof addressOrRole === 'object' && addressOrRole !== null && !Array.isArray(addressOrRole);
+    typeof addressOrRole === "object" &&
+    addressOrRole !== null &&
+    !Array.isArray(addressOrRole);
   const resolvedOptions: UseHasRoleOptions = isSecondArgOptions
     ? (addressOrRole as UseHasRoleOptions)
     : options;
@@ -1195,28 +1289,42 @@ export function useHasRole(
   let resolvedRole: Role | undefined;
   let explicitAddress: string | undefined;
 
-  if (typeof roleOrAddress === 'string' && VALID_ROLES.includes(roleOrAddress)) {
+  if (
+    typeof roleOrAddress === "string" &&
+    VALID_ROLES.includes(roleOrAddress)
+  ) {
     resolvedRole = roleOrAddress as Role;
     explicitAddress =
-      typeof addressOrRole === 'string' && !VALID_ROLES.includes(addressOrRole)
+      typeof addressOrRole === "string" && !VALID_ROLES.includes(addressOrRole)
         ? addressOrRole
-        : typeof addressOrRole === 'string'
+        : typeof addressOrRole === "string"
           ? addressOrRole
           : undefined;
-  } else if (typeof addressOrRole === 'string' && VALID_ROLES.includes(addressOrRole)) {
+  } else if (
+    typeof addressOrRole === "string" &&
+    VALID_ROLES.includes(addressOrRole)
+  ) {
     resolvedRole = addressOrRole as Role;
-    explicitAddress = typeof roleOrAddress === 'string' ? roleOrAddress : undefined;
+    explicitAddress =
+      typeof roleOrAddress === "string" ? roleOrAddress : undefined;
   } else {
     resolvedRole = roleOrAddress as Role | undefined;
-    explicitAddress = typeof addressOrRole === 'string' ? addressOrRole : undefined;
+    explicitAddress =
+      typeof addressOrRole === "string" ? addressOrRole : undefined;
   }
 
   const client =
-    resolvedOptions.client !== undefined ? resolvedOptions.client : contextClient;
-  const { pollingInterval, pollingIntervalMs, enabled = true } = resolvedOptions;
+    resolvedOptions.client !== undefined
+      ? resolvedOptions.client
+      : contextClient;
+  const {
+    pollingInterval,
+    pollingIntervalMs,
+    enabled = true,
+  } = resolvedOptions;
   const intervalMs = pollingIntervalMs ?? pollingInterval ?? 0;
 
-  const targetAddress = (explicitAddress ?? wallet.publicKey ?? '').trim();
+  const targetAddress = (explicitAddress ?? wallet.publicKey ?? "").trim();
 
   const [data, setData] = useState<boolean | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -1239,18 +1347,20 @@ export function useHasRole(
     }
 
     if (!client) {
-      const err = new Error('BcForgeProvider client is not configured.');
+      const err = new Error("BcForgeProvider client is not configured.");
       if (mountedRef.current) {
         setData(null);
         setError(err);
-        setAlertMessage('Unable to verify role: SDK client is not configured.');
+        setAlertMessage("Unable to verify role: SDK client is not configured.");
         setLoading(false);
       }
       return false;
     }
 
     if (!resolvedRole || !VALID_ROLES.includes(resolvedRole)) {
-      const err = new Error(`Invalid role specified: "${String(resolvedRole ?? '')}".`);
+      const err = new Error(
+        `Invalid role specified: "${String(resolvedRole ?? "")}".`,
+      );
       if (mountedRef.current) {
         setData(null);
         setError(err);
@@ -1264,14 +1374,18 @@ export function useHasRole(
       if (mountedRef.current) {
         setData(null);
         setError(null);
-        setAlertMessage('Connect a wallet or provide an address to verify role permissions.');
+        setAlertMessage(
+          "Connect a wallet or provide an address to verify role permissions.",
+        );
         setLoading(false);
       }
       return false;
     }
 
     if (!isValidStellarAddress(targetAddress)) {
-      const err = new Error(`Invalid Stellar address format: "${targetAddress}".`);
+      const err = new Error(
+        `Invalid Stellar address format: "${targetAddress}".`,
+      );
       if (mountedRef.current) {
         setData(null);
         setError(err);
@@ -1298,11 +1412,13 @@ export function useHasRole(
       }
       return granted;
     } catch (err) {
-      const normalized = normalizeHookError(err, 'has_role');
+      const normalized = normalizeHookError(err, "has_role");
       if (mountedRef.current && currentRequestId === requestIdRef.current) {
         setData(false);
         setError(normalized);
-        setAlertMessage(`Failed to verify role "${resolvedRole}": ${normalized.message}`);
+        setAlertMessage(
+          `Failed to verify role "${resolvedRole}": ${normalized.message}`,
+        );
       }
       return false;
     } finally {
@@ -1313,11 +1429,10 @@ export function useHasRole(
   }, [client, enabled, resolvedRole, targetAddress]);
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
-    void checkRole();
+    if (!enabled) return;
+    void (async () => {
+      await checkRole();
+    })();
   }, [enabled, checkRole]);
 
   // Optional reactive polling with unmount cleanup
