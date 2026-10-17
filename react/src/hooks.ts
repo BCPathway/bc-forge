@@ -1287,6 +1287,7 @@ export function useTransactionSubmission(
 
   const [status, setStatusState] =
     useState<TransactionSubmissionStatus>("idle");
+  const statusRef = useRef<TransactionSubmissionStatus>("idle");
   const [txHash, setTxHash] = useState<string | null>(null);
   const [data, setData] = useState<TransactionResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -1329,7 +1330,10 @@ export function useTransactionSubmission(
       if (!mountedRef.current) return;
       if (runId !== undefined && runId !== activeRunIdRef.current) return;
       setStatusState(nextStatus);
-      onStatusChangeRef.current?.(nextStatus);
+      if (statusRef.current !== nextStatus) {
+        statusRef.current = nextStatus;
+        onStatusChangeRef.current?.(nextStatus);
+      }
     },
     [],
   );
@@ -1758,7 +1762,10 @@ export function useTransactionSubmission(
       setData(null);
       setError(null);
       setRetryCount(0);
-      onStatusChangeRef.current?.("idle");
+      if (statusRef.current !== "idle") {
+        statusRef.current = "idle";
+        onStatusChangeRef.current?.("idle");
+      }
     }
   }, [clearAllTimers]);
 
