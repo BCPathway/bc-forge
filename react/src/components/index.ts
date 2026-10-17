@@ -1,37 +1,62 @@
 // SPDX-License-Identifier: MIT
-export { Alert } from './Alert';
-export type { AlertProps, AlertVariant } from './Alert';
+export { Alert } from "./Alert";
+export type { AlertProps, AlertVariant } from "./Alert";
 
-export { Badge } from './Badge';
-export type { BadgeProps, BadgeVariant, BadgeSize } from './Badge';
+export { Badge } from "./Badge";
+export type { BadgeProps, BadgeVariant, BadgeSize } from "./Badge";
 
-export { Dropdown } from './Dropdown';
-export type { DropdownProps, DropdownVariant, DropdownSize, DropdownItem } from './Dropdown';
+export { Dropdown } from "./Dropdown";
+export type {
+  DropdownProps,
+  DropdownVariant,
+  DropdownSize,
+  DropdownItem,
+} from "./Dropdown";
 
-export { ConnectWallet } from './ConnectWallet';
-export type { ConnectWalletProps } from './ConnectWallet';
+export { ConnectWallet } from "./ConnectWallet";
+export type { ConnectWalletProps } from "./ConnectWallet";
 
-export { WalletSelectModal, WALLET_INSTALL_LABELS } from './WalletSelectModal';
-export type { WalletSelectModalProps } from './WalletSelectModal';
+export { WalletSelectModal, WALLET_INSTALL_LABELS } from "./WalletSelectModal";
+export type { WalletSelectModalProps } from "./WalletSelectModal";
 
-export { TokenCard } from './TokenCard';
-export type { TokenCardProps } from './TokenCard';
+export { TokenCard } from "./TokenCard";
+export type { TokenCardProps } from "./TokenCard";
 
-export { MintForm, MINT_FORM_ERRORS } from './MintForm';
-export type { MintFormProps } from './MintForm';
+export { MintForm, MINT_FORM_ERRORS } from "./MintForm";
+export type { MintFormProps } from "./MintForm";
 
 export {
   VaultDepositWidget,
   VAULT_DEPOSIT_NO_ACCOUNT,
   VAULT_DEPOSIT_NO_CLIENT,
-} from './VaultDepositWidget';
-export type { VaultDepositWidgetProps } from './VaultDepositWidget';
+} from "./VaultDepositWidget";
+export type { VaultDepositWidgetProps } from "./VaultDepositWidget";
 
-export { APYChart } from './APYChart';
-export type { APYChartProps, ApyChartPoint } from './APYChart';
+export { APYChart } from "./APYChart";
+export type { APYChartProps, ApyChartPoint } from "./APYChart";
 
-export { ProposalVotingPanel } from './ProposalVotingPanel';
-export type { ProposalVotingPanelProps, ProposalSummary, ProposalId } from './ProposalVotingPanel';
+export { ProposalVotingPanel } from "./ProposalVotingPanel";
+export type {
+  ProposalVotingPanelProps,
+  ProposalSummary,
+  ProposalId,
+} from "./ProposalVotingPanel";
 
-export { TransactionToast } from './TransactionToast';
-export type { TransactionToastProps, TransactionToastStatus } from './TransactionToast';
+export { TransactionToast } from "./TransactionToast";
+export type {
+  TransactionToastProps,
+  TransactionToastStatus,
+} from "./TransactionToast";
+
+export { CopyToClipboard } from "./CopyToClipboard";
+export type { CopyToClipboardProps } from "./CopyToClipboard";
+
+export {
+  ConnectionStatusBar,
+  getNetworkName,
+  getLatencyTier,
+} from "./ConnectionStatusBar";
+export type {
+  ConnectionStatusBarProps,
+  LatencyTier,
+} from "./ConnectionStatusBar";

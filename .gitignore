@@ -54,3 +54,11 @@ docs/.vitepress/cache/
 react/storybook-static/
 react/test-results/
 react/playwright-report/
+
+# Issues (Additions and Modifications)
+batch_upload_issues.py 
+generate_issues.py 
+optimize_issues.py
+phase3_frontend_125_issues.json
+update_all_issue_descriptions.py
+/__pycache__/generate_issues.cpython-314.pyc    

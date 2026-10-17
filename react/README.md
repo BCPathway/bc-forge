@@ -84,7 +84,7 @@ Hooks and client access:
 - `BcForgeProvider`, `useBcForgeClient`, `useOptionalBcForgeClient`
 - `useVaultClient`, `useOptionalVaultClient`
 - `WalletProvider`, `useWallet`, `useWalletContext`, `truncatePublicKey`
-- `useBcForgeToken`, `useBalance`, `useMint`, `useTotalSupply`, `useTransfer`
+- `useTokenMetadata`, `clearTokenMetadataCache`, `useBcForgeToken`, `useBalance`, `useMint`, `useTotalSupply`, `useTransfer`
 - `useApprove`, `useBurn`, `useAllowance`
 - `useVaultDeposit`, `useVaultShareBalance`, `useProposalVote`, `useProposalVoting`
 

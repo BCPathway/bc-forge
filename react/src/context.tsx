@@ -117,7 +117,6 @@ export const useVaultClient = (): VaultClient => {
 export const useOptionalVaultClient = (): VaultClient | null =>
   useContext(bcForgeContext).vaultClient;
 
-// ─── Wallet connection (#902) ───────────────────────────────────────────────
 // ─── Wallet connection (#902, #953) ────────────────────────────────────────
 
 /** Wallets offered by {@link WalletProvider}'s `connect`. */
@@ -143,6 +142,7 @@ type WalletConnectionData =
       publicKey: null;
       name: null;
       error: null;
+      isHardwareWallet?: boolean;
     }
   | {
       status: "connecting";
@@ -150,6 +150,7 @@ type WalletConnectionData =
       publicKey: null;
       name: WalletName;
       error: null;
+      isHardwareWallet?: boolean;
     }
   | {
       status: "connected";
@@ -157,6 +158,7 @@ type WalletConnectionData =
       publicKey: string;
       name: string;
       error: null;
+      isHardwareWallet?: boolean;
     }
   | {
       status: "wrong-network";
@@ -166,6 +168,7 @@ type WalletConnectionData =
       expectedNetworkPassphrase: string;
       actualNetworkPassphrase: string;
       error: Error;
+      isHardwareWallet?: boolean;
     }
   | {
       status: "error";
@@ -173,17 +176,30 @@ type WalletConnectionData =
       publicKey: null;
       name: string | null;
       error: Error;
+      isHardwareWallet?: boolean;
     };
 
 type WalletMachineState =
-  | { status: "disconnected"; adapter: null; error: null }
-  | { status: "connecting"; adapter: null; wallet: WalletName; error: null }
+  | {
+      status: "disconnected";
+      adapter: null;
+      error: null;
+      isHardwareWallet?: boolean;
+    }
+  | {
+      status: "connecting";
+      adapter: null;
+      wallet: WalletName;
+      error: null;
+      isHardwareWallet?: boolean;
+    }
   | {
       status: "connected";
       adapter: WalletAdapter;
       wallet: WalletName;
       publicKey: string;
       error: null;
+      isHardwareWallet?: boolean;
     }
   | {
       status: "wrong-network";
@@ -192,12 +208,14 @@ type WalletMachineState =
       expectedNetworkPassphrase: string;
       actualNetworkPassphrase: string;
       error: Error;
+      isHardwareWallet?: boolean;
     }
   | {
       status: "error";
       adapter: WalletAdapter | null;
       wallet: WalletName | null;
       error: Error;
+      isHardwareWallet?: boolean;
     };
 
 type WalletMachineAction =
@@ -207,6 +225,7 @@ type WalletMachineAction =
       wallet: WalletName;
       adapter: WalletAdapter;
       publicKey: string;
+      isHardwareWallet?: boolean;
     }
   | {
       type: "wrong-network";
@@ -227,6 +246,7 @@ const disconnectedState: WalletMachineState = {
   status: "disconnected",
   adapter: null,
   error: null,
+  isHardwareWallet: false,
 };
 
 function walletReducer(
@@ -240,6 +260,7 @@ function walletReducer(
         adapter: null,
         wallet: action.wallet,
         error: null,
+        isHardwareWallet: false,
       };
     case "connected":
       return {
@@ -248,6 +269,7 @@ function walletReducer(
         wallet: action.wallet,
         publicKey: action.publicKey,
         error: null,
+        isHardwareWallet: Boolean(action.isHardwareWallet),
       };
     case "wrong-network":
       return {
@@ -272,11 +294,66 @@ function walletReducer(
   }
 }
 
+/** Default signature timeout for software wallets in milliseconds (30 seconds). */
+export const DEFAULT_SIGNATURE_TIMEOUT_MS = 30_000;
+
+/** Extended signature timeout for hardware wallets (Ledger) in milliseconds (120 seconds). */
+export const HARDWARE_SIGNATURE_TIMEOUT_MS = 120_000;
+
+/** Timeout handler options for signing with a hardware or software wallet. */
+export interface SignWithTimeoutOptions {
+  /** Custom timeout in milliseconds. Defaults to 120s for hardware wallets, 30s for software wallets. */
+  timeoutMs?: number;
+  /** Whether the signer is confirmed to be a hardware wallet (Ledger). */
+  isHardwareWallet?: boolean;
+  /** Optional custom timeout message. */
+  timeoutMessage?: string;
+}
+
+/**
+ * Executes a transaction signing action with a hardware-aware timeout handler (#1180).
+ * Provides adequate time (default 120s) for physical device confirmation on Ledger
+ * and converts timeouts into friendly, actionable UI error messages.
+ */
+export async function signWithHardwareTimeout<T>(
+  signAction: () => Promise<T>,
+  options: SignWithTimeoutOptions = {},
+): Promise<T> {
+  const {
+    isHardwareWallet = false,
+    timeoutMs = isHardwareWallet
+      ? HARDWARE_SIGNATURE_TIMEOUT_MS
+      : DEFAULT_SIGNATURE_TIMEOUT_MS,
+    timeoutMessage = isHardwareWallet
+      ? "Confirm on Ledger device timed out. Please ensure your device is connected, unlocked, and the Stellar app is open."
+      : "Signature request timed out.",
+  } = options;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([signAction(), timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export interface WalletConnectionActions {
   /** Connect to the named wallet and set it as the client's signer. */
   connect: (wallet: WalletName) => Promise<void>;
   /** Disconnect the current wallet and clear the client's signer. */
   disconnect: () => Promise<void>;
+  /** Helper to execute signing with appropriate hardware/software timeout. */
+  signWithTimeout?: <T>(
+    signAction: () => Promise<T>,
+    customTimeoutMs?: number,
+  ) => Promise<T>;
   /**
    * Connect to `wallet`, first making Albedo available (#1170) when the intent
    * script has not been loaded yet, and re-probing afterwards so the picker
@@ -314,7 +391,13 @@ export interface WalletDetectionActions {
 /** Full discriminated wallet state and actions returned by {@link useWallet}. */
 export type WalletConnectionState = WalletConnectionData &
   WalletConnectionActions &
-  WalletDetectionActions;
+  WalletDetectionActions & {
+    isHardwareWallet: boolean;
+    signWithTimeout: <T>(
+      signAction: () => Promise<T>,
+      customTimeoutMs?: number,
+    ) => Promise<T>;
+  };
 
 interface WalletContextType
   extends WalletConnectionActions, WalletDetectionActions {
@@ -323,6 +406,7 @@ interface WalletContextType
   connected: boolean;
   publicKey: string | null;
   error: Error | null;
+  isHardwareWallet?: boolean;
 }
 
 const walletContext = createContext<WalletContextType>({
@@ -467,6 +551,29 @@ const WalletMachine: React.FC<WalletProviderProps> = ({
           return;
         }
 
+        let isHardwareWallet = false;
+        try {
+          if (typeof (adapter as any)?.isHardwareWallet === "boolean") {
+            isHardwareWallet = (adapter as any).isHardwareWallet;
+          } else if (typeof (adapter as any)?.isHardwareWallet === "function") {
+            isHardwareWallet = Boolean(
+              await (adapter as any).isHardwareWallet(),
+            );
+          } else if (wallet === "freighter") {
+            const api = (globalThis as any).freighter;
+            if (typeof api?.isHardwareWallet === "function") {
+              isHardwareWallet = Boolean(await api.isHardwareWallet());
+            } else if (typeof api?.getUserInfo === "function") {
+              const info = await api.getUserInfo();
+              isHardwareWallet = Boolean(
+                info?.isHardwareWallet || info?.hardwareWallet,
+              );
+            }
+          }
+        } catch {
+          isHardwareWallet = false;
+        }
+
         client.setWalletAdapter(adapter);
         vaultClient?.setWalletAdapter(adapter);
         // Only a wallet that actually connected is persisted (#1172).
@@ -476,6 +583,7 @@ const WalletMachine: React.FC<WalletProviderProps> = ({
           wallet,
           adapter,
           publicKey: adapter.publicKey,
+          isHardwareWallet,
         });
       } catch (err) {
         if (attempt !== connectAttempt.current) return;
@@ -761,8 +869,24 @@ export function useWallet(): WalletConnection {
     };
   }
 
+  const isHardwareWallet = Boolean(
+    (context.state.status === "connected" && context.state.isHardwareWallet) ||
+    (adapter as any)?.isHardwareWallet,
+  );
+
+  const signWithTimeout = useCallback(
+    <T,>(signAction: () => Promise<T>, customTimeoutMs?: number) =>
+      signWithHardwareTimeout(signAction, {
+        isHardwareWallet,
+        timeoutMs: customTimeoutMs,
+      }),
+    [isHardwareWallet],
+  );
+
   return {
     ...state,
+    isHardwareWallet,
+    signWithTimeout,
     connect: context.connect,
     disconnect: context.disconnect,
     connectWallet: context.connectWallet,

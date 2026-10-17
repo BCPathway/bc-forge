@@ -11,8 +11,7 @@
  * payload is all zeros. No private key can ever produce a signature for it.
  * This constant is used for zero-address validation across the SDK.
  */
-export const ZERO_ADDRESS =
-  'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+export const ZERO_ADDRESS = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
 /**
  * Returns `true` if the given address is the canonical zero-address sentinel.
@@ -61,7 +60,13 @@ import {
 } from './utils';
 import type { DryRunResult } from './utils';
 
-import { SimulationError, RPCError, SignerRequiredError, ContractError, parseContractError } from './errors';
+import {
+  SimulationError,
+  RPCError,
+  SignerRequiredError,
+  ContractError,
+  parseContractError,
+} from './errors';
 
 export type { DryRunResult, DryRunFootprint } from './utils';
 
@@ -191,7 +196,8 @@ function parseProposalLists(native: Record<string, unknown>): ProposalLists {
   return {
     pendingIds: asIds(pending),
     approvedIds: asIds(approved),
-    nextCursor: cursor === null || cursor === undefined ? null : BigInt(cursor as string | number | bigint),
+    nextCursor:
+      cursor === null || cursor === undefined ? null : BigInt(cursor as string | number | bigint),
   };
 }
 
@@ -228,6 +234,11 @@ export class bcForgeClient {
   /** The wallet adapter configured on this client, if any. */
   getWalletAdapter(): WalletAdapter | undefined {
     return this.walletAdapter;
+  }
+
+  /** Get the deployed token contract ID configured on this client. */
+  getContractId(): string {
+    return this.contractId;
   }
 
   /** Connect the configured wallet adapter (if any) */
@@ -666,7 +677,6 @@ export class bcForgeClient {
   }
 
   /**
-/**
    * Burn tokens from an address using an approved allowance.
    *
    * @param spender - Address authorized to burn tokens
@@ -1260,11 +1270,7 @@ export class bcForgeClient {
   ): Promise<TransactionResult> {
     return this.invokeContract(
       'execute_upgrade',
-      [
-        addressToScVal(executor),
-        nativeToScVal(proposalId, { type: 'u64' }),
-        hashToScVal(wasmHash),
-      ],
+      [addressToScVal(executor), nativeToScVal(proposalId, { type: 'u64' }), hashToScVal(wasmHash)],
       source,
     );
   }
@@ -1289,11 +1295,7 @@ export class bcForgeClient {
       this.networkPassphrase,
       this.contractId,
       'execute_upgrade',
-      [
-        addressToScVal(executor),
-        nativeToScVal(proposalId, { type: 'u64' }),
-        hashToScVal(wasmHash),
-      ],
+      [addressToScVal(executor), nativeToScVal(proposalId, { type: 'u64' }), hashToScVal(wasmHash)],
       sourcePublicKey,
     );
   }
@@ -1609,11 +1611,7 @@ export class bcForgeClient {
     const migrate = await this.invokeContract('migrate_admin', [], source);
     const grant = await this.invokeContract(
       'grant_role',
-      [
-        addressToScVal(signerAddress),
-        roleToScVal(Role.SuperAdmin),
-        addressToScVal(superAdmin),
-      ],
+      [addressToScVal(signerAddress), roleToScVal(Role.SuperAdmin), addressToScVal(superAdmin)],
       source,
     );
     return { migrate, grant };

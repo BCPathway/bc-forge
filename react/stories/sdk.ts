@@ -3,21 +3,26 @@ import type {
   WalletAdapter,
   bcForgeClientConfig,
   TransactionResult,
-} from '@bc-forge/sdk';
+} from "@bc-forge/sdk";
 
 export const account =
-  'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT';
-export const networkPassphrase = 'Test SDF Network ; September 2015';
+  "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT";
+export const networkPassphrase = "Test SDF Network ; September 2015";
 const result: TransactionResult = {
   success: true,
-  hash: 'STORYBOOK_TRANSACTION_952',
+  hash: "STORYBOOK_TRANSACTION_952",
 };
 
 /** Storybook-only SDK boundary: no transport or signing implementation. */
 export class bcForgeClient {
   private adapter?: WalletAdapter;
+  private contractId: string;
   constructor(config: bcForgeClientConfig) {
     this.adapter = config.walletAdapter;
+    this.contractId = config.contractId;
+  }
+  getContractId() {
+    return this.contractId;
   }
   setWalletAdapter(adapter?: WalletAdapter) {
     this.adapter = adapter;
@@ -47,7 +52,7 @@ export class VaultClient {
 
 /** In-memory wallet used by the real WalletProvider state machine. */
 export class FreighterAdapter implements WalletAdapter {
-  name = 'freighter';
+  name = "freighter";
   connected = false;
   publicKey?: string;
   networkPassphrase = networkPassphrase;
@@ -60,13 +65,13 @@ export class FreighterAdapter implements WalletAdapter {
     this.publicKey = undefined;
   }
   async signTransaction(): Promise<string> {
-    throw new Error('Storybook never signs transactions');
+    throw new Error("Storybook never signs transactions");
   }
 }
 export class AlbedoAdapter extends FreighterAdapter {
-  name = 'albedo';
+  name = "albedo";
 }
 
 export async function calculateApy(): Promise<never> {
-  throw new Error('Pass deterministic points to APYChart stories');
+  throw new Error("Pass deterministic points to APYChart stories");
 }
