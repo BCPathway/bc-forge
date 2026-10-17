@@ -353,10 +353,10 @@ describe("Product components (#950)", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("SDK unavailable");
       screen
         .getAllByRole("button", { name: "Approve" })
-        .forEach((b) => expect(b).toBeDisabled());
+        .forEach((b: HTMLElement) => expect(b).toBeDisabled());
       screen
         .getAllByRole("button", { name: "Execute" })
-        .forEach((b) => expect(b).toBeDisabled());
+        .forEach((b: HTMLElement) => expect(b).toBeDisabled());
     });
 
     it("shows the empty message with no proposals", () => {

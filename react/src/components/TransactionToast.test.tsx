@@ -31,6 +31,14 @@ describe("TransactionToast", () => {
         "pending",
       );
     });
+
+    it("displays Confirm on Ledger device when isHardwareWallet is true", () => {
+      render(<TransactionToast status="pending" isHardwareWallet={true} />);
+
+      expect(screen.getByTestId("transaction-toast-message")).toHaveTextContent(
+        "Confirm on Ledger device",
+      );
+    });
   });
 
   describe("success", () => {
@@ -105,6 +113,21 @@ describe("TransactionToast", () => {
 
       expect(screen.getByTestId("transaction-toast-message")).toHaveTextContent(
         "simulation failed",
+      );
+    });
+
+    it("maps user rejection in Freighter to Transaction cancelled by user", () => {
+      render(
+        <TransactionToast
+          status="error"
+          error={
+            new Error("Freighter failed to sign transaction: User declined")
+          }
+        />,
+      );
+
+      expect(screen.getByTestId("transaction-toast-message")).toHaveTextContent(
+        "Transaction cancelled by user",
       );
     });
 
