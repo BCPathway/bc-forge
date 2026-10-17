@@ -10,6 +10,8 @@ const mockClient = {
   getContractId: jest.fn(),
   getAllowance: jest.fn(),
   approveProposal: jest.fn(),
+  mint: jest.fn(),
+  clearCache: jest.fn(),
 };
 const mockVaultClient = {
   deposit: jest.fn(),
@@ -25,10 +27,13 @@ jest.mock("./context", () => ({
 
 import {
   clearTokenMetadataCache,
+  decodeTransactionError,
   useAllowance,
   useProposalVote,
   useTokenMetadata,
+  useTransactionSubmission,
   useVaultDeposit,
+  type TransactionSubmissionStatus,
 } from "./hooks";
 
 describe("React client hooks", () => {
@@ -294,5 +299,406 @@ describe("React client hooks", () => {
     });
 
     expect(mockClient.approveProposal).not.toHaveBeenCalled();
+  });
+
+  describe("useTransactionSubmission (#1193)", () => {
+    it("starts in idle status with clean initial state", () => {
+      const { result } = renderHook(() => useTransactionSubmission());
+
+      expect(result.current.status).toBe("idle");
+      expect(result.current.isIdle).toBe(true);
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.txHash).toBeNull();
+      expect(result.current.data).toBeNull();
+      expect(result.current.error).toBeNull();
+      expect(result.current.alertMessage).toBeNull();
+      expect(result.current.retryCount).toBe(0);
+    });
+
+    it("tracks full status transitions: idle -> simulating -> signing -> submitting -> confirmed", async () => {
+      const transitions: TransactionSubmissionStatus[] = [];
+      let resolveSimulate!: (val: string) => void;
+      let resolveSign!: (val: string) => void;
+      let resolveSend!: (val: { success: boolean; hash: string; returnValue?: unknown }) => void;
+
+      const { result } = renderHook(() =>
+        useTransactionSubmission({
+          onStatusChange: (s) => transitions.push(s),
+        }),
+      );
+
+      expect(result.current.status).toBe("idle");
+
+      let submitPromise!: Promise<unknown>;
+      act(() => {
+        submitPromise = result.current.submit({
+          method: "mint",
+          simulate: () =>
+            new Promise<string>((resolve) => {
+              resolveSimulate = resolve;
+            }),
+          sign: () =>
+            new Promise<string>((resolve) => {
+              resolveSign = resolve;
+            }),
+          send: () =>
+            new Promise((resolve) => {
+              resolveSend = resolve;
+            }),
+        });
+      });
+
+      expect(result.current.status).toBe("simulating");
+      expect(result.current.isSimulating).toBe(true);
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => {
+        resolveSimulate("UNSIGNED_XDR");
+      });
+
+      expect(result.current.status).toBe("signing");
+      expect(result.current.isSigning).toBe(true);
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => {
+        resolveSign("SIGNED_XDR");
+      });
+
+      expect(result.current.status).toBe("submitting");
+      expect(result.current.isSubmitting).toBe(true);
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => {
+        resolveSend({
+          success: true,
+          hash: "tx-hash-123",
+          returnValue: 1000n,
+        });
+        await submitPromise;
+      });
+
+      expect(result.current.status).toBe("confirmed");
+      expect(result.current.isConfirmed).toBe(true);
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.txHash).toBe("tx-hash-123");
+      expect(result.current.hash).toBe("tx-hash-123");
+      expect(result.current.data).toEqual({
+        success: true,
+        hash: "tx-hash-123",
+        returnValue: 1000n,
+      });
+      expect(result.current.error).toBeNull();
+      expect(transitions).toEqual([
+        "simulating",
+        "signing",
+        "submitting",
+        "confirmed",
+      ]);
+      expect(mockClient.clearCache).toHaveBeenCalled();
+    });
+
+    it("tracks status transitions with callback-based action and lifecycle markers", async () => {
+      const transitions: TransactionSubmissionStatus[] = [];
+      const onSuccess = jest.fn();
+
+      const { result } = renderHook(() =>
+        useTransactionSubmission({
+          onStatusChange: (s) => transitions.push(s),
+          onSuccess,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.submit(async ({ markSimulating, markSigning, markSubmitting }) => {
+          markSimulating();
+          markSigning();
+          markSubmitting("callback-tx-hash");
+          return {
+            success: true,
+            hash: "callback-tx-hash",
+          };
+        });
+      });
+
+      expect(result.current.status).toBe("confirmed");
+      expect(result.current.txHash).toBe("callback-tx-hash");
+      expect(transitions).toEqual([
+        "simulating",
+        "signing",
+        "submitting",
+        "confirmed",
+      ]);
+      expect(onSuccess).toHaveBeenCalledWith({
+        success: true,
+        hash: "callback-tx-hash",
+      });
+    });
+
+    it("polls for ledger inclusion when send returns a hash and pollStatus is provided", async () => {
+      jest.useFakeTimers();
+      try {
+        const pollStatus = jest
+          .fn()
+          .mockResolvedValueOnce({ status: "NOT_FOUND" as const })
+          .mockResolvedValueOnce({ status: "PENDING" as const })
+          .mockResolvedValueOnce({
+            status: "SUCCESS" as const,
+            returnValue: 42n,
+          });
+
+        const { result } = renderHook(() =>
+          useTransactionSubmission({ pollIntervalMs: 200 }),
+        );
+
+        let submitPromise!: Promise<unknown>;
+        act(() => {
+          submitPromise = result.current.submit({
+            simulate: async () => "UNSIGNED",
+            sign: async () => "SIGNED",
+            send: async () => "polled-tx-hash",
+            pollStatus,
+          });
+        });
+
+        await waitFor(() => expect(pollStatus).toHaveBeenCalledTimes(1));
+        expect(result.current.status).toBe("submitting");
+        expect(result.current.txHash).toBe("polled-tx-hash");
+
+        await act(async () => {
+          jest.advanceTimersByTime(200);
+        });
+        await waitFor(() => expect(pollStatus).toHaveBeenCalledTimes(2));
+
+        await act(async () => {
+          jest.advanceTimersByTime(200);
+          await submitPromise;
+        });
+
+        expect(pollStatus).toHaveBeenCalledTimes(3);
+        expect(result.current.status).toBe("confirmed");
+        expect(result.current.data).toEqual({
+          success: true,
+          hash: "polled-tx-hash",
+          returnValue: 42n,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("transitions to failed and sets helpful error when wallet is disconnected without unhandled rejection", async () => {
+      mockUseWallet.mockReturnValue({ status: "disconnected" });
+      const onError = jest.fn();
+
+      const { result } = renderHook(() =>
+        useTransactionSubmission({ onError }),
+      );
+
+      let submitRes: unknown;
+      await act(async () => {
+        submitRes = await result.current.submit(async () => ({
+          success: true,
+          hash: "never-reached",
+        }));
+      });
+
+      expect(submitRes).toBeNull();
+      expect(result.current.status).toBe("failed");
+      expect(result.current.isFailed).toBe(true);
+      expect(result.current.error?.message).toBe(
+        'Cannot submit a transaction while wallet status is "disconnected".',
+      );
+      expect(result.current.alertMessage).toBe(
+        'Cannot submit a transaction while wallet status is "disconnected".',
+      );
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it("decodes Soroban token and admin contract error codes on failure", async () => {
+      const { result } = renderHook(() => useTransactionSubmission());
+
+      await act(async () => {
+        await result.current.submit({
+          method: "transfer",
+          send: async () => {
+            throw new Error("HostError: Error(Contract, #4)");
+          },
+        });
+      });
+
+      expect(result.current.status).toBe("failed");
+      expect(result.current.error?.message).toMatch(
+        /\[TOKEN_INSUFFICIENT_BALANCE\].*insufficient/i,
+      );
+
+      await act(async () => {
+        await result.current.submit({
+          method: "grant_role",
+          send: async () => {
+            throw new Error("HostError: Error(Contract, #3)");
+          },
+        });
+      });
+
+      expect(result.current.status).toBe("failed");
+      expect(result.current.error?.message).toMatch(
+        /\[ADMIN_UNAUTHORIZED_ROLE\].*not authorized/i,
+      );
+    });
+
+    it("decodes wallet signature rejection into a friendly user message without retrying", async () => {
+      const sendSpy = jest.fn();
+      const { result } = renderHook(() =>
+        useTransactionSubmission({ maxRetries: 3 }),
+      );
+
+      await act(async () => {
+        await result.current.submit({
+          simulate: async () => "UNSIGNED",
+          sign: async () => {
+            throw new Error("Freighter: User declined signature request");
+          },
+          send: sendSpy,
+        });
+      });
+
+      expect(result.current.status).toBe("failed");
+      expect(result.current.error?.message).toMatch(
+        /Transaction cancelled by user/i,
+      );
+      expect(result.current.retryCount).toBe(0);
+      expect(sendSpy).not.toHaveBeenCalled();
+    });
+
+    it("automatically retries transient RPC failures and succeeds", async () => {
+      let attempts = 0;
+      const { result } = renderHook(() =>
+        useTransactionSubmission({ maxRetries: 2, retryDelayMs: 10 }),
+      );
+
+      await act(async () => {
+        await result.current.submit(async () => {
+          attempts += 1;
+          if (attempts < 2) {
+            throw new Error("RPC timeout: network latency");
+          }
+          return { success: true, hash: "recovered-hash" };
+        });
+      });
+
+      expect(attempts).toBe(2);
+      expect(result.current.retryCount).toBe(1);
+      expect(result.current.status).toBe("confirmed");
+      expect(result.current.txHash).toBe("recovered-hash");
+    });
+
+    it("supports manual retry() and reset()", async () => {
+      let shouldFail = true;
+      const { result } = renderHook(() =>
+        useTransactionSubmission({ maxRetries: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.submit(async () => {
+          if (shouldFail) {
+            throw new Error("Temporary RPC outage");
+          }
+          return { success: true, hash: "manual-retry-hash" };
+        });
+      });
+
+      expect(result.current.status).toBe("failed");
+      expect(result.current.error?.message).toBe("Temporary RPC outage");
+
+      shouldFail = false;
+      await act(async () => {
+        await result.current.retry();
+      });
+
+      expect(result.current.status).toBe("confirmed");
+      expect(result.current.txHash).toBe("manual-retry-hash");
+      expect(result.current.error).toBeNull();
+
+      act(() => {
+        result.current.reset();
+      });
+
+      expect(result.current.status).toBe("idle");
+      expect(result.current.txHash).toBeNull();
+      expect(result.current.data).toBeNull();
+    });
+
+    it("supports manual refetch() for an existing transaction hash", async () => {
+      const pollStatus = jest.fn().mockResolvedValue({
+        status: "SUCCESS" as const,
+        returnValue: "refetched-val",
+      });
+
+      const { result } = renderHook(() => useTransactionSubmission());
+
+      await act(async () => {
+        await result.current.submit({
+          send: async () => ({ hash: "refetch-hash", success: true }),
+          pollStatus,
+        });
+      });
+
+      expect(result.current.status).toBe("confirmed");
+
+      await act(async () => {
+        await result.current.refetch();
+      });
+
+      expect(pollStatus).toHaveBeenCalledWith("refetch-hash");
+      expect(result.current.status).toBe("confirmed");
+      expect(result.current.data?.returnValue).toBe("refetched-val");
+    });
+
+    it("cleans up active timers and avoids state updates after unmount", async () => {
+      jest.useFakeTimers();
+      try {
+        const pollStatus = jest.fn().mockResolvedValue({
+          status: "PENDING" as const,
+        });
+
+        const { result, unmount } = renderHook(() =>
+          useTransactionSubmission({ pollIntervalMs: 500 }),
+        );
+
+        act(() => {
+          void result.current.submit({
+            send: async () => "unmount-hash",
+            pollStatus,
+          });
+        });
+
+        await waitFor(() => expect(pollStatus).toHaveBeenCalledTimes(1));
+
+        unmount();
+
+        await act(async () => {
+          jest.advanceTimersByTime(5000);
+        });
+
+        expect(pollStatus).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("exposes decodeTransactionError helper for standalone error normalization", () => {
+      const tokenErr = decodeTransactionError(
+        new Error("Error(Contract, #6)"),
+        "transfer",
+      );
+      expect(tokenErr.message).toContain("[TOKEN_CONTRACT_PAUSED]");
+
+      const adminErr = decodeTransactionError(
+        new Error("Error(Contract, #11)"),
+        "execute_proposal",
+      );
+      expect(adminErr.message).toContain("[ADMIN_THRESHOLD_NOT_MET]");
+    });
   });
 });

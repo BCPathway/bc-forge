@@ -87,6 +87,7 @@ Hooks and client access:
 - `useTokenMetadata`, `clearTokenMetadataCache`, `useBcForgeToken`, `useBalance`, `useMint`, `useTotalSupply`, `useTransfer`
 - `useApprove`, `useBurn`, `useAllowance`
 - `useVaultDeposit`, `useVaultShareBalance`, `useProposalVote`, `useProposalVoting`
+- `useTransactionSubmission`, `decodeTransactionError`
 
 Components:
 
