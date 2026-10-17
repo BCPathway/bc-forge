@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { theme } from '../theme';
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { theme } from "../theme";
 
-export interface CopyToClipboardProps
-  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onCopy' | 'onError'> {
+export interface CopyToClipboardProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "onCopy" | "onError"
+> {
   /** The text value to copy to clipboard (e.g. Stellar public key or transaction hash). */
   text: string;
   /** Accessible label or text label for the button. Defaults to 'Copy to clipboard'. */
@@ -33,8 +35,8 @@ export interface CopyToClipboardProps
  */
 export const CopyToClipboard: React.FC<CopyToClipboardProps> = ({
   text,
-  label = 'Copy to clipboard',
-  successMessage = 'Copied!',
+  label = "Copy to clipboard",
+  successMessage = "Copied!",
   timeout = 2000,
   onCopy,
   onError,
@@ -56,22 +58,23 @@ export const CopyToClipboard: React.FC<CopyToClipboardProps> = ({
   const handleCopy = useCallback(async () => {
     setCopyError(null);
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
-      } else if (typeof document !== 'undefined') {
+      } else if (typeof document !== "undefined") {
         // Fallback for environments lacking Clipboard API
-        const textArea = document.createElement('textarea');
+        const textArea = document.createElement("textarea");
         textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.opacity = '0';
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-        const successful = document.execCommand('copy');
+        const successful = document.execCommand("copy");
         document.body.removeChild(textArea);
-        if (!successful) throw new Error('Clipboard copy command was unsuccessful');
+        if (!successful)
+          throw new Error("Clipboard copy command was unsuccessful");
       } else {
-        throw new Error('Clipboard is unavailable in this environment');
+        throw new Error("Clipboard is unavailable in this environment");
       }
 
       setCopied(true);
@@ -91,9 +94,9 @@ export const CopyToClipboard: React.FC<CopyToClipboardProps> = ({
   return (
     <div
       style={{
-        position: 'relative',
-        display: 'inline-flex',
-        alignItems: 'center',
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
       }}
     >
       <button
@@ -104,20 +107,20 @@ export const CopyToClipboard: React.FC<CopyToClipboardProps> = ({
         onClick={() => void handleCopy()}
         className={className}
         style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '6px',
-          padding: '6px 10px',
-          fontSize: '13px',
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "6px",
+          padding: "6px 10px",
+          fontSize: "13px",
           fontWeight: 500,
           color: copied ? theme.successText : theme.text,
           backgroundColor: copied ? theme.successBackground : theme.surface,
           border: `1px solid ${copied ? theme.successBorder : theme.border}`,
-          borderRadius: '6px',
-          cursor: 'pointer',
-          transition: 'all 0.15s ease-in-out',
-          outline: 'none',
+          borderRadius: "6px",
+          cursor: "pointer",
+          transition: "all 0.15s ease-in-out",
+          outline: "none",
           ...style,
         }}
         {...buttonProps}
@@ -168,21 +171,21 @@ export const CopyToClipboard: React.FC<CopyToClipboardProps> = ({
           aria-live="polite"
           data-testid="copied-tooltip"
           style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 6px)',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            padding: '3px 8px',
-            fontSize: '11px',
+            position: "absolute",
+            bottom: "calc(100% + 6px)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "3px 8px",
+            fontSize: "11px",
             fontWeight: 600,
-            color: '#ffffff',
-            backgroundColor: '#1f2937',
-            borderRadius: '4px',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-            whiteSpace: 'nowrap',
-            pointerEvents: 'none',
+            color: "#ffffff",
+            backgroundColor: "#1f2937",
+            borderRadius: "4px",
+            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
             zIndex: 10,
-            animation: 'fadeInOut 0.2s ease-in-out',
+            animation: "fadeInOut 0.2s ease-in-out",
           }}
         >
           {successMessage}
@@ -195,12 +198,12 @@ export const CopyToClipboard: React.FC<CopyToClipboardProps> = ({
           aria-live="assertive"
           data-testid="copy-error"
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
+            position: "absolute",
+            top: "calc(100% + 4px)",
             left: 0,
-            fontSize: '11px',
+            fontSize: "11px",
             color: theme.dangerText,
-            whiteSpace: 'nowrap',
+            whiteSpace: "nowrap",
           }}
         >
           {copyError}

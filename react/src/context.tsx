@@ -6,8 +6,10 @@ import React, {
   useMemo,
   useReducer,
   useRef,
-  ReactNode,
-} from 'react';
+  useState,
+  useEffect,
+  type ReactNode,
+} from "react";
 import {
   bcForgeClient,
   bcForgeClientConfig,
@@ -15,46 +17,335 @@ import {
   VaultClientConfig,
   FreighterAdapter,
   AlbedoAdapter,
-} from '@bc-forge/sdk';
-import type { WalletAdapter } from '@bc-forge/sdk';
-import { truncateMiddle } from './utils';
+} from "@bc-forge/sdk";
+import type { WalletAdapter } from "@bc-forge/sdk";
+import { truncateMiddle } from "./utils";
 
 interface BcForgeContextType {
   client: bcForgeClient | null;
   vaultClient: VaultClient | null;
   networkPassphrase: string | null;
+  /** Active network, or `null` while the provider is driven purely by `config`. */
+  network: NetworkDescriptor | null;
+  /** Id of the active network, or `null` while no network has been selected. */
+  networkId: NetworkId | null;
+  /** Every network offered by `useNetwork`'s `setNetwork`. */
+  networks: readonly NetworkDescriptor[];
+  /** Effective Soroban RPC endpoint of the active network. */
+  rpcUrl: string;
+  /** Switch the active network; rebuilds the client and refetches consumers. */
+  setNetwork: (id: NetworkId) => Promise<void>;
+  /** `true` while a network switch is being applied. */
+  isSwitching: boolean;
+  /** Last network switch failure, if any. */
+  switchError: Error | null;
+}
+
+// ─── Multi-network switching (#1148) ────────────────────────────────────────
+
+/** Networks {@link BcForgeProvider} can switch between (#1148). */
+export type NetworkId = "testnet" | "futurenet" | "local";
+
+/** Static description of one selectable Stellar network (#1148). */
+export interface NetworkDescriptor {
+  /** Stable id used by {@link NetworkState.setNetwork}. */
+  id: NetworkId;
+  /** Human readable name for a switcher control. */
+  label: string;
+  /** Stellar network passphrase used for signing and network validation. */
+  networkPassphrase: string;
+  /** Public Soroban RPC endpoint, unless `rpcUrls` overrides it. */
+  defaultRpcUrl: string;
+}
+
+/** The networks {@link BcForgeProvider} offers by default (#1148). */
+export const STELLAR_NETWORKS: readonly NetworkDescriptor[] = [
+  {
+    id: "testnet",
+    label: "Testnet",
+    networkPassphrase: "Test SDF Network ; September 2015",
+    defaultRpcUrl: "https://soroban-testnet.stellar.org",
+  },
+  {
+    id: "futurenet",
+    label: "Futurenet",
+    networkPassphrase: "Test SDF Future Network ; October 2022",
+    defaultRpcUrl: "https://soroban-futurenet.stellar.org",
+  },
+  {
+    id: "local",
+    label: "Local standalone",
+    networkPassphrase: "Local Sandbox Stellar Network ; September 2022",
+    defaultRpcUrl: "http://localhost:8000",
+  },
+];
+
+/**
+ * Matches a passphrase against the known networks.
+ *
+ * Returns `null` for a passphrase that is not one of the descriptors — for
+ * example a custom devnet — which leaves the provider's own `config` in charge.
+ */
+function findNetworkByPassphrase(
+  passphrase: string | null,
+  networks: readonly NetworkDescriptor[],
+): NetworkDescriptor | null {
+  if (passphrase === null) return null;
+  return (
+    networks.find((candidate) => candidate.networkPassphrase === passphrase) ??
+    null
+  );
+}
+
+/** Network selection state and actions exposed by {@link useNetwork} (#1148). */
+export interface NetworkState {
+  /** Active network metadata, or `null` when driven purely by `config`. */
+  network: NetworkDescriptor | null;
+  /** Id of the active network, or `null` when none has been selected. */
+  networkId: NetworkId | null;
+  /** Every selectable network, in switcher order. */
+  networks: readonly NetworkDescriptor[];
+  /** Effective Soroban RPC endpoint of the active network. */
+  rpcUrl: string;
+  /** Effective network passphrase; `null` outside a provider. */
+  networkPassphrase: string | null;
+  /**
+   * Switch to another network. Rebuilds the `bcForgeClient` (and the
+   * `VaultClient` when configured) so every consumer hook refetches, and
+   * propagates the new passphrase to {@link WalletProvider} so an adapter
+   * connected to the previous network surfaces as `wrong-network`.
+   *
+   * Resolves rather than throwing: an unknown id, or a failure raised while
+   * applying the switch, is reported through {@link NetworkState.error}.
+   */
+  setNetwork: (id: NetworkId) => Promise<void>;
+  /** `true` between calling `setNetwork` and the switch being applied. */
+  isSwitching: boolean;
+  /** Last switch failure, or `null`. */
+  error: Error | null;
 }
 
 const bcForgeContext = createContext<BcForgeContextType>({
   client: null,
   vaultClient: null,
   networkPassphrase: null,
+  network: null,
+  networkId: null,
+  networks: STELLAR_NETWORKS,
+  rpcUrl: "",
+  setNetwork: async () => {},
+  isSwitching: false,
+  switchError: null,
 });
 
 export interface BcForgeProviderProps {
   config: bcForgeClientConfig;
   vaultConfig?: VaultClientConfig;
   children: ReactNode;
+  /**
+   * Network to start on (#1148). Omit to stay on the `config` passphrase until
+   * {@link NetworkState.setNetwork} is called, which keeps existing single-network
+   * apps byte-for-byte unchanged.
+   */
+  defaultNetwork?: NetworkId;
+  /** Extra networks appended to the selectable list (#1148). */
+  networks?: readonly NetworkDescriptor[];
+  /** Per-network RPC endpoint override; the selected network's entry wins (#1148). */
+  rpcUrls?: Partial<Record<NetworkId, string>>;
+  /** Per-network contract id override, applied to the token and vault clients (#1148). */
+  contractIds?: Partial<Record<NetworkId, string>>;
+  /** Called after the active network changes (#1148). */
+  onNetworkChange?: (network: NetworkDescriptor) => void;
 }
 
-export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({ config, vaultConfig, children }) => {
-  const client = useMemo(() => new bcForgeClient(config), [config]);
-  const vaultClient = useMemo(
-    () => (vaultConfig ? new VaultClient(vaultConfig) : null),
-    [vaultConfig],
+export const BcForgeProvider: React.FC<BcForgeProviderProps> = ({
+  config,
+  vaultConfig,
+  children,
+  defaultNetwork,
+  networks: extraNetworks,
+  rpcUrls,
+  contractIds,
+  onNetworkChange,
+}) => {
+  const [selectedNetworkId, setSelectedNetworkId] = useState<NetworkId | null>(
+    defaultNetwork ?? null,
   );
-  const value = useMemo(
-    () => ({ client, vaultClient, networkPassphrase: config.networkPassphrase }),
-    [client, vaultClient, config.networkPassphrase],
+  const [switchingId, setSwitchingId] = useState<NetworkId | null>(null);
+  const [switchError, setSwitchError] = useState<Error | null>(null);
+
+  const networks = useMemo(
+    () =>
+      extraNetworks && extraNetworks.length > 0
+        ? [...STELLAR_NETWORKS, ...extraNetworks]
+        : STELLAR_NETWORKS,
+    [extraNetworks],
+  );
+  const networkIndex = useMemo(
+    () =>
+      new Map<NetworkId, NetworkDescriptor>(
+        networks.map((entry) => [entry.id, entry] as const),
+      ),
+    [networks],
   );
 
-  return <bcForgeContext.Provider value={value}>{children}</bcForgeContext.Provider>;
+  // `null` means "use the provider's own config verbatim": that is the state
+  // every existing consumer is in until a network is explicitly selected.
+  const selectedNetwork =
+    selectedNetworkId === null
+      ? null
+      : (networkIndex.get(selectedNetworkId) ?? null);
+
+  const rpcUrl =
+    selectedNetwork === null
+      ? config.rpcUrl
+      : (rpcUrls?.[selectedNetwork.id] ?? selectedNetwork.defaultRpcUrl);
+  const passphrase =
+    selectedNetwork === null
+      ? config.networkPassphrase
+      : selectedNetwork.networkPassphrase;
+  const contractId =
+    selectedNetwork === null || contractIds === undefined
+      ? config.contractId
+      : (contractIds[selectedNetwork.id] ?? config.contractId);
+
+  // Only a selected network overrides the caller's config, and the override is a
+  // new object whenever the effective values change, so `client` (and every
+  // hook keyed on it) is rebuilt exactly once per real configuration change.
+  const effectiveConfig = useMemo<bcForgeClientConfig>(() => {
+    if (selectedNetwork === null) return config;
+    return { ...config, rpcUrl, networkPassphrase: passphrase, contractId };
+  }, [config, selectedNetwork, rpcUrl, passphrase, contractId]);
+  const client = useMemo(
+    () => new bcForgeClient(effectiveConfig),
+    [effectiveConfig],
+  );
+
+  // The vault follows the same network so vault reads hit the new endpoint.
+  const effectiveVaultConfig = useMemo<VaultClientConfig | undefined>(() => {
+    if (!vaultConfig) return undefined;
+    if (selectedNetwork === null) return vaultConfig;
+    return { ...vaultConfig, rpcUrl, networkPassphrase: passphrase };
+  }, [vaultConfig, selectedNetwork, rpcUrl, passphrase]);
+  const vaultClient = useMemo(
+    () => (effectiveVaultConfig ? new VaultClient(effectiveVaultConfig) : null),
+    [effectiveVaultConfig],
+  );
+
+  const setNetwork = useCallback(
+    async (id: NetworkId) => {
+      const target = networkIndex.get(id);
+      if (!target) {
+        setSwitchError(
+          new Error(
+            `Unknown network "${id}". Add it to BcForgeProvider's "networks" prop to make it selectable.`,
+          ),
+        );
+        return;
+      }
+      setSwitchError(null);
+      setSwitchingId(id);
+      try {
+        // Yield once so consumers can render the pending state before the
+        // client is rebuilt underneath them.
+        await Promise.resolve();
+        setSelectedNetworkId(id);
+      } catch (err) {
+        setSwitchError(err instanceof Error ? err : new Error(String(err)));
+      } finally {
+        setSwitchingId(null);
+      }
+    },
+    [networkIndex],
+  );
+
+  // Reported after the switch has been applied, so listeners see the new network.
+  useEffect(() => {
+    if (selectedNetwork === null || !onNetworkChange) return;
+    onNetworkChange(selectedNetwork);
+  }, [selectedNetwork, onNetworkChange]);
+
+  const value = useMemo(
+    () => ({
+      client,
+      vaultClient,
+      // The effective passphrase, so WalletProvider validates the adapter
+      // against the network that is actually active.
+      networkPassphrase: passphrase,
+      network: selectedNetwork ?? findNetworkByPassphrase(passphrase, networks),
+      networkId: selectedNetwork?.id ?? null,
+      networks,
+      rpcUrl,
+      setNetwork,
+      isSwitching: switchingId !== null,
+      switchError,
+    }),
+    [
+      client,
+      vaultClient,
+      passphrase,
+      selectedNetwork,
+      networks,
+      rpcUrl,
+      setNetwork,
+      switchingId,
+      switchError,
+    ],
+  );
+
+  return (
+    <bcForgeContext.Provider value={value}>{children}</bcForgeContext.Provider>
+  );
 };
+
+/**
+ * Active Stellar network and the switcher that changes it (#1148).
+ *
+ * With no {@link BcForgeProvider} mounted this returns inert defaults rather
+ * than throwing, so a component can render standalone. With a provider that has
+ * not selected a network it reports the network inferred from `config`'s
+ * passphrase when that passphrase is a known one, and `networkId: null` when it
+ * is not.
+ */
+export function useNetwork(): NetworkState {
+  const {
+    network,
+    networkId,
+    networks,
+    rpcUrl,
+    networkPassphrase,
+    setNetwork,
+    isSwitching,
+    switchError,
+  } = useContext(bcForgeContext);
+  return useMemo<NetworkState>(
+    () => ({
+      network,
+      networkId,
+      networks,
+      rpcUrl,
+      networkPassphrase,
+      setNetwork,
+      isSwitching,
+      error: switchError,
+    }),
+    [
+      network,
+      networkId,
+      networks,
+      rpcUrl,
+      networkPassphrase,
+      setNetwork,
+      isSwitching,
+      switchError,
+    ],
+  );
+}
 
 export const useBcForgeClient = () => {
   const context = useContext(bcForgeContext);
   if (!context.client) {
-    throw new Error('useBcForgeClient must be used within a BcForgeProvider');
+    throw new Error("useBcForgeClient must be used within a BcForgeProvider");
   }
   return context.client;
 };
@@ -73,7 +364,7 @@ export const useOptionalBcForgeClient = (): bcForgeClient | null =>
 export const useVaultClient = (): VaultClient => {
   const context = useContext(bcForgeContext);
   if (!context.vaultClient) {
-    throw new Error('useVaultClient requires vaultConfig on BcForgeProvider');
+    throw new Error("useVaultClient requires vaultConfig on BcForgeProvider");
   }
   return context.vaultClient;
 };
@@ -93,7 +384,7 @@ export const useOptionalVaultClient = (): VaultClient | null =>
 // ─── Wallet connection (#902, #953) ────────────────────────────────────────
 
 /** Wallets offered by {@link WalletProvider}'s `connect`. */
-export type WalletName = 'freighter' | 'albedo';
+export type WalletName = "freighter" | "albedo";
 
 /** Truncates a Stellar public key for display: `GABC…WXYZ`. */
 export function truncatePublicKey(publicKey: string): string {
@@ -110,7 +401,7 @@ export interface WalletState {
 /** Shared wallet state exposed by {@link useWallet}. */
 type WalletConnectionData =
   | {
-      status: 'disconnected';
+      status: "disconnected";
       connected: false;
       publicKey: null;
       name: null;
@@ -118,7 +409,7 @@ type WalletConnectionData =
       isHardwareWallet?: boolean;
     }
   | {
-      status: 'connecting';
+      status: "connecting";
       connected: false;
       publicKey: null;
       name: WalletName;
@@ -126,7 +417,7 @@ type WalletConnectionData =
       isHardwareWallet?: boolean;
     }
   | {
-      status: 'connected';
+      status: "connected";
       connected: true;
       publicKey: string;
       name: string;
@@ -134,7 +425,7 @@ type WalletConnectionData =
       isHardwareWallet?: boolean;
     }
   | {
-      status: 'wrong-network';
+      status: "wrong-network";
       connected: false;
       publicKey: null;
       name: string;
@@ -144,7 +435,7 @@ type WalletConnectionData =
       isHardwareWallet?: boolean;
     }
   | {
-      status: 'error';
+      status: "error";
       connected: false;
       publicKey: null;
       name: string | null;
@@ -153,10 +444,21 @@ type WalletConnectionData =
     };
 
 type WalletMachineState =
-  | { status: 'disconnected'; adapter: null; error: null; isHardwareWallet?: boolean }
-  | { status: 'connecting'; adapter: null; wallet: WalletName; error: null; isHardwareWallet?: boolean }
   | {
-      status: 'connected';
+      status: "disconnected";
+      adapter: null;
+      error: null;
+      isHardwareWallet?: boolean;
+    }
+  | {
+      status: "connecting";
+      adapter: null;
+      wallet: WalletName;
+      error: null;
+      isHardwareWallet?: boolean;
+    }
+  | {
+      status: "connected";
       adapter: WalletAdapter;
       wallet: WalletName;
       publicKey: string;
@@ -164,7 +466,7 @@ type WalletMachineState =
       isHardwareWallet?: boolean;
     }
   | {
-      status: 'wrong-network';
+      status: "wrong-network";
       adapter: WalletAdapter;
       wallet: WalletName;
       expectedNetworkPassphrase: string;
@@ -172,29 +474,40 @@ type WalletMachineState =
       error: Error;
       isHardwareWallet?: boolean;
     }
-  | { status: 'error'; adapter: WalletAdapter | null; wallet: WalletName | null; error: Error; isHardwareWallet?: boolean };
+  | {
+      status: "error";
+      adapter: WalletAdapter | null;
+      wallet: WalletName | null;
+      error: Error;
+      isHardwareWallet?: boolean;
+    };
 
 type WalletMachineAction =
-  | { type: 'connecting'; wallet: WalletName }
+  | { type: "connecting"; wallet: WalletName }
   | {
-      type: 'connected';
+      type: "connected";
       wallet: WalletName;
       adapter: WalletAdapter;
       publicKey: string;
       isHardwareWallet?: boolean;
     }
   | {
-      type: 'wrong-network';
+      type: "wrong-network";
       wallet: WalletName;
       adapter: WalletAdapter;
       expectedNetworkPassphrase: string;
       actualNetworkPassphrase: string;
     }
-  | { type: 'error'; wallet: WalletName | null; adapter?: WalletAdapter | null; error: Error }
-  | { type: 'disconnected' };
+  | {
+      type: "error";
+      wallet: WalletName | null;
+      adapter?: WalletAdapter | null;
+      error: Error;
+    }
+  | { type: "disconnected" };
 
 const disconnectedState: WalletMachineState = {
-  status: 'disconnected',
+  status: "disconnected",
   adapter: null,
   error: null,
   isHardwareWallet: false,
@@ -205,20 +518,26 @@ function walletReducer(
   action: WalletMachineAction,
 ): WalletMachineState {
   switch (action.type) {
-    case 'connecting':
-      return { status: 'connecting', adapter: null, wallet: action.wallet, error: null, isHardwareWallet: false };
-    case 'connected':
+    case "connecting":
       return {
-        status: 'connected',
+        status: "connecting",
+        adapter: null,
+        wallet: action.wallet,
+        error: null,
+        isHardwareWallet: false,
+      };
+    case "connected":
+      return {
+        status: "connected",
         adapter: action.adapter,
         wallet: action.wallet,
         publicKey: action.publicKey,
         error: null,
         isHardwareWallet: Boolean(action.isHardwareWallet),
       };
-    case 'wrong-network':
+    case "wrong-network":
       return {
-        status: 'wrong-network',
+        status: "wrong-network",
         adapter: action.adapter,
         wallet: action.wallet,
         expectedNetworkPassphrase: action.expectedNetworkPassphrase,
@@ -227,14 +546,14 @@ function walletReducer(
           `Wallet is connected to a different Stellar network. Expected "${action.expectedNetworkPassphrase}" but received "${action.actualNetworkPassphrase}".`,
         ),
       };
-    case 'error':
+    case "error":
       return {
-        status: 'error',
+        status: "error",
         adapter: action.adapter ?? null,
         wallet: action.wallet,
         error: action.error,
       };
-    case 'disconnected':
+    case "disconnected":
       return disconnectedState;
   }
 }
@@ -266,10 +585,12 @@ export async function signWithHardwareTimeout<T>(
 ): Promise<T> {
   const {
     isHardwareWallet = false,
-    timeoutMs = isHardwareWallet ? HARDWARE_SIGNATURE_TIMEOUT_MS : DEFAULT_SIGNATURE_TIMEOUT_MS,
+    timeoutMs = isHardwareWallet
+      ? HARDWARE_SIGNATURE_TIMEOUT_MS
+      : DEFAULT_SIGNATURE_TIMEOUT_MS,
     timeoutMessage = isHardwareWallet
-      ? 'Confirm on Ledger device timed out. Please ensure your device is connected, unlocked, and the Stellar app is open.'
-      : 'Signature request timed out.',
+      ? "Confirm on Ledger device timed out. Please ensure your device is connected, unlocked, and the Stellar app is open."
+      : "Signature request timed out.",
   } = options;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -293,14 +614,20 @@ export interface WalletConnectionActions {
   /** Disconnect the current wallet and clear the client's signer. */
   disconnect: () => Promise<void>;
   /** Helper to execute signing with appropriate hardware/software timeout. */
-  signWithTimeout?: <T>(signAction: () => Promise<T>, customTimeoutMs?: number) => Promise<T>;
+  signWithTimeout?: <T>(
+    signAction: () => Promise<T>,
+    customTimeoutMs?: number,
+  ) => Promise<T>;
 }
 
 /** Full discriminated wallet state and actions returned by {@link useWallet}. */
 export type WalletConnectionState = WalletConnectionData &
   WalletConnectionActions & {
     isHardwareWallet: boolean;
-    signWithTimeout: <T>(signAction: () => Promise<T>, customTimeoutMs?: number) => Promise<T>;
+    signWithTimeout: <T>(
+      signAction: () => Promise<T>,
+      customTimeoutMs?: number,
+    ) => Promise<T>;
   };
 
 interface WalletContextType extends WalletConnectionActions {
@@ -339,7 +666,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 }) => {
   const { client, vaultClient, networkPassphrase } = useContext(bcForgeContext);
   if (!client || !networkPassphrase) {
-    throw new Error('WalletProvider must be used within a BcForgeProvider');
+    throw new Error("WalletProvider must be used within a BcForgeProvider");
   }
 
   const [state, dispatch] = useReducer(walletReducer, disconnectedState);
@@ -360,13 +687,15 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
         vaultClient?.setWalletAdapter(undefined);
       }
       activeAdapter.current = null;
-      dispatch({ type: 'connecting', wallet });
+      dispatch({ type: "connecting", wallet });
 
       let adapter: WalletAdapter | null = null;
       try {
         adapter =
           adapterFactories?.[wallet]?.() ??
-          (wallet === 'freighter' ? new FreighterAdapter() : new AlbedoAdapter());
+          (wallet === "freighter"
+            ? new FreighterAdapter()
+            : new AlbedoAdapter());
         activeAdapter.current = adapter;
         await adapter.connect();
         if (attempt !== connectAttempt.current) {
@@ -375,15 +704,20 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
         }
 
         if (!adapter.connected || !adapter.publicKey) {
-          throw new Error(`${wallet} did not return a connected account and public key`);
+          throw new Error(
+            `${wallet} did not return a connected account and public key`,
+          );
         }
 
         const actualNetworkPassphrase = adapter.networkPassphrase;
-        if (actualNetworkPassphrase && actualNetworkPassphrase !== networkPassphrase) {
+        if (
+          actualNetworkPassphrase &&
+          actualNetworkPassphrase !== networkPassphrase
+        ) {
           client.setWalletAdapter(undefined);
           vaultClient?.setWalletAdapter(undefined);
           dispatch({
-            type: 'wrong-network',
+            type: "wrong-network",
             wallet,
             adapter,
             expectedNetworkPassphrase: networkPassphrase,
@@ -394,17 +728,21 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 
         let isHardwareWallet = false;
         try {
-          if (typeof (adapter as any)?.isHardwareWallet === 'boolean') {
+          if (typeof (adapter as any)?.isHardwareWallet === "boolean") {
             isHardwareWallet = (adapter as any).isHardwareWallet;
-          } else if (typeof (adapter as any)?.isHardwareWallet === 'function') {
-            isHardwareWallet = Boolean(await (adapter as any).isHardwareWallet());
-          } else if (wallet === 'freighter') {
+          } else if (typeof (adapter as any)?.isHardwareWallet === "function") {
+            isHardwareWallet = Boolean(
+              await (adapter as any).isHardwareWallet(),
+            );
+          } else if (wallet === "freighter") {
             const api = (globalThis as any).freighter;
-            if (typeof api?.isHardwareWallet === 'function') {
+            if (typeof api?.isHardwareWallet === "function") {
               isHardwareWallet = Boolean(await api.isHardwareWallet());
-            } else if (typeof api?.getUserInfo === 'function') {
+            } else if (typeof api?.getUserInfo === "function") {
               const info = await api.getUserInfo();
-              isHardwareWallet = Boolean(info?.isHardwareWallet || info?.hardwareWallet);
+              isHardwareWallet = Boolean(
+                info?.isHardwareWallet || info?.hardwareWallet,
+              );
             }
           }
         } catch {
@@ -413,14 +751,20 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 
         client.setWalletAdapter(adapter);
         vaultClient?.setWalletAdapter(adapter);
-        dispatch({ type: 'connected', wallet, adapter, publicKey: adapter.publicKey, isHardwareWallet });
+        dispatch({
+          type: "connected",
+          wallet,
+          adapter,
+          publicKey: adapter.publicKey,
+          isHardwareWallet,
+        });
       } catch (err) {
         if (attempt !== connectAttempt.current) return;
         client.setWalletAdapter(undefined);
         vaultClient?.setWalletAdapter(undefined);
         activeAdapter.current = adapter;
         dispatch({
-          type: 'error',
+          type: "error",
           wallet,
           adapter,
           error: err instanceof Error ? err : new Error(String(err)),
@@ -439,9 +783,11 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
       vaultClient?.getWalletAdapter() ??
       null;
     const wallet =
-      state.status === 'connected' || state.status === 'wrong-network' || state.status === 'connecting'
+      state.status === "connected" ||
+      state.status === "wrong-network" ||
+      state.status === "connecting"
         ? state.wallet
-        : state.status === 'error'
+        : state.status === "error"
           ? state.wallet
           : null;
 
@@ -449,14 +795,14 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
     client.setWalletAdapter(undefined);
     vaultClient?.setWalletAdapter(undefined);
     activeAdapter.current = null;
-    dispatch({ type: 'disconnected' });
+    dispatch({ type: "disconnected" });
 
     try {
       await adapter?.disconnect();
     } catch (err) {
       if (attempt !== connectAttempt.current) return;
       dispatch({
-        type: 'error',
+        type: "error",
         wallet,
         adapter,
         error: err instanceof Error ? err : new Error(String(err)),
@@ -468,16 +814,21 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
     () => ({
       state,
       adapter: state.adapter,
-      connected: state.status === 'connected',
-      publicKey: state.status === 'connected' ? state.publicKey : null,
-      error: state.status === 'error' || state.status === 'wrong-network' ? state.error : null,
+      connected: state.status === "connected",
+      publicKey: state.status === "connected" ? state.publicKey : null,
+      error:
+        state.status === "error" || state.status === "wrong-network"
+          ? state.error
+          : null,
       connect,
       disconnect,
     }),
     [state, connect, disconnect],
   );
 
-  return <walletContext.Provider value={value}>{children}</walletContext.Provider>;
+  return (
+    <walletContext.Provider value={value}>{children}</walletContext.Provider>
+  );
 };
 
 /** Access the wallet connection state provided by {@link WalletProvider}. */
@@ -495,31 +846,34 @@ export type WalletConnection = WalletConnectionState;
 export function useWallet(): WalletConnection {
   const { client, vaultClient, networkPassphrase } = useContext(bcForgeContext);
   const context = useContext(walletContext);
-  const fallbackAdapter = context.state.status === 'disconnected'
-    ? client?.getWalletAdapter?.() ?? vaultClient?.getWalletAdapter() ?? null
-    : null;
+  const fallbackAdapter =
+    context.state.status === "disconnected"
+      ? (client?.getWalletAdapter?.() ??
+        vaultClient?.getWalletAdapter() ??
+        null)
+      : null;
   const adapter = context.adapter ?? fallbackAdapter;
 
   let state: WalletConnectionData;
-  if (context.state.status === 'connecting') {
+  if (context.state.status === "connecting") {
     state = {
-      status: 'connecting',
+      status: "connecting",
       connected: false,
       publicKey: null,
       name: context.state.wallet,
       error: null,
     };
-  } else if (context.state.status === 'error') {
+  } else if (context.state.status === "error") {
     state = {
-      status: 'error',
+      status: "error",
       connected: false,
       publicKey: null,
       name: context.state.wallet,
       error: context.state.error,
     };
-  } else if (context.state.status === 'wrong-network') {
+  } else if (context.state.status === "wrong-network") {
     state = {
-      status: 'wrong-network',
+      status: "wrong-network",
       connected: false,
       publicKey: null,
       name: context.state.adapter.name,
@@ -534,9 +888,11 @@ export function useWallet(): WalletConnection {
       networkPassphrase &&
       actualNetworkPassphrase !== networkPassphrase
     ) {
-      const error = new Error('Wallet is connected to a different Stellar network.');
+      const error = new Error(
+        "Wallet is connected to a different Stellar network.",
+      );
       state = {
-        status: 'wrong-network',
+        status: "wrong-network",
         connected: false,
         publicKey: null,
         name: adapter.name,
@@ -546,16 +902,16 @@ export function useWallet(): WalletConnection {
       };
     } else {
       state = {
-        status: 'connected',
+        status: "connected",
         connected: true,
         publicKey: adapter.publicKey,
         name: adapter.name,
         error: null,
       };
     }
-  } else if (context.state.status === 'disconnected') {
+  } else if (context.state.status === "disconnected") {
     state = {
-      status: 'disconnected',
+      status: "disconnected",
       connected: false,
       publicKey: null,
       name: null,
@@ -563,7 +919,7 @@ export function useWallet(): WalletConnection {
     };
   } else {
     state = {
-      status: 'disconnected',
+      status: "disconnected",
       connected: false,
       publicKey: null,
       name: null,
@@ -572,8 +928,8 @@ export function useWallet(): WalletConnection {
   }
 
   const isHardwareWallet = Boolean(
-    (context.state.status === 'connected' && context.state.isHardwareWallet) ||
-      (adapter as any)?.isHardwareWallet,
+    (context.state.status === "connected" && context.state.isHardwareWallet) ||
+    (adapter as any)?.isHardwareWallet,
   );
 
   const signWithTimeout = useCallback(

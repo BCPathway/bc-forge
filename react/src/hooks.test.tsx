@@ -1,5 +1,5 @@
-import "@testing-library/jest-dom";
 // SPDX-License-Identifier: MIT
+import "@testing-library/jest-dom";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { bcForgeClient } from "@bc-forge/sdk";
 

@@ -11,7 +11,8 @@
   "dependencies": {
     "@bc-forge/sdk": "*",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@stellar/stellar-sdk": "^16.0.1",

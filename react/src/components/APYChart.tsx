@@ -226,7 +226,12 @@ export const APYChart: React.FC<APYChartProps> = ({
   }
 
   const { min, max } = extent(usable.map((p) => p.value));
+  const first = usable[0];
   const latest = usable[usable.length - 1];
+  // Unreachable: a zero-length series already returned the empty state above.
+  // Narrowing here keeps the reads below honest under `noUncheckedIndexedAccess`.
+  if (first === undefined || latest === undefined) return null;
+
   const { polyline, yForValue, xForIndex } = toPolyline(usable, width, height);
   const areaPath = toAreaPath(polyline, usable, width, height);
   const summary = `${title}: ${usable.length} point${usable.length === 1 ? '' : 's'} from ${formatValue(
@@ -262,9 +267,9 @@ export const APYChart: React.FC<APYChartProps> = ({
         {usable.length === 1 ? (
           <line
             x1={PLOT_PADDING}
-            y1={yForValue(usable[0].value)}
+            y1={yForValue(first.value)}
             x2={width - PLOT_PADDING}
-            y2={yForValue(usable[0].value)}
+            y2={yForValue(first.value)}
             stroke="#2563eb"
             strokeWidth={2}
             strokeLinecap="round"
@@ -298,7 +303,7 @@ export const APYChart: React.FC<APYChartProps> = ({
       </div>
 
       <div style={{ ...CAPTION_STYLE, fontSize: 11 }}>
-        <span>{usable[0].label}</span>
+        <span>{first.label}</span>
         {shouldFetch ? (
           <button
             type="button"
