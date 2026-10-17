@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import React from 'react';
 
 const links = [
@@ -10,13 +11,17 @@ const links = [
 ];
 
 export const Nav: React.FC = () => (
-  <nav aria-label="Demo screens" data-testid="demo-nav">
+  <nav
+    aria-label="Demo screens"
+    data-testid="demo-nav"
+    className="mt-4 flex flex-wrap gap-4"
+  >
     {links.map(({ href, label }) => (
       <a
         key={href}
         href={href}
-        style={{ marginRight: 16 }}
         data-testid={`nav-${label.toLowerCase()}`}
+        className="rounded-glass px-2 py-1 font-medium text-[var(--bc-brand-primary)] underline underline-offset-4 hover:text-[var(--bc-brand-primary-hover)]"
       >
         {label}
       </a>

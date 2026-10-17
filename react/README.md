@@ -75,6 +75,76 @@ function Balance({ address }: { address: string }) {
 
 `useBalance` reads the token balance through the SDK client created by the provider.
 
+## Theme (#1141)
+
+`ThemeProvider` manages the `light` / `dark` / `system` preference, persists the
+explicit choice to `localStorage`, follows `prefers-color-scheme` while the
+preference is `system`, and keeps other tabs of the same origin in sync through
+the `storage` event.
+
+```tsx
+import { ThemeProvider, ThemeScript, useTheme } from '@bc-forge/react';
+
+export function App({ children }: { children: React.ReactNode }) {
+  return (
+    <ThemeProvider defaultTheme="system">
+      <ThemeToggle />
+      {children}
+    </ThemeProvider>
+  );
+}
+
+function ThemeToggle() {
+  const { resolvedTheme, toggleTheme } = useTheme();
+  return <button onClick={toggleTheme}>Use {resolvedTheme === 'dark' ? 'light' : 'dark'}</button>;
+}
+```
+
+On mount the provider writes the `dark` class, `data-theme`, `color-scheme` and
+every `--bc-*` custom property onto `<html>`, and restores the previous values
+when it unmounts. It is safe during SSR and in browsers without
+`localStorage` or `matchMedia` — both degrade to the light default rather than
+throwing.
+
+**Avoid a flash of the wrong theme.** React cannot run before the browser has
+already parsed the document, so render `<ThemeScript />` (or inline
+`createThemeScript()`) in `<head>`. It is a few hundred bytes of dependency-free
+JavaScript that applies the stored theme before the first paint; both it and the
+provider must use the same `storageKey` (default `bc-forge-theme`).
+
+| Prop          | Type                | Default             | Description                                        |
+| ------------- | ------------------- | ------------------- | -------------------------------------------------- |
+| `children`    | `React.ReactNode`   | —                   | The tree that inherits the theme.                   |
+| `defaultTheme`| `'light' \| 'dark' \| 'system'` | `'system'` | Used when `localStorage` holds nothing.  |
+| `storageKey`  | `string`            | `'bc-forge-theme'`  | Where the preference is persisted.                  |
+
+`useTheme()` returns `{ theme, resolvedTheme, isSystem, setTheme, toggleTheme }`
+and falls back to sensible defaults outside a provider instead of throwing.
+
+## Design tokens (#1140)
+
+`react/src/theme.ts` exports the original `theme` object — unchanged, and still
+what the shipped components read — plus a design-token layer that one
+declaration feeds to all three consumers: React inline styles, a `style`
+attribute, and a CSS custom property.
+
+```ts
+import {
+  designTokens,       // token id -> { name, value, darkValue, cssVariable, contrast, … }
+  cssVariables,       // token id -> '--bc-…' custom property name
+  cssVariableName,    // 'brand-primary' -> '--bc-brand-primary'
+  cssVariablesFor,    // (scheme) -> { '--bc-…': value }
+  designTokenStyle,   // (scheme) -> spreadable into a React style prop
+  designTokenValue,   // (id, scheme) -> a single value
+  designTokenNames,   // every token id, in declaration order
+  designTokenContrast,// token id -> documented WCAG ratio
+} from '@bc-forge/react';
+```
+
+Every text/background pair is annotated with its WCAG 2.1 contrast ratio on the
+token itself. Body text pairs are AAA; `border` is a decorative divider and is
+never the only boundary (WCAG 1.4.11).
+
 ## Exports
 
 Everything re-exported from `react/src/index.ts` is public. The names below are the hooks, components, and screens.
@@ -87,6 +157,18 @@ Hooks and client access:
 - `useTokenMetadata`, `clearTokenMetadataCache`, `useBcForgeToken`, `useBalance`, `useMint`, `useTotalSupply`, `useTransfer`
 - `useApprove`, `useBurn`, `useAllowance`
 - `useVaultDeposit`, `useVaultShareBalance`, `useProposalVote`, `useProposalVoting`
+
+Theme:
+
+- `ThemeProvider`, `ThemeScript`, `useTheme`, `ThemeContext`
+- `createThemeScript`, `resolveTheme`, `readStoredTheme`, `storeTheme`
+- `DEFAULT_THEME_STORAGE_KEY`, `DARK_CLASS`, `THEME_ATTRIBUTE`
+
+Design tokens (`react/src/theme.ts`):
+
+- `theme`, `designTokens`, `cssVariables`, `cssVariableName`
+- `cssVariablesFor`, `designTokenStyle`, `designTokenValue`
+- `designTokenNames`, `designTokenContrast`
 
 Components:
 

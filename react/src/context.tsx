@@ -19,6 +19,34 @@ import {
 import type { WalletAdapter } from '@bc-forge/sdk';
 import { truncateMiddle } from './utils';
 
+// ─── Theme (#1141) ──────────────────────────────────────────────────────────
+//
+// `ThemeProvider` lives in `./theme/ThemeProvider` so the light/dark logic stays
+// in one self-contained, independently testable module. It is re-exported here
+// because `context.tsx` is this package's documented entry point for React
+// context providers: every provider a consumer needs should be reachable from
+// one place, and `./context` is already re-exported by `src/index.ts`.
+export {
+  DARK_CLASS,
+  DEFAULT_THEME_STORAGE_KEY,
+  THEME_ATTRIBUTE,
+  ThemeContext,
+  ThemeProvider,
+  ThemeScript,
+  createThemeScript,
+  readStoredTheme,
+  resolveTheme,
+  storeTheme,
+  useTheme,
+} from './theme/ThemeProvider';
+export type {
+  ResolvedTheme,
+  Theme,
+  ThemeContextValue,
+  ThemeProviderProps,
+  ThemeScriptProps,
+} from './theme/ThemeProvider';
+
 interface BcForgeContextType {
   client: bcForgeClient | null;
   vaultClient: VaultClient | null;
