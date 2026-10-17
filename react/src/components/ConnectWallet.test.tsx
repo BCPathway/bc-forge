@@ -87,6 +87,11 @@ const renderConnected = () =>
 describe('ConnectWallet', () => {
   beforeEach(() => {
     mockSetWalletAdapter.mockClear();
+    // A successful connect persists the wallet so a reload can restore it
+    // (#1172), and jsdom keeps one `localStorage` for the whole file. A session
+    // left by an earlier test would be silently reconnected on mount and push
+    // `setWalletAdapter` past the single-call assertions below.
+    localStorage.clear();
   });
 
   it('calls client.setWalletAdapter with the Freighter adapter and exposes the public key', async () => {
