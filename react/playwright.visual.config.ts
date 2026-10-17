@@ -17,7 +17,16 @@ export default defineConfig({
       animations: 'disabled',
       caret: 'hide',
       scale: 'css',
-      maxDiffPixels: 0,
+      // `threshold: 0` keeps every pixel strict — any real colour shift in a
+      // single pixel still fails. `maxDiffPixels` only absorbs the handful of
+      // stray pixels Chromium re-rasterises between runs: anti-aliasing on
+      // `border-radius` corners is not bit-reproducible on the pinned Playwright
+      // image, and it drifts with no code change at all (regenerating the
+      // baselines moved `products-mintform--ready` by 48px and
+      // `products-vaultdepositwidget--ready` by 2px). The budget is roughly 3x
+      // that observed noise floor, still ~2 orders of magnitude below a real
+      // regression: a moved or recoloured element moves thousands of pixels.
+      maxDiffPixels: 150,
       threshold: 0,
     },
   },
