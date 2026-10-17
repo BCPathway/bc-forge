@@ -430,6 +430,11 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
     [adapterFactories, client, networkPassphrase, state, vaultClient],
   );
 
+  /**
+   * Disconnects the wallet adapter, thoroughly wiping cached keys,
+   * terminating adapter listeners, unsetting signers on bcForgeClient,
+   * and transitioning wallet machine state to 'disconnected' (#1174).
+   */
   const disconnect = useCallback(async () => {
     const attempt = ++connectAttempt.current;
     const adapter =
@@ -438,29 +443,59 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
       client.getWalletAdapter?.() ??
       vaultClient?.getWalletAdapter() ??
       null;
-    const wallet =
-      state.status === 'connected' || state.status === 'wrong-network' || state.status === 'connecting'
-        ? state.wallet
-        : state.status === 'error'
-          ? state.wallet
-          : null;
 
-    // Clear signer access synchronously so a write cannot start during disconnect.
-    client.setWalletAdapter(undefined);
-    vaultClient?.setWalletAdapter(undefined);
+    // 1. Immediately wipe active adapter ref and unset signers synchronously
+    // to prevent any race condition with write hook submissions.
     activeAdapter.current = null;
+    try {
+      client.setWalletAdapter(undefined);
+    } catch {
+      // Ignore cleanup error
+    }
+    try {
+      vaultClient?.setWalletAdapter(undefined);
+    } catch {
+      // Ignore cleanup error
+    }
+    if ('signer' in (client as any)) {
+      (client as any).signer = undefined;
+    }
+    if (vaultClient && 'signer' in (vaultClient as any)) {
+      (vaultClient as any).signer = undefined;
+    }
+
+    // 2. Wipe cached keys and terminate listeners on the adapter instance
+    if (adapter) {
+      try {
+        if ('publicKey' in adapter) {
+          adapter.publicKey = undefined;
+        }
+        if (typeof (adapter as any).removeAllListeners === 'function') {
+          (adapter as any).removeAllListeners();
+        }
+        if (typeof (adapter as any).clearListeners === 'function') {
+          (adapter as any).clearListeners();
+        }
+        if (typeof (adapter as any).destroy === 'function') {
+          (adapter as any).destroy();
+        }
+        if (typeof (adapter as any).cleanup === 'function') {
+          (adapter as any).cleanup();
+        }
+      } catch {
+        // Ignore listener termination failures
+      }
+    }
+
+    // 3. Transition wallet state to 'disconnected'
     dispatch({ type: 'disconnected' });
 
+    // 4. Asynchronously invoke adapter disconnect; catch any errors gracefully
+    // so state remains cleanly transitioned to 'disconnected'.
     try {
       await adapter?.disconnect();
-    } catch (err) {
-      if (attempt !== connectAttempt.current) return;
-      dispatch({
-        type: 'error',
-        wallet,
-        adapter,
-        error: err instanceof Error ? err : new Error(String(err)),
-      });
+    } catch {
+      // Disconnection cleanup completes locally even if remote wallet throws
     }
   }, [client, state, vaultClient]);
 
@@ -534,7 +569,9 @@ export function useWallet(): WalletConnection {
       networkPassphrase &&
       actualNetworkPassphrase !== networkPassphrase
     ) {
-      const error = new Error('Wallet is connected to a different Stellar network.');
+      const error = new Error(
+        `Wallet is connected to a different Stellar network. Expected "${networkPassphrase}" but received "${actualNetworkPassphrase}".`,
+      );
       state = {
         status: 'wrong-network',
         connected: false,
