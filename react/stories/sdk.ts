@@ -13,6 +13,17 @@ const result: TransactionResult = {
   hash: "STORYBOOK_TRANSACTION_952",
 };
 
+export enum Role {
+  Admin = "Admin",
+  SuperAdmin = "SuperAdmin",
+  Minter = "Minter",
+  Pauser = "Pauser",
+}
+
+export function parseContractError(): Error | null {
+  return null;
+}
+
 /** Storybook-only SDK boundary: no transport or signing implementation. */
 export class bcForgeClient {
   private adapter?: WalletAdapter;
@@ -33,6 +44,28 @@ export class bcForgeClient {
   async mint() {
     return result;
   }
+  async getBalance() {
+    return 0n;
+  }
+  async getDecimals() {
+    return 7;
+  }
+  async getAllowance() {
+    return 0n;
+  }
+  async hasRole() {
+    return false;
+  }
+  async approve() {
+    return result;
+  }
+  async transfer() {
+    return result;
+  }
+  async burn() {
+    return result;
+  }
+  clearCache() {}
 }
 
 export class VaultClient {
