@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import React, { useEffect } from 'react';
 
-import { truncateMiddle } from '../utils';
+import { parseWalletError, truncateMiddle } from '../utils';
 
 /** Lifecycle of the transaction a {@link TransactionToast} reports on. */
 export type TransactionToastStatus = 'pending' | 'success' | 'error';
@@ -30,6 +30,12 @@ export interface TransactionToastProps extends Omit<React.HTMLAttributes<HTMLDiv
   onDismiss?: () => void;
   /** Accessible label for the dismiss button. @default 'Dismiss notification' */
   dismissLabel?: string;
+  /**
+   * Whether the transaction is currently awaiting signature verification on a
+   * hardware wallet (e.g. Ledger). When `true` and `status === 'pending'`, displays
+   * 'Confirm on Ledger device'.
+   */
+  isHardwareWallet?: boolean;
 }
 
 const STATUS_STYLES: Record<TransactionToastStatus, React.CSSProperties> = {
@@ -50,13 +56,18 @@ const SPINNER: React.CSSProperties = {
   borderTopColor: 'transparent',
 };
 
-function messageFor(status: TransactionToastStatus, error?: string | Error | null): string {
+function messageFor(
+  status: TransactionToastStatus,
+  error?: string | Error | null,
+  isHardwareWallet?: boolean,
+): string {
   // `error` describes the failure only; pending and success keep their own copy.
   if (status === 'error') {
     if (!error) return FALLBACK_ERROR_MESSAGE;
-    return error instanceof Error ? error.message : error;
+    return parseWalletError(error);
   }
   if (status === 'success') return 'Transaction confirmed.';
+  if (isHardwareWallet) return 'Confirm on Ledger device';
   return 'Submitting transaction…';
 }
 
@@ -78,6 +89,7 @@ export const TransactionToast: React.FC<TransactionToastProps> = ({
   autoDismissMs,
   onDismiss,
   dismissLabel = 'Dismiss notification',
+  isHardwareWallet = false,
   style,
   children,
   ...rest
@@ -116,7 +128,7 @@ export const TransactionToast: React.FC<TransactionToastProps> = ({
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {label ? <div style={{ fontWeight: 700 }}>{label}</div> : null}
-        <div data-testid="transaction-toast-message">{messageFor(status, error)}</div>
+        <div data-testid="transaction-toast-message">{messageFor(status, error, isHardwareWallet)}</div>
         {children}
         {hash ? (
           <div style={{ marginTop: 4, fontSize: 12, wordBreak: 'break-all' }}>

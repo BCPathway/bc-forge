@@ -254,8 +254,8 @@ describe('Product components (#950)', () => {
       render(<ProposalVotingPanel proposals={proposals} />);
 
       expect(screen.getByRole('alert')).toHaveTextContent('SDK unavailable');
-      screen.getAllByRole('button', { name: 'Approve' }).forEach((b) => expect(b).toBeDisabled());
-      screen.getAllByRole('button', { name: 'Execute' }).forEach((b) => expect(b).toBeDisabled());
+      screen.getAllByRole('button', { name: 'Approve' }).forEach((b: HTMLElement) => expect(b).toBeDisabled());
+      screen.getAllByRole('button', { name: 'Execute' }).forEach((b: HTMLElement) => expect(b).toBeDisabled());
     });
 
     it('shows the empty message with no proposals', () => {

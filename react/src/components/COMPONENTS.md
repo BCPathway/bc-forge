@@ -49,6 +49,40 @@ provided the badge becomes a keyboard-focusable interactive control
 <Badge variant="warning" onClick={() => alert('clicked')}>Dismiss</Badge>
 ```
 
+## CopyToClipboard (#1159)
+
+Interactive button for copying Stellar public keys, contract addresses, and transaction hashes with animated transient 'Copied!' tooltip confirmation.
+
+| Prop             | Type                                     | Default                 | Description                                                    |
+| ---------------- | ---------------------------------------- | ----------------------- | -------------------------------------------------------------- |
+| `text`           | `string`                                 | — (required)            | Text to copy to clipboard.                                     |
+| `label`          | `string`                                 | `'Copy to clipboard'`   | Button label and accessible text.                              |
+| `successMessage` | `string`                                 | `'Copied!'`             | Transient feedback message.                                    |
+| `timeout`        | `number`                                 | `2000`                  | Duration in ms to display success feedback.                    |
+| `onCopy`         | `(text: string) => void`                 | —                       | Callback fired when copy succeeds.                             |
+| `onError`        | `(error: Error) => void`                 | —                       | Callback fired when copy fails.                                |
+
+```tsx
+<CopyToClipboard text="GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" />
+<CopyToClipboard text={txHash} label="Copy Hash" successMessage="Hash Copied!" />
+```
+
+## ConnectionStatusBar (#1183)
+
+Status bar displaying connected wallet name, network pill, and real-time Soroban RPC ping latency indicator (green < 500ms, yellow 500–1500ms, red > 1500ms or offline).
+
+| Prop             | Type                                     | Default                 | Description                                                    |
+| ---------------- | ---------------------------------------- | ----------------------- | -------------------------------------------------------------- |
+| `rpcUrl`         | `string`                                 | —                       | Optional RPC URL to ping.                                      |
+| `pingRpc`        | `() => Promise<number>`                  | —                       | Optional custom ping handler returning latency in ms.          |
+| `pingIntervalMs` | `number`                                 | `10000`                 | Interval in ms between latency checks (0 to disable).          |
+| `onLatencyChange`| `(latency: number \| null) => void`      | —                       | Callback fired when latency updates.                           |
+
+```tsx
+<ConnectionStatusBar />
+<ConnectionStatusBar pingIntervalMs={15000} />
+```
+
 ## Product components (#950)
 
 These build on the SDK rather than raw RPC: mint and vault writes go through
@@ -66,13 +100,15 @@ Reports one transaction's lifecycle. `pending` and `success` render
 `role="status"`, `error` renders `role="alert"`, so a failure is announced
 assertively and progress politely.
 
-| Prop            | Type                                | Default                 | Description                                                    |
-| --------------- | ----------------------------------- | ----------------------- | -------------------------------------------------------------- |
-| `status`        | `'pending' \| 'success' \| 'error'` | `'pending'`             | Transaction state.                                             |
-| `hash`          | `string`                            | —                       | Rendered in full so it stays copyable.                         |
-| `error`         | `string \| Error`                   | —                       | Failure text; only shown for `status="error"`.                 |
-| `label`         | `string`                            | —                       | Operation name, e.g. `'Mint'`.                                 |
-| `explorerUrl`   | `string`                            | —                       | Explorer base URL; the hash is appended as a link.             |
+| Prop             | Type                                | Default                 | Description                                                    |
+| ---------------- | ----------------------------------- | ----------------------- | -------------------------------------------------------------- |
+| `status`         | `'pending' \| 'success' \| 'error'` | `'pending'`             | Transaction state.                                             |
+| `hash`           | `string`                            | —                       | Rendered in full so it stays copyable.                         |
+| `error`          | `string \| Error`                   | —                       | Failure text; only shown for `status="error"`.                 |
+| `label`          | `string`                            | —                       | Operation name, e.g. `'Mint'`.                                 |
+| `explorerUrl`    | `string`                            | —                       | Explorer base URL; the hash is appended as a link.             |
+| `isHardwareWallet` | `boolean`                         | `false`                 | When true and pending, displays 'Confirm on Ledger device'.    |
+
 | `autoDismissMs` | `number`                            | —                       | Auto-dismiss delay; requires `onDismiss`.                      |
 | `onDismiss`     | `() => void`                        | —                       | Renders a dismiss button when set.                             |
 

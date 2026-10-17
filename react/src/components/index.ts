@@ -32,3 +32,10 @@ export type { ProposalVotingPanelProps, ProposalSummary, ProposalId } from './Pr
 
 export { TransactionToast } from './TransactionToast';
 export type { TransactionToastProps, TransactionToastStatus } from './TransactionToast';
+
+export { CopyToClipboard } from './CopyToClipboard';
+export type { CopyToClipboardProps } from './CopyToClipboard';
+
+export { ConnectionStatusBar, getNetworkName, getLatencyTier } from './ConnectionStatusBar';
+export type { ConnectionStatusBarProps, LatencyTier } from './ConnectionStatusBar';
+

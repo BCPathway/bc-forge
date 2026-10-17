@@ -11,6 +11,7 @@ describe('bcForgeClient balance formatting', () => {
       networkPassphrase: 'Test SDF Network ; September 2015',
       contractId: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
     });
+    client.setLedgerSequence(100);
 
     const queryContract = jest.fn(async (...args: unknown[]) => {
       const method = args[0] as string;
@@ -40,6 +41,7 @@ describe('bcForgeClient read-only mode', () => {
       networkPassphrase: 'Test SDF Network ; September 2015',
       contractId: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
     });
+    client.setLedgerSequence(100);
 
     const queryContract = jest.fn(async (...args: unknown[]) => {
       const method = args[0] as string;
@@ -65,6 +67,7 @@ describe('bcForgeClient read-only mode', () => {
     await expect(client.getName()).resolves.toBe('TestToken');
     await expect(client.getSymbol()).resolves.toBe('TST');
     await expect(client.getTotalSupply()).resolves.toBe(100000000n);
+    expect(client.getContractId()).toBe('CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526');
   });
 
   it('fails write operations with a typed SignerRequiredError when constructed without a wallet', async () => {
@@ -77,7 +80,9 @@ describe('bcForgeClient read-only mode', () => {
     const targetAddr = Keypair.random().publicKey();
 
     await expect(client.mint(targetAddr, 100n)).rejects.toThrow(SignerRequiredError);
-    await expect(client.transfer(targetAddr, Keypair.random().publicKey(), 50n)).rejects.toThrow(SignerRequiredError);
+    await expect(client.transfer(targetAddr, Keypair.random().publicKey(), 50n)).rejects.toThrow(
+      SignerRequiredError,
+    );
     await expect(client.burn(targetAddr, 10n)).rejects.toThrow(SignerRequiredError);
     await expect(client.pause()).rejects.toThrow(SignerRequiredError);
     await expect(client.unpause()).rejects.toThrow(SignerRequiredError);

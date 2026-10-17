@@ -27,8 +27,13 @@ export function parseContractError(): Error | null {
 /** Storybook-only SDK boundary: no transport or signing implementation. */
 export class bcForgeClient {
   private adapter?: WalletAdapter;
+  private contractId: string;
   constructor(config: bcForgeClientConfig) {
     this.adapter = config.walletAdapter;
+    this.contractId = config.contractId;
+  }
+  getContractId() {
+    return this.contractId;
   }
   setWalletAdapter(adapter?: WalletAdapter) {
     this.adapter = adapter;

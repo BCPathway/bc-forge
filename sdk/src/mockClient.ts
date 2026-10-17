@@ -4,7 +4,13 @@
  *
  * Allows frontend devs to test logic without a live Soroban RPC.
  */
-import { Role, type BatchMintRecipient, type bcForgeClientConfig, type RbacInitResult, type TransactionResult } from './client';
+import {
+  Role,
+  type BatchMintRecipient,
+  type bcForgeClientConfig,
+  type RbacInitResult,
+  type TransactionResult,
+} from './client';
 import { formatAtomicAmount } from './utils';
 
 interface AccountState {
@@ -21,8 +27,16 @@ export class MockBcForgeClient {
   private decimals: number = 7;
   private adminAddress: string = 'GADMIN0000000000000000000000000000000000000000000000000000';
   private linkedContracts: Record<string, string> = {};
+  private contractId: string;
 
-  constructor(_config: bcForgeClientConfig) {}
+  constructor(config?: bcForgeClientConfig) {
+    this.contractId =
+      config?.contractId ?? 'CMOCK000000000000000000000000000000000000000000000000000';
+  }
+
+  getContractId(): string {
+    return this.contractId;
+  }
 
   async getBalance(address: string): Promise<string> {
     return formatAtomicAmount(this.accounts[address]?.balance ?? 0n, this.decimals);

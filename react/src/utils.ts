@@ -99,3 +99,74 @@ export function truncateMiddle(
   if (value.length <= lead + tail) return value;
   return `${value.slice(0, lead)}${separator}${value.slice(-tail)}`;
 }
+
+/**
+ * Known error patterns and their user-friendly descriptions.
+ */
+const WALLET_ERROR_PATTERNS: Array<{ test: (msg: string) => boolean; message: string }> = [
+  {
+    // Matches Freighter, Albedo, and standard wallet rejection messages:
+    // "User declined", "User rejected", "User cancelled", "transaction was rejected", etc.
+    test: (msg) =>
+      /user\s*(declined|rejected|cancelled|canceled|denied)/i.test(msg) ||
+      /transaction\s*(was\s*)?(declined|rejected|cancelled|canceled)/i.test(msg) ||
+      /rejected\s*by\s*user/i.test(msg) ||
+      /declined\s*by\s*user/i.test(msg) ||
+      /signature\s*rejected/i.test(msg) ||
+      /request\s*rejected/i.test(msg),
+    message: 'Transaction cancelled by user',
+  },
+  {
+    test: (msg) =>
+      /not\s*connected|disconnected|no\s*wallet\s*connected|unauthenticated/i.test(msg),
+    message: 'Wallet is not connected. Please connect your wallet first.',
+  },
+  {
+    test: (msg) =>
+      /wrong\s*network|different\s*stellar\s*network|network\s*mismatch/i.test(msg),
+    message: 'Wallet is connected to a different Stellar network than expected.',
+  },
+  {
+    test: (msg) =>
+      /timeout|timed\s*out|network\s*error|econnrefused|failed\s*to\s*fetch/i.test(msg),
+    message: 'Network request timed out or failed. Please check your connection and try again.',
+  },
+  {
+    test: (msg) =>
+      /hardware\s*wallet|ledger.*(timed?\s*out|disconnected)/i.test(msg),
+    message: 'Hardware wallet confirmation timed out or device was disconnected.',
+  },
+];
+
+/**
+ * Parses arbitrary wallet, signature, network, and RPC errors into friendly UI descriptions.
+ * Intercepts user signature rejections (e.g. from Freighter, Albedo, or Ledger) and
+ * converts them to 'Transaction cancelled by user'.
+ *
+ * @param error - The caught error object, message string, or unknown thrown exception.
+ * @returns Human-readable, actionable error message suitable for toasts and alert dialogs.
+ */
+export function parseWalletError(error: unknown): string {
+  if (!error) return 'An unexpected error occurred.';
+
+  const rawMessage =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message: unknown }).message)
+          : String(error);
+
+  const trimmed = rawMessage.trim();
+  if (!trimmed) return 'An unexpected error occurred.';
+
+  for (const { test, message } of WALLET_ERROR_PATTERNS) {
+    if (test(trimmed)) {
+      return message;
+    }
+  }
+
+  return trimmed;
+}
+
