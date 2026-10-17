@@ -66,6 +66,10 @@ export class MockBcForgeClient {
     return this.adminAddress;
   }
 
+  async getRoleAdmin(_role: Role | string): Promise<string> {
+    return this.adminAddress;
+  }
+
   async setAdmin(admin: string): Promise<TransactionResult> {
     this.adminAddress = admin;
     return { success: true, hash: 'mock-hash', returnValue: null };

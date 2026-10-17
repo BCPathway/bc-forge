@@ -10,6 +10,9 @@ const mockClient = {
   getContractId: jest.fn(),
   getAllowance: jest.fn(),
   approveProposal: jest.fn(),
+  hasRole: jest.fn(),
+  getRoleAdmin: jest.fn(),
+  getAdmin: jest.fn(),
 };
 const mockVaultClient = {
   deposit: jest.fn(),
@@ -23,10 +26,24 @@ jest.mock("./context", () => ({
   useWallet: mockUseWallet,
 }));
 
+jest.mock("@bc-forge/sdk", () => ({
+  Role: {
+    Admin: "Admin",
+    SuperAdmin: "SuperAdmin",
+    Minter: "Minter",
+    Pauser: "Pauser",
+  },
+  bcForgeClient: jest.fn(),
+  VaultClient: jest.fn(),
+}));
+
 import {
   clearTokenMetadataCache,
+  Role,
   useAllowance,
   useProposalVote,
+  useRbacRoles,
+  useRoleAdmins,
   useTokenMetadata,
   useVaultDeposit,
 } from "./hooks";
@@ -294,5 +311,153 @@ describe("React client hooks", () => {
     });
 
     expect(mockClient.approveProposal).not.toHaveBeenCalled();
+  });
+
+  describe("useRbacRoles (#1187)", () => {
+    it("checks hasRole for Admin, SuperAdmin, Minter, and Pauser against target address", async () => {
+      mockClient.hasRole.mockImplementation((role: string, _addr: string) => {
+        if (role === Role.Admin || role === Role.SuperAdmin)
+          return Promise.resolve(true);
+        return Promise.resolve(false);
+      });
+
+      const { result } = renderHook(() => useRbacRoles("GACCOUNT123"));
+
+      expect(result.current.loading).toBe(true);
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.roles).toEqual({
+        [Role.Admin]: true,
+        [Role.SuperAdmin]: true,
+        [Role.Minter]: false,
+        [Role.Pauser]: false,
+      });
+      expect(result.current.data).toEqual(result.current.roles);
+      expect(result.current.error).toBeNull();
+      expect(mockClient.hasRole).toHaveBeenCalledWith(
+        Role.Admin,
+        "GACCOUNT123",
+      );
+      expect(mockClient.hasRole).toHaveBeenCalledWith(
+        Role.SuperAdmin,
+        "GACCOUNT123",
+      );
+      expect(mockClient.hasRole).toHaveBeenCalledWith(
+        Role.Minter,
+        "GACCOUNT123",
+      );
+      expect(mockClient.hasRole).toHaveBeenCalledWith(
+        Role.Pauser,
+        "GACCOUNT123",
+      );
+    });
+
+    it("returns default all-false roles without fetching when address is empty", async () => {
+      const { result } = renderHook(() => useRbacRoles("   "));
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.roles).toEqual({
+        [Role.Admin]: false,
+        [Role.SuperAdmin]: false,
+        [Role.Minter]: false,
+        [Role.Pauser]: false,
+      });
+      expect(mockClient.hasRole).not.toHaveBeenCalled();
+    });
+
+    it("supports manual refetch of role mapping", async () => {
+      mockClient.hasRole.mockResolvedValue(false);
+
+      const { result } = renderHook(() => useRbacRoles("GACCOUNT123"));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.roles[Role.Minter]).toBe(false);
+
+      mockClient.hasRole.mockImplementation((role: string) => {
+        if (role === Role.Minter) return Promise.resolve(true);
+        return Promise.resolve(false);
+      });
+
+      await act(async () => {
+        await result.current.refetch();
+      });
+
+      expect(result.current.roles[Role.Minter]).toBe(true);
+    });
+
+    it("handles RPC errors gracefully", async () => {
+      mockClient.hasRole.mockRejectedValueOnce(new Error("RPC Timeout"));
+
+      const { result } = renderHook(() => useRbacRoles("GACCOUNT123"));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.error?.message).toBe("RPC Timeout");
+    });
+  });
+
+  describe("useRoleAdmins (#1189)", () => {
+    it("queries role admin authorities and super admin accounts for governance introspection", async () => {
+      mockClient.getAdmin.mockResolvedValue("GADMIN123");
+      mockClient.getRoleAdmin.mockImplementation((role: string) => {
+        if (role === Role.Minter) return Promise.resolve("GMINTERADMIN");
+        return Promise.resolve("GADMIN123");
+      });
+      mockClient.hasRole.mockResolvedValue(true);
+
+      const { result } = renderHook(() =>
+        useRoleAdmins({ candidateAddresses: ["GSUPER1"] }),
+      );
+
+      expect(result.current.loading).toBe(true);
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.data).toContain("GADMIN123");
+      expect(result.current.data).toContain("GMINTERADMIN");
+      expect(result.current.data).toContain("GSUPER1");
+      expect(result.current.admins).toEqual(result.current.data);
+      expect(result.current.roleAdmins[Role.Minter]).toBe("GMINTERADMIN");
+      expect(result.current.superAdmins).toContain("GADMIN123");
+      expect(result.current.superAdmins).toContain("GSUPER1");
+      expect(result.current.error).toBeNull();
+    });
+
+    it("queries admin authority for a specific role", async () => {
+      mockClient.getAdmin.mockResolvedValue("GADMIN123");
+      mockClient.getRoleAdmin.mockResolvedValue("GPAUSERADMIN");
+
+      const { result } = renderHook(() => useRoleAdmins(Role.Pauser));
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.data).toContain("GPAUSERADMIN");
+      expect(result.current.roleAdmins[Role.Pauser]).toBe("GPAUSERADMIN");
+      expect(mockClient.getRoleAdmin).toHaveBeenCalledWith(Role.Pauser);
+    });
+
+    it("captures errors gracefully and provides refetch capability", async () => {
+      mockClient.getAdmin.mockRejectedValue(
+        new Error("RPC Network Failure"),
+      );
+      mockClient.getRoleAdmin.mockRejectedValue(
+        new Error("RPC Network Failure"),
+      );
+
+      const { result } = renderHook(() => useRoleAdmins());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.error?.message).toBe("RPC Network Failure");
+
+      mockClient.getAdmin.mockResolvedValue("GADMIN_RECOVERED");
+      mockClient.getRoleAdmin.mockResolvedValue("GADMIN_RECOVERED");
+
+      await act(async () => {
+        await result.current.refetch();
+      });
+
+      expect(result.current.data).toContain("GADMIN_RECOVERED");
+      expect(result.current.error).toBeNull();
+    });
   });
 });

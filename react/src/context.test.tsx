@@ -12,6 +12,12 @@ const mockVaultSetWalletAdapter = jest.fn();
 const mockVaultGetWalletAdapter = jest.fn();
 
 jest.mock('@bc-forge/sdk', () => ({
+  Role: {
+    Admin: 'Admin',
+    SuperAdmin: 'SuperAdmin',
+    Minter: 'Minter',
+    Pauser: 'Pauser',
+  },
   bcForgeClient: jest.fn().mockImplementation(() => ({
     setWalletAdapter: mockSetWalletAdapter,
     getWalletAdapter: mockGetWalletAdapter,
@@ -66,6 +72,7 @@ function WalletProbe() {
       <span data-testid="wallet-error">{wallet.error?.message ?? 'none'}</span>
       <span data-testid="write-error">{writeError || 'none'}</span>
       <button onClick={() => void wallet.connect('freighter')}>connect</button>
+      <button onClick={() => void wallet.disconnect()}>disconnect</button>
       <button
         onClick={() => {
           void mint('GDESTINATION', 1n).catch((error: Error) => setWriteError(error.message));
@@ -173,4 +180,54 @@ describe('wallet state machine', () => {
     });
     expect(mockMint).not.toHaveBeenCalled();
   });
+
+  it('disconnects wallet, transitions state to disconnected, unsets signer, and wipes keys (#1174)', async () => {
+    const adapter = createFakeAdapter();
+    renderWallet(adapter);
+
+    fireEvent.click(screen.getByRole('button', { name: 'connect' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('wallet-status')).toHaveTextContent('connected');
+    });
+    expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(adapter);
+
+    fireEvent.click(screen.getByRole('button', { name: 'disconnect' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('wallet-status')).toHaveTextContent('disconnected');
+    });
+    expect(screen.getByTestId('wallet-key')).toHaveTextContent('none');
+    expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(undefined);
+    expect(adapter.publicKey).toBeUndefined();
+
+    // Verify subsequent write attempt fails
+    fireEvent.click(screen.getByRole('button', { name: 'mint' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('write-error')).toHaveTextContent(
+        'Cannot submit a transaction while wallet status is "disconnected"',
+      );
+    });
+    expect(mockMint).not.toHaveBeenCalled();
+  });
+
+  it('terminates listeners and handles disconnect errors gracefully without breaking disconnected state (#1174)', async () => {
+    const removeAllListeners = jest.fn();
+    const adapter = createFakeAdapter();
+    (adapter as any).removeAllListeners = removeAllListeners;
+    adapter.disconnect = jest.fn().mockRejectedValue(new Error('Wallet window closed'));
+
+    renderWallet(adapter);
+
+    fireEvent.click(screen.getByRole('button', { name: 'connect' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('wallet-status')).toHaveTextContent('connected');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'disconnect' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('wallet-status')).toHaveTextContent('disconnected');
+    });
+    expect(removeAllListeners).toHaveBeenCalled();
+    expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(undefined);
+  });
 });
+

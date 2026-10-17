@@ -7,11 +7,14 @@ import {
   useWallet,
 } from "./context";
 import type { Keypair } from "@stellar/stellar-sdk";
-import type {
-  bcForgeClient,
-  TransactionResult,
-  VaultClient,
+import {
+  Role,
+  type bcForgeClient,
+  type TransactionResult,
+  type VaultClient,
 } from "@bc-forge/sdk";
+
+export { Role };
 
 /**
  * Hook to read the connected wallet state: adapter name, public key,
@@ -884,4 +887,448 @@ export function useProposalVoting() {
   );
 
   return { approve, execute, pendingId, error, available: client !== null };
+}
+
+// ─── RBAC Roles (#1187) ──────────────────────────────────────────────────────
+
+/**
+ * Record mapping each {@link Role} enum variant to boolean granted status.
+ */
+export type RbacRolesRecord = Record<Role, boolean>;
+
+/**
+ * Configuration options for {@link useRbacRoles}.
+ */
+export interface UseRbacRolesOptions {
+  /**
+   * Optional explicit {@link bcForgeClient} instance.
+   * When omitted, resolves the client from the nearest {@link BcForgeProvider}.
+   */
+  client?: bcForgeClient | null;
+  /**
+   * Whether automatic role fetching is enabled.
+   * @default true
+   */
+  enabled?: boolean;
+  /**
+   * Optional polling interval in milliseconds for periodic background refresh.
+   * Disabled when omitted or `<= 0`.
+   */
+  pollIntervalMs?: number;
+}
+
+/**
+ * Return value of {@link useRbacRoles}.
+ */
+export interface UseRbacRolesResult {
+  /** Record mapping each {@link Role} enum variant to whether it is granted to the address. */
+  roles: RbacRolesRecord;
+  /** Alias for roles record. */
+  data: RbacRolesRecord | null;
+  /** `true` while an RPC role query is in flight. */
+  loading: boolean;
+  /** Error captured from the most recent query, or `null`. */
+  error: Error | null;
+  /**
+   * Manually re-fetch role mapping from the contract.
+   */
+  refetch: () => Promise<RbacRolesRecord | null>;
+}
+
+function getDefaultRbacRoles(): RbacRolesRecord {
+  const roleObj = (Role || {
+    Admin: "Admin",
+    SuperAdmin: "SuperAdmin",
+    Minter: "Minter",
+    Pauser: "Pauser",
+  }) as typeof Role;
+
+  return {
+    [roleObj.Admin]: false,
+    [roleObj.SuperAdmin]: false,
+    [roleObj.Minter]: false,
+    [roleObj.Pauser]: false,
+  };
+}
+
+/**
+ * Hook checking `hasRole` for `Admin`, `SuperAdmin`, `Minter`, and `Pauser` against a target address (#1187).
+ *
+ * Returns a record mapping each {@link Role} enum variant to boolean granted status with refetch capability.
+ * Gracefully captures unauthenticated states and RPC errors.
+ *
+ * @param address - Target Stellar public key or account address to inspect
+ * @param options - Configuration options (client override, polling interval, enabled flag)
+ * @returns `{ roles, data, loading, error, refetch }`
+ */
+export function useRbacRoles(
+  address: string | undefined | null,
+  options: UseRbacRolesOptions = {},
+): UseRbacRolesResult {
+  const {
+    client: clientOption,
+    enabled = true,
+    pollIntervalMs,
+  } = options;
+
+  const optionalClient = useOptionalBcForgeClient();
+  let client: bcForgeClient | null = null;
+  if (clientOption !== undefined) {
+    client = clientOption;
+  } else if (optionalClient) {
+    client = optionalClient;
+  }
+
+  const [roles, setRoles] = useState<RbacRolesRecord>(getDefaultRbacRoles);
+  const [data, setData] = useState<RbacRolesRecord | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const fetchRoles = useCallback(async (): Promise<RbacRolesRecord | null> => {
+    if (!client) {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+      return null;
+    }
+
+    const trimmedAddress = address?.trim();
+    if (!trimmedAddress) {
+      if (mountedRef.current) {
+        setRoles(getDefaultRbacRoles());
+        setData(null);
+        setError(null);
+        setLoading(false);
+      }
+      return null;
+    }
+
+    if (mountedRef.current) {
+      setLoading(true);
+      setError(null);
+    }
+
+    try {
+      const roleObj = (Role || {
+        Admin: "Admin",
+        SuperAdmin: "SuperAdmin",
+        Minter: "Minter",
+        Pauser: "Pauser",
+      }) as typeof Role;
+
+      const [isAdmin, isSuperAdmin, isMinter, isPauser] = await Promise.all([
+        client.hasRole(roleObj.Admin, trimmedAddress),
+        client.hasRole(roleObj.SuperAdmin, trimmedAddress),
+        client.hasRole(roleObj.Minter, trimmedAddress),
+        client.hasRole(roleObj.Pauser, trimmedAddress),
+      ]);
+
+      const result: RbacRolesRecord = {
+        [roleObj.Admin]: Boolean(isAdmin),
+        [roleObj.SuperAdmin]: Boolean(isSuperAdmin),
+        [roleObj.Minter]: Boolean(isMinter),
+        [roleObj.Pauser]: Boolean(isPauser),
+      };
+
+      if (mountedRef.current) {
+        setRoles(result);
+        setData(result);
+        setError(null);
+      }
+      return result;
+    } catch (err) {
+      const normalizedError = err instanceof Error ? err : new Error(String(err));
+      if (mountedRef.current) {
+        setError(normalizedError);
+      }
+      return null;
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [client, address]);
+
+  useEffect(() => {
+    if (!enabled || !address?.trim() || !client) {
+      setLoading(false);
+      return;
+    }
+    void fetchRoles();
+  }, [enabled, address, client, fetchRoles]);
+
+  useEffect(() => {
+    if (!enabled || !address?.trim() || !client || !pollIntervalMs || pollIntervalMs <= 0) {
+      return;
+    }
+    const timer = setInterval(() => {
+      void fetchRoles();
+    }, pollIntervalMs);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [enabled, address, client, pollIntervalMs, fetchRoles]);
+
+  return {
+    roles,
+    data,
+    loading: enabled && Boolean(address?.trim()) && client !== null ? loading : false,
+    error,
+    refetch: fetchRoles,
+  };
+}
+
+// ─── Role Admins (#1189) ─────────────────────────────────────────────────────
+
+/**
+ * Configuration options for {@link useRoleAdmins}.
+ */
+export interface UseRoleAdminsOptions {
+  /**
+   * Optional specific role to query the admin authority for.
+   * When omitted, queries all roles (`Admin`, `SuperAdmin`, `Minter`, `Pauser`).
+   */
+  role?: Role;
+  /**
+   * Optional explicit {@link bcForgeClient} instance.
+   * When omitted, resolves the client from the nearest {@link BcForgeProvider}.
+   */
+  client?: bcForgeClient | null;
+  /**
+   * Whether automatic fetching is enabled.
+   * @default true
+   */
+  enabled?: boolean;
+  /**
+   * Optional polling interval in milliseconds for periodic background refresh.
+   * Disabled when omitted or `<= 0`.
+   */
+  pollIntervalMs?: number;
+  /**
+   * Optional list of candidate accounts to inspect for `SuperAdmin` authority.
+   */
+  candidateAddresses?: string[];
+}
+
+/**
+ * Return value of {@link useRoleAdmins}.
+ */
+export interface UseRoleAdminsResult {
+  /**
+   * List of active admin addresses with permission to grant or revoke specific roles.
+   */
+  data: string[];
+  /** Alias for data: list of active admin addresses. */
+  admins: string[];
+  /** Mapping of each queried role to its admin authority address. */
+  roleAdmins: Partial<Record<Role, string>>;
+  /** Addresses verified as SuperAdmin accounts. */
+  superAdmins: string[];
+  /** `true` while an RPC query is in flight. */
+  loading: boolean;
+  /** Error captured from the most recent query, or `null`. */
+  error: Error | null;
+  /**
+   * Manually re-fetch role admin authorities.
+   */
+  refetch: () => Promise<string[] | null>;
+}
+
+/**
+ * Hook querying role admin authorities and super admin accounts for governance introspection (#1189).
+ *
+ * Returns a list of active admin addresses with permission to grant or revoke specific roles.
+ *
+ * @param roleOrOptions - Specific {@link Role} to query or hook configuration options
+ * @param maybeOptions - Options when first argument is a Role
+ * @returns `{ data, admins, roleAdmins, superAdmins, loading, error, refetch }`
+ */
+export function useRoleAdmins(
+  roleOrOptions?: Role | UseRoleAdminsOptions,
+  maybeOptions?: UseRoleAdminsOptions,
+): UseRoleAdminsResult {
+  const options: UseRoleAdminsOptions =
+    typeof roleOrOptions === "string"
+      ? { ...maybeOptions, role: roleOrOptions }
+      : (roleOrOptions ?? {});
+
+  const {
+    role,
+    client: clientOption,
+    enabled = true,
+    pollIntervalMs,
+    candidateAddresses,
+  } = options;
+
+  const optionalClient = useOptionalBcForgeClient();
+  let client: bcForgeClient | null = null;
+  if (clientOption !== undefined) {
+    client = clientOption;
+  } else if (optionalClient) {
+    client = optionalClient;
+  }
+
+  const [admins, setAdmins] = useState<string[]>([]);
+  const [roleAdmins, setRoleAdmins] = useState<Partial<Record<Role, string>>>({});
+  const [superAdmins, setSuperAdmins] = useState<string[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const fetchAdmins = useCallback(async (): Promise<string[] | null> => {
+    if (!client) {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+      return null;
+    }
+
+    if (mountedRef.current) {
+      setLoading(true);
+      setError(null);
+    }
+
+    try {
+      const roleObj = (Role || {
+        Admin: "Admin",
+        SuperAdmin: "SuperAdmin",
+        Minter: "Minter",
+        Pauser: "Pauser",
+      }) as typeof Role;
+
+      const targetRoles: Role[] = role
+        ? [role]
+        : [roleObj.Admin, roleObj.SuperAdmin, roleObj.Minter, roleObj.Pauser];
+
+      const roleAdminMap: Partial<Record<Role, string>> = {};
+      const activeAdminSet = new Set<string>();
+      const verifiedSuperAdmins: string[] = [];
+
+      let contractAdmin: string | undefined;
+      let lastError: unknown;
+
+      // Query contract admin
+      try {
+        contractAdmin = await client.getAdmin();
+        if (contractAdmin) {
+          activeAdminSet.add(contractAdmin);
+          verifiedSuperAdmins.push(contractAdmin);
+        }
+      } catch (err) {
+        lastError = err;
+      }
+
+      // Query role admin authorities
+      await Promise.all(
+        targetRoles.map(async (r) => {
+          try {
+            let adminAddr: string | undefined;
+            if (typeof (client as any).getRoleAdmin === "function") {
+              adminAddr = await (client as any).getRoleAdmin(r);
+            } else {
+              adminAddr = contractAdmin;
+            }
+            if (adminAddr) {
+              roleAdminMap[r] = adminAddr;
+              activeAdminSet.add(adminAddr);
+            }
+          } catch (err) {
+            lastError = err;
+            if (contractAdmin) {
+              roleAdminMap[r] = contractAdmin;
+            }
+          }
+        }),
+      );
+
+      // If no admin authorities could be resolved and errors occurred, surface the error
+      if (activeAdminSet.size === 0 && lastError) {
+        throw lastError;
+      }
+
+      // Verify any candidate SuperAdmin accounts
+      if (candidateAddresses && candidateAddresses.length > 0) {
+        await Promise.all(
+          candidateAddresses.map(async (candidate) => {
+            try {
+              const isSuper = await client!.hasRole(roleObj.SuperAdmin, candidate);
+              if (isSuper) {
+                activeAdminSet.add(candidate);
+                if (!verifiedSuperAdmins.includes(candidate)) {
+                  verifiedSuperAdmins.push(candidate);
+                }
+              }
+            } catch {
+              // Ignore candidate check error
+            }
+          }),
+        );
+      }
+
+      const adminList = Array.from(activeAdminSet);
+
+      if (mountedRef.current) {
+        setAdmins(adminList);
+        setRoleAdmins(roleAdminMap);
+        setSuperAdmins(verifiedSuperAdmins);
+        setError(null);
+      }
+      return adminList;
+    } catch (err) {
+      const normalizedError = err instanceof Error ? err : new Error(String(err));
+      if (mountedRef.current) {
+        setError(normalizedError);
+      }
+      return null;
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [client, role, candidateAddresses]);
+
+  useEffect(() => {
+    if (!enabled || !client) {
+      setLoading(false);
+      return;
+    }
+    void fetchAdmins();
+  }, [enabled, client, fetchAdmins]);
+
+  useEffect(() => {
+    if (!enabled || !client || !pollIntervalMs || pollIntervalMs <= 0) {
+      return;
+    }
+    const timer = setInterval(() => {
+      void fetchAdmins();
+    }, pollIntervalMs);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [enabled, client, pollIntervalMs, fetchAdmins]);
+
+  return {
+    data: admins,
+    admins,
+    roleAdmins,
+    superAdmins,
+    loading: enabled && client !== null ? loading : false,
+    error,
+    refetch: fetchAdmins,
+  };
 }

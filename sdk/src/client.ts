@@ -1353,6 +1353,21 @@ export class bcForgeClient {
   }
 
   /**
+   * Get the administering address for a specific role (#1189).
+   *
+   * @param role - The role whose administering address is requested
+   * @returns The admin address for the role
+   */
+  async getRoleAdmin(role: Role): Promise<string> {
+    try {
+      const result = await this.queryContract('get_role_admin', [roleToScVal(role)]);
+      return scValToNative(result) as string;
+    } catch {
+      return this.getAdmin();
+    }
+  }
+
+  /**
    * Verify that an address holds the SuperAdmin role on-chain.
    *
    * @param address - Address to verify

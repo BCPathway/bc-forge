@@ -37,9 +37,10 @@ const DISCONNECT_STYLE: React.CSSProperties = {
  * surfaced through {@link Alert}.
  */
 export const ConnectWallet: React.FC<ConnectWalletProps> = ({ style, className }) => {
-  const { name, publicKey, connected, status, connect, disconnect, error } = useWallet();
+  const wallet = useWallet();
+  const { name, publicKey, connected, status, connect, disconnect, error } = wallet;
 
-  const handleConnect = (wallet: WalletName) => void connect(wallet);
+  const handleConnect = (targetWallet: WalletName) => void connect(targetWallet);
 
   return (
     <div
@@ -52,14 +53,34 @@ export const ConnectWallet: React.FC<ConnectWalletProps> = ({ style, className }
         ...style,
       }}
     >
-      {error && (
+      {status === 'wrong-network' ? (
+        <Alert
+          variant="warning"
+          title="Network Mismatch Warning"
+          data-testid="network-mismatch-warning"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span>{error?.message ?? 'Wallet is connected to a different Stellar network.'}</span>
+            {Boolean('expectedNetworkPassphrase' in wallet && wallet.expectedNetworkPassphrase) && (
+              <span style={{ fontSize: '12px' }}>
+                Expected: <strong>{(wallet as any).expectedNetworkPassphrase}</strong>
+              </span>
+            )}
+            {Boolean('actualNetworkPassphrase' in wallet && wallet.actualNetworkPassphrase) && (
+              <span style={{ fontSize: '12px' }}>
+                Actual: <strong>{(wallet as any).actualNetworkPassphrase}</strong>
+              </span>
+            )}
+          </div>
+        </Alert>
+      ) : error ? (
         <Alert
           variant="danger"
-          title={status === 'wrong-network' ? 'Wrong network' : 'Wallet connection failed'}
+          title="Wallet connection failed"
         >
           {error.message}
         </Alert>
-      )}
+      ) : null}
 
       {connected && publicKey ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>

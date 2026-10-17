@@ -48,6 +48,12 @@ jest.mock('@bc-forge/sdk', () => {
     }
   }
   return {
+    Role: {
+      Admin: 'Admin',
+      SuperAdmin: 'SuperAdmin',
+      Minter: 'Minter',
+      Pauser: 'Pauser',
+    },
     bcForgeClient: jest.fn().mockImplementation(() => ({
       setWalletAdapter: mockSetWalletAdapter,
     })),
@@ -144,5 +150,46 @@ describe('ConnectWallet', () => {
 
     expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(undefined);
     expect(screen.getByTestId('probe-pubkey')).toHaveTextContent('none');
+  });
+
+  it('displays prominent warning banner identifying expected vs actual network passphrases (#1175)', async () => {
+    class MismatchedFreighterAdapter {
+      name = 'freighter';
+      connected = false;
+      publicKey?: string;
+      networkPassphrase = 'Public Global Stellar Network ; September 2015';
+      async connect() {
+        this.publicKey = FREIGHTER_KEY;
+        this.connected = true;
+      }
+      async disconnect() {}
+      async signTransaction(xdr: string) {
+        return xdr;
+      }
+    }
+
+    render(
+      <BcForgeProvider config={config}>
+        <WalletProvider
+          adapterFactories={{
+            freighter: () => new MismatchedFreighterAdapter() as any,
+          }}
+        >
+          <ConnectWallet />
+        </WalletProvider>
+      </BcForgeProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId('connect-freighter'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('network-mismatch-warning')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('network-mismatch-warning')).toHaveTextContent(
+      /Test SDF Network ; September 2015/,
+    );
+    expect(screen.getByTestId('network-mismatch-warning')).toHaveTextContent(
+      /Public Global Stellar Network ; September 2015/,
+    );
   });
 });
