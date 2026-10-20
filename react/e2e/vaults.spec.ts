@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { installFreighterStub, installNetworkStubs, MOCK_PUBLIC_KEY, MOCK_TX_HASH } from './stubs';
 
 test.describe('Vaults Dashboard flow', () => {
@@ -68,7 +69,6 @@ test.describe('Vaults Dashboard flow', () => {
   });
 });
 
-
 /**
  * E2E tests for VaultsScreen Withdrawals & Share Redemptions (#1258)
  * Verifies withdraw input validation, MAX shares button, share preview,
@@ -88,9 +88,9 @@ test.describe('VaultsScreen Withdrawals & Share Redemptions (#1258)', () => {
     // Try typing invalid negative amount or excessively large amount
     await withdrawInput.fill('-50');
     const submitBtn = page.locator('button:has-text("Withdraw"), [data-testid="submit-withdraw-btn"]');
-    
+
     // Validation error or disabled state check
-   0 const errorAlert = page.locator('.error-message, [role="alert"]');
+    const errorAlert = page.locator('.error-message, [role="alert"]');
     if (await errorAlert.isVisible()) {
       await expect(errorAlert).toContainText(/invalid|greater than zero|exceeds/i);
     }
@@ -146,5 +146,68 @@ test.describe('VaultsScreen Withdrawals & Share Redemptions (#1258)', () => {
     // Verify unauthenticated prompt is displayed
     const connectPrompt = page.locator('.wallet-disconnected-alert, text=/connect wallet/i');
     await expect(connectPrompt).toBeVisible();
+  });
+});
+
+test.describe('VaultsScreen Metrics & Deposit Flow (#1257)', () => {
+  test.beforeEach(async ({ page }) => {
+    // Intercept RPC or vault API calls if needed, or navigate to Vaults view
+    await page.goto('/vaults');
+    await page.waitForLoadState('domcontentloaded');
+  });
+
+  test('should render vault metric cards and APY chart correctly', async ({ page }) => {
+    // Assert total assets metric card is visible and populated
+    const totalAssetsCard = page.locator('[data-testid="vault-total-assets"], .vault-metrics-assets');
+    await expect(totalAssetsCard).toBeVisible({ timeout: 10000 });
+
+    // Assert shares and APY chart are visible
+    const apyChart = page.locator('[data-testid="vault-apy-chart"], canvas, .recharts-surface');
+    await expect(apyChart).toBeVisible();
+  });
+
+  test('should pass automated WCAG 2.1 AA accessibility audit on VaultsScreen', async ({ page }) => {
+    const accessibilityScanResults = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze();
+
+    if (accessibilityScanResults.violations.length > 0) {
+      console.error('Accessibility violations found:', JSON.stringify(accessibilityScanResults.violations, null, 2));
+    }
+
+    expect(accessibilityScanResults.violations).toEqual([]);
+  });
+
+  test('should successfully simulate wallet connection, deposit amount, slippage selection, and confirmation', async ({ page }) => {
+    // 1. Simulate Wallet Connection using mock fixture
+    const connectWalletBtn = page.locator('button:has-text("Connect Wallet"), [data-testid="connect-wallet-btn"]');
+    if (await connectWalletBtn.isVisible()) {
+      await connectWalletBtn.click();
+      // Select mock wallet provider
+      const mockProviderOption = page.locator('text=Freighter Mock, text=Mock Wallet, [data-testid="mock-wallet-option"]');
+      if (await mockProviderOption.isVisible()) {
+        await mockProviderOption.click();
+      }
+    }
+
+    // 2. Enter deposit amount
+    const depositInput = page.locator('input[name="depositAmount"], [data-testid="deposit-amount-input"]');
+    await expect(depositInput).toBeVisible();
+    await depositInput.fill('150.00');
+
+    // 3. Test slippage selector
+    const slippageButton = page.locator('button:has-text("0.5%"), [data-testid="slippage-btn-0.5"]');
+    if (await slippageButton.isVisible()) {
+      await slippageButton.click();
+    }
+
+    // 4. Confirm deposit
+    const submitDepositBtn = page.locator('button:has-text("Deposit"), [data-testid="confirm-deposit-btn"]');
+    await expect(submitDepositBtn).toBeEnabled();
+    await submitDepositBtn.click();
+
+    // 5. Verify transaction success confirmation modal / alert
+    const successMessage = page.locator('text=Deposit Successful, text=Transaction Confirmed, [data-testid="tx-success-alert"]');
+    await expect(successMessage).toBeVisible({ timeout: 15000 });
   });
 });
