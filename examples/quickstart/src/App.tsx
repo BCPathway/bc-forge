@@ -9,6 +9,7 @@ import {
   FreighterAdapter,
   type WalletAdapter,
 } from '@bc-forge/sdk';
+import { StrKey } from '@stellar/stellar-sdk';
 
 // Type for mint data from indexer
 interface MintData {
@@ -91,7 +92,7 @@ function ConfigForm({
         <button
           className="btn btn-primary"
           onClick={onConnect}
-          disabled={isConnected || !config.contractId || !config.rpcUrl}
+          disabled={isConnected || !StrKey.isValidContract(config.contractId) || !config.rpcUrl}
         >
           {isConnected ? 'Connected' : 'Connect Wallet'}
         </button>
@@ -381,14 +382,7 @@ function AppContent({
   }, [client]);
 
   return (
-    <div className="container">
-      <header style={{ marginBottom: '24px' }}>
-        <h1 style={{ margin: 0, fontSize: '1.75rem' }}>bc-forge Quickstart</h1>
-        <p style={{ margin: '8px 0 0', color: '#666' }}>
-          Testnet dApp using SDK, React hooks, and Indexer
-        </p>
-      </header>
-
+    <>
       <ConfigForm
         config={config}
         onConfigChange={onConfigChange}
@@ -407,7 +401,7 @@ function AppContent({
         indexerUrl={config.indexerUrl}
         indexerToken={config.indexerToken}
       />
-    </div>
+    </>
   );
 }
 
@@ -434,14 +428,42 @@ function App() {
     setConfig(prev => ({ ...prev, ...partial }));
   }, []);
 
+  const contractReady = StrKey.isValidContract(config.contractId);
+
   return (
-    <BcForgeProvider config={{
-      rpcUrl: config.rpcUrl,
-      networkPassphrase: config.networkPassphrase,
-      contractId: config.contractId,
-    }}>
-      <AppContent config={config} onConfigChange={handleConfigChange} />
-    </BcForgeProvider>
+    <div className="container">
+      <header style={{ marginBottom: '24px' }}>
+        <h1 style={{ margin: 0, fontSize: '1.75rem' }}>bc-forge Quickstart</h1>
+        <p style={{ margin: '8px 0 0', color: '#666' }}>
+          Testnet dApp using SDK, React hooks, and Indexer
+        </p>
+      </header>
+
+      {contractReady ? (
+        <BcForgeProvider config={{
+          rpcUrl: config.rpcUrl,
+          networkPassphrase: config.networkPassphrase,
+          contractId: config.contractId,
+        }}>
+          <AppContent config={config} onConfigChange={handleConfigChange} />
+        </BcForgeProvider>
+      ) : (
+        <>
+          <ConfigForm
+            config={config}
+            onConfigChange={handleConfigChange}
+            isConnected={false}
+            onConnect={() => {}}
+            onDisconnect={() => {}}
+          />
+          <div className="card">
+            <p style={{ color: '#888', margin: 0 }}>
+              Enter a valid contract ID (C…) to load token info, balance, and recent mints.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
