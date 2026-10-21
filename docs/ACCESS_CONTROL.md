@@ -113,6 +113,8 @@ storage slot, domain-separated by Soroban's storage API.
 | `Threshold` | `instance()` | `u32` | Approvals required for proposal |
 | `Proposal(u64)` | `instance()` | `Proposal` | Governance proposal data |
 | `ProposalIdCounter` | `instance()` | `u64` | Auto-incrementing proposal ID |
+| `UpgradeProposal(u64)` | `instance()` | `UpgradeProposal` | Multi-sig WASM upgrade proposal |
+| `UpgradeProposalIdCounter` | `instance()` | `u64` | Auto-incrementing upgrade proposal ID |
 | `SuperAdmin(Address)` | `persistent()` | `bool` | Populated by `migrate_admin` |
 
 `instance()` state lives on the contract instance ledger entry (shared TTL).
@@ -152,6 +154,8 @@ The table below lists every RBAC-guarded entrypoint across the workspace.
 | `create_proposal` | Admin-pool member | pool membership + `require_auth` |
 | `approve_proposal` | Admin-pool member | pool membership + `require_auth` |
 | `mark_executed` | Admin | `admin.require_auth` (threshold check) |
+| `submit_upgrade_proposal` | Admin-pool member | membership check (`Address::require_auth`) |
+| `get_upgrade_proposal` | Public read | none |
 
 ### Lifecycle module (`contracts/lifecycle`)
 
@@ -308,6 +312,16 @@ if (isZeroAddress(someAddress)) {
     throw new Error('Invalid address: zero address is not allowed');
 }
 ```
+
+## WASM upgrade proposals
+
+`submit_upgrade_proposal` starts the multi-sig gated WASM upgrade flow. A
+proposal records the submitting pool member, the target 32-byte WASM hash, and a
+non-empty description; the creator is recorded as the first approval and the
+proposal receives a unique auto-incrementing ID from its own counter (so generic
+and upgrade proposal IDs never collide). Submissions by non-pool members, the
+zero address, the all-zero WASM hash, or with an empty description are rejected
+with typed errors.
 
 ## Source of truth
 

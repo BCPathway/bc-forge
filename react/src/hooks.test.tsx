@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import "@testing-library/jest-dom";
 // SPDX-License-Identifier: MIT
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -47,10 +48,8 @@ const mockVaultClient = {
 const mockUseWallet = jest.fn(() => ({
   status: "connected" as string,
   connected: true,
-  publicKey:
-    "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT" as
-      | string
-      | null,
+  publicKey: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT" as
+    string | null,
   error: null as Error | null,
 }));
 
@@ -285,15 +284,15 @@ describe("React client hooks", () => {
         status: "wrong-network",
         connected: false,
         publicKey: null,
-        error: new Error(
-          "Wallet is connected to a different Stellar network.",
-        ),
+        error: new Error("Wallet is connected to a different Stellar network."),
       });
 
       const { result } = renderHook(() => useBalance());
 
       expect(result.current.data).toBeNull();
-      expect(result.current.error?.message).toMatch(/different Stellar network/);
+      expect(result.current.error?.message).toMatch(
+        /different Stellar network/,
+      );
       expect(result.current.alertMessage).toBe(
         "Wallet is connected to a different Stellar network than expected.",
       );
@@ -1514,9 +1513,7 @@ describe("React client hooks", () => {
     });
 
     it("captures errors gracefully and provides refetch capability", async () => {
-      mockClient.getAdmin.mockRejectedValue(
-        new Error("RPC Network Failure"),
-      );
+      mockClient.getAdmin.mockRejectedValue(new Error("RPC Network Failure"));
       mockClient.getRoleAdmin.mockRejectedValue(
         new Error("RPC Network Failure"),
       );
@@ -1738,7 +1735,7 @@ describe("React client hooks", () => {
       expect(result.current.data).toBeNull();
     });
   });
-describe("useFlashLoanGuardStatus (#1201)", () => {
+  describe("useFlashLoanGuardStatus (#1201)", () => {
     it("returns unlocked state when flash loan guard is not engaged", async () => {
       mockClient.getFlashLoanLockStatus.mockResolvedValue({
         isLocked: false,
@@ -1853,7 +1850,7 @@ describe("useFlashLoanGuardStatus (#1201)", () => {
       expect(result.current.recipients).toEqual([]);
     });
   });
-describe("useContractEvents (#1195)", () => {
+  describe("useContractEvents (#1195)", () => {
     const sampleEvents = [
       {
         id: "1",
