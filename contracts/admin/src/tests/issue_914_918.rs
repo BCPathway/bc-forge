@@ -67,6 +67,10 @@ fn test_role_proposal_requires_quorum_and_executes_the_bound_grant() {
     );
 
     client.approve_proposal(&second_admin, &proposal_id);
+    assert_eq!(
+        client.try_execute_role_proposal(&second_admin, &proposal_id),
+        Err(Ok(AdminError::UnauthorizedRole)),
+    );
     client.execute_role_proposal(&admin, &proposal_id);
     assert!(client.has_role(&Role::Minter, &target));
     assert!(
