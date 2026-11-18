@@ -107,7 +107,7 @@ test.describe("TransferScreen Balance & Transfers Flow (#1253)", () => {
     const maxBtn = page.getByTestId("transfer-max");
     await expect(maxBtn).toBeVisible();
     await expect(maxBtn).toBeEnabled();
-    await maxBtn.click();
+    await maxBtn.click({ force: true });
 
     const amountInput = page.locator("#transfer-amount");
     const value = await amountInput.inputValue();

@@ -161,6 +161,11 @@ test.describe("VaultsScreen Withdrawals & Share Redemptions (#1258)", () => {
   test("should display helpful UI alerts when unauthenticated or wallet is disconnected", async ({
     page,
   }) => {
+    await page.goto("/#/");
+    const disconnectBtn = page.getByRole("button", { name: "Disconnect" });
+    if (await disconnectBtn.isVisible()) {
+      await disconnectBtn.click();
+    }
     await page.goto("/#/vaults");
     await expect(page.locator("text=Wallet not connected")).toBeVisible();
   });

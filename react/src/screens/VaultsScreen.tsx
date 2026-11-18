@@ -370,13 +370,23 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
       )}
 
       {toast && (
-        <TransactionToast
-          status={toast.status}
-          hash={toast.hash}
-          error={toast.message}
-          label={toast.status === "pending" ? "Vault transaction" : undefined}
-          onDismiss={() => setToast(null)}
-        />
+        <div data-testid="tx-hash-container">
+          <TransactionToast
+            status={toast.status}
+            hash={toast.hash}
+            error={toast.message}
+            label={toast.status === "pending" ? "Vault transaction" : undefined}
+            onDismiss={() => setToast(null)}
+          />
+          {toast.hash ? (
+            <div
+              data-testid="tx-hash"
+              style={{ fontSize: "12px", color: "#4b5563", marginTop: "4px" }}
+            >
+              {toast.hash}
+            </div>
+          ) : null}
+        </div>
       )}
 
       {!isConnected && (

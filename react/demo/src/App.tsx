@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import React from 'react';
+import React from "react";
 import {
   BcForgeProvider,
   WalletProvider,
@@ -11,11 +11,11 @@ import {
   BurnScreen,
   RolesScreen,
   VaultsScreen,
-} from '@bc-forge/react';
-import { Nav } from './Nav';
-import { useHashRoute } from './useHashRoute';
-import { loadConfig, type DemoConfig } from './config';
-import { ConfigErrorScreen } from './ConfigErrorScreen';
+} from "@bc-forge/react";
+import { Nav } from "./Nav";
+import { useHashRoute } from "./useHashRoute";
+import { loadConfig, type DemoConfig } from "./config";
+import { ConfigErrorScreen } from "./ConfigErrorScreen";
 
 /**
  * The environment is validated once at module load (#1146). Every screen reads
@@ -26,22 +26,21 @@ const configResult = loadConfig();
 /** Screens of the hash-routed demo, built from the validated configuration. */
 function buildRoutes(config: DemoConfig): Record<string, React.ReactNode> {
   return {
-    '': (
+    "": (
       <section data-testid="connect-control">
         <h2>Connect Control</h2>
         <ConnectWallet />
       </section>
     ),
-    '#/mint': <MintScreen />,
-    '#/transfer': <TransferScreen walletAddress={config.walletAddress} />,
-    '#/burn': <BurnScreen walletAddress={config.walletAddress} />,
-    '#/roles': <RolesScreen />,
-    '#/vaults': (
+    "#/mint": <MintScreen />,
+    "#/transfer": <TransferScreen walletAddress={config.walletAddress} />,
+    "#/burn": <BurnScreen walletAddress={config.walletAddress} />,
+    "#/roles": <RolesScreen />,
+    "#/vaults": (
       <VaultsScreen
         rpcUrl={config.rpcUrl}
         networkPassphrase={config.networkPassphrase}
         contractId={config.contractId}
-        walletAddress={config.walletAddress}
       />
     ),
   };
@@ -56,7 +55,7 @@ function buildRoutes(config: DemoConfig): Record<string, React.ReactNode> {
  */
 const ThemeToggle: React.FC = () => {
   const { resolvedTheme, toggleTheme } = useTheme();
-  const next = resolvedTheme === 'dark' ? 'light' : 'dark';
+  const next = resolvedTheme === "dark" ? "light" : "dark";
 
   return (
     <button
@@ -89,7 +88,7 @@ export const App: React.FC = () => {
 
   const { config } = configResult;
   const routes = buildRoutes(config);
-  const content = routes[route] ?? routes[''];
+  const content = routes[route] ?? routes[""];
 
   return (
     <BcForgeProvider
@@ -100,7 +99,14 @@ export const App: React.FC = () => {
       }}
     >
       <WalletProvider>
-        <div style={{ fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto', padding: 24 }}>
+        <div
+          style={{
+            fontFamily: "sans-serif",
+            maxWidth: 900,
+            margin: "0 auto",
+            padding: 24,
+          }}
+        >
           <h1>bc-forge React Demo</h1>
           <Nav />
           <hr />

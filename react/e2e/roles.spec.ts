@@ -138,6 +138,11 @@ test.describe("RolesScreen Role Actions (#1256)", () => {
   test("should display helpful UI alerts when wallet is disconnected or unauthenticated", async ({
     page,
   }) => {
+    await page.goto("/#/");
+    const disconnectBtn = page.getByRole("button", { name: "Disconnect" });
+    if (await disconnectBtn.isVisible()) {
+      await disconnectBtn.click();
+    }
     await page.goto("/#/roles");
     await expect(page.locator("text=Wallet not connected")).toBeVisible();
   });
