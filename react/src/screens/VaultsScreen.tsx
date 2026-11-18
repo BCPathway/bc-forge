@@ -255,8 +255,7 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
       const result = await activeClient.deposit(
         connectedAddress,
         amountBigInt,
-        (effectiveAdapter ??
-          walletAdapter) as unknown as import("@stellar/stellar-sdk").Keypair,
+        (effectiveAdapter ?? walletAdapter) as any,
         minimumAfterSlippage(estimatedDepositShares, slippageBps),
       );
       if (result && result.success) {
@@ -316,8 +315,7 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
       const result = await activeClient.withdraw(
         connectedAddress,
         sharesBigInt,
-        (effectiveAdapter ??
-          walletAdapter) as unknown as import("@stellar/stellar-sdk").Keypair,
+        (effectiveAdapter ?? walletAdapter) as any,
         minimumAfterSlippage(quote, slippageBps),
       );
       if (result && result.success) {
