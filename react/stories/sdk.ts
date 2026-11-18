@@ -83,6 +83,6 @@ export enum Role {
   Pauser = "Pauser",
 }
 
-export function parseContractError(errorMsg: string, method?: string) {
+export function parseContractError(_errorMsg: string, _method?: string) {
   return null;
 }
