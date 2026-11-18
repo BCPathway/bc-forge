@@ -395,8 +395,7 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
           title="Wallet not connected"
           data-testid="vaults-wallet-disconnected-alert"
         >
-          Wallet not connected. Connect your wallet to manage vault shares and
-          deposits.
+          Connect your wallet to manage vault shares and deposits.
         </Alert>
       )}
 

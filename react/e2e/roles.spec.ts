@@ -144,6 +144,8 @@ test.describe("RolesScreen Role Actions (#1256)", () => {
       await disconnectBtn.click();
     }
     await page.goto("/#/roles");
-    await expect(page.locator("text=Wallet not connected")).toBeVisible();
+    await expect(
+      page.locator("text=Wallet not connected").first(),
+    ).toBeVisible();
   });
 });

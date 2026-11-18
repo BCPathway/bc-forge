@@ -167,7 +167,9 @@ test.describe("VaultsScreen Withdrawals & Share Redemptions (#1258)", () => {
       await disconnectBtn.click();
     }
     await page.goto("/#/vaults");
-    await expect(page.locator("text=Wallet not connected")).toBeVisible();
+    await expect(
+      page.locator("text=Wallet not connected").first(),
+    ).toBeVisible();
   });
 });
 
