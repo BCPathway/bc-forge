@@ -14,6 +14,7 @@ test.describe("Vaults Dashboard flow", () => {
   }) => {
     await installFreighterStub(page, MOCK_PUBLIC_KEY);
     await installNetworkStubs(page, {
+      balance: 1000n,
       totalAssets: 1000000n,
       totalShares: 100000n,
       sharePrice: 10n,
@@ -91,6 +92,7 @@ test.describe("VaultsScreen Withdrawals & Share Redemptions (#1258)", () => {
   test.beforeEach(async ({ page }) => {
     await installFreighterStub(page, MOCK_PUBLIC_KEY);
     await installNetworkStubs(page, {
+      balance: 1000n,
       totalAssets: 1000000n,
       totalShares: 100000n,
       sharePrice: 10n,
@@ -109,7 +111,9 @@ test.describe("VaultsScreen Withdrawals & Share Redemptions (#1258)", () => {
     page,
   }) => {
     const withdrawForm = page.getByTestId("withdraw-form");
-    const withdrawInput = withdrawForm.locator('input[name="withdrawShares"]');
+    const withdrawInput = withdrawForm.locator(
+      'input[name="withdrawAmount"], input[name="withdrawShares"]',
+    );
     await expect(withdrawInput).toBeVisible();
 
     // Try typing an excessively large amount exceeding share balance (500)
@@ -124,9 +128,12 @@ test.describe("VaultsScreen Withdrawals & Share Redemptions (#1258)", () => {
     const withdrawForm = page.getByTestId("withdraw-form");
     const maxBtn = withdrawForm.getByRole("button", { name: "MAX" });
     await expect(maxBtn).toBeVisible();
+    await expect(maxBtn).toBeEnabled();
     await maxBtn.click();
 
-    const withdrawInput = withdrawForm.locator('input[name="withdrawShares"]');
+    const withdrawInput = withdrawForm.locator(
+      'input[name="withdrawAmount"], input[name="withdrawShares"]',
+    );
     const val = await withdrawInput.inputValue();
     expect(Number(val)).toBeGreaterThan(0);
 
@@ -138,7 +145,9 @@ test.describe("VaultsScreen Withdrawals & Share Redemptions (#1258)", () => {
     page,
   }) => {
     const withdrawForm = page.getByTestId("withdraw-form");
-    const withdrawInput = withdrawForm.locator('input[name="withdrawShares"]');
+    const withdrawInput = withdrawForm.locator(
+      'input[name="withdrawAmount"], input[name="withdrawShares"]',
+    );
     await withdrawInput.fill("10");
 
     const submitBtn = withdrawForm.getByRole("button", { name: "Withdraw" });
@@ -161,6 +170,7 @@ test.describe("VaultsScreen Metrics & Deposit Flow (#1257)", () => {
   test.beforeEach(async ({ page }) => {
     await installFreighterStub(page, MOCK_PUBLIC_KEY);
     await installNetworkStubs(page, {
+      balance: 1000n,
       totalAssets: 1000000n,
       totalShares: 100000n,
       sharePrice: 10n,

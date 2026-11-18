@@ -171,27 +171,29 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
         style={PANEL_STYLE}
         data-testid="transfer-receipt"
       >
-        <h2
-          id={titleId}
-          style={{
-            margin: 0,
-            fontSize: 17,
-            fontWeight: 700,
-            color: theme.successText,
-          }}
-        >
-          Transfer confirmed
-        </h2>
-        <dl style={{ margin: 0, display: "grid", gap: 10 }}>
-          {rows.map(([label, value, testId]) => (
-            <div key={label}>
-              <dt style={ROW_LABEL_STYLE}>{label}</dt>
-              <dd style={ROW_VALUE_STYLE} data-testid={testId}>
-                {value}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <div data-testid="transfer-success" style={{ display: "contents" }}>
+          <h2
+            id={titleId}
+            style={{
+              margin: 0,
+              fontSize: 17,
+              fontWeight: 700,
+              color: theme.successText,
+            }}
+          >
+            Transfer confirmed
+          </h2>
+          <dl style={{ margin: 0, display: "grid", gap: 10 }}>
+            {rows.map(([label, value, testId]) => (
+              <div key={label}>
+                <dt style={ROW_LABEL_STYLE}>{label}</dt>
+                <dd style={ROW_VALUE_STYLE} data-testid={testId}>
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
         <div
           style={{
             display: "flex",

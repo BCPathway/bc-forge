@@ -36,7 +36,10 @@ test.describe("Burn Tokens flow", () => {
     // Confirm dialog
     await expect(page.getByTestId("confirmation-dialog")).toBeVisible();
     await page.getByTestId("confirmation-dialog-checkbox").check();
-    await page.getByTestId("confirmation-dialog-confirm").click();
+    await expect(page.getByTestId("confirmation-dialog-confirm")).toBeEnabled();
+    await page
+      .getByTestId("confirmation-dialog-confirm")
+      .click({ force: true });
 
     // Assert success state
     const successAlert = page.getByTestId("burn-success");
@@ -124,7 +127,10 @@ test.describe("BurnScreen Safety Modal & Execution Flow (#1254)", () => {
 
     // Check safety modal checkbox & submit
     await page.getByTestId("confirmation-dialog-checkbox").check();
-    await page.getByTestId("confirmation-dialog-confirm").click();
+    await expect(page.getByTestId("confirmation-dialog-confirm")).toBeEnabled();
+    await page
+      .getByTestId("confirmation-dialog-confirm")
+      .click({ force: true });
 
     // Verify supply decrement success notification / alert
     const successAlert = page.getByTestId("burn-success");

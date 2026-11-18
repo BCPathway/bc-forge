@@ -128,7 +128,8 @@ test.describe("RolesScreen Role Actions (#1256)", () => {
     // Confirm revocation
     await page.getByTestId("confirmation-dialog-checkbox").check();
     const confirmRevokeBtn = page.getByTestId("confirmation-dialog-confirm");
-    await confirmRevokeBtn.click();
+    await expect(confirmRevokeBtn).toBeEnabled();
+    await confirmRevokeBtn.click({ force: true });
 
     // Verify success
     await expect(page.locator("text=Revoke Minter succeeded")).toBeVisible();

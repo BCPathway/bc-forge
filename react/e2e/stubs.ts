@@ -252,7 +252,9 @@ export async function installNetworkStubs(
       }
       let retvalXdr = "AAAAAQ=="; // default void (xdr.ScVal.scvVoid())
 
-      if (callData.includes("total_assets")) {
+      if (callData.includes("underlying_token")) {
+        retvalXdr = "AAAAEgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ==";
+      } else if (callData.includes("total_assets")) {
         retvalXdr = nativeToScVal(totalAssetsVal, { type: "i128" }).toXDR(
           "base64",
         );

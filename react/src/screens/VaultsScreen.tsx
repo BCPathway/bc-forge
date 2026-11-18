@@ -379,6 +379,17 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
         />
       )}
 
+      {!isConnected && (
+        <Alert
+          variant="warning"
+          title="Wallet not connected"
+          data-testid="vaults-wallet-disconnected-alert"
+        >
+          Wallet not connected. Connect your wallet to manage vault shares and
+          deposits.
+        </Alert>
+      )}
+
       {/* Metrics Section */}
       <div
         style={{
@@ -742,21 +753,56 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
             }}
           >
             Shares
-            <input
-              type="text"
-              name="withdrawAmount"
-              placeholder="Enter positive integer shares"
-              value={withdrawAmount}
-              onChange={(e) => setWithdrawAmount(e.target.value)}
-              disabled={!isConnected || isSubmitting}
-              style={{
-                padding: "8px 12px",
-                border: "1px solid #d1d5db",
-                borderRadius: "6px",
-                fontSize: "14px",
-                outline: "none",
-              }}
-            />
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input
+                type="text"
+                name="withdrawAmount"
+                data-testid="withdraw-shares-input"
+                placeholder="Enter positive integer shares"
+                value={withdrawAmount}
+                onChange={(e) => setWithdrawAmount(e.target.value)}
+                disabled={!isConnected || isSubmitting}
+                style={{
+                  flex: 1,
+                  padding: "8px 12px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "6px",
+                  fontSize: "14px",
+                  outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                data-testid="max-withdraw-btn"
+                disabled={
+                  !isConnected ||
+                  isSubmitting ||
+                  shareBalance === null ||
+                  shareBalance <= 0n
+                }
+                onClick={() => {
+                  if (shareBalance !== null) {
+                    setWithdrawAmount(shareBalance.toString());
+                  }
+                }}
+                style={{
+                  padding: "8px 12px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "6px",
+                  fontSize: "14px",
+                  backgroundColor: "#f3f4f6",
+                  cursor:
+                    !isConnected ||
+                    isSubmitting ||
+                    shareBalance === null ||
+                    shareBalance <= 0n
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+              >
+                MAX
+              </button>
+            </div>
           </label>
           <div
             data-testid="withdraw-estimate"
@@ -772,7 +818,10 @@ export const VaultsScreen: React.FC<VaultsScreenProps> = ({
               !isConnected ||
               isSubmitting ||
               shareBalance === null ||
-              shareBalance === 0n
+              shareBalance === 0n ||
+              parsedWithdrawAmount === null ||
+              parsedWithdrawAmount <= 0n ||
+              parsedWithdrawAmount > shareBalance
             }
             style={{
               padding: "10px 16px",
