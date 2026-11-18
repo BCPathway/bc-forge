@@ -1,0 +1,62 @@
+# Mergify merge queue configuration
+# Docs: https://docs.mergify.com/merge-queue/
+
+queue_rules:
+  - name: default
+    merge_method: squash
+
+    # ── Gate: what a PR needs before it enters the queue ──
+    queue_conditions:
+      - "#approved-reviews-by >= 1"
+      - -draft
+      - -conflict
+      # All CI jobs from the main "bc-forge CI" workflow:
+      - check-success = Smart Contracts (Rust)
+      - check-success = TypeScript SDK
+      - check-success = SDK Bindings Staleness
+      - check-success = Indexer
+      - check-success = TypeScript CLI
+      - check-success = React Package
+      - "check-success = React peer compat (React 18.0.0)"
+      - "check-success = React peer compat (React 19.0.0)"
+      - check-success = Dependency Audit
+      - check-success = README project tree
+      - check-success = Documentation Links
+      - check-success = Docs Site
+
+    # ── Re-checked on the temporary merge-queue PR before merge ──
+    merge_conditions:
+      - check-success = Smart Contracts (Rust)
+      - check-success = TypeScript SDK
+      - check-success = SDK Bindings Staleness
+      - check-success = Indexer
+      - check-success = TypeScript CLI
+      - check-success = React Package
+      - "check-success = React peer compat (React 18.0.0)"
+      - "check-success = React peer compat (React 19.0.0)"
+      - check-success = Dependency Audit
+      - check-success = README project tree
+      - check-success = Documentation Links
+      - check-success = Docs Site
+
+# ── Auto-queue PRs that meet the conditions ──
+pull_request_rules:
+  - name: Auto-queue when CI passes and approved
+    conditions:
+      - "#approved-reviews-by >= 1"
+      - -draft
+      - -conflict
+      - check-success = Smart Contracts (Rust)
+      - check-success = TypeScript SDK
+      - check-success = SDK Bindings Staleness
+      - check-success = Indexer
+      - check-success = TypeScript CLI
+      - check-success = React Package
+      - "check-success = React peer compat (React 18.0.0)"
+      - "check-success = React peer compat (React 19.0.0)"
+      - check-success = Dependency Audit
+      - check-success = README project tree
+      - check-success = Documentation Links
+      - check-success = Docs Site
+    actions:
+      queue:

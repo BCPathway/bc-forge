@@ -811,7 +811,7 @@ export const RolesScreen: React.FC<RolesScreenProps> = ({
 
       {!connected && (
         <span style={{ fontSize: "13px", color: theme.neutralText }}>
-          Connect a wallet to grant or revoke roles.
+          Wallet not connected. Connect a wallet to grant or revoke roles.
         </span>
       )}
 

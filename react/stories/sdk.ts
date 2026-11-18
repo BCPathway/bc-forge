@@ -69,9 +69,20 @@ export class FreighterAdapter implements WalletAdapter {
   }
 }
 export class AlbedoAdapter extends FreighterAdapter {
-  override name = 'albedo';
+  override name = "albedo";
 }
 
 export async function calculateApy(): Promise<never> {
   throw new Error("Pass deterministic points to APYChart stories");
+}
+
+export enum Role {
+  Admin = "Admin",
+  SuperAdmin = "SuperAdmin",
+  Minter = "Minter",
+  Pauser = "Pauser",
+}
+
+export function parseContractError(_errorMsg: string, _method?: string) {
+  return null;
 }

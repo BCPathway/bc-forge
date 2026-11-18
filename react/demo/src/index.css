@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+/* SPDX-License-Identifier: MIT */
 /**
  * Demo stylesheet: Tailwind entry point plus the CSS custom properties that back
  * the bc-forge design tokens (#1140).
@@ -52,7 +52,11 @@
     --bc-surface-glass: rgba(255, 255, 255, 0.72);
     --bc-surface-glass-border: rgba(255, 255, 255, 0.6);
     --bc-surface-gradient: linear-gradient(180deg, #ffffff 0%, #f3f4f6 100%);
-    --bc-surface-gradient-elevated: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+    --bc-surface-gradient-elevated: linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #eff6ff 100%
+    );
     --bc-background-canvas: #f3f4f6;
 
     /* Text, borders, focus */
@@ -62,8 +66,10 @@
     --bc-focus-ring: rgba(99, 102, 241, 0.35);
 
     /* Typography */
-    --bc-font-sans: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-    --bc-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --bc-font-sans:
+      Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --bc-font-mono:
+      "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     --bc-text-display: 3.5rem;
     --bc-text-title: 1.5rem;
     --bc-text-body: 0.9375rem;
@@ -86,7 +92,7 @@
    * Matching on both keeps the stylesheet correct whether or not React has
    * hydrated yet.
    */
-  [data-theme='dark'],
+  [data-theme="dark"],
   .dark {
     color-scheme: dark;
 
@@ -103,7 +109,11 @@
     --bc-surface-glass: rgba(17, 26, 46, 0.72);
     --bc-surface-glass-border: rgba(148, 163, 184, 0.2);
     --bc-surface-gradient: linear-gradient(180deg, #0b1220 0%, #070b14 100%);
-    --bc-surface-gradient-elevated: linear-gradient(180deg, #182338 0%, #0b1220 100%);
+    --bc-surface-gradient-elevated: linear-gradient(
+      180deg,
+      #182338 0%,
+      #0b1220 100%
+    );
     --bc-background-canvas: #070b14;
 
     --bc-text: #e5e7eb;
@@ -171,7 +181,9 @@
     box-shadow: 0 8px 32px rgba(2, 6, 23, 0.12);
   }
 
-  @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  @supports (
+    (-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))
+  ) {
     .surface-glass {
       -webkit-backdrop-filter: blur(var(--bc-blur-glass));
       backdrop-filter: blur(var(--bc-blur-glass));
@@ -206,7 +218,7 @@
   }
 
   .dark .surface-gradient,
-  [data-theme='dark'] .surface-gradient {
+  [data-theme="dark"] .surface-gradient {
     box-shadow: 0 24px 64px rgba(2, 6, 23, 0.48);
   }
 

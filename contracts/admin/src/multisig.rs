@@ -15,7 +15,7 @@ use soroban_sdk::{contracttype, vec, Address, BytesN, Env, Map, String, Vec};
 
 use crate::address::require_non_zero_address;
 use crate::events;
-use crate::rbac::{get_admin, has_admin, require_admin, require_super_admin, Role};
+use crate::rbac::{get_admin, has_admin, require_admin, Role};
 use crate::reentrancy_guard;
 use crate::{extend_instance_ttl, extend_storage_ttl_for_key, AdminError, AdminKey};
 
@@ -456,9 +456,10 @@ pub fn create_role_proposal(
         soroban_sdk::panic_with_error!(env, AdminError::RoleAlreadyGranted);
     }
     let id = create_proposal(env, creator, description);
-    env.storage()
-        .instance()
-        .set(&AdminKey::RoleGrantProposal(id), &RoleGrantAction { role, target });
+    env.storage().instance().set(
+        &AdminKey::RoleGrantProposal(id),
+        &RoleGrantAction { role, target },
+    );
     extend_instance_ttl(env);
     id
 }
@@ -607,7 +608,9 @@ pub fn execute_role_proposal(
     if !get_admin_pool(env).contains(&executor) {
         return Err(AdminError::UnauthorizedRole);
     }
-    require_super_admin(env, &executor);
+    if !crate::rbac::has_role(env, Role::SuperAdmin, &executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
 
     let mut proposal: Proposal = env
         .storage()

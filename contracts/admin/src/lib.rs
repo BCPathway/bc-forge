@@ -631,10 +631,7 @@ mod tests {
             super::execute_role_proposal(&env, executor, proposal_id)
         }
 
-        pub fn get_role_proposal(
-            env: Env,
-            proposal_id: u64,
-        ) -> Option<RoleGrantProposalDetails> {
+        pub fn get_role_proposal(env: Env, proposal_id: u64) -> Option<RoleGrantProposalDetails> {
             super::get_role_proposal(&env, proposal_id)
         }
 
