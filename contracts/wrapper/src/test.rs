@@ -2595,3 +2595,39 @@ fn test_emergency_cap_blocks_excessive_withdrawals_in_window() {
     let third = wrapper.withdraw(&user, &200_000);
     assert_eq!(third, 200_000);
 }
+
+#[test]
+fn test_get_storage_info_uninitialized_requires_no_auth() {
+    let env = Env::default();
+    let contract_id = env.register(WrapperContract, ());
+    let client = WrapperContractClient::new(&env, &contract_id);
+
+    let info = client.get_storage_info();
+    assert_eq!(info.instance_ttl, 0);
+    assert_eq!(info.instance_keys, 0);
+}
+
+#[test]
+fn test_get_storage_info_tracks_keys_and_ttl_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    let initial = wrapper.get_storage_info();
+    assert_eq!(initial.instance_keys, 5); // UnderlyingToken, Decimals, Symbol, Name, Supply
+    assert_eq!(initial.instance_ttl, bc_forge_ttl::INSTANCE_BUMP_AMOUNT);
+
+    let seq = env.ledger().sequence();
+    env.ledger().set_sequence_number(seq + 10);
+    let aged = wrapper.get_storage_info();
+    assert_eq!(aged.instance_ttl, bc_forge_ttl::INSTANCE_BUMP_AMOUNT - 10);
+
+    let advance = bc_forge_ttl::INSTANCE_BUMP_AMOUNT - bc_forge_ttl::INSTANCE_LIFETIME_THRESHOLD;
+    env.ledger().set_sequence_number(seq + advance);
+    let near_expiry = wrapper.get_storage_info();
+    assert!(near_expiry.instance_ttl <= bc_forge_ttl::INSTANCE_LIFETIME_THRESHOLD);
+
+    wrapper.wrap(&user, &1_000);
+    let after_bump = wrapper.get_storage_info();
+    assert_eq!(after_bump.instance_ttl, bc_forge_ttl::INSTANCE_BUMP_AMOUNT);
+}
