@@ -44,6 +44,7 @@ nul
 # PR text
 issue_pr.txt
 .opencode
+scratch/
 
 # Generated docs site artifacts (built by the root docs:* scripts)
 docs/api/sdk/
