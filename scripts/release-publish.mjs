@@ -80,8 +80,10 @@ for (const command of steps) {
     } catch (error) {
       if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN) {
         console.warn(
-          "\n=== Changeset publish with provenance failed. Retrying with token fallback (provenance=false) ===",
+          "\n=== Changeset publish with OIDC/provenance failed. Retrying with token fallback ===",
         );
+        delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+        delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
         execSync("npm config set provenance false", {
           cwd: root,
           stdio: "inherit",
