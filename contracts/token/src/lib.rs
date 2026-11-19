@@ -90,6 +90,18 @@ pub enum DataKey {
     FeeExemption(Address),
     /// Nonce for contract wallet batch execution replay protection.
     Nonce(Address),
+    /// Recorded live-until ledger from the most recent instance TTL extension.
+    InstanceLiveUntil,
+}
+
+/// Instance TTL and the count of known singleton token keys.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageInfo {
+    /// Estimated remaining ledgers until instance TTL expiration (recorded live-until minus current ledger).
+    pub instance_ttl: u32,
+    /// Number of active singleton configuration keys stored in instance storage.
+    pub instance_keys: u32,
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -324,6 +336,51 @@ impl BcForgeToken {
 
     fn extend_instance_ttl_for_call(env: &Env) {
         ttl::extend_instance_ttl(env);
+        Self::remember_instance_extension(
+            env,
+            ttl::INSTANCE_LIFETIME_THRESHOLD,
+            ttl::INSTANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn read_recorded_live_until(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::InstanceLiveUntil)
+            .unwrap_or(0)
+    }
+
+    fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+        let current = env.ledger().sequence();
+        let stored = Self::read_recorded_live_until(env);
+        let remaining = stored.saturating_sub(current);
+        if stored == 0 || remaining <= threshold {
+            let requested = current.saturating_add(extend_to);
+            if requested > stored {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::InstanceLiveUntil, &requested);
+            }
+        }
+    }
+
+    fn get_instance_ttl_internal(env: &Env) -> u32 {
+        Self::read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+    }
+
+    fn get_storage_key_counts_internal(env: &Env) -> u32 {
+        let keys = [
+            DataKey::Decimals,
+            DataKey::Name,
+            DataKey::Symbol,
+            DataKey::Supply,
+            DataKey::MaxSupply,
+            DataKey::Treasury,
+            DataKey::FeeConfig,
+        ];
+        keys.iter()
+            .filter(|key| env.storage().instance().has(*key))
+            .count() as u32
     }
 
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
@@ -1722,8 +1779,16 @@ impl BcForgeToken {
         admin::require_admin(&env, &caller);
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
-        ttl::extend_instance_ttl(&env);
+        Self::extend_instance_ttl_for_call(&env);
         events::emit_metadata_updated(&env, &caller, &name, &symbol);
         Ok(())
+    }
+
+    /// Returns instance TTL and singleton storage key counts. No authorization.
+    pub fn get_storage_info(env: Env) -> StorageInfo {
+        StorageInfo {
+            instance_ttl: Self::get_instance_ttl_internal(&env),
+            instance_keys: Self::get_storage_key_counts_internal(&env),
+        }
     }
 }

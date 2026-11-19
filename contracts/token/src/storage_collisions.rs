@@ -27,7 +27,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 15] = [
+const DATA_KEY_SLOT_NAMES: [&str; 16] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -35,6 +35,7 @@ const DATA_KEY_SLOT_NAMES: [&str; 15] = [
     "Decimals",
     "FeeConfig",
     "FeeExemption",
+    "InstanceLiveUntil",
     "Lockup",
     "MaxSupply",
     "Name",
@@ -95,10 +96,11 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::InstanceLiveUntil => "InstanceLiveUntil",
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 15] {
+fn all_data_keys(env: &Env) -> [DataKey; 16] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -117,6 +119,7 @@ fn all_data_keys(env: &Env) -> [DataKey; 15] {
         DataKey::FeeConfig,
         DataKey::FeeExemption(owner.clone()),
         DataKey::Nonce(owner),
+        DataKey::InstanceLiveUntil,
     ]
 }
 
@@ -167,7 +170,13 @@ fn test_initialize_writes_only_its_documented_slots() {
             // admin::set_admin writes AdminKey::Admin, which is the same slot.
             let written = matches!(
                 name,
-                "Admin" | "Decimals" | "Name" | "Symbol" | "Supply" | "MaxSupply"
+                "Admin"
+                    | "Decimals"
+                    | "InstanceLiveUntil"
+                    | "Name"
+                    | "Symbol"
+                    | "Supply"
+                    | "MaxSupply"
             );
             assert_eq!(
                 env.storage().instance().has(key),

@@ -22,6 +22,7 @@ pub mod math;
 mod test;
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
@@ -134,6 +135,18 @@ pub enum DataKey {
     QueuedWithdrawal(Address),
     /// Emergency cap tracking state for a user.
     UserEmergencyState(Address),
+    /// Recorded live-until ledger from the most recent instance TTL extension.
+    InstanceLiveUntil,
+}
+
+/// Instance TTL and the count of known singleton wrapper keys.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageInfo {
+    /// Estimated remaining ledgers until instance TTL expiration (recorded live-until minus current ledger).
+    pub instance_ttl: u32,
+    /// Number of active singleton configuration keys stored in instance storage.
+    pub instance_keys: u32,
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -185,6 +198,57 @@ pub enum WrapperError {
 pub struct WrapperContract;
 
 impl WrapperContract {
+    // ── Storage Diagnostics & TTL Helpers ────────────────────────────────────
+
+    fn extend_instance_ttl_for_call(env: &Env) {
+        ttl::extend_instance_ttl(env);
+        Self::remember_instance_extension(
+            env,
+            ttl::INSTANCE_LIFETIME_THRESHOLD,
+            ttl::INSTANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn read_recorded_live_until(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::InstanceLiveUntil)
+            .unwrap_or(0)
+    }
+
+    fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+        let current = env.ledger().sequence();
+        let stored = Self::read_recorded_live_until(env);
+        let remaining = stored.saturating_sub(current);
+        if stored == 0 || remaining <= threshold {
+            let requested = current.saturating_add(extend_to);
+            if requested > stored {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::InstanceLiveUntil, &requested);
+            }
+        }
+    }
+
+    fn get_instance_ttl_internal(env: &Env) -> u32 {
+        Self::read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+    }
+
+    fn get_storage_key_counts_internal(env: &Env) -> u32 {
+        let keys = [
+            DataKey::UnderlyingToken,
+            DataKey::Decimals,
+            DataKey::Symbol,
+            DataKey::Name,
+            DataKey::Supply,
+            DataKey::PendingRewards,
+            DataKey::CooldownConfig,
+        ];
+        keys.iter()
+            .filter(|key| env.storage().instance().has(*key))
+            .count() as u32
+    }
+
     // ── Guards ───────────────────────────────────────────────────────────────
 
     fn ensure_initialized(env: &Env) -> Result<(), WrapperError> {
@@ -586,6 +650,7 @@ impl WrapperContract {
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         Self::write_supply(&env, 0);
+        Self::extend_instance_ttl_for_call(&env);
 
         events::emit_initialized(&env, &admin, &token_contract_id);
         Ok(())
@@ -610,6 +675,7 @@ impl WrapperContract {
         }
 
         Self::acquire_lock(&env)?;
+        Self::extend_instance_ttl_for_call(&env);
 
         let underlying_id = Self::read_underlying(&env);
         let underlying_client = TokenClient::new(&env, &underlying_id);
@@ -691,6 +757,7 @@ impl WrapperContract {
         }
 
         Self::acquire_lock(&env)?;
+        Self::extend_instance_ttl_for_call(&env);
 
         let underlying_id = Self::read_underlying(&env);
         let underlying_client = TokenClient::new(&env, &underlying_id);
@@ -765,6 +832,7 @@ impl WrapperContract {
         }
 
         Self::acquire_lock(&env)?;
+        Self::extend_instance_ttl_for_call(&env);
 
         let underlying_id = Self::read_underlying(&env);
         let underlying_client = TokenClient::new(&env, &underlying_id);
@@ -968,6 +1036,7 @@ impl WrapperContract {
         }
 
         Self::acquire_lock(&env)?;
+        Self::extend_instance_ttl_for_call(&env);
 
         let underlying_id = Self::read_underlying(&env);
         let underlying_client = TokenClient::new(&env, &underlying_id);
@@ -1213,6 +1282,7 @@ impl WrapperContract {
         }
 
         Self::acquire_lock(&env)?;
+        Self::extend_instance_ttl_for_call(&env);
 
         let underlying_id = Self::read_underlying(&env);
         let underlying_client = TokenClient::new(&env, &underlying_id);
@@ -1410,6 +1480,14 @@ impl WrapperContract {
     /// Simulates a withdrawal and returns the number of assets that would be returned, rounding down.
     pub fn preview_withdraw(env: Env, shares: i128) -> Result<i128, WrapperError> {
         Self::convert_to_assets(env, shares)
+    }
+
+    /// Returns instance TTL and singleton storage key counts. No authorization.
+    pub fn get_storage_info(env: Env) -> StorageInfo {
+        StorageInfo {
+            instance_ttl: Self::get_instance_ttl_internal(&env),
+            instance_keys: Self::get_storage_key_counts_internal(&env),
+        }
     }
 }
 
