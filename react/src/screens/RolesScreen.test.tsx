@@ -396,7 +396,7 @@ describe("RolesScreen (#906, #1224, #1225, #1227, #1228, #1231, #1232, #1233)", 
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
 
     URL.createObjectURL = originalCreate;
-    URL.revokeObjectURL = revokeObjectURL;
+    URL.revokeObjectURL = originalRevoke;
   });
 
   it("blocks revoking the last active SuperAdmin", async () => {

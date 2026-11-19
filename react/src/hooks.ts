@@ -597,7 +597,6 @@ export const DEFAULT_BALANCE_TIMEOUT_MS = 10_000;
  */
 export const DEFAULT_BALANCE_POLL_INTERVAL_MS = 15_000;
 
-
 /**
  * Configuration options for {@link useBalance} and {@link useWalletBalancePolling}.
  */
@@ -832,7 +831,7 @@ export function useBalance(
   } else if (optionalClient) {
     client = optionalClient;
   } else {
-    client = useBcForgeClient();
+    throw new Error("useBcForgeClient must be used within a BcForgeProvider");
   }
 
   const wallet = useWallet();
@@ -860,125 +859,125 @@ export function useBalance(
     };
   }, []);
 
-  const fetchBalance = useCallback(async (): Promise<WalletBalancesSnapshot | null> => {
-    if (!enabled || !client || !resolvedAddress) {
-      return null;
-    }
-
-    // Validate address format when an explicit 56-char or malformed address is detected
-    if (
-      resolvedAddress.length === 56 &&
-      !isValidStellarAddress(resolvedAddress)
-    ) {
-      const invalidErr = new Error(
-        `Invalid Stellar address format: "${resolvedAddress}".`,
-      );
-      if (mountedRef.current) {
-        setError(invalidErr);
-        setLoading(false);
+  const fetchBalance =
+    useCallback(async (): Promise<WalletBalancesSnapshot | null> => {
+      if (!enabled || !client || !resolvedAddress) {
+        return null;
       }
-      return null;
-    }
 
-    if (
-      !/^[GC][A-Z0-9_]+$/i.test(resolvedAddress)
-    ) {
-      const invalidErr = new Error(
-        `Invalid Stellar address format: "${resolvedAddress}".`,
-      );
-      if (mountedRef.current) {
-        setError(invalidErr);
-        setLoading(false);
+      // Validate address format when an explicit 56-char or malformed address is detected
+      if (
+        resolvedAddress.length === 56 &&
+        !isValidStellarAddress(resolvedAddress)
+      ) {
+        const invalidErr = new Error(
+          `Invalid Stellar address format: "${resolvedAddress}".`,
+        );
+        if (mountedRef.current) {
+          setError(invalidErr);
+          setLoading(false);
+        }
+        return null;
       }
-      return null;
-    }
 
-    const currentRequestId = ++requestIdRef.current;
+      if (!/^[GC][A-Z0-9_]+$/i.test(resolvedAddress)) {
+        const invalidErr = new Error(
+          `Invalid Stellar address format: "${resolvedAddress}".`,
+        );
+        if (mountedRef.current) {
+          setError(invalidErr);
+          setLoading(false);
+        }
+        return null;
+      }
 
-    if (mountedRef.current) {
-      setLoading(true);
-      setError(null);
-    }
+      const currentRequestId = ++requestIdRef.current;
 
-    try {
-      const tokenPromise = withRpcTimeout(
-        client.getBalance(resolvedAddress),
-        timeoutMs,
-        "RPC balance query timed out.",
-      );
-
-      const nativePromise = includeNative
-        ? withRpcTimeout(
-            queryNativeXlmBalance(client, resolvedAddress, fetchNativeBalance),
-            timeoutMs,
-            "Native XLM balance query timed out.",
-          ).catch((err) => {
-            if (fetchNativeBalance) throw err;
-            return null;
-          })
-        : Promise.resolve(null);
-
-      const rolesPromise = includeRoles
-        ? withRpcTimeout(
-            queryRoleHierarchy(client, resolvedAddress, fetchRoles),
-            timeoutMs,
-            "Role hierarchy query timed out.",
-          ).catch((err) => {
-            if (fetchRoles) throw err;
-            return null;
-          })
-        : Promise.resolve(null);
-
-      const [rawTokenBalance, resolvedNative, resolvedRoles] = await Promise.all([
-        tokenPromise,
-        nativePromise,
-        rolesPromise,
-      ]);
-
-      const tokenBalance =
-        typeof rawTokenBalance === "bigint"
-          ? rawTokenBalance
-          : BigInt(rawTokenBalance as string | number);
-
-      const updatedAt = Date.now();
-      const snapshot: WalletBalancesSnapshot = {
-        tokenBalance,
-        nativeBalance: resolvedNative,
-        roles: resolvedRoles,
-        lastUpdatedAt: updatedAt,
-      };
-
-      if (mountedRef.current && currentRequestId === requestIdRef.current) {
-        setData(tokenBalance);
-        setNativeBalance(resolvedNative);
-        setRoles(resolvedRoles);
-        setLastUpdatedAt(updatedAt);
+      if (mountedRef.current) {
+        setLoading(true);
         setError(null);
       }
 
-      return snapshot;
-    } catch (err) {
-      const rawError = err instanceof Error ? err : new Error(String(err));
-      const normalized = normalizeMetadataError(rawError);
-      if (mountedRef.current && currentRequestId === requestIdRef.current) {
-        setError(normalized);
+      try {
+        const tokenPromise = withRpcTimeout(
+          client.getBalance(resolvedAddress),
+          timeoutMs,
+          "RPC balance query timed out.",
+        );
+
+        const nativePromise = includeNative
+          ? withRpcTimeout(
+              queryNativeXlmBalance(
+                client,
+                resolvedAddress,
+                fetchNativeBalance,
+              ),
+              timeoutMs,
+              "Native XLM balance query timed out.",
+            ).catch((err) => {
+              if (fetchNativeBalance) throw err;
+              return null;
+            })
+          : Promise.resolve(null);
+
+        const rolesPromise = includeRoles
+          ? withRpcTimeout(
+              queryRoleHierarchy(client, resolvedAddress, fetchRoles),
+              timeoutMs,
+              "Role hierarchy query timed out.",
+            ).catch((err) => {
+              if (fetchRoles) throw err;
+              return null;
+            })
+          : Promise.resolve(null);
+
+        const [rawTokenBalance, resolvedNative, resolvedRoles] =
+          await Promise.all([tokenPromise, nativePromise, rolesPromise]);
+
+        const tokenBalance =
+          typeof rawTokenBalance === "bigint"
+            ? rawTokenBalance
+            : BigInt(rawTokenBalance as string | number);
+
+        const updatedAt = Date.now();
+        const snapshot: WalletBalancesSnapshot = {
+          tokenBalance,
+          nativeBalance: resolvedNative,
+          roles: resolvedRoles,
+          lastUpdatedAt: updatedAt,
+        };
+
+        if (mountedRef.current && currentRequestId === requestIdRef.current) {
+          setData(tokenBalance);
+          setNativeBalance(resolvedNative);
+          setRoles(resolvedRoles);
+          setLastUpdatedAt(updatedAt);
+          setError(null);
+        }
+
+        return snapshot;
+      } catch (err) {
+        const rawError = err instanceof Error ? err : new Error(String(err));
+        const normalized = normalizeMetadataError(rawError);
+        if (mountedRef.current && currentRequestId === requestIdRef.current) {
+          setError(normalized);
+        }
+        return null;
+      } finally {
+        if (mountedRef.current && currentRequestId === requestIdRef.current) {
+          setLoading(false);
+        }
       }
-      return null;
-    } finally {
-      if (mountedRef.current && currentRequestId === requestIdRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [
-    enabled,
-    client,
-    resolvedAddress,
-    timeoutMs,
-    includeNative,
-    includeRoles,
-    fetchNativeBalance,
-    fetchRoles,
-  ]);
+    }, [
+      enabled,
+      client,
+      resolvedAddress,
+      timeoutMs,
+      includeNative,
+      includeRoles,
+      fetchNativeBalance,
+      fetchRoles,
+    ]);
 
   // Eagerly fetch on mount / when address or connection state transitions to connected,
   // and clear stale data when disconnected.
@@ -3558,11 +3557,7 @@ export function useRbacRoles(
   address: string | undefined | null,
   options: UseRbacRolesOptions = {},
 ): UseRbacRolesResult {
-  const {
-    client: clientOption,
-    enabled = true,
-    pollIntervalMs,
-  } = options;
+  const { client: clientOption, enabled = true, pollIntervalMs } = options;
 
   const optionalClient = useOptionalBcForgeClient();
   let client: bcForgeClient | null = null;
@@ -3638,7 +3633,8 @@ export function useRbacRoles(
       }
       return result;
     } catch (err) {
-      const normalizedError = err instanceof Error ? err : new Error(String(err));
+      const normalizedError =
+        err instanceof Error ? err : new Error(String(err));
       if (mountedRef.current) {
         setError(normalizedError);
       }
@@ -3659,7 +3655,13 @@ export function useRbacRoles(
   }, [enabled, address, client, fetchRoles]);
 
   useEffect(() => {
-    if (!enabled || !address?.trim() || !client || !pollIntervalMs || pollIntervalMs <= 0) {
+    if (
+      !enabled ||
+      !address?.trim() ||
+      !client ||
+      !pollIntervalMs ||
+      pollIntervalMs <= 0
+    ) {
       return;
     }
     const timer = setInterval(() => {
@@ -3673,7 +3675,8 @@ export function useRbacRoles(
   return {
     roles,
     data,
-    loading: enabled && Boolean(address?.trim()) && client !== null ? loading : false,
+    loading:
+      enabled && Boolean(address?.trim()) && client !== null ? loading : false,
     error,
     refetch: fetchRoles,
   };
@@ -3770,7 +3773,9 @@ export function useRoleAdmins(
   }
 
   const [admins, setAdmins] = useState<string[]>([]);
-  const [roleAdmins, setRoleAdmins] = useState<Partial<Record<Role, string>>>({});
+  const [roleAdmins, setRoleAdmins] = useState<Partial<Record<Role, string>>>(
+    {},
+  );
   const [superAdmins, setSuperAdmins] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
@@ -3859,7 +3864,10 @@ export function useRoleAdmins(
         await Promise.all(
           candidateAddresses.map(async (candidate) => {
             try {
-              const isSuper = await client!.hasRole(roleObj.SuperAdmin, candidate);
+              const isSuper = await client!.hasRole(
+                roleObj.SuperAdmin,
+                candidate,
+              );
               if (isSuper) {
                 activeAdminSet.add(candidate);
                 if (!verifiedSuperAdmins.includes(candidate)) {
@@ -3883,7 +3891,8 @@ export function useRoleAdmins(
       }
       return adminList;
     } catch (err) {
-      const normalizedError = err instanceof Error ? err : new Error(String(err));
+      const normalizedError =
+        err instanceof Error ? err : new Error(String(err));
       if (mountedRef.current) {
         setError(normalizedError);
       }
