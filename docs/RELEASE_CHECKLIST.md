@@ -90,6 +90,7 @@ Publish workflows set top-level `permissions: {}` so every unspecified `GITHUB_T
   - `contents: write` (push release commits and tags)
   - `id-token: write` (OIDC token for npm provenance)
   - `pull-requests: write` (open and update the Changesets version PR)
+  - When enterprise policy disallows `GITHUB_TOKEN` from creating pull requests, `WORKFLOW_APPROVER_PAT` (or equivalent repository/environment Personal Access Token) is passed as `GITHUB_TOKEN` to `changesets/action` to open the version PR. If a version PR is created manually (e.g. `gh pr create --head changeset-release/main`), Changesets will update it instead of attempting to create one.
 - **`release.yml`** (`react-prepublish` and `verify-react-release` jobs):
   - `contents: read` on the calling job. These jobs call reusable workflows that request `contents: read`. A `uses` job that inherits `permissions: {}` is rejected at startup with `contents: none`.
 - **`publish-release-manifest.yml`** (`manifest` job, environment `container`):
