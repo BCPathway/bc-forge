@@ -28,6 +28,12 @@ if (
   delete process.env.NODE_AUTH_TOKEN;
 }
 
+// If NPM_TOKEN is provided and NODE_AUTH_TOKEN is missing,
+// map NPM_TOKEN into NODE_AUTH_TOKEN for tools that expect it.
+if (process.env.NPM_TOKEN && !process.env.NODE_AUTH_TOKEN) {
+  process.env.NODE_AUTH_TOKEN = process.env.NPM_TOKEN;
+}
+
 // If NPM_CONFIG_USERCONFIG points to a generated .npmrc containing always-auth
 // or unbound token placeholders without a real token, remove it so OIDC succeeds.
 if (
@@ -68,5 +74,24 @@ const steps = [
 
 for (const command of steps) {
   console.log(`\n=== release:publish: ${command} ===`);
-  execSync(command, { cwd: root, stdio: "inherit" });
+  if (command === "npx changeset publish") {
+    try {
+      execSync(command, { cwd: root, stdio: "inherit" });
+    } catch (error) {
+      if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN) {
+        console.warn(
+          "\n=== Changeset publish with provenance failed. Retrying with token fallback (provenance=false) ===",
+        );
+        execSync("npm config set provenance false", {
+          cwd: root,
+          stdio: "inherit",
+        });
+        execSync(command, { cwd: root, stdio: "inherit" });
+      } else {
+        throw error;
+      }
+    }
+  } else {
+    execSync(command, { cwd: root, stdio: "inherit" });
+  }
 }
