@@ -16,6 +16,12 @@ import {
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 
 /** Builds a contract instance ledger entry referencing `wasmHash`. */
+function extensionPoint(): xdr.ExtensionPoint {
+  return typeof xdr.ExtensionPoint.v0 === "function"
+    ? xdr.ExtensionPoint.v0()
+    : new (xdr.ExtensionPoint as any)(0);
+}
+
 function instanceEntry(wasmHash: Buffer): xdr.LedgerEntryData {
   const instance = new xdr.ScContractInstance({
     executable: xdr.ContractExecutable.contractExecutableWasm(wasmHash),
@@ -24,7 +30,7 @@ function instanceEntry(wasmHash: Buffer): xdr.LedgerEntryData {
 
   return xdr.LedgerEntryData.contractData(
     new xdr.ContractDataEntry({
-      ext: new xdr.ExtensionPoint(0),
+      ext: extensionPoint(),
       contract: new Address(CONTRACT_ID).toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
       durability: xdr.ContractDataDurability.persistent,
@@ -42,7 +48,7 @@ function assetInstanceEntry(): xdr.LedgerEntryData {
 
   return xdr.LedgerEntryData.contractData(
     new xdr.ContractDataEntry({
-      ext: new xdr.ExtensionPoint(0),
+      ext: extensionPoint(),
       contract: new Address(CONTRACT_ID).toScAddress(),
       key: xdr.ScVal.scvLedgerKeyContractInstance(),
       durability: xdr.ContractDataDurability.persistent,
