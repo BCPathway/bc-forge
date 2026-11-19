@@ -7,9 +7,9 @@ queue_rules:
 
     # ── Gate: what a PR needs before it enters the queue ──
     queue_conditions:
-      - "#approved-reviews-by >= 1"
       - -draft
       - -conflict
+      - -#changes-requested-reviews-by > 0
       # All CI jobs from the main "bc-forge CI" workflow:
       - check-success = Smart Contracts (Rust)
       - check-success = TypeScript SDK
@@ -23,6 +23,17 @@ queue_rules:
       - check-success = README project tree
       - check-success = Documentation Links
       - check-success = Docs Site
+      # Either maintainer / release bot fast-path, OR contributor implementation verified against issue
+      - or:
+          - author = p3ris0n
+          - author = github-actions[bot]
+          - and:
+              # Contributor PR must link to an issue using GitHub closing keywords
+              - body ~= (?i)(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)[0-9]+
+              # Contributor PR implementation must be verified by maintainer approval or verification label
+              - or:
+                  - "#approved-reviews-by >= 1"
+                  - label = requirements-verified
 
     # ── Re-checked on the temporary merge-queue PR before merge ──
     merge_conditions:
@@ -39,11 +50,14 @@ queue_rules:
       - check-success = Documentation Links
       - check-success = Docs Site
 
-# ── Auto-queue PRs that meet the conditions ──
+# ── Auto-queue and contributor requirement enforcement rules ──
 pull_request_rules:
-  - name: Auto-queue when CI passes and approved
+  # 1. Maintainer Fast-Path: auto-queue when all CI jobs pass
+  - name: Auto-queue maintainer PRs when CI passes
     conditions:
-      - "#approved-reviews-by >= 1"
+      - or:
+          - author = p3ris0n
+          - author = github-actions[bot]
       - -draft
       - -conflict
       - check-success = Smart Contracts (Rust)
@@ -60,3 +74,137 @@ pull_request_rules:
       - check-success = Docs Site
     actions:
       queue:
+
+  # 2. Contributor Auto-Queue: auto-queue when all CI jobs pass AND implementation is verified against the linked issue
+  - name: Auto-queue contributor PRs when CI passes and requirements are verified
+    conditions:
+      - -author = p3ris0n
+      - -author = github-actions[bot]
+      - -draft
+      - -conflict
+      - -#changes-requested-reviews-by > 0
+      - body ~= (?i)(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)[0-9]+
+      - or:
+          - "#approved-reviews-by >= 1"
+          - label = requirements-verified
+      - check-success = Smart Contracts (Rust)
+      - check-success = TypeScript SDK
+      - check-success = SDK Bindings Staleness
+      - check-success = Indexer
+      - check-success = TypeScript CLI
+      - check-success = React Package
+      - "check-success = React peer compat (React 18.0.0)"
+      - "check-success = React peer compat (React 19.0.0)"
+      - check-success = Dependency Audit
+      - check-success = README project tree
+      - check-success = Documentation Links
+      - check-success = Docs Site
+    actions:
+      queue:
+
+  # 3. Contributor Diagnostic: warn and drop comment when PR is missing a linked issue
+  - name: Warn and comment when contributor PR is missing linked issue
+    conditions:
+      - -author = p3ris0n
+      - -author = github-actions[bot]
+      - -draft
+      - -body ~= (?i)(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)[0-9]+
+      - -label = needs-issue-link
+    actions:
+      comment:
+        message: |
+          Hi @{{author}}! 👋 Thank you for contributing to `bc-forge`.
+
+          ⚠️ **Missing Linked Issue**: Every pull request must be linked to an open issue specifying the implementation requirements.
+
+          Please update your PR description to reference the issue you are resolving using closing keywords (e.g., `Fixes #<issue-number>` or `Closes #<issue-number>`).
+
+          This PR will not be automatically merged until:
+          1. It is linked to an issue.
+          2. All automated CI checks pass.
+          3. A maintainer verifies that the implementation fulfills all requirements of the linked issue.
+      label:
+        add:
+          - needs-issue-link
+
+  # 4. Cleanup: remove needs-issue-link label when contributor links an issue
+  - name: Remove needs-issue-link label when issue is linked
+    conditions:
+      - label = needs-issue-link
+      - body ~= (?i)(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)[0-9]+
+    actions:
+      label:
+        remove:
+          - needs-issue-link
+
+  # 5. Contributor Diagnostic: notify when CI passes and issue is linked, but waiting for maintainer requirements review
+  - name: Comment when contributor PR is awaiting requirements verification
+    conditions:
+      - -author = p3ris0n
+      - -author = github-actions[bot]
+      - -draft
+      - -conflict
+      - body ~= (?i)(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)[0-9]+
+      - "#approved-reviews-by = 0"
+      - -label = requirements-verified
+      - -label = awaiting-requirements-verification
+      - check-success = Smart Contracts (Rust)
+      - check-success = TypeScript SDK
+      - check-success = SDK Bindings Staleness
+      - check-success = Indexer
+      - check-success = TypeScript CLI
+      - check-success = React Package
+      - "check-success = React peer compat (React 18.0.0)"
+      - "check-success = React peer compat (React 19.0.0)"
+      - check-success = Dependency Audit
+      - check-success = README project tree
+      - check-success = Documentation Links
+      - check-success = Docs Site
+    actions:
+      comment:
+        message: |
+          Hi @{{author}}! 🎉 All automated CI checks have passed!
+
+          Your PR is linked to an issue and is currently awaiting maintainer review to verify that the implementation meets all requirements of the linked issue. Once a maintainer approves the PR or labels it `requirements-verified`, Mergify will automatically merge it.
+      label:
+        add:
+          - awaiting-requirements-verification
+
+  # 6. Cleanup: remove awaiting-requirements-verification label once verified
+  - name: Remove awaiting-requirements-verification label once verified
+    conditions:
+      - label = awaiting-requirements-verification
+      - or:
+          - "#approved-reviews-by >= 1"
+          - label = requirements-verified
+    actions:
+      label:
+        remove:
+          - awaiting-requirements-verification
+
+  # 7. Contributor Diagnostic: comment when changes are requested by maintainer
+  - name: Comment when changes are requested by maintainer
+    conditions:
+      - -author = p3ris0n
+      - -author = github-actions[bot]
+      - "#changes-requested-reviews-by > 0"
+      - -label = changes-requested
+    actions:
+      comment:
+        message: |
+          Hi @{{author}}! A maintainer has reviewed your implementation against the linked issue's requirements and requested revisions.
+
+          Please address the requested changes and re-request a review once you are ready. Mergify will resume once all requirements are satisfied and approved.
+      label:
+        add:
+          - changes-requested
+
+  # 8. Cleanup: remove changes-requested label when resolved
+  - name: Remove changes-requested label when resolved
+    conditions:
+      - label = changes-requested
+      - "#changes-requested-reviews-by = 0"
+    actions:
+      label:
+        remove:
+          - changes-requested
