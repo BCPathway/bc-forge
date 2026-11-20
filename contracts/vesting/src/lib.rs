@@ -276,7 +276,12 @@ impl VestingContract {
             Symbol::new(env, "transfer_from"),
             (&current_contract, grantor, &current_contract, amount).into_val(env),
         );
-        Self::token_client(env).transfer_from(&current_contract, grantor, &current_contract, &amount);
+        Self::token_client(env).transfer_from(
+            &current_contract,
+            grantor,
+            &current_contract,
+            &amount,
+        );
     }
 
     fn transfer_from_vault(env: &Env, to: &Address, amount: i128) {

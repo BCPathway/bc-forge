@@ -30,7 +30,12 @@ fn setup(
     let vesting = VestingContractClient::new(env, &vesting_id);
     vesting.initialize(&admin, &token_id);
     token.mint(&admin, &admin, &1_000_000);
-    token.approve(&admin, &vesting_id, &i128::MAX, &(env.ledger().sequence() + 10_000));
+    token.approve(
+        &admin,
+        &vesting_id,
+        &i128::MAX,
+        &(env.ledger().sequence() + 10_000),
+    );
 
     (token, vesting, admin, beneficiary, vesting_id)
 }
@@ -231,7 +236,14 @@ pub struct ReenteringVestingTokenContract;
 impl ReenteringVestingTokenContract {
     pub fn mint(_env: Env, _admin: Address, _to: Address, _amount: i128) {}
 
-    pub fn transfer_from(_env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {}
+    pub fn transfer_from(
+        _env: Env,
+        _spender: Address,
+        _from: Address,
+        _to: Address,
+        _amount: i128,
+    ) {
+    }
 
     pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
         let vesting_id = env

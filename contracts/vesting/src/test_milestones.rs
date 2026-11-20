@@ -38,7 +38,12 @@ fn setup(
     let vesting = VestingContractClient::new(env, &vesting_id);
     vesting.initialize(&admin, &token_id);
     token.mint(&admin, &admin, &1_000_000);
-    token.approve(&admin, &vesting_id, &i128::MAX, &(env.ledger().sequence() + 10_000));
+    token.approve(
+        &admin,
+        &vesting_id,
+        &i128::MAX,
+        &(env.ledger().sequence() + 10_000),
+    );
 
     (token, vesting, admin, beneficiary, vesting_id)
 }

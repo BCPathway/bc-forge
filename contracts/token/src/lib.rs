@@ -442,51 +442,58 @@ impl BcForgeToken {
     }
 }
 
+fn read_current_snapshot_id(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::CurrentSnapshotId)
+        .unwrap_or(0)
+}
 
-    fn read_current_snapshot_id(env: &Env) -> u32 {
-        env.storage().instance().get(&DataKey::CurrentSnapshotId).unwrap_or(0)
+fn write_current_snapshot_id(env: &Env, id: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::CurrentSnapshotId, &id);
+    ttl::extend_instance_ttl(env);
+}
+
+fn read_snapshot_ledger(env: &Env, snapshot_id: u32) -> Option<u32> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SnapshotLedger(snapshot_id))
+}
+
+fn read_account_snapshot_cursor(env: &Env, account: &Address) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::AccountSnapshotCursor(account.clone()))
+        .unwrap_or(0)
+}
+
+fn write_account_snapshot_cursor(env: &Env, account: &Address, snapshot_id: u32) {
+    env.storage().persistent().set(
+        &DataKey::AccountSnapshotCursor(account.clone()),
+        &snapshot_id,
+    );
+}
+
+fn checkpoint_account_balance(env: &Env, account: &Address, pre_mutation_balance: i128) {
+    let current = Self::read_current_snapshot_id(env);
+    if current == 0 {
+        return;
     }
-
-    fn write_current_snapshot_id(env: &Env, id: u32) {
-        env.storage().instance().set(&DataKey::CurrentSnapshotId, &id);
-        ttl::extend_instance_ttl(env);
+    let mut cursor = Self::read_account_snapshot_cursor(env, account);
+    if cursor >= current {
+        return;
     }
-
-    fn read_snapshot_ledger(env: &Env, snapshot_id: u32) -> Option<u32> {
-        env.storage().persistent().get(&DataKey::SnapshotLedger(snapshot_id))
-    }
-
-    fn read_account_snapshot_cursor(env: &Env, account: &Address) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::AccountSnapshotCursor(account.clone()))
-            .unwrap_or(0)
-    }
-
-    fn write_account_snapshot_cursor(env: &Env, account: &Address, snapshot_id: u32) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::AccountSnapshotCursor(account.clone()), &snapshot_id);
-    }
-
-    fn checkpoint_account_balance(env: &Env, account: &Address, pre_mutation_balance: i128) {
-        let current = Self::read_current_snapshot_id(env);
-        if current == 0 {
-            return;
+    while cursor < current {
+        cursor += 1;
+        let key = DataKey::BalanceSnapshot(account.clone(), cursor);
+        if !env.storage().persistent().has(&key) {
+            env.storage().persistent().set(&key, &pre_mutation_balance);
         }
-        let mut cursor = Self::read_account_snapshot_cursor(env, account);
-        if cursor >= current {
-            return;
-        }
-        while cursor < current {
-            cursor += 1;
-            let key = DataKey::BalanceSnapshot(account.clone(), cursor);
-            if !env.storage().persistent().has(&key) {
-                env.storage().persistent().set(&key, &pre_mutation_balance);
-            }
-        }
-        Self::write_account_snapshot_cursor(env, account, current);
     }
+    Self::write_account_snapshot_cursor(env, account, current);
+}
 
 /// Lockup period state storage helpers (#719).
 ///
@@ -1371,7 +1378,11 @@ impl BcForgeToken {
     }
 
     /// Returns the historical balance of an address at a snapshot id.
-    pub fn balance_at_snapshot(env: Env, id: Address, snapshot_id: u32) -> Result<i128, TokenError> {
+    pub fn balance_at_snapshot(
+        env: Env,
+        id: Address,
+        snapshot_id: u32,
+    ) -> Result<i128, TokenError> {
         Self::extend_instance_ttl_for_call(&env);
         Self::ensure_initialized(&env)?;
         if Self::read_snapshot_ledger(&env, snapshot_id).is_none() {

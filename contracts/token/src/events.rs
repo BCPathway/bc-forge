@@ -423,11 +423,8 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
     );
 }
 
-
 /// Emits the `snap_new` event when a balance snapshot is created.
 pub fn emit_snapshot_created(env: &Env, snapshot_id: u32, ledger: u32) {
-    env.events().publish(
-        (symbol_short!("snap_new"),),
-        (snapshot_id, ledger),
-    );
+    env.events()
+        .publish((symbol_short!("snap_new"),), (snapshot_id, ledger));
 }
