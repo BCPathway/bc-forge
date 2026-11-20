@@ -27,7 +27,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 15] = [
+const DATA_KEY_SLOT_NAMES: [&str; 18] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -37,11 +37,14 @@ const DATA_KEY_SLOT_NAMES: [&str; 15] = [
     "FeeExemption",
     "Lockup",
     "MaxSupply",
+    "MetadataLocked",
+    "MintPaused",
     "Name",
     "Nonce",
     "PendingAdmin",
     "Supply",
     "Symbol",
+    "TransferPaused",
     "Treasury",
 ];
 
@@ -95,10 +98,13 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::MetadataLocked => "MetadataLocked",
+        DataKey::MintPaused => "MintPaused",
+        DataKey::TransferPaused => "TransferPaused",
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 15] {
+fn all_data_keys(env: &Env) -> [DataKey; 18] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -117,6 +123,9 @@ fn all_data_keys(env: &Env) -> [DataKey; 15] {
         DataKey::FeeConfig,
         DataKey::FeeExemption(owner.clone()),
         DataKey::Nonce(owner),
+        DataKey::MetadataLocked,
+        DataKey::MintPaused,
+        DataKey::TransferPaused,
     ]
 }
 

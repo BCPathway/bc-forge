@@ -368,6 +368,22 @@ pub fn emit_metadata_updated(env: &Env, caller: &Address, name: &String, symbol:
     );
 }
 
+/// Emits `meta_lck` when name and symbol are permanently locked.
+pub fn emit_metadata_locked(env: &Env, caller: &Address) {
+    env.events()
+        .publish((symbol_short!("meta_lck"),), (caller.clone(),));
+}
+
+/// Emits `scope_pse` when a single pause scope (mints or transfers) toggles.
+///
+/// Data: `(caller, scope, paused)`.
+pub fn emit_scope_paused(env: &Env, caller: &Address, scope: soroban_sdk::Symbol, paused: bool) {
+    env.events().publish(
+        (symbol_short!("scope_pse"),),
+        (caller.clone(), scope, paused),
+    );
+}
+
 /// Emits the `exec_btch` event when a batch of operations is executed via `execute_from_contract`.
 ///
 /// @notice Publishes batch execution event data including caller address and count of executed operations.
