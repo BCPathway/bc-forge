@@ -10,8 +10,8 @@ mod test;
 mod test_milestones;
 
 use bc_forge_admin as admin;
-use bc_forge_token::BcForgeTokenClient;
 use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
+use soroban_sdk::token::Client as TokenClient;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal,
     Symbol, Val, Vec,
@@ -241,9 +241,9 @@ impl VestingContract {
         Self::vested_amount(env, schedule, current_ledger) - schedule.schedule.released_amount
     }
 
-    fn token_client(env: &Env) -> BcForgeTokenClient<'_> {
+    fn token_client(env: &Env) -> TokenClient<'_> {
         let token = Self::read_token(env);
-        BcForgeTokenClient::new(env, &token)
+        TokenClient::new(env, &token)
     }
 
     fn authorize_current_contract_call(
@@ -267,16 +267,21 @@ impl VestingContract {
         ));
     }
 
-    fn mint_into_vault(env: &Env, amount: i128) {
+    fn transfer_from_grantor(env: &Env, grantor: &Address, amount: i128) {
         let token = Self::read_token(env);
         let current_contract = env.current_contract_address();
         Self::authorize_current_contract_call(
             env,
             &token,
-            symbol_short!("mint"),
-            (&current_contract, &current_contract, amount).into_val(env),
+            Symbol::new(env, "transfer_from"),
+            (&current_contract, grantor, &current_contract, amount).into_val(env),
         );
-        Self::token_client(env).mint(&current_contract, &current_contract, &amount);
+        Self::token_client(env).transfer_from(
+            &current_contract,
+            grantor,
+            &current_contract,
+            &amount,
+        );
     }
 
     fn transfer_from_vault(env: &Env, to: &Address, amount: i128) {
@@ -320,6 +325,7 @@ impl VestingContract {
 
     pub fn create_vesting(
         env: Env,
+        caller: Address,
         beneficiary: Address,
         amount: i128,
         cliff: u32,
@@ -328,8 +334,7 @@ impl VestingContract {
     ) -> Result<u64, VestingError> {
         reentrancy_guard!(&env, "create_vesting", {
             Self::ensure_initialized(&env)?;
-            let admin_address = Self::read_admin(&env);
-            admin::require_admin(&env, &admin_address);
+            caller.require_auth();
 
             if amount <= 0 {
                 return Err(VestingError::InvalidAmount);
@@ -346,7 +351,7 @@ impl VestingContract {
             let cliff_ledger = start_ledger + cliff;
             let end_ledger = start_ledger + duration;
 
-            Self::mint_into_vault(&env, amount);
+            Self::transfer_from_grantor(&env, &caller, amount);
 
             let schedule = StoredVestingSchedule {
                 schedule: VestingSchedule {

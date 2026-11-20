@@ -90,6 +90,14 @@ pub enum DataKey {
     FeeExemption(Address),
     /// Nonce for contract wallet batch execution replay protection.
     Nonce(Address),
+    /// Current snapshot id counter.
+    CurrentSnapshotId,
+    /// Ledger sequence recorded for a snapshot id.
+    SnapshotLedger(u32),
+    /// Historical balance checkpoint for (account, snapshot id).
+    BalanceSnapshot(Address, u32),
+    /// Last snapshot id checkpointed for an account.
+    AccountSnapshotCursor(Address),
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -191,6 +199,8 @@ pub enum TokenError {
     LockupNotFound = 21,
     /// The holder's lock has not reached its unlock timestamp.
     TokensStillLocked = 22,
+    /// Requested snapshot id does not exist.
+    SnapshotNotFound = 23,
 }
 
 #[contract]
@@ -347,6 +357,8 @@ impl BcForgeToken {
 
         if from != to {
             let to_balance = Self::read_balance(env, to);
+            Self::checkpoint_account_balance(env, from, from_balance);
+            Self::checkpoint_account_balance(env, to, to_balance);
             Self::write_balance(env, from, from_balance - amount);
             Self::write_balance(env, to, to_balance + amount);
         }
@@ -369,7 +381,9 @@ impl BcForgeToken {
             return Err(TokenError::MaxSupplyExceeded);
         }
 
-        let new_balance = Self::read_balance(env, to) + amount;
+        let current_balance = Self::read_balance(env, to);
+        Self::checkpoint_account_balance(env, to, current_balance);
+        let new_balance = current_balance + amount;
         Self::write_balance(env, to, new_balance);
         Self::write_supply(env, new_supply);
         events::emit_mint(env, admin_address, to, amount, new_balance, new_supply);
@@ -426,6 +440,59 @@ impl BcForgeToken {
             .persistent()
             .set(&DataKey::Nonce(address.clone()), &nonce);
     }
+}
+
+fn read_current_snapshot_id(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::CurrentSnapshotId)
+        .unwrap_or(0)
+}
+
+fn write_current_snapshot_id(env: &Env, id: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::CurrentSnapshotId, &id);
+    ttl::extend_instance_ttl(env);
+}
+
+fn read_snapshot_ledger(env: &Env, snapshot_id: u32) -> Option<u32> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SnapshotLedger(snapshot_id))
+}
+
+fn read_account_snapshot_cursor(env: &Env, account: &Address) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::AccountSnapshotCursor(account.clone()))
+        .unwrap_or(0)
+}
+
+fn write_account_snapshot_cursor(env: &Env, account: &Address, snapshot_id: u32) {
+    env.storage().persistent().set(
+        &DataKey::AccountSnapshotCursor(account.clone()),
+        &snapshot_id,
+    );
+}
+
+fn checkpoint_account_balance(env: &Env, account: &Address, pre_mutation_balance: i128) {
+    let current = Self::read_current_snapshot_id(env);
+    if current == 0 {
+        return;
+    }
+    let mut cursor = Self::read_account_snapshot_cursor(env, account);
+    if cursor >= current {
+        return;
+    }
+    while cursor < current {
+        cursor += 1;
+        let key = DataKey::BalanceSnapshot(account.clone(), cursor);
+        if !env.storage().persistent().has(&key) {
+            env.storage().persistent().set(&key, &pre_mutation_balance);
+        }
+    }
+    Self::write_account_snapshot_cursor(env, account, current);
 }
 
 /// Lockup period state storage helpers (#719).
@@ -1292,6 +1359,45 @@ impl BcForgeToken {
     /// Returns [`TokenError::PayloadExpired`] if `max_ledger > 0` and current ledger > `max_ledger`.
     /// Returns [`TokenError::PayloadReplayed`] if `nonce` does not match the stored nonce for `from`.
     /// Returns [`TokenError::InvalidAmount`] if any operation amount is invalid.
+    /// Creates a balance snapshot at the current ledger sequence.
+    pub fn take_snapshot(env: Env, caller: Address) -> Result<u32, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        caller.require_auth();
+        if !bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &caller) {
+            return Err(TokenError::InvalidAmount);
+        }
+        let snapshot_id = Self::read_current_snapshot_id(&env) + 1;
+        let ledger = env.ledger().sequence();
+        env.storage()
+            .persistent()
+            .set(&DataKey::SnapshotLedger(snapshot_id), &ledger);
+        Self::write_current_snapshot_id(&env, snapshot_id);
+        events::emit_snapshot_created(&env, snapshot_id, ledger);
+        Ok(snapshot_id)
+    }
+
+    /// Returns the historical balance of an address at a snapshot id.
+    pub fn balance_at_snapshot(
+        env: Env,
+        id: Address,
+        snapshot_id: u32,
+    ) -> Result<i128, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        if Self::read_snapshot_ledger(&env, snapshot_id).is_none() {
+            return Err(TokenError::SnapshotNotFound);
+        }
+        if let Some(balance) = env
+            .storage()
+            .persistent()
+            .get(&DataKey::BalanceSnapshot(id.clone(), snapshot_id))
+        {
+            return Ok(balance);
+        }
+        Ok(Self::read_balance(&env, &id))
+    }
+
     pub fn execute_from_contract(
         env: Env,
         from: Address,
@@ -1498,6 +1604,7 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
+        Self::checkpoint_account_balance(&env, &from, balance);
         let new_balance = balance - amount;
         let new_supply = Self::read_supply(&env) - amount;
         Self::write_balance(&env, &from, new_balance);
@@ -1537,6 +1644,7 @@ impl TokenInterface for BcForgeToken {
             soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
         }
 
+        Self::checkpoint_account_balance(&env, &from, balance);
         let new_balance = balance - amount;
         let new_supply = Self::read_supply(&env) - amount;
         Self::write_allowance(
