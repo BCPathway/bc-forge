@@ -817,3 +817,49 @@ fn test_emergency_cap_blocks_excessive_withdrawals_in_window() {
     assert_eq!(third, 200_000);
 }
 
+#[test]
+fn test_second_withdrawal_while_queued_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, underlying, admin, user, _vault_id) = setup_and_fund(&env);
+
+    vault.set_cooldown_config(&admin, &CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    });
+
+    vault.deposit(&user, &1_000_000, &0);
+    assert_eq!(vault.withdraw(&user, &500_000, &0), 0);
+    assert_eq!(vault.share_balance(&user), 500_000);
+
+    assert_eq!(
+        vault.try_withdraw(&user, &200_000, &0),
+        Err(Ok(VaultError::WithdrawalAlreadyQueued))
+    );
+    assert_eq!(vault.share_balance(&user), 500_000);
+
+    let queued = vault.get_queued_withdrawal(&user).unwrap();
+    env.ledger().set_sequence_number(queued.release_ledger + 1);
+    assert_eq!(vault.claim_withdrawal(&user), 500_000);
+    assert_eq!(underlying.balance(&user), 9_500_000);
+}
+
+#[test]
+fn test_same_ledger_withdrawal_prohibited() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(1);
+    let (vault, _underlying, _admin, user, _vault_id) = setup_and_fund(&env);
+
+    vault.deposit(&user, &1_000_000, &0);
+    assert_eq!(
+        vault.try_withdraw(&user, &1_000_000, &0),
+        Err(Ok(VaultError::SameLedgerWithdrawalProhibited))
+    );
+
+    env.ledger().set_sequence_number(2);
+    assert_eq!(vault.withdraw(&user, &1_000_000, &0), 1_000_000);
+}
+

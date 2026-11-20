@@ -79,17 +79,61 @@ pub fn mul_div_down(a: i128, b: i128, denominator: i128) -> Option<i128> {
     }
 
     // Attempt direct checked multiplication
+    // Direct checked multiplication covers the common case. Fall back to
+    // 256-bit intermediate arithmetic for values near i128::MAX.
     if let Some(product) = a.checked_mul(b) {
         return Some(product / denominator);
     }
 
-    // Handle large numbers without overflow using 256-bit equivalent or quotient-remainder decomposition
-    // a * b / d = (a / d) * b + ((a % d) * b) / d
-    let q = a / denominator;
-    let r = a % denominator;
-    let term1 = q.checked_mul(b)?;
-    let term2 = r.checked_mul(b)? / denominator;
-    term1.checked_add(term2)
+    fn mul_u128(a: u128, b: u128) -> [u64; 4] {
+        let mut result = [0u64; 4];
+        let mut a_limbs = [0u64; 2];
+        let mut b_limbs = [0u64; 2];
+        a_limbs[0] = a as u64;
+        a_limbs[1] = (a >> 64) as u64;
+        b_limbs[0] = b as u64;
+        b_limbs[1] = (b >> 64) as u64;
+
+        for i in 0..2 {
+            let mut carry = 0u128;
+            for j in 0..2 {
+                let partial = (a_limbs[i] as u128) * (b_limbs[j] as u128);
+                let cur = (result[i + j] as u128)
+                    .wrapping_add(partial)
+                    .wrapping_add(carry);
+                result[i + j] = cur as u64;
+                carry = cur >> 64;
+            }
+            result[i + 2] = result[i + 2].wrapping_add(carry as u64);
+        }
+        result
+    }
+
+    let product = mul_u128(a as u128, b as u128);
+    let denominator = denominator as u128;
+    let mut remainder = 0u128;
+    let mut quotient = 0u128;
+
+    for limb_index in (0..4).rev() {
+        for bit_index in (0..64).rev() {
+            let bit = ((product[limb_index] >> bit_index) & 1) as u128;
+            remainder = remainder
+                .checked_shl(1)
+                .unwrap_or(0)
+                .wrapping_add(bit);
+            quotient = quotient.checked_shl(1).unwrap_or(0);
+            if remainder >= denominator {
+                remainder -= denominator;
+                quotient += 1;
+            }
+        }
+    }
+
+    if quotient > i128::MAX as u128 {
+        None
+    } else {
+        Some(quotient as i128)
+    }
 }
 
 /// Multiplies `a` by `b` and divides by `denominator`, rounding **up** (ceil).
@@ -220,5 +264,12 @@ mod tests {
         assert_eq!(convert_to_assets(1, 0, -1), None);
         assert_eq!(share_price(-1, 0), None);
         assert_eq!(share_price(0, -1), None);
+    }
+
+    #[test]
+    fn test_mul_div_down_large_256_bit_intermediate() {
+        let d = 1i128 << 126;
+        let a = i128::MAX;
+        assert_eq!(mul_div_down(a, d, d), Some(i128::MAX));
     }
 }
