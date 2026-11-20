@@ -57,10 +57,5 @@ fn test_deposit_block_survives_until_withdrawal() {
 
     env.ledger().set_sequence_number(101);
     client.withdraw(&user);
-    assert_eq!(
-        env.as_contract(&contract_id, || {
-            env.storage().persistent().has(&key)
-        }),
-        false
-    );
+    assert!(!env.as_contract(&contract_id, || { env.storage().persistent().has(&key) }));
 }

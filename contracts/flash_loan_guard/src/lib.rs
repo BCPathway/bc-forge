@@ -15,9 +15,7 @@
 #![no_std]
 
 use bc_forge_ttl as ttl;
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env,
-};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
 
 #[derive(Clone)]
 #[contracttype]
@@ -61,11 +59,7 @@ impl FlashLoanGuardContract {
         let current_block = env.ledger().sequence();
         let key = DataKey::DepositBlock(user.clone());
 
-        let deposit_block: u32 = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(0);
+        let deposit_block: u32 = env.storage().persistent().get(&key).unwrap_or(0);
 
         if current_block <= deposit_block {
             return Err(FlashLoanError::SameLedgerWithdrawal);
