@@ -29,3 +29,8 @@ jobs:
 
       - name: Run admin tests with extended proptest cases
         run: cargo test -p bc-forge-admin
+
+      - name: Run token invariant suite with extended cases
+        env:
+          PROPTEST_CASES: 5000
+        run: cargo test -p bc-forge-token --test invariants
