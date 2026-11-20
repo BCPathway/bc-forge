@@ -285,3 +285,73 @@ fn test_reentrancy_on_vesting_release_reverts() {
     let result = vesting.try_release(&beneficiary);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_transfer_beneficiary_success_by_holder() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (token, vesting, _admin, beneficiary, _vid) = setup(&env);
+    let new_b = Address::generate(&env);
+    let id = vesting.create_vesting(&beneficiary, &1_000, &0, &100, &false);
+
+    vesting.transfer_beneficiary(&beneficiary, &id, &new_b);
+    assert_eq!(vesting.get_vesting_info(&beneficiary).len(), 0);
+    assert_eq!(vesting.get_vesting_info(&new_b).len(), 1);
+
+    env.ledger().set_sequence_number(110);
+    assert_eq!(vesting.release(&new_b), 1_000);
+    assert_eq!(token.balance(&new_b), 1_000);
+}
+
+#[test]
+fn test_transfer_beneficiary_success_by_superadmin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (_token, vesting, admin, beneficiary, _vid) = setup(&env);
+    let new_b = Address::generate(&env);
+    let id = vesting.create_vesting(&beneficiary, &1_000, &0, &100, &true);
+
+    vesting.transfer_beneficiary(&admin, &id, &new_b);
+    assert_eq!(vesting.get_vesting_info(&new_b).len(), 1);
+    assert_eq!(vesting.get_vesting_info(&beneficiary).len(), 0);
+}
+
+#[test]
+fn test_transfer_beneficiary_unauthorized_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_token, vesting, _admin, beneficiary, _vid) = setup(&env);
+    let id = vesting.create_vesting(&beneficiary, &1_000, &0, &100, &true);
+    let stranger = Address::generate(&env);
+    let new_b = Address::generate(&env);
+
+    let res = vesting.try_transfer_beneficiary(&stranger, &id, &new_b);
+    assert_eq!(res, Err(Ok(VestingError::UnauthorizedBeneficiaryTransfer)));
+}
+
+#[test]
+fn test_transfer_beneficiary_same_address_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_token, vesting, _admin, beneficiary, _vid) = setup(&env);
+    let id = vesting.create_vesting(&beneficiary, &1_000, &0, &100, &true);
+    let res = vesting.try_transfer_beneficiary(&beneficiary, &id, &beneficiary);
+    assert_eq!(res, Err(Ok(VestingError::BeneficiaryAlreadySet)));
+}
+
+#[test]
+fn test_transfer_beneficiary_old_holder_cannot_claim() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (token, vesting, _admin, beneficiary, _vid) = setup(&env);
+    let new_b = Address::generate(&env);
+    let id = vesting.create_vesting(&beneficiary, &1_000, &0, &100, &false);
+    vesting.transfer_beneficiary(&beneficiary, &id, &new_b);
+
+    env.ledger().set_sequence_number(110);
+    assert_eq!(vesting.release(&beneficiary), 0);
+    assert_eq!(token.balance(&beneficiary), 0);
+}
