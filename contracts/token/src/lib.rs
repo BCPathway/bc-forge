@@ -432,15 +432,15 @@ impl BcForgeToken {
             return Err(TokenError::AccountFrozen);
         }
         match Self::read_filter_mode(env) {
-            FILTER_ALLOWLIST => {
-                if !Self::read_filter_status(env, from) || !Self::read_filter_status(env, to) {
-                    return Err(TokenError::AddressNotAllowed);
-                }
+            FILTER_ALLOWLIST
+                if !Self::read_filter_status(env, from) || !Self::read_filter_status(env, to) =>
+            {
+                return Err(TokenError::AddressNotAllowed);
             }
-            FILTER_DENYLIST => {
-                if Self::read_filter_status(env, from) || Self::read_filter_status(env, to) {
-                    return Err(TokenError::AddressNotAllowed);
-                }
+            FILTER_DENYLIST
+                if Self::read_filter_status(env, from) || Self::read_filter_status(env, to) =>
+            {
+                return Err(TokenError::AddressNotAllowed);
             }
             _ => {}
         }

@@ -37,8 +37,8 @@ fn freeze_blocks_send_and_receive_and_unfreeze_restores() {
     c.mint(&admin, &b, &10);
     c.freeze(&officer, &a);
     assert!(c.is_frozen(&a));
-    assert_eq!(c.try_transfer(&a, &b, &1).is_err(), true);
-    assert_eq!(c.try_transfer(&b, &a, &1).is_err(), true);
+    assert!(c.try_transfer(&a, &b, &1).is_err());
+    assert!(c.try_transfer(&b, &a, &1).is_err());
     c.unfreeze(&officer, &a);
     c.transfer(&a, &b, &1);
     assert_eq!(c.balance(&b), 11);
