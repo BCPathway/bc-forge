@@ -166,7 +166,23 @@ await client.setAdminPool(
 
 ### Step 2 — Create the upgrade proposal
 
-Any pool member can create a proposal:
+Any pool member can create a proposal. To securely bind the executable bytecode hash directly to the proposal state (#1310), use `create_upgrade_proposal`:
+
+```bash
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source $POOL_MEMBER_SECRET \
+  --network testnet \
+  -- \
+  create_upgrade_proposal \
+  --creator <POOL_MEMBER_PUBLIC_KEY> \
+  --wasm_hash "$WASM_HASH" \
+  --description "Upgrade to v2.1.0 — fix transfer overflow"
+```
+
+The command returns a proposal ID (e.g., `0`) and binds the approved WASM hash on-chain so arbitrary bytecode cannot be substituted once quorum is reached.
+
+Legacy text-only proposals can also be created via `create_proposal`:
 
 ```bash
 stellar contract invoke \
@@ -241,6 +257,19 @@ stellar contract invoke \
   --proposal_id 0 \
   --wasm_hash "$WASM_HASH"
 ```
+
+> **Security Note (#1310):** If a WASM hash was bound to the proposal, `execute_upgrade` and `emergency_execute_upgrade` assert that `--wasm_hash` matches the bound hash on-chain; any mismatch will revert with `AdminError::WasmHashMismatch`.
+> Proposals created via `submit_upgrade_proposal` can also be executed with `execute_upgrade_proposal`, which applies the upgrade using the bound hash automatically:
+> ```bash
+> stellar contract invoke \
+>   --id <CONTRACT_ID> \
+>   --source $POOL_MEMBER_SECRET \
+>   --network testnet \
+>   -- \
+>   execute_upgrade_proposal \
+>   --executor <POOL_MEMBER_PUBLIC_KEY> \
+>   --proposal_id 0
+> ```
 
 Or via SDK:
 
