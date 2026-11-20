@@ -435,7 +435,6 @@ pub fn emit_minter_allowance_set(env: &Env, admin: &Address, minter: &Address, a
     );
 }
 
-
 /// Emits the `strm_new` event when a mint stream is created.
 pub fn emit_stream_mint_created(
     env: &Env,

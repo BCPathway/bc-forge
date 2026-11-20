@@ -525,8 +525,13 @@ impl BcForgeToken {
         Self::extend_instance_ttl(env);
     }
 
-    fn consume_minter_allowance(env: &Env, minter: &Address, amount: i128) -> Result<(), TokenError> {
-        let allowance = Self::read_minter_allowance(env, minter).ok_or(TokenError::MinterQuotaExceeded)?;
+    fn consume_minter_allowance(
+        env: &Env,
+        minter: &Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        let allowance =
+            Self::read_minter_allowance(env, minter).ok_or(TokenError::MinterQuotaExceeded)?;
         if allowance < amount {
             return Err(TokenError::MinterQuotaExceeded);
         }
@@ -785,12 +790,17 @@ impl BcForgeToken {
     ) -> Result<u64, TokenError> {
         Self::extend_instance_ttl_for_call(&env);
         Self::ensure_initialized(&env)?;
-        let is_super_admin = bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &caller);
+        let is_super_admin =
+            bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &caller);
         let is_minter = bc_forge_admin::has_role(&env, bc_forge_admin::Role::Minter, &caller);
         if !is_super_admin && !is_minter {
             return Err(TokenError::InvalidAmount);
         }
-        if total_amount <= 0 || end_ledger <= start_ledger || cliff_ledger < start_ledger || cliff_ledger > end_ledger {
+        if total_amount <= 0
+            || end_ledger <= start_ledger
+            || cliff_ledger < start_ledger
+            || cliff_ledger > end_ledger
+        {
             return Err(TokenError::InvalidAmount);
         }
         let current_supply = Self::read_supply(&env);
@@ -827,7 +837,12 @@ impl BcForgeToken {
         if claimable <= 0 {
             return Ok(0);
         }
-        Self::internal_mint(&env, &env.current_contract_address(), &stream.recipient, claimable)?;
+        Self::internal_mint(
+            &env,
+            &env.current_contract_address(),
+            &stream.recipient,
+            claimable,
+        )?;
         stream.minted_amount = stream
             .minted_amount
             .checked_add(claimable)
