@@ -57,3 +57,11 @@ pub fn emit_withdraw_queued(
     );
 }
 
+/// Emitted when a yield vault claim is made.
+pub fn emit_claim(env: &Env, caller: &Address, shares: i128, amount: i128) {
+    env.events().publish(
+        (symbol_short!("v_claim"),),
+        (caller.clone(), shares, amount),
+    );
+}
+

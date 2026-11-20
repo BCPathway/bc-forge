@@ -34,7 +34,7 @@ import {
 import { SimulationError, RPCError } from './errors';
 import type { TransactionResult } from './client';
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface WrapperClientConfig {
   /** Soroban RPC endpoint URL */
@@ -65,7 +65,43 @@ export interface VaultState {
   lastUpdateTimestamp: bigint;
 }
 
-// â”€â”€â”€ Client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/**
+ * Cooldown configuration for emergency withdrawals.
+ */
+export interface CooldownConfig {
+  /** Whether cooldown is enabled */
+  enabled: boolean;
+  /** Number of ledgers for the cooldown period */
+  cooldownLedgers: number;
+  /** Maximum emergency withdrawal amount during cooldown */
+  emergencyCap: bigint;
+  /** Number of ledgers for the emergency withdrawal window */
+  emergencyWindowLedgers: number;
+}
+
+/**
+ * Queued withdrawal information for a user.
+ */
+export interface QueuedWithdrawal {
+  /** Amount of shares to withdraw */
+  shares: bigint;
+  /** Amount of underlying assets for the withdrawal */
+  amount: bigint;
+  /** Ledger sequence number when the withdrawal is released */
+  releaseLedger: number;
+}
+
+/**
+ * User-specific emergency state information.
+ */
+export interface UserEmergencyState {
+  /** Total amount withdrawn during emergencies */
+  amountWithdrawn: bigint;
+  /** Ledger sequence number when the emergency window starts */
+  windowStartLedger: number;
+}
+
+// â”€â”€â”€ Client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export class WrapperClient {
   private rpcUrl: string;
@@ -82,7 +118,7 @@ export class WrapperClient {
     this.contract = new Contract(this.contractId);
   }
 
-  // â”€â”€â”€ Read-Only Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€â”€ Read-Only Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Get the wrapped token balance for an address.
@@ -754,5 +790,61 @@ export class WrapperClient {
         throw error;
       }
     });
+  }
+
+  /**
+   * Get the cooldown configuration for emergency withdrawals.
+   */
+  async getCooldownConfig(): Promise<CooldownConfig> {
+    const result = await this.queryContract('get_cooldown_config', []);
+    const native = scValToNative(result) as {
+      enabled: boolean;
+      cooldown_ledgers: number;
+      emergency_cap: bigint | number | string;
+      emergency_window_ledgers: number;
+    };
+    return {
+      enabled: native.enabled,
+      cooldownLedgers: Number(native.cooldown_ledgers),
+      emergencyCap: BigInt(native.emergency_cap),
+      emergencyWindowLedgers: Number(native.emergency_window_ledgers),
+    };
+  }
+
+  /**
+   * Get the queued withdrawal information for a user.
+   */
+  async getQueuedWithdrawal(user: string): Promise<QueuedWithdrawal | null> {
+    const result = await this.queryContract('get_queued_withdrawal', [addressToScVal(user)]);
+    const native = scValToNative(result) as {
+      shares: bigint | number | string;
+      amount: bigint | number | string;
+      release_ledger: number;
+    } | null;
+    if (!native) return null;
+    return {
+      shares: BigInt(native.shares),
+      amount: BigInt(native.amount),
+      releaseLedger: Number(native.release_ledger),
+    };
+  }
+
+  /**
+   * Claim a queued withdrawal.
+   */
+  async claimWithdrawal(signer: Keypair): Promise<TransactionResult> {
+    return this.invokeContract(
+      'claim_withdrawal',
+      [addressToScVal(signer.publicKey())],
+      signer,
+    );
+  }
+
+  /**
+   * Check if a withdrawal is claimable by the user at the current ledger.
+   */
+  async isWithdrawalClaimable(user: string, currentLedger: number): Promise<boolean> {
+    const queued = await this.getQueuedWithdrawal(user);
+    return queued !== null && currentLedger >= queued.releaseLedger;
   }
 }

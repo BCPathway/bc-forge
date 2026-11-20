@@ -175,7 +175,13 @@ impl SplitContract {
                     retry_count,
                 };
                 Self::write_failed_payout(env, &failed_payout);
-                events::emit_payout_failed(env, invoice_id, &recipient.to);
+                events::emit_payout_failed(
+                    env,
+                    invoice_id,
+                    &recipient.to,
+                    failed_payout.amount,
+                    failed_payout.retry_count,
+                );
             }
         }
 
@@ -230,7 +236,13 @@ impl SplitContract {
         } else {
             failed_payout.retry_count += 1;
             Self::write_failed_payout(env, &failed_payout);
-            events::emit_payout_failed(env, invoice_id, recipient);
+            events::emit_payout_failed(
+                env,
+                invoice_id,
+                recipient,
+                failed_payout.amount,
+                failed_payout.retry_count,
+            );
             Err(SplitError::InsufficientBalance)
         }
     }

@@ -1517,3 +1517,61 @@ fn test_update_metadata_rejects_unauthorized_caller() {
     assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
     assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
 }
+
+#[test]
+fn test_transfer_charges_fee_and_routes_to_treasury() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &sender, &1_000);
+
+    client.set_treasury(&admin, &treasury);
+    propose_and_wait(
+        &env,
+        &client,
+        &admin,
+        &bc_forge_admin::PrivilegeAction::SetFeeConfig,
+    );
+    client.set_fee_config(&admin, &sample_fee_config());
+
+    client.transfer(&sender, &recipient, &100);
+    assert_eq!(client.balance(&sender), 890);
+    assert_eq!(client.balance(&recipient), 100);
+    assert_eq!(client.balance(&treasury), 10);
+}
+
+#[test]
+fn test_transfer_fee_exemption() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &sender, &1_000);
+    client.set_treasury(&admin, &treasury);
+    propose_and_wait(
+        &env,
+        &client,
+        &admin,
+        &bc_forge_admin::PrivilegeAction::SetFeeConfig,
+    );
+    client.set_fee_config(&admin, &sample_fee_config());
+    client.set_fee_exemption(&admin, &sender, &crate::FeeExemption { exemption_type: 1 });
+
+    client.transfer(&sender, &recipient, &100);
+    assert_eq!(client.balance(&sender), 900);
+    assert_eq!(client.balance(&recipient), 100);
+    assert_eq!(client.balance(&treasury), 0);
+}
