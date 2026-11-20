@@ -29,3 +29,10 @@ pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) 
         (upgrader.clone(), new_wasm_hash.clone()),
     );
 }
+
+pub fn emit_invoice_cancelled(env: &Env, invoice_id: u64, caller: &Address, refunded_amount: i128) {
+    env.events().publish(
+        (symbol_short!("inv_cxl"), invoice_id),
+        (invoice_id, caller.clone(), refunded_amount),
+    );
+}

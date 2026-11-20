@@ -18,7 +18,7 @@ export class bcForgeClient {
     rpcUrl: string;
     networkPassphrase: string;
     contractId: string;
-  }) {}
+  }) { }
 
   async initialize(
     _admin: string,
@@ -32,6 +32,30 @@ export class bcForgeClient {
 
   async verifySuperAdmin(_address: string): Promise<boolean> {
     return true;
+  }
+
+  async hasRole(_role: Role | string, _address: string): Promise<boolean> {
+    return false;
+  }
+
+  async grantRole(
+    _role: Role | string,
+    _address: string,
+    _source?: unknown,
+  ): Promise<TransactionResult> {
+    return { success: true, hash: "mock-grant-role" };
+  }
+
+  async revokeRole(
+    _role: Role | string,
+    _address: string,
+    _source?: unknown,
+  ): Promise<TransactionResult> {
+    return { success: true, hash: "mock-revoke-role" };
+  }
+
+  async getRoleHierarchy(_address: string): Promise<unknown> {
+    return {};
   }
 
   async getAdmin(): Promise<string> {
@@ -70,6 +94,20 @@ export class bcForgeClient {
 
   async submitSignedTransaction(_txXdr: string): Promise<TransactionResult> {
     return { success: true, hash: "mock-submitted" };
+  }
+
+  async getSplitInvoice(
+    _invoiceId: number | bigint,
+    _splitContractId?: string,
+  ): Promise<unknown> {
+    return null;
+  }
+
+  async getVestingInfo(
+    _beneficiary: string,
+    _vestingContractId?: string,
+  ): Promise<unknown[]> {
+    return [];
   }
 
   async createProposal(

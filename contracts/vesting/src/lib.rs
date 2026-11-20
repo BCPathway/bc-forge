@@ -10,7 +10,9 @@ mod test;
 mod test_milestones;
 
 use bc_forge_admin as admin;
+use bc_forge_lifecycle;
 use bc_forge_token::BcForgeTokenClient;
+use bc_forge_ttl as ttl;
 use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal,
@@ -37,6 +39,18 @@ enum DataKey {
     /// unlock ledger, in addition to (not instead of) the linear curve.
     Milestones(u64),
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct VestingScheduleInput {
+    pub beneficiary: Address,
+    pub total_amount: i128,
+    pub cliff_ledgers: u32,
+    pub duration_ledgers: u32,
+    pub revocable: bool,
+}
+
+pub const MAX_VESTING_BATCH_SIZE: u32 = 50;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -107,6 +121,9 @@ pub enum VestingError {
     /// The vesting is still inside its cliff: nothing is claimable yet
     /// (#918 makes the cliff an explicit, testable error path).
     CliffNotReached = 13,
+    BatchEmpty = 14,
+    BatchTooLarge = 15,
+    ContractPaused = 16,
 }
 
 #[contract]
@@ -383,6 +400,9 @@ impl VestingContract {
     pub fn release(env: Env, beneficiary: Address) -> Result<i128, VestingError> {
         reentrancy_guard!(&env, "release", {
             Self::ensure_initialized(&env)?;
+            if bc_forge_lifecycle::is_paused(&env) {
+                return Err(VestingError::ContractPaused);
+            }
             beneficiary.require_auth();
 
             let current_ledger = env.ledger().sequence();
@@ -551,6 +571,9 @@ impl VestingContract {
     ) -> Result<i128, VestingError> {
         reentrancy_guard!(&env, "claim_on_behalf", {
             Self::ensure_initialized(&env)?;
+            if bc_forge_lifecycle::is_paused(&env) {
+                return Err(VestingError::ContractPaused);
+            }
             caller.require_auth();
 
             if caller != beneficiary {
@@ -592,5 +615,97 @@ impl VestingContract {
             }
             Ok(total_to_release)
         })
+    }
+
+    pub fn create_vesting_batch(
+        env: Env,
+        caller: Address,
+        schedules: Vec<VestingScheduleInput>,
+    ) -> Result<Vec<u64>, VestingError> {
+        reentrancy_guard!(&env, "create_vesting_batch", {
+            ttl::extend_instance_ttl(&env);
+            Self::ensure_initialized(&env)?;
+            admin::require_admin(&env, &caller);
+
+            if schedules.is_empty() {
+                return Err(VestingError::BatchEmpty);
+            }
+            if schedules.len() > MAX_VESTING_BATCH_SIZE {
+                return Err(VestingError::BatchTooLarge);
+            }
+
+            let mut created_ids = Vec::new(&env);
+            let start_ledger = env.ledger().sequence();
+
+            for input in schedules.iter() {
+                if input.total_amount <= 0 {
+                    return Err(VestingError::InvalidAmount);
+                }
+                if input.duration_ledgers == 0 {
+                    return Err(VestingError::InvalidDuration);
+                }
+                if input.cliff_ledgers > input.duration_ledgers {
+                    return Err(VestingError::CliffAfterEnd);
+                }
+
+                let schedule_id = Self::next_schedule_id(&env);
+                let cliff_ledger = start_ledger.saturating_add(input.cliff_ledgers);
+                let end_ledger = start_ledger.saturating_add(input.duration_ledgers);
+                Self::mint_into_vault(&env, input.total_amount);
+
+                let schedule = StoredVestingSchedule {
+                    schedule: VestingSchedule {
+                        beneficiary: input.beneficiary.clone(),
+                        total_amount: input.total_amount,
+                        cliff_ledger,
+                        end_ledger,
+                        released_amount: 0,
+                        revocable: input.revocable,
+                    },
+                    start_ledger,
+                    revoked_at_ledger: None,
+                    schedule_id,
+                };
+                Self::write_schedule(&env, schedule_id, &schedule);
+
+                let mut schedule_ids = Self::beneficiary_schedule_ids(&env, &input.beneficiary);
+                schedule_ids.push_back(schedule_id);
+                Self::write_beneficiary_schedule_ids(&env, &input.beneficiary, &schedule_ids);
+
+                events::emit_vesting_created(
+                    &env,
+                    schedule_id,
+                    &input.beneficiary,
+                    input.total_amount,
+                    cliff_ledger,
+                    end_ledger,
+                    input.revocable,
+                );
+                created_ids.push_back(schedule_id);
+            }
+
+            Ok(created_ids)
+        })
+    }
+
+    pub fn pause(env: Env, caller: Address) -> Result<(), VestingError> {
+        ttl::extend_instance_ttl(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_pauser(&env, &caller);
+        bc_forge_lifecycle::set_paused(&env, true);
+        Ok(())
+    }
+
+    pub fn unpause(env: Env, caller: Address) -> Result<(), VestingError> {
+        ttl::extend_instance_ttl(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_pauser(&env, &caller);
+        bc_forge_lifecycle::set_paused(&env, false);
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        ttl::extend_instance_ttl(&env);
+        bc_forge_lifecycle::is_paused(&env)
     }
 }
