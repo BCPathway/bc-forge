@@ -72,6 +72,14 @@ pub struct UserEmergencyState {
     pub window_start_ledger: u32,
 }
 
+/// Per-user deposit state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserDepositState {
+    /// Ledger sequence of the user's latest deposit.
+    pub deposit_block: u32,
+}
+
 // ─── Storage ─────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -91,6 +99,10 @@ pub enum DataKey {
     QueuedWithdrawal(Address),
     /// Emergency cap tracking state for a user.
     UserEmergencyState(Address),
+    /// Per-user deposit state.
+    UserDepositState(Address),
+    /// User's latest deposit ledger block.
+    DepositBlock(Address),
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -119,6 +131,10 @@ pub enum VaultError {
     EmergencyCapExceeded = 9,
     /// No queued withdrawal found to claim, or already claimed.
     NoQueuedWithdrawal = 10,
+    /// A withdrawal is already queued for this user.
+    WithdrawalAlreadyQueued = 11,
+    /// A withdrawal was attempted in the same ledger as a deposit.
+    SameLedgerWithdrawalProhibited = 12,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -241,6 +257,19 @@ impl YieldVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::UserEmergencyState(user.clone()), state);
+    }
+
+    fn read_user_deposit_state(env: &Env, user: &Address) -> UserDepositState {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UserDepositState(user.clone()))
+            .unwrap_or(UserDepositState { deposit_block: 0 })
+    }
+
+    fn write_user_deposit_state(env: &Env, user: &Address, state: &UserDepositState) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserDepositState(user.clone()), state);
     }
 
     fn check_and_update_emergency_cap(
@@ -393,6 +422,11 @@ impl YieldVaultContract {
             Self::read_balance(&env, &caller) + shares_out,
         );
         Self::write_supply(&env, total_shares + shares_out);
+        if env.ledger().sequence() > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::DepositBlock(caller.clone()), &env.ledger().sequence());
+        }
 
         events::emit_deposit(&env, &caller, assets, shares_out);
         Ok(shares_out)
@@ -480,8 +514,20 @@ impl YieldVaultContract {
             return Err(VaultError::InvalidAmount);
         }
 
-        if Self::read_queued_withdrawal(&env, &caller).is_some() {
-            return Err(VaultError::CooldownNotMet);
+        let config = Self::read_cooldown_config(&env);
+
+        let deposit_block: Option<u32> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DepositBlock(caller.clone()));
+        if let Some(deposit_block) = deposit_block {
+            if env.ledger().sequence() <= deposit_block {
+                return Err(VaultError::SameLedgerWithdrawalProhibited);
+            }
+        }
+
+        if config.enabled && Self::read_queued_withdrawal(&env, &caller).is_some() {
+            return Err(VaultError::WithdrawalAlreadyQueued);
         }
 
         let balance = Self::read_balance(&env, &caller);
@@ -509,6 +555,9 @@ impl YieldVaultContract {
         // Burn shares.
         Self::write_balance(&env, &caller, balance - shares);
         Self::write_supply(&env, total_shares - shares);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::DepositBlock(caller.clone()));
 
         if config.enabled {
             let release_ledger = env.ledger().sequence().saturating_add(config.cooldown_ledgers);

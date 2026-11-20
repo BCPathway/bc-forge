@@ -134,6 +134,8 @@ pub enum DataKey {
     QueuedWithdrawal(Address),
     /// Emergency cap tracking state for a user.
     UserEmergencyState(Address),
+    /// Ledger sequence of the user's latest deposit, for same-ledger protection.
+    DepositBlock(Address),
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -177,6 +179,10 @@ pub enum WrapperError {
     /// `rescue_tokens` was called on this vault's own share token. Share
     /// balances the vault holds are not stranded foreign assets.
     ShareTokenProtected = 20,
+    /// A withdrawal is already queued for this user and must be claimed first.
+    WithdrawalAlreadyQueued = 21,
+    /// A withdrawal was attempted in the same ledger sequence as a deposit.
+    SameLedgerWithdrawalProhibited = 22,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -731,6 +737,11 @@ impl WrapperContract {
         let new_balance = Self::read_balance(&env, &caller) + shares_out;
         Self::write_balance(&env, &caller, new_balance);
         Self::write_supply(&env, total_shares + shares_out);
+        if env.ledger().sequence() > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::DepositBlock(caller.clone()), &env.ledger().sequence());
+        }
 
         Self::release_lock(&env);
         events::emit_deposit(&env, &caller, assets, shares_out);
@@ -1199,9 +1210,7 @@ impl WrapperContract {
             return Err(WrapperError::InvalidAmount);
         }
 
-        if Self::read_queued_withdrawal(&env, &caller).is_some() {
-            return Err(WrapperError::CooldownNotMet);
-        }
+        let config = Self::read_cooldown_config(&env);
 
         // #730 – enforce the deposit time lockup: revert while the caller's
         // deposit is still locked (current ledger timestamp < unlock time).
@@ -1210,6 +1219,20 @@ impl WrapperContract {
         let balance = Self::read_balance(&env, &caller);
         if balance < shares {
             return Err(WrapperError::InsufficientBalance);
+        }
+
+        let deposit_block: Option<u32> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DepositBlock(caller.clone()));
+        if let Some(deposit_block) = deposit_block {
+            if env.ledger().sequence() <= deposit_block {
+                return Err(WrapperError::SameLedgerWithdrawalProhibited);
+            }
+        }
+
+        if config.enabled && Self::read_queued_withdrawal(&env, &caller).is_some() {
+            return Err(WrapperError::WithdrawalAlreadyQueued);
         }
 
         Self::acquire_lock(&env)?;
@@ -1231,15 +1254,18 @@ impl WrapperContract {
             return Err(WrapperError::InvalidAmount);
         }
 
-        let config = Self::read_cooldown_config(&env);
-        if let Err(e) = Self::check_and_update_emergency_cap(&env, &caller, tokens_out, &config) {
+        if let Err(error) =
+            Self::check_and_update_emergency_cap(&env, &caller, tokens_out, &config)
+        {
             Self::release_lock(&env);
-            return Err(e);
+            return Err(error);
         }
 
-        // Burn shares
         Self::write_balance(&env, &caller, balance - shares);
         Self::write_supply(&env, total_shares - shares);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::DepositBlock(caller.clone()));
 
         if config.enabled {
             let release_ledger = env

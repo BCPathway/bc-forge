@@ -60,7 +60,7 @@ impl BcForgeRateLimit {
         operation_type: &String,
     ) -> Option<RateLimitConfig> {
         env.storage()
-            .instance()
+            .persistent()
             .get::<_, RateLimitConfig>(&DataKey::AddressRateLimit(
                 address.clone(),
                 operation_type.clone(),
@@ -79,7 +79,7 @@ impl BcForgeRateLimit {
 
     fn get_address_state(env: &Env, address: &Address, operation_type: &String) -> RateLimitState {
         env.storage()
-            .instance()
+            .temporary()
             .get::<_, RateLimitState>(&DataKey::AddressCount(
                 address.clone(),
                 operation_type.clone(),
@@ -90,7 +90,7 @@ impl BcForgeRateLimit {
             })
     }
 
-    fn reset_if_needed(
+    fn reset_global_if_needed(
         env: &Env,
         current_time: u64,
         config: &RateLimitConfig,
@@ -104,9 +104,37 @@ impl BcForgeRateLimit {
         }
     }
 
-    fn increment_count(env: &Env, state: &mut RateLimitState, key: &DataKey) {
+    fn reset_address_if_needed(
+        env: &Env,
+        current_time: u64,
+        config: &RateLimitConfig,
+        state: &mut RateLimitState,
+        key: &DataKey,
+    ) {
+        if current_time >= state.last_reset + config.window_seconds {
+            state.count = 0;
+            state.last_reset = current_time;
+        }
+        env.storage().temporary().set(key, state);
+        let ledgers = (config.window_seconds / 5).max(100) as u32;
+        env.storage().temporary().extend_ttl(key, ledgers, ledgers);
+    }
+
+    fn increment_global_count(env: &Env, state: &mut RateLimitState, key: &DataKey) {
         state.count += 1;
         env.storage().instance().set(key, state);
+    }
+
+    fn increment_address_count(
+        env: &Env,
+        state: &mut RateLimitState,
+        key: &DataKey,
+        window_seconds: u64,
+    ) {
+        state.count += 1;
+        env.storage().temporary().set(key, state);
+        let ledgers = (window_seconds / 5).max(100) as u32;
+        env.storage().temporary().extend_ttl(key, ledgers, ledgers);
     }
 
     /// Check if the operation is allowed based on rate limits
@@ -123,7 +151,7 @@ impl BcForgeRateLimit {
         if let Some(global_config) = Self::get_global_config(env, operation_type) {
             let mut global_state = Self::get_global_state(env, operation_type);
 
-            Self::reset_if_needed(
+            Self::reset_global_if_needed(
                 env,
                 current_time,
                 &global_config,
@@ -135,7 +163,7 @@ impl BcForgeRateLimit {
                 return false;
             }
 
-            Self::increment_count(
+            Self::increment_global_count(
                 env,
                 &mut global_state,
                 &DataKey::GlobalCount(operation_type.clone()),
@@ -147,7 +175,7 @@ impl BcForgeRateLimit {
             if let Some(address_config) = Self::get_address_config(env, addr, operation_type) {
                 let mut address_state = Self::get_address_state(env, addr, operation_type);
 
-                Self::reset_if_needed(
+                Self::reset_address_if_needed(
                     env,
                     current_time,
                     &address_config,
@@ -159,10 +187,11 @@ impl BcForgeRateLimit {
                     return false;
                 }
 
-                Self::increment_count(
+                Self::increment_address_count(
                     env,
                     &mut address_state,
                     &DataKey::AddressCount(addr.clone(), operation_type.clone()),
+                    address_config.window_seconds,
                 );
             }
         }
@@ -198,7 +227,7 @@ impl BcForgeRateLimit {
             limit,
             window_seconds,
         };
-        env.storage().instance().set(
+        env.storage().persistent().set(
             &DataKey::AddressRateLimit(address.clone(), operation_type.clone()),
             &config,
         );
