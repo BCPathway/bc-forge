@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #![cfg(test)]
 
 extern crate std;
@@ -92,9 +92,9 @@ fn test_revoke_role_rejects_removing_the_only_configured_super_admin() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// #914 — privileged-action timelock
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// #914 â€” privileged-action timelock
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_privilege_propose_requires_admin() {
@@ -173,7 +173,7 @@ fn test_privilege_cancel_blocks_execution_and_allows_resubmit() {
     let action = PrivilegeAction::TransferOwnership(new_owner);
 
     client.propose_privilege_action(&admin, &action);
-    // Any admin can cancel — cancellation is the emergency brake.
+    // Any admin can cancel â€” cancellation is the emergency brake.
     client.cancel_privilege_action(&admin, &action);
 
     advance_timestamp(&env, 25 * 60 * 60);
@@ -210,9 +210,9 @@ fn test_privilege_rejects_second_live_proposal_for_same_action() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// #915 — renounce_role + role-hierarchy query
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// #915 â€” renounce_role + role-hierarchy query
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_renounce_role_holder_can_renounce_without_super_admin() {
@@ -223,7 +223,7 @@ fn test_renounce_role_holder_can_renounce_without_super_admin() {
     client.grant_role(&admin, &Role::Minter, &minter);
     assert!(client.has_role(&Role::Minter, &minter));
 
-    // The holder renounces their own role — no SuperAdmin signature needed.
+    // The holder renounces their own role â€” no SuperAdmin signature needed.
     client.renounce_role(&minter, &Role::Minter);
     assert!(
         !client.has_role(&Role::Minter, &minter),
@@ -284,7 +284,7 @@ fn test_renounce_role_super_admin_ok_when_another_holder_remains() {
     assert!(client.has_role(&Role::SuperAdmin, &admin));
 
     // An explicitly granted SuperAdmin CAN renounce while another raw
-    // holder remains — here the admin's implicit SuperAdmin keeps the
+    // holder remains â€” here the admin's implicit SuperAdmin keeps the
     // system able to grant roles.
     client.renounce_role(&sa1, &Role::SuperAdmin);
     assert!(!client.has_role(&Role::SuperAdmin, &sa1));
@@ -338,9 +338,9 @@ fn test_get_role_hierarchy_reports_each_role() {
     assert!(!none.is_admin && !none.is_super_admin && !none.is_minter && !none.is_pauser);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// #917 — proposal listing + quorum reads
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// #917 â€” proposal listing + quorum reads
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_list_legacy_proposals_splits_pending_and_approved() {
@@ -371,7 +371,7 @@ fn test_list_legacy_proposals_splits_pending_and_approved() {
 
     // Expired proposals drop out of the pending list. Jump past the expiry
     // window (600 ledgers) but stay inside the instance's 20-ledger
-    // threshold by listing first — instance storage keeps getting refreshed
+    // threshold by listing first â€” instance storage keeps getting refreshed
     // by reads, so a large jump between listings is what archives it.
     let lists = client.list_legacy_proposals(&0);
     let mut info = env.ledger().get();
@@ -502,4 +502,70 @@ fn test_list_upgrade_proposals_paginates_past_scan_cap() {
     let page2 = client.list_upgrade_proposals(&page1.next_cursor.unwrap());
     assert_eq!(page2.approved_ids, vec![&env, 59u64]);
     assert_eq!(page2.next_cursor, None);
+}
+
+#[test]
+fn test_action_proposal_requires_quorum_and_timelock_then_consumes() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+
+    // Single-member pool: the creator's auto-approval is already quorum.
+    let action = crate::ProposalAction::SetMaxSupply { new_cap: 10_000 };
+    let id = env.as_contract(&contract_id, || {
+        crate::create_action_proposal(
+            &env,
+            admin.clone(),
+            action.clone(),
+            String::from_str(&env, "raise cap to 10k"),
+        )
+    });
+
+    // Proposal stores the action and starts a 24-hour timelock at quorum.
+    env.as_contract(&contract_id, || {
+        assert_eq!(crate::get_action_proposal(&env, id), Some(action.clone()));
+        let unlock = crate::get_proposal_unlock_time(&env, id).expect("timelock");
+        assert_eq!(unlock, env.ledger().timestamp() + crate::TIMELOCK_DELAY_SECS);
+        assert_eq!(
+            crate::consume_action_proposal(&env, admin.clone(), id),
+            Err(AdminError::TimelockActive)
+        );
+    });
+
+    advance_timestamp(&env, 24 * 60 * 60);
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            crate::consume_action_proposal(&env, admin.clone(), id),
+            Ok(action)
+        );
+        // A second consume is rejected (checks-effects-interactions).
+        assert_eq!(
+            crate::consume_action_proposal(&env, admin.clone(), id),
+            Err(AdminError::ProposalAlreadyExecuted)
+        );
+    });
+}
+
+#[test]
+fn test_privileged_mint_action_round_trips() {
+    let env = Env::default();
+    let (_client, admin) = setup(&env);
+    let contract_id = _client.address.clone();
+    let recipient = Address::generate(&env);
+    let action = crate::ProposalAction::PrivilegedMint {
+        to: recipient.clone(),
+        amount: 250,
+    };
+
+    let id = env.as_contract(&contract_id, || {
+        crate::create_action_proposal(
+            &env,
+            admin.clone(),
+            action.clone(),
+            String::from_str(&env, "mint 250 to recipient"),
+        )
+    });
+    env.as_contract(&contract_id, || {
+        assert_eq!(crate::get_action_proposal(&env, id), Some(action));
+    });
 }

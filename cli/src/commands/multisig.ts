@@ -27,7 +27,65 @@ export function createMultisigCommand(): Command {
   root.addCommand(createStepCommand("propose"));
   root.addCommand(createStepCommand("approve"));
   root.addCommand(createStepCommand("execute"));
+  root.addCommand(createCapChangeCommand());
   return root;
+}
+
+/** `bc-forge multisig propose-cap-change --new-cap <amount>` (#1329). */
+function createCapChangeCommand(): Command {
+  const cmd = new Command("propose-cap-change").description(
+    "Propose a governed max-supply change (propose_cap_change)"
+  );
+  cmd
+    .requiredOption("--new-cap <amount>", "New maximum supply as an integer")
+    .option("--description <text>", "Human-readable proposal description")
+    .option("--contract-id <id>", "Token contract ID, or a deployment alias")
+    .option("--source <secret>", "Pool member secret key (hot signer)");
+
+  addNetworkOptions(cmd);
+
+  cmd.action(async (opts, command) => {
+    try {
+      const contractId = resolveContractIdOption(command, opts.contractId) ?? opts.contractId;
+      if (!contractId) {
+        throw new Error(
+          "No contract id: pass --contract-id <id> or set CONTRACT_ID in the environment."
+        );
+      }
+      if (!/^-?\d+$/.test(opts.newCap.trim())) {
+        throw new Error("--new-cap must be an integer");
+      }
+      const newCap = BigInt(opts.newCap.trim());
+      if (newCap < 0n) {
+        throw new Error("--new-cap must be non-negative");
+      }
+
+      const secretKey = opts.source || getSecretKey();
+      if (!secretKey) {
+        throw new Error("No signer: pass --source or set SECRET_KEY");
+      }
+      const { Keypair } = await import("@stellar/stellar-sdk");
+      const signer = Keypair.fromSecret(secretKey);
+
+      const client = new bcForgeClient({
+        rpcUrl: opts.rpcUrl,
+        networkPassphrase: opts.networkPassphrase,
+        contractId,
+      });
+      const result = await client.proposeCapChange(
+        signer.publicKey(),
+        newCap,
+        opts.description ?? `Set max supply to ${newCap.toString()}`,
+        signer,
+      );
+      logger.info(`Cap-change proposal submitted (tx ${result.hash ?? "unknown"})`);
+    } catch (err: unknown) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+  });
+
+  return cmd;
 }
 
 function createStepCommand(action: MultisigAction): Command {

@@ -1594,3 +1594,25 @@ fn test_schedule_cap_change_rejects_value_below_supply() {
     );
     assert_eq!(client.get_pending_max_supply(), None);
 }
+#[test]
+fn test_admin_contract_restricts_direct_cap_changes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let multisig = Address::generate(&env);
+
+    // Before binding, the legacy Minter path still works.
+    client.set_max_supply(&admin, &1_000);
+
+    client.set_admin_contract(&admin, &multisig);
+    assert_eq!(client.get_admin_contract(), Some(multisig.clone()));
+
+    // A direct change from the former minter is now rejected.
+    assert_eq!(
+        client.try_set_max_supply(&admin, &2_000),
+        Err(Ok(TokenError::UnauthorizedCaller))
+    );
+    // The bound admin contract may change the cap directly.
+    client.set_max_supply(&multisig, &2_000);
+    assert_eq!(client.get_max_supply(), 2_000);
+}
