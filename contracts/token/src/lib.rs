@@ -552,6 +552,16 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Read-only view of a holder's lockup state (#1326).
+    ///
+    /// Returns ``None`` when the holder has no persisted lock, otherwise the
+    /// locked amount and the timestamp at which it becomes withdrawable.
+    /// Locked amounts remain reserved from the spendable balance until the
+    /// holder explicitly calls ``withdraw_locked`` after that timestamp.
+    pub fn get_lockup(env: Env, user: Address) -> Option<LockupState> {
+        Self::read_lockup(&env, &user)
+    }
+
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
