@@ -434,3 +434,30 @@ pub fn emit_minter_allowance_set(env: &Env, admin: &Address, minter: &Address, a
         (admin.clone(), minter.clone(), allowance),
     );
 }
+
+
+/// Emits the `strm_new` event when a mint stream is created.
+pub fn emit_stream_mint_created(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    total_amount: i128,
+) {
+    env.events().publish(
+        (symbol_short!("strm_new"),),
+        (stream_id, recipient.clone(), total_amount),
+    );
+}
+
+/// Emits the `strm_clm` event when streamed mint tokens are claimed.
+pub fn emit_stream_mint_claimed(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    claimed_amount: i128,
+) {
+    env.events().publish(
+        (symbol_short!("strm_clm"),),
+        (stream_id, recipient.clone(), claimed_amount),
+    );
+}

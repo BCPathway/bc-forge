@@ -92,6 +92,10 @@ pub enum DataKey {
     Nonce(Address),
     /// Per-minter issuance budget (remaining allowance) in token units.
     MinterAllowance(Address),
+    /// Scheduled mint stream by id.
+    MintStream(u64),
+    /// Next mint stream id counter.
+    NextMintStreamId,
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -139,6 +143,18 @@ pub struct LockupState {
     /// Unix timestamp (seconds since epoch) at which the locked tokens
     /// become withdrawable.
     pub unlock_timestamp: u64,
+}
+
+/// A scheduled mint stream that mints tokens to a recipient over time.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MintStream {
+    pub recipient: Address,
+    pub total_amount: i128,
+    pub minted_amount: i128,
+    pub start_ledger: u32,
+    pub end_ledger: u32,
+    pub cliff_ledger: u32,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -452,6 +468,58 @@ impl BcForgeToken {
         Self::write_minter_allowance(env, minter, allowance - amount);
         Ok(())
     }
+
+    fn read_next_mint_stream_id(env: &Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::NextMintStreamId)
+            .unwrap_or(0u64)
+    }
+
+    fn write_next_mint_stream_id(env: &Env, id: u64) {
+        env.storage()
+            .instance()
+            .set(&DataKey::NextMintStreamId, &id);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn read_mint_stream(env: &Env, stream_id: u64) -> Result<MintStream, TokenError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MintStream(stream_id))
+            .ok_or(TokenError::InvalidAmount)
+    }
+
+    fn write_mint_stream(env: &Env, stream_id: u64, stream: &MintStream) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::MintStream(stream_id), stream);
+    }
+
+    fn claimable_stream_amount(stream: &MintStream, current_ledger: u32) -> i128 {
+        let vested = if current_ledger < stream.cliff_ledger {
+            0
+        } else if current_ledger >= stream.end_ledger {
+            stream.total_amount
+        } else {
+            let elapsed = (current_ledger - stream.start_ledger) as i128;
+            let duration = (stream.end_ledger - stream.start_ledger) as i128;
+            if duration <= 0 {
+                stream.total_amount
+            } else {
+                stream
+                    .total_amount
+                    .saturating_mul(elapsed)
+                    .checked_div(duration)
+                    .unwrap_or(0)
+            }
+        };
+        if vested <= stream.minted_amount {
+            0
+        } else {
+            vested - stream.minted_amount
+        }
+    }
 }
 
 /// Lockup period state storage helpers (#719).
@@ -617,6 +685,70 @@ impl BcForgeToken {
 
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
+    }
+
+    /// Creates a scheduled mint stream for a recipient.
+    pub fn create_mint_stream(
+        env: Env,
+        caller: Address,
+        recipient: Address,
+        total_amount: i128,
+        start_ledger: u32,
+        end_ledger: u32,
+        cliff_ledger: u32,
+    ) -> Result<u64, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        let is_super_admin = bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &caller);
+        let is_minter = bc_forge_admin::has_role(&env, bc_forge_admin::Role::Minter, &caller);
+        if !is_super_admin && !is_minter {
+            return Err(TokenError::InvalidAmount);
+        }
+        if total_amount <= 0 || end_ledger <= start_ledger || cliff_ledger < start_ledger || cliff_ledger > end_ledger {
+            return Err(TokenError::InvalidAmount);
+        }
+        let current_supply = Self::read_supply(&env);
+        let projected = current_supply
+            .checked_add(total_amount)
+            .ok_or(TokenError::InvalidAmount)?;
+        if projected > Self::read_max_supply(&env) {
+            return Err(TokenError::MaxSupplyExceeded);
+        }
+
+        let stream_id = Self::read_next_mint_stream_id(&env);
+        Self::write_next_mint_stream_id(&env, stream_id + 1);
+        let stream = MintStream {
+            recipient: recipient.clone(),
+            total_amount,
+            minted_amount: 0,
+            start_ledger,
+            end_ledger,
+            cliff_ledger,
+        };
+        Self::write_mint_stream(&env, stream_id, &stream);
+        events::emit_stream_mint_created(&env, stream_id, &recipient, total_amount);
+        Ok(stream_id)
+    }
+
+    /// Claims currently vested tokens from a mint stream.
+    pub fn claim_stream_mint(env: Env, stream_id: u64) -> Result<i128, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        let mut stream = Self::read_mint_stream(&env, stream_id)?;
+        let current_ledger = env.ledger().sequence();
+        let claimable = Self::claimable_stream_amount(&stream, current_ledger);
+        if claimable <= 0 {
+            return Ok(0);
+        }
+        Self::internal_mint(&env, &env.current_contract_address(), &stream.recipient, claimable)?;
+        stream.minted_amount = stream
+            .minted_amount
+            .checked_add(claimable)
+            .ok_or(TokenError::InvalidAmount)?;
+        Self::write_mint_stream(&env, stream_id, &stream);
+        events::emit_stream_mint_claimed(&env, stream_id, &stream.recipient, claimable);
+        Ok(claimable)
     }
 
     /// Sets the per-minter issuance allowance. Only SuperAdmin can call this.
