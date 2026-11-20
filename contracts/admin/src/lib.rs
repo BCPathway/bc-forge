@@ -326,6 +326,11 @@ pub enum AdminError {
     RoleProposalNotFound = 30,
     /// A role proposal must be executed through `execute_role_proposal`.
     RoleProposalRequiresExecution = 31,
+    /// The role grant carried an expiry ledger that has now passed; the role is inactive.
+    RoleExpired = 32,
+    /// `grant_role_with_expiry` was given an `expires_at` that is not strictly
+    /// after the current ledger sequence.
+    InvalidExpiry = 33,
 }
 
 /// Storage keys for the access-control layer.
@@ -398,6 +403,9 @@ pub enum AdminKey {
     /// [`get_instance_ttl`] derives a non-negative remaining lifetime from this
     /// value. It is not one of the five monitored singleton keys.
     InstanceLiveUntil,
+    /// Expiry record for a time-limited role grant. Present only for roles
+    /// granted through `grant_role_with_expiry`; holds a [`RoleRecord`].
+    RoleExpiry(Role, Address),
     /// Role grant action attached to a legacy proposal, keyed by proposal ID.
     /// Appended to preserve every existing storage-key discriminant.
     RoleGrantProposal(u64),
@@ -540,6 +548,7 @@ mod tests {
     mod proptest;
     mod quorum_proptest;
     mod rbac_errors;
+    mod role_expiry;
 
     #[contract]
     struct AdminContract;
@@ -567,6 +576,20 @@ mod tests {
             address: Address,
         ) -> Result<(), AdminError> {
             super::revoke_role(&env, &caller, role, &address)
+        }
+
+        pub fn grant_role_with_expiry(
+            env: Env,
+            caller: Address,
+            role: Role,
+            account: Address,
+            expires_at: u32,
+        ) -> Result<(), AdminError> {
+            super::grant_role_with_expiry(&env, &caller, role, &account, expires_at)
+        }
+
+        pub fn get_role_record(env: Env, role: Role, address: Address) -> Option<RoleRecord> {
+            super::get_role_record(&env, role, &address)
         }
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {

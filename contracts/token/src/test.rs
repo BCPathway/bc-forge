@@ -1517,3 +1517,179 @@ fn test_update_metadata_rejects_unauthorized_caller() {
     assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
     assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
 }
+
+// ---- Metadata lock ----
+
+#[test]
+fn test_metadata_update_succeeds_before_lock() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    assert!(!client.is_metadata_locked());
+    client.update_metadata(
+        &admin,
+        &String::from_str(&env, "Before"),
+        &String::from_str(&env, "BEF"),
+    );
+    assert_eq!(client.name(), String::from_str(&env, "Before"));
+}
+
+#[test]
+fn test_lock_metadata_blocks_set_and_update_metadata() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    client.lock_metadata(&admin);
+    let (_, topics, _) = last_event(&env);
+    let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(topic0, symbol_short!("meta_lck"));
+    assert!(client.is_metadata_locked());
+
+    let name = String::from_str(&env, "Evil");
+    let symbol = String::from_str(&env, "EVL");
+    assert_eq!(
+        client.try_set_metadata(&admin, &name, &symbol, &7),
+        Err(Ok(TokenError::MetadataImmutable))
+    );
+    assert_eq!(
+        client.try_update_metadata(&admin, &name, &symbol),
+        Err(Ok(TokenError::MetadataImmutable))
+    );
+    assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
+    assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
+    // Irreversible and idempotent.
+    client.lock_metadata(&admin);
+    assert!(client.is_metadata_locked());
+}
+
+#[test]
+fn test_lock_metadata_requires_super_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+    let outsider = Address::generate(&env);
+    assert!(client.try_lock_metadata(&outsider).is_err());
+    assert!(!client.is_metadata_locked());
+}
+
+// ---- Decoupled pause scopes ----
+
+fn setup_minter(env: &Env) -> (BcForgeTokenClient<'_>, Address, Address, Address) {
+    env.mock_all_auths();
+    let (client, admin) = setup(env);
+    let minter = Address::generate(env);
+    let holder = Address::generate(env);
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(env, &admin, bc_forge_admin::Role::Minter, &minter);
+    });
+    client.mint(&minter, &holder, &1_000);
+    (client, admin, minter, holder)
+}
+
+#[test]
+fn test_pause_mints_leaves_transfers_working() {
+    let env = Env::default();
+    let (client, admin, minter, holder) = setup_minter(&env);
+    let other = Address::generate(&env);
+    client.pause_mints(&admin);
+    assert!(client.is_mint_paused());
+    assert!(!client.is_transfer_paused());
+
+    assert_eq!(
+        client.try_mint(&minter, &holder, &1),
+        Err(Ok(TokenError::ContractPaused))
+    );
+    let batch = vec![
+        &env,
+        crate::Recipient {
+            to: holder.clone(),
+            amount: 1,
+        },
+    ];
+    assert_eq!(
+        client.try_batch_mint(&minter, &batch),
+        Err(Ok(TokenError::ContractPaused))
+    );
+    client.transfer(&holder, &other, &100);
+    assert_eq!(client.balance(&other), 100);
+
+    assert_eq!(
+        client.try_pause_mints(&admin),
+        Err(Ok(TokenError::AlreadyPaused))
+    );
+    client.unpause_mints(&admin);
+    client.mint(&minter, &holder, &1);
+    assert_eq!(
+        client.try_unpause_mints(&admin),
+        Err(Ok(TokenError::NotPaused))
+    );
+}
+
+#[test]
+fn test_pause_transfers_leaves_mints_working() {
+    let env = Env::default();
+    let (client, admin, minter, holder) = setup_minter(&env);
+    let other = Address::generate(&env);
+    client.pause_transfers(&admin);
+    assert!(client.is_transfer_paused());
+    assert!(!client.is_mint_paused());
+
+    assert_eq!(
+        client.try_transfer(&holder, &other, &10),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::ContractPaused as u32
+        )))
+    );
+    let batch = vec![&env, (other.clone(), 10_i128)];
+    assert_eq!(
+        client.try_batch_transfer(&holder, &batch),
+        Err(Ok(TokenError::ContractPaused))
+    );
+    client.approve(&holder, &other, &50, &(env.ledger().sequence() + 100));
+    assert!(client
+        .try_transfer_from(&other, &holder, &other, &10)
+        .is_err());
+    client.mint(&minter, &holder, &5);
+    assert_eq!(client.balance(&holder), 1_005);
+
+    client.unpause_transfers(&admin);
+    client.transfer(&holder, &other, &10);
+}
+
+#[test]
+fn test_pause_all_halts_everything_and_unpause_all_restores() {
+    let env = Env::default();
+    let (client, admin, minter, holder) = setup_minter(&env);
+    let other = Address::generate(&env);
+    client.pause_all(&admin);
+    assert!(client.is_paused());
+    assert!(client.is_mint_paused());
+    assert!(client.is_transfer_paused());
+    assert_eq!(
+        client.try_mint(&minter, &holder, &1),
+        Err(Ok(TokenError::ContractPaused))
+    );
+    assert_eq!(
+        client.try_transfer(&holder, &other, &1),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            TokenError::ContractPaused as u32
+        )))
+    );
+    client.unpause_all(&admin);
+    client.mint(&minter, &holder, &1);
+    client.transfer(&holder, &other, &1);
+}
+
+#[test]
+fn test_scoped_pause_requires_pauser_or_admin() {
+    let env = Env::default();
+    let (client, admin, _minter, holder) = setup_minter(&env);
+    assert!(client.try_pause_mints(&holder).is_err());
+    assert!(client.try_pause_transfers(&holder).is_err());
+    let pauser = Address::generate(&env);
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Pauser, &pauser);
+    });
+    client.pause_transfers(&pauser);
+    client.unpause_transfers(&pauser);
+}

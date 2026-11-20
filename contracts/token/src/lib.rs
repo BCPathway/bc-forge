@@ -28,8 +28,8 @@ use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, TryIntoVal,
-    Val, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    String, TryIntoVal, Val, Vec,
 };
 
 /// A mint recipient with an amount.
@@ -90,6 +90,12 @@ pub enum DataKey {
     FeeExemption(Address),
     /// Nonce for contract wallet batch execution replay protection.
     Nonce(Address),
+    /// Set once by `lock_metadata`; permanently freezes name and symbol.
+    MetadataLocked,
+    /// Set while minting alone is paused (`pause_mints`).
+    MintPaused,
+    /// Set while transfers alone are paused (`pause_transfers`).
+    TransferPaused,
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -191,6 +197,8 @@ pub enum TokenError {
     LockupNotFound = 21,
     /// The holder's lock has not reached its unlock timestamp.
     TokensStillLocked = 22,
+    /// Name and symbol were permanently locked by `lock_metadata`.
+    MetadataImmutable = 23,
 }
 
 #[contract]
@@ -218,6 +226,53 @@ impl BcForgeToken {
         } else {
             Ok(())
         }
+    }
+
+    fn flag_set(env: &Env, key: DataKey) -> bool {
+        env.storage().instance().get(&key).unwrap_or(false)
+    }
+
+    /// Rejects while minting is paused, either by the master pause or `pause_mints`.
+    fn ensure_mints_not_paused(env: &Env) -> Result<(), TokenError> {
+        Self::ensure_not_paused(env)?;
+        if Self::flag_set(env, DataKey::MintPaused) {
+            return Err(TokenError::ContractPaused);
+        }
+        Ok(())
+    }
+
+    /// Rejects while transfers are paused, either by the master pause or `pause_transfers`.
+    fn ensure_transfers_not_paused(env: &Env) -> Result<(), TokenError> {
+        Self::ensure_not_paused(env)?;
+        if Self::flag_set(env, DataKey::TransferPaused) {
+            return Err(TokenError::ContractPaused);
+        }
+        Ok(())
+    }
+
+    fn set_scope_paused(
+        env: &Env,
+        caller: &Address,
+        key: DataKey,
+        scope: soroban_sdk::Symbol,
+        paused: bool,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(env);
+        Self::ensure_initialized(env)?;
+        if !admin::is_admin_or_pauser(env, caller) {
+            return Err(TokenError::ContractPaused);
+        }
+        caller.require_auth();
+        if Self::flag_set(env, key.clone()) == paused {
+            return Err(if paused {
+                TokenError::AlreadyPaused
+            } else {
+                TokenError::NotPaused
+            });
+        }
+        env.storage().instance().set(&key, &paused);
+        events::emit_scope_paused(env, caller, scope, paused);
+        Ok(())
     }
 
     fn read_balance(env: &Env, address: &Address) -> i128 {
@@ -619,7 +674,7 @@ impl BcForgeToken {
         }
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_mints_not_paused(&env)?;
             bc_forge_admin::has_role!(&env, bc_forge_admin::Role::Minter, &minter);
 
             if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
@@ -646,7 +701,7 @@ impl BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_mints_not_paused(&env)?;
 
             // Check for any invalid amounts before requiring minter role
             for i in 0..recipients.len() {
@@ -686,7 +741,7 @@ impl BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "batch_transfer_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_transfers_not_paused(&env)?;
             from.require_auth();
 
             let mut total: i128 = 0;
@@ -968,6 +1023,72 @@ impl BcForgeToken {
         bc_forge_lifecycle::set_paused(&env, false);
         events::emit_unpaused(&env, &caller);
         Ok(())
+    }
+
+    /// Emergency master pause; alias of [`Self::pause`] (halts mints and transfers).
+    pub fn pause_all(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::pause(env, caller)
+    }
+
+    /// Lifts the master pause; alias of [`Self::unpause`].
+    pub fn unpause_all(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::unpause(env, caller)
+    }
+
+    /// Halts minting (`mint`, `batch_mint`) while transfers keep working.
+    /// Requires the Pauser or SuperAdmin role.
+    pub fn pause_mints(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::MintPaused,
+            symbol_short!("mints"),
+            true,
+        )
+    }
+
+    /// Resumes minting after `pause_mints`.
+    pub fn unpause_mints(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::MintPaused,
+            symbol_short!("mints"),
+            false,
+        )
+    }
+
+    /// Halts transfers (`transfer`, `transfer_from`, `batch_transfer`,
+    /// `execute_from_contract`) while minting keeps working.
+    pub fn pause_transfers(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::TransferPaused,
+            symbol_short!("transfers"),
+            true,
+        )
+    }
+
+    /// Resumes transfers after `pause_transfers`.
+    pub fn unpause_transfers(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::TransferPaused,
+            symbol_short!("transfers"),
+            false,
+        )
+    }
+
+    /// Returns whether minting is currently halted (master pause or `pause_mints`).
+    pub fn is_mint_paused(env: Env) -> bool {
+        bc_forge_lifecycle::is_paused(&env) || Self::flag_set(&env, DataKey::MintPaused)
+    }
+
+    /// Returns whether transfers are currently halted (master pause or `pause_transfers`).
+    pub fn is_transfer_paused(env: Env) -> bool {
+        bc_forge_lifecycle::is_paused(&env) || Self::flag_set(&env, DataKey::TransferPaused)
     }
 
     /// Upgrades the contract's executable to a new WASM hash.
@@ -1302,7 +1423,7 @@ impl BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "execute_from_contract_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_transfers_not_paused(&env)?;
 
             if operations.is_empty() {
                 return Err(TokenError::BatchEmpty);
@@ -1416,7 +1537,7 @@ impl TokenInterface for BcForgeToken {
             // plain `require_not_paused` panic: a non-contract panic unwinds through the
             // reentrancy guard's Drop, which performs storage writes mid-unwind and masks
             // the failure as Context(InvalidAction) for try_ callers.
-            Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+            Self::panic_on_err(&env, Self::ensure_transfers_not_paused(&env));
             from.require_auth();
             if amount <= 0 {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
@@ -1445,7 +1566,7 @@ impl TokenInterface for BcForgeToken {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
         // #762 – tie pause state into token transfers via the lifecycle modifier.
         // See the comment in `transfer` for why this is not `require_not_paused`.
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+        Self::panic_on_err(&env, Self::ensure_transfers_not_paused(&env));
         spender.require_auth();
         if amount <= 0 {
             soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
@@ -1685,6 +1806,9 @@ impl BcForgeToken {
     ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         admin::require_admin(&env, &caller);
+        if Self::flag_set(&env, DataKey::MetadataLocked) {
+            return Err(TokenError::MetadataImmutable);
+        }
         let stored_decimals: u32 = env
             .storage()
             .instance()
@@ -1720,10 +1844,37 @@ impl BcForgeToken {
     ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         admin::require_admin(&env, &caller);
+        if Self::flag_set(&env, DataKey::MetadataLocked) {
+            return Err(TokenError::MetadataImmutable);
+        }
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         ttl::extend_instance_ttl(&env);
         events::emit_metadata_updated(&env, &caller, &name, &symbol);
         Ok(())
+    }
+
+    /// Permanently freezes name and symbol (irreversible).
+    ///
+    /// @notice Requires `SuperAdmin`. After this call `set_metadata` and
+    ///         `update_metadata` fail with `TokenError::MetadataImmutable`.
+    ///         Calling it again is a no-op. Emits `meta_lck`.
+    pub fn lock_metadata(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if Self::flag_set(&env, DataKey::MetadataLocked) {
+            return Ok(());
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MetadataLocked, &true);
+        events::emit_metadata_locked(&env, &caller);
+        Ok(())
+    }
+
+    /// Returns whether name and symbol have been permanently locked.
+    pub fn is_metadata_locked(env: Env) -> bool {
+        Self::flag_set(&env, DataKey::MetadataLocked)
     }
 }
