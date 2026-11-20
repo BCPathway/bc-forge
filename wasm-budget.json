@@ -1,9 +1,9 @@
 {
-  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects lock_tokens, withdraw_locked (#1076, #1077), and role proposals (#914, #918, #1308); vesting links the token crate, so that same code is included in its WASM. The rate-limit and split budgets are raised by #914/#918 as well: both contracts link the bc-forge-admin crate, whose privileged-action timelock, role renounce, and proposal listing additions compile into their WASMs.",
+  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects lock_tokens, withdraw_locked (#1076, #1077), and role proposals (#914, #918, #1308); vesting links the token crate, so that same code is included in its WASM. The rate-limit and split budgets are raised by #914/#918 as well: both contracts link the bc-forge-admin crate, whose privileged-action timelock, role renounce, and proposal listing additions compile into their WASMs. Rate-limit and split are raised again (#1338): grant_role_with_expiry, RoleRecord and the expiry checks in has_role/require_role also compile into both (measured 55.9 KiB and 93.1 KiB on CI, +5% headroom).",
   "_measured_on": "cargo 1.96.0, wasm32-unknown-unknown, --release, zero warnings. #914/#918 re-measured on 1.94.0; rate-limit/split re-measured on 1.96.0; token/vesting re-measured on 1.96.0 (#1308).",
   "budgets": {
-    "bc_forge_rate_limit.wasm": 54603,
-    "bc_forge_split.wasm": 94692,
+    "bc_forge_rate_limit.wasm": 60104,
+    "bc_forge_split.wasm": 100100,
     "bc_forge_token.wasm": 205000,
     "bc_forge_vesting.wasm": 240000,
     "bc_forge_wrapper.wasm": 140000,
