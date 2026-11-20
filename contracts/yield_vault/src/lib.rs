@@ -127,6 +127,8 @@ pub enum VaultError {
 pub struct YieldVaultContract;
 
 impl YieldVaultContract {
+    const VIRTUAL_OFFSET: i128 = 1;
+
     // ── Guards ───────────────────────────────────────────────────────────────
 
     fn ensure_initialized(env: &Env) -> Result<(), VaultError> {
@@ -321,9 +323,9 @@ impl YieldVaultContract {
     ///
     /// # Share formula
     /// ```text
-    /// shares_out = assets                                  (first deposit)
-    /// shares_out = assets * total_shares / total_assets    (subsequent)
+    /// shares_out = assets * (total_shares + VIRTUAL_OFFSET) / (total_assets_before + VIRTUAL_OFFSET)
     /// ```
+    /// where `VIRTUAL_OFFSET = 1` mitigates first-depositor inflation attacks.
     ///
     /// Rounding is floor (in favour of the protocol). Reverts if `shares_out`
     /// would round to zero.
@@ -334,7 +336,7 @@ impl YieldVaultContract {
         min_shares_out: i128,
     ) -> Result<i128, VaultError> {
         Self::ensure_initialized(&env)?;
-        // #733 – pause guard on deposit only; withdraw is always open.
+        // #733 - pause guard on deposit only; withdraw is always open.
         Self::ensure_not_paused(&env)?;
         caller.require_auth();
 
@@ -342,7 +344,7 @@ impl YieldVaultContract {
             return Err(VaultError::InvalidAmount);
         }
 
-        // #732 – rate-limit guard prevents whale manipulation.
+        // #732 - rate-limit guard prevents whale manipulation.
         Self::rate_limit_deposits(&env, &caller, assets)?;
 
         let underlying_id = Self::read_underlying(&env);
@@ -356,27 +358,24 @@ impl YieldVaultContract {
             &assets,
         );
 
-        // Calculate shares to mint.
+        // Calculate shares to mint using virtual offsets to mitigate inflation attacks.
         let total_shares = Self::read_supply(&env);
-        let shares_out: i128 = if total_shares == 0 {
-            // First deposit — bootstrap 1:1.
-            assets
-        } else {
-            // total_assets now includes the freshly transferred tokens;
-            // subtract them back to get the pre-deposit asset total.
-            let total_assets_after = underlying_client.balance(&env.current_contract_address());
-            let total_assets_before = total_assets_after.checked_sub(assets).unwrap_or(0);
-
-            if total_assets_before <= 0 {
-                // Vault had zero assets but nonzero shares — treat as first deposit.
-                assets
-            } else {
-                assets
-                    .checked_mul(total_shares)
-                    .and_then(|p| p.checked_div(total_assets_before))
-                    .ok_or(VaultError::InvalidAmount)?
-            }
-        };
+        let total_assets_after = underlying_client.balance(&env.current_contract_address());
+        let total_assets_before = total_assets_after.checked_sub(assets).unwrap_or(0);
+        let shares_out = assets
+            .checked_mul(
+                total_shares
+                    .checked_add(Self::VIRTUAL_OFFSET)
+                    .ok_or(VaultError::InvalidAmount)?,
+            )
+            .and_then(|p| {
+                p.checked_div(
+                    total_assets_before
+                        .checked_add(Self::VIRTUAL_OFFSET)
+                        .ok_or(VaultError::InvalidAmount)?,
+                )
+            })
+            .ok_or(VaultError::InvalidAmount)?;
 
         if shares_out <= 0 {
             return Err(VaultError::InvalidAmount);
@@ -495,8 +494,18 @@ impl YieldVaultContract {
         let total_shares = Self::read_supply(&env);
         let total_assets = underlying_client.balance(&env.current_contract_address());
         let tokens_out = shares
-            .checked_mul(total_assets)
-            .and_then(|p| p.checked_div(total_shares))
+            .checked_mul(
+                total_assets
+                    .checked_add(Self::VIRTUAL_OFFSET)
+                    .ok_or(VaultError::InvalidAmount)?,
+            )
+            .and_then(|p| {
+                p.checked_div(
+                    total_shares
+                        .checked_add(Self::VIRTUAL_OFFSET)
+                        .ok_or(VaultError::InvalidAmount)?,
+                )
+            })
             .ok_or(VaultError::InvalidAmount)?;
 
         if tokens_out <= 0 || tokens_out < min_tokens_out {
