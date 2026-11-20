@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #![cfg(test)]
 
 extern crate std;
@@ -511,7 +511,7 @@ fn test_action_proposal_requires_quorum_and_timelock_then_consumes() {
     let contract_id = client.address.clone();
 
     // Single-member pool: the creator's auto-approval is already quorum.
-    let action = crate::ProposalAction::SetMaxSupply { new_cap: 10_000 };
+    let action = crate::ProposalAction::SetMaxSupply(10_000);
     let id = env.as_contract(&contract_id, || {
         crate::create_action_proposal(
             &env,
@@ -525,7 +525,10 @@ fn test_action_proposal_requires_quorum_and_timelock_then_consumes() {
     env.as_contract(&contract_id, || {
         assert_eq!(crate::get_action_proposal(&env, id), Some(action.clone()));
         let unlock = crate::get_proposal_unlock_time(&env, id).expect("timelock");
-        assert_eq!(unlock, env.ledger().timestamp() + crate::TIMELOCK_DELAY_SECS);
+        assert_eq!(
+            unlock,
+            env.ledger().timestamp() + crate::TIMELOCK_DELAY_SECS
+        );
         assert_eq!(
             crate::consume_action_proposal(&env, admin.clone(), id),
             Err(AdminError::TimelockActive)
@@ -552,10 +555,7 @@ fn test_privileged_mint_action_round_trips() {
     let (_client, admin) = setup(&env);
     let contract_id = _client.address.clone();
     let recipient = Address::generate(&env);
-    let action = crate::ProposalAction::PrivilegedMint {
-        to: recipient.clone(),
-        amount: 250,
-    };
+    let action = crate::ProposalAction::PrivilegedMint(recipient.clone(), 250);
 
     let id = env.as_contract(&contract_id, || {
         crate::create_action_proposal(

@@ -15,7 +15,7 @@ use soroban_sdk::{contracttype, vec, Address, BytesN, Env, Map, String, Vec};
 
 use crate::address::require_non_zero_address;
 use crate::events;
-use crate::rbac::{get_admin, has_admin, require_admin, Role};
+use crate::rbac::{get_admin, has_admin, has_role, require_admin, Role};
 use crate::reentrancy_guard;
 use crate::{extend_instance_ttl, extend_storage_ttl_for_key, AdminError, AdminKey};
 
@@ -40,9 +40,9 @@ pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
 #[contracttype]
 pub enum ProposalAction {
     /// Changes a token's maximum supply cap to `new_cap`.
-    SetMaxSupply { new_cap: i128 },
+    SetMaxSupply(i128),
     /// Mints `amount` to `to` through a privileged, governed path.
-    PrivilegedMint { to: Address, amount: i128 },
+    PrivilegedMint(Address, i128),
 }
 
 /// Default lifetime of a legacy [`Proposal`], in ledgers.
@@ -491,12 +491,12 @@ pub fn create_action_proposal(
     description: String,
 ) -> u64 {
     match &action {
-        ProposalAction::SetMaxSupply { new_cap } => {
+        ProposalAction::SetMaxSupply(new_cap) => {
             if *new_cap < 0 {
                 soroban_sdk::panic_with_error!(env, AdminError::InvalidAction);
             }
         }
-        ProposalAction::PrivilegedMint { to, amount } => {
+        ProposalAction::PrivilegedMint(to, amount) => {
             require_non_zero_address(env, to);
             if *amount <= 0 {
                 soroban_sdk::panic_with_error!(env, AdminError::InvalidAction);
@@ -531,13 +531,6 @@ pub fn consume_action_proposal(
     proposal_id: u64,
 ) -> Result<ProposalAction, AdminError> {
     let _reentrancy_guard = reentrancy_guard::enter(env);
-    executor.require_auth();
-    if !get_admin_pool(env).contains(&executor) {
-        return Err(AdminError::UnauthorizedRole);
-    }
-    if !has_role(env, Role::SuperAdmin, &executor) {
-        return Err(AdminError::UnauthorizedRole);
-    }
 
     let mut proposal: Proposal = env
         .storage()
@@ -553,6 +546,15 @@ pub fn consume_action_proposal(
     if _proposal_expired(env, &proposal) {
         return Err(AdminError::ProposalExpired);
     }
+
+    executor.require_auth();
+    if !get_admin_pool(env).contains(&executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+    if !has_role(env, Role::SuperAdmin, &executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
     if !is_proposal_ready(env, proposal_id) {
         return Err(AdminError::ThresholdNotMet);
     }

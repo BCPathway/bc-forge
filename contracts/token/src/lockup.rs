@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 //! Unit tests for the lockup period state storage mapping (#719).
 //!
 //! The mapping stores per-user [`LockupState`] (locked amount + unlock
@@ -760,7 +760,10 @@ fn get_lockup_view_survives_withdrawal_after_unlock() {
     client.lock_tokens(&admin, &user, &200, &100);
 
     assert!(client.get_lockup(&user).is_some());
-    assert_eq!(client.try_withdraw_locked(&user), Err(Ok(TokenError::TokensStillLocked)));
+    assert_eq!(
+        client.try_withdraw_locked(&user),
+        Err(Ok(TokenError::TokensStillLocked))
+    );
 
     env.ledger().set_timestamp(101);
     client.withdraw_locked(&user);

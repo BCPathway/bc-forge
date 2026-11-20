@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 //! Storage-collision tests for initialization.
 //!
 //! A `BcForgeToken` instance is written by four `#[contracttype]` key enums:

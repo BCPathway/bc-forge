@@ -307,9 +307,7 @@ impl BcForgeToken {
     }
 
     fn remove_pending_cap_change(env: &Env) {
-        env.storage()
-            .instance()
-            .remove(&DataKey::PendingMaxSupply);
+        env.storage().instance().remove(&DataKey::PendingMaxSupply);
     }
 
     // Governing admin/multisig contract (#1329).
@@ -938,7 +936,11 @@ impl BcForgeToken {
     /// Only a SuperAdmin may set or replace it. Once set, direct calls to
     /// supply-policy entry points are rejected unless they come from this
     /// address.
-    pub fn set_admin_contract(env: Env, caller: Address, admin_contract: Address) -> Result<(), TokenError> {
+    pub fn set_admin_contract(
+        env: Env,
+        caller: Address,
+        admin_contract: Address,
+    ) -> Result<(), TokenError> {
         Self::extend_instance_ttl_for_call(&env);
         Self::ensure_initialized(&env)?;
         admin::require_super_admin(&env, &caller);
@@ -969,7 +971,7 @@ impl BcForgeToken {
         Ok(admin::create_action_proposal(
             &env,
             caller,
-            admin::ProposalAction::SetMaxSupply { new_cap },
+            admin::ProposalAction::SetMaxSupply(new_cap),
             description,
         ))
     }
@@ -985,7 +987,7 @@ impl BcForgeToken {
         let action = admin::consume_action_proposal(&env, caller.clone(), proposal_id)
             .map_err(Self::map_admin_error)?;
         let new_cap = match action {
-            admin::ProposalAction::SetMaxSupply { new_cap } => new_cap,
+            admin::ProposalAction::SetMaxSupply(new_cap) => new_cap,
             _ => return Err(TokenError::InvalidAmount),
         };
         if new_cap < Self::read_supply(&env) {
@@ -1012,7 +1014,7 @@ impl BcForgeToken {
         Ok(admin::create_action_proposal(
             &env,
             caller,
-            admin::ProposalAction::PrivilegedMint { to, amount },
+            admin::ProposalAction::PrivilegedMint(to, amount),
             description,
         ))
     }
@@ -1029,12 +1031,11 @@ impl BcForgeToken {
         let action = admin::consume_action_proposal(&env, caller.clone(), proposal_id)
             .map_err(Self::map_admin_error)?;
         let (to, amount) = match action {
-            admin::ProposalAction::PrivilegedMint { to, amount } => (to, amount),
+            admin::ProposalAction::PrivilegedMint(to, amount) => (to, amount),
             _ => return Err(TokenError::InvalidAmount),
         };
         Self::internal_mint(&env, &caller, &to, amount)
     }
-
 
     /// Transfers contract ownership to a new admin.
     ///
