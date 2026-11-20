@@ -96,6 +96,8 @@ pub enum DataKey {
     MintStream(u64),
     /// Next mint stream id counter.
     NextMintStreamId,
+    /// Recorded live-until ledger for instance TTL diagnostics.
+    InstanceLiveUntil,
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -155,6 +157,14 @@ pub struct MintStream {
     pub start_ledger: u32,
     pub end_ledger: u32,
     pub cliff_ledger: u32,
+}
+
+/// Instance storage footprint and TTL diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct StorageInfo {
+    pub instance_ttl: u32,
+    pub instance_keys: u32,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -256,20 +266,20 @@ impl BcForgeToken {
     fn read_supply(env: &Env) -> i128 {
         let key = DataKey::Supply;
         if env.storage().instance().has(&key) {
-            ttl::extend_instance_ttl(env);
+            Self::extend_instance_ttl(env);
         }
         env.storage().instance().get(&key).unwrap_or(0)
     }
 
     fn write_supply(env: &Env, supply: i128) {
         env.storage().instance().set(&DataKey::Supply, &supply);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn read_max_supply(env: &Env) -> i128 {
         let key = DataKey::MaxSupply;
         if env.storage().instance().has(&key) {
-            ttl::extend_instance_ttl(env);
+            Self::extend_instance_ttl(env);
         }
         env.storage().instance().get(&key).unwrap_or(i128::MAX)
     }
@@ -278,7 +288,7 @@ impl BcForgeToken {
         env.storage()
             .instance()
             .set(&DataKey::MaxSupply, &max_supply);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn remove_legacy_allowance_exp(env: &Env, from: &Address, spender: &Address) {
@@ -342,8 +352,63 @@ impl BcForgeToken {
         }
     }
 
-    fn extend_instance_ttl_for_call(env: &Env) {
+    fn read_recorded_live_until(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::InstanceLiveUntil)
+            .unwrap_or(0)
+    }
+
+    fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+        let current = env.ledger().sequence();
+        let stored = Self::read_recorded_live_until(env);
+        let remaining = stored.saturating_sub(current);
+        if stored == 0 || remaining <= threshold {
+            let requested = current.saturating_add(extend_to);
+            if requested > stored {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::InstanceLiveUntil, &requested);
+            }
+        }
+    }
+
+    fn extend_instance_ttl(env: &Env) {
         ttl::extend_instance_ttl(env);
+        Self::remember_instance_extension(
+            env,
+            ttl::INSTANCE_LIFETIME_THRESHOLD,
+            ttl::INSTANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn extend_instance_ttl_for_call(env: &Env) {
+        Self::extend_instance_ttl(env);
+    }
+
+    fn get_instance_ttl_value(env: &Env) -> u32 {
+        Self::read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+    }
+
+    fn get_storage_key_counts_value(env: &Env) -> u32 {
+        let keys = [
+            DataKey::Decimals,
+            DataKey::Name,
+            DataKey::Symbol,
+            DataKey::Supply,
+            DataKey::MaxSupply,
+            DataKey::Treasury,
+            DataKey::FeeConfig,
+        ];
+        let mut count = 0u32;
+        let mut i = 0;
+        while i < keys.len() {
+            if env.storage().instance().has(&keys[i]) {
+                count += 1;
+            }
+            i += 1;
+        }
+        count
     }
 
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
@@ -412,26 +477,26 @@ impl BcForgeToken {
 
     fn write_fee_config(env: &Env, config: &FeeConfig) {
         env.storage().instance().set(&DataKey::FeeConfig, config);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn write_treasury(env: &Env, treasury: &Address) {
         env.storage().instance().set(&DataKey::Treasury, treasury);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn write_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
         env.storage()
             .instance()
             .set(&DataKey::FeeExemption(address.clone()), exemption);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn delete_fee_exemption(env: &Env, address: &Address) {
         env.storage()
             .instance()
             .remove(&DataKey::FeeExemption(address.clone()));
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn read_nonce(env: &Env, address: &Address) -> u64 {
@@ -457,7 +522,7 @@ impl BcForgeToken {
         env.storage()
             .instance()
             .set(&DataKey::MinterAllowance(minter.clone()), &allowance);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn consume_minter_allowance(env: &Env, minter: &Address, amount: i128) -> Result<(), TokenError> {
@@ -480,7 +545,7 @@ impl BcForgeToken {
         env.storage()
             .instance()
             .set(&DataKey::NextMintStreamId, &id);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn read_mint_stream(env: &Env, stream_id: u64) -> Result<MintStream, TokenError> {
@@ -685,6 +750,27 @@ impl BcForgeToken {
 
         events::emit_initialized(&env, &admin_address, decimal, &name, &symbol);
         Ok(())
+    }
+
+    /// Returns storage diagnostics for the token contract.
+    pub fn get_storage_info(env: Env) -> StorageInfo {
+        Self::extend_instance_ttl_for_call(&env);
+        StorageInfo {
+            instance_ttl: Self::get_instance_ttl_value(&env),
+            instance_keys: Self::get_storage_key_counts_value(&env),
+        }
+    }
+
+    /// Returns the recorded remaining instance TTL in ledgers.
+    pub fn get_instance_ttl(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_instance_ttl_value(&env)
+    }
+
+    /// Returns the number of populated singleton instance keys.
+    pub fn get_storage_key_counts(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_storage_key_counts_value(&env)
     }
 
     /// Creates a scheduled mint stream for a recipient.

@@ -22,6 +22,7 @@ pub mod math;
 mod test;
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
@@ -88,6 +89,14 @@ pub struct UserEmergencyState {
     pub window_start_ledger: u32,
 }
 
+/// Instance storage footprint and TTL diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct StorageInfo {
+    pub instance_ttl: u32,
+    pub instance_keys: u32,
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -134,6 +143,8 @@ pub enum DataKey {
     QueuedWithdrawal(Address),
     /// Emergency cap tracking state for a user.
     UserEmergencyState(Address),
+    /// Recorded live-until ledger for instance TTL diagnostics.
+    InstanceLiveUntil,
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -186,6 +197,65 @@ pub struct WrapperContract;
 
 impl WrapperContract {
     // ── Guards ───────────────────────────────────────────────────────────────
+
+    fn read_recorded_live_until(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::InstanceLiveUntil)
+            .unwrap_or(0)
+    }
+
+    fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+        let current = env.ledger().sequence();
+        let stored = Self::read_recorded_live_until(env);
+        let remaining = stored.saturating_sub(current);
+        if stored == 0 || remaining <= threshold {
+            let requested = current.saturating_add(extend_to);
+            if requested > stored {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::InstanceLiveUntil, &requested);
+            }
+        }
+    }
+
+    fn extend_instance_ttl(env: &Env) {
+        ttl::extend_instance_ttl(env);
+        Self::remember_instance_extension(
+            env,
+            ttl::INSTANCE_LIFETIME_THRESHOLD,
+            ttl::INSTANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn extend_instance_ttl_for_call(env: &Env) {
+        Self::extend_instance_ttl(env);
+    }
+
+    fn get_instance_ttl_value(env: &Env) -> u32 {
+        Self::read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+    }
+
+    fn get_storage_key_counts_value(env: &Env) -> u32 {
+        let keys = [
+            DataKey::UnderlyingToken,
+            DataKey::Decimals,
+            DataKey::Symbol,
+            DataKey::Name,
+            DataKey::Supply,
+            DataKey::PendingRewards,
+            DataKey::CooldownConfig,
+        ];
+        let mut count = 0u32;
+        let mut i = 0;
+        while i < keys.len() {
+            if env.storage().instance().has(&keys[i]) {
+                count += 1;
+            }
+            i += 1;
+        }
+        count
+    }
 
     fn ensure_initialized(env: &Env) -> Result<(), WrapperError> {
         if admin::has_admin(env) {
