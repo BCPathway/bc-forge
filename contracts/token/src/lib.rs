@@ -633,7 +633,7 @@ impl BcForgeToken {
     /// Mints new tokens to multiple recipients in a single call.
     ///
     /// @notice Mints tokens to each recipient in the `recipients` list. Only authorized miners can call this function.
-    /// @dev Requires the caller to have the Minter role. Rate limits are checked per recipient. The total supply is updated atomically.
+    /// @dev Requires the caller to have the Minter role. Rate limits are checked against the aggregated batch amount. The total supply is updated atomically.
     /// @param env The Soroban environment.
     /// @param minter The address of the minter calling this function.
     /// @param recipients A list of recipients with amounts to mint to each.
@@ -648,21 +648,28 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
 
-            // Check for any invalid amounts before requiring minter role
+            // Check for any invalid amounts and aggregate total batch amount before
+            // requiring minter role so callers cannot bypass volume-based rate limits
+            // by splitting a large issuance across many recipients.
+            let mut total_batch_amount: i128 = 0;
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
+                total_batch_amount = total_batch_amount
+                    .checked_add(recipient.amount)
+                    .ok_or(TokenError::InvalidAmount)?;
             }
 
             bc_forge_admin::has_role!(&env, bc_forge_admin::Role::Minter, &minter);
 
+            if !crate::rate_limit::check_mint_rate_limit(&env, &minter, total_batch_amount) {
+                return Err(TokenError::InvalidAmount);
+            }
+
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
-                if !crate::rate_limit::check_mint_rate_limit(&env, &minter, recipient.amount) {
-                    return Err(TokenError::InvalidAmount);
-                }
                 Self::internal_mint(&env, &minter, &recipient.to, recipient.amount)?;
             }
 
