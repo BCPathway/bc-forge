@@ -7,9 +7,12 @@ export type IndexerEventType =
   | 'transfer'
   | 'burn'
   | 'vaultDeposit'
+  | 'vaultWithdraw'
+  | 'vaultClaim'
   | 'wrapperUpdate'
   | 'vestingClaim'
-  | 'splitDistribution';
+  | 'splitDistribution'
+  | 'splitFailure';
 
 export type IndexerEvent = {
   type: IndexerEventType;
