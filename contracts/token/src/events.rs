@@ -422,3 +422,76 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
         (user.clone(), amount, EVENT_SCHEMA_VERSION),
     );
 }
+
+/// Emits `acc_frz` when an account is frozen (#1333).
+pub fn emit_account_frozen(env: &Env, caller: &Address, account: &Address) {
+    env.events().publish(
+        (symbol_short!("acc_frz"),),
+        (caller.clone(), account.clone(), EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `acc_unfrz` when an account is unfrozen (#1333).
+pub fn emit_account_unfrozen(env: &Env, caller: &Address, account: &Address) {
+    env.events().publish(
+        (symbol_short!("acc_unfrz"),),
+        (caller.clone(), account.clone(), EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `clawback` when tokens are seized (#1333).
+pub fn emit_tokens_clawback(
+    env: &Env,
+    caller: &Address,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+) {
+    env.events().publish(
+        (symbol_short!("clawback"),),
+        (
+            caller.clone(),
+            from.clone(),
+            to.clone(),
+            amount,
+            EVENT_SCHEMA_VERSION,
+        ),
+    );
+}
+
+/// Emits `flt_mode` when the transfer filter mode changes (#1334).
+pub fn emit_filter_mode_set(env: &Env, caller: &Address, mode: u32) {
+    env.events().publish(
+        (symbol_short!("flt_mode"),),
+        (caller.clone(), mode, EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `flt_stat` when an address filter status changes (#1334).
+pub fn emit_filter_status_set(env: &Env, caller: &Address, account: &Address, status: bool) {
+    env.events().publish(
+        (symbol_short!("flt_stat"),),
+        (
+            caller.clone(),
+            account.clone(),
+            status,
+            EVENT_SCHEMA_VERSION,
+        ),
+    );
+}
+
+/// Emits `own_prop` when ownership is proposed (#1337).
+pub fn emit_ownership_proposed(env: &Env, caller: &Address, pending_admin: &Address) {
+    env.events().publish(
+        (symbol_short!("own_prop"),),
+        (caller.clone(), pending_admin.clone(), EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `own_canc` when a pending ownership transfer is cancelled (#1337).
+pub fn emit_ownership_cancelled(env: &Env, caller: &Address) {
+    env.events().publish(
+        (symbol_short!("own_canc"),),
+        (caller.clone(), EVENT_SCHEMA_VERSION),
+    );
+}

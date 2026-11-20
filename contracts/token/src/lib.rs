@@ -19,6 +19,9 @@ mod test;
 mod fuzz_mint;
 
 #[cfg(test)]
+mod compliance;
+
+#[cfg(test)]
 mod lockup;
 
 #[cfg(test)]
@@ -90,7 +93,24 @@ pub enum DataKey {
     FeeExemption(Address),
     /// Nonce for contract wallet batch execution replay protection.
     Nonce(Address),
+    /// Account frozen by a compliance officer (#1333).
+    Frozen(Address),
+    /// Active transfer filter mode (#1334).
+    FilterMode,
+    /// Allowlist/denylist membership per address (#1334).
+    AddressFilter(Address),
+    /// Whether peer-to-peer transfers are enabled (#1335).
+    IsTransferable,
+    /// Address nominated to become admin via two-step handoff (#1337).
+    PendingOwner,
 }
+
+/// Transfer filter disabled.
+pub const FILTER_NONE: u32 = 0;
+/// Only allowlisted addresses may send or receive.
+pub const FILTER_ALLOWLIST: u32 = 1;
+/// Denylisted addresses may neither send nor receive.
+pub const FILTER_DENYLIST: u32 = 2;
 
 /// Fee configuration for dynamic contract fee charging.
 ///
@@ -191,6 +211,22 @@ pub enum TokenError {
     LockupNotFound = 21,
     /// The holder's lock has not reached its unlock timestamp.
     TokensStillLocked = 22,
+    /// The sender or recipient account is frozen.
+    AccountFrozen = 23,
+    /// The sender or recipient is rejected by the active allowlist/denylist.
+    AddressNotAllowed = 24,
+    /// Transfers are disabled (soulbound token).
+    TransfersDisabled = 25,
+    /// Invalid filter mode value.
+    InvalidFilterMode = 26,
+    /// No pending ownership transfer exists.
+    NoPendingOwner = 27,
+    /// Caller is not the pending owner.
+    NotPendingOwner = 28,
+    /// The account cannot be frozen (contract itself).
+    CannotFreezeReserve = 29,
+    /// The caller lacks the required role.
+    Unauthorized = 30,
 }
 
 #[contract]
@@ -340,6 +376,8 @@ impl BcForgeToken {
         to: &Address,
         amount: i128,
     ) -> Result<(), TokenError> {
+        Self::ensure_transferable(env)?;
+        Self::check_frozen_and_filter(env, from, to)?;
         let from_balance = Self::read_balance(env, from);
         if Self::get_spendable_balance(env, from) < amount {
             return Err(TokenError::InsufficientBalance);
@@ -353,6 +391,89 @@ impl BcForgeToken {
         Ok(())
     }
 
+    fn is_transferable_flag(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsTransferable)
+            .unwrap_or(true)
+    }
+
+    fn ensure_transferable(env: &Env) -> Result<(), TokenError> {
+        if Self::is_transferable_flag(env) {
+            Ok(())
+        } else {
+            Err(TokenError::TransfersDisabled)
+        }
+    }
+
+    fn is_frozen_internal(env: &Env, account: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Frozen(account.clone()))
+            .unwrap_or(false)
+    }
+
+    fn read_filter_mode(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FilterMode)
+            .unwrap_or(FILTER_NONE)
+    }
+
+    fn read_filter_status(env: &Env, account: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AddressFilter(account.clone()))
+            .unwrap_or(false)
+    }
+
+    fn check_frozen_and_filter(env: &Env, from: &Address, to: &Address) -> Result<(), TokenError> {
+        if Self::is_frozen_internal(env, from) || Self::is_frozen_internal(env, to) {
+            return Err(TokenError::AccountFrozen);
+        }
+        match Self::read_filter_mode(env) {
+            FILTER_ALLOWLIST => {
+                if !Self::read_filter_status(env, from) || !Self::read_filter_status(env, to) {
+                    return Err(TokenError::AddressNotAllowed);
+                }
+            }
+            FILTER_DENYLIST => {
+                if Self::read_filter_status(env, from) || Self::read_filter_status(env, to) {
+                    return Err(TokenError::AddressNotAllowed);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Mint-side filter check: recipient must pass the active filter and not be frozen.
+    fn check_recipient(env: &Env, to: &Address) -> Result<(), TokenError> {
+        if Self::is_frozen_internal(env, to) {
+            return Err(TokenError::AccountFrozen);
+        }
+        match Self::read_filter_mode(env) {
+            FILTER_ALLOWLIST if !Self::read_filter_status(env, to) => {
+                Err(TokenError::AddressNotAllowed)
+            }
+            FILTER_DENYLIST if Self::read_filter_status(env, to) => {
+                Err(TokenError::AddressNotAllowed)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn require_compliance_or_super_admin(env: &Env, caller: &Address) -> Result<(), TokenError> {
+        if admin::has_role(env, admin::Role::Compliance, caller)
+            || admin::has_role(env, admin::Role::SuperAdmin, caller)
+        {
+            caller.require_auth();
+            Ok(())
+        } else {
+            Err(TokenError::Unauthorized)
+        }
+    }
+
     fn internal_mint(
         env: &Env,
         admin_address: &Address,
@@ -363,6 +484,7 @@ impl BcForgeToken {
             return Err(TokenError::InvalidAmount);
         }
 
+        Self::check_recipient(env, to)?;
         let max_supply = Self::read_max_supply(env);
         let new_supply = Self::read_supply(env) + amount;
         if new_supply > max_supply {
@@ -593,6 +715,217 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Initializes the token with an explicit transferability flag (#1335).
+    /// When `is_transferable` is false the token is soulbound: mint and burn
+    /// work but every transfer is rejected with `TransfersDisabled`.
+    pub fn initialize_custom(
+        env: Env,
+        admin_address: Address,
+        decimal: u32,
+        name: String,
+        symbol: String,
+        is_transferable: bool,
+    ) -> Result<(), TokenError> {
+        Self::initialize(env.clone(), admin_address, decimal, name, symbol)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::IsTransferable, &is_transferable);
+        Ok(())
+    }
+
+    /// Returns whether peer-to-peer transfers are enabled (default true).
+    pub fn is_transferable(env: Env) -> bool {
+        Self::is_transferable_flag(&env)
+    }
+
+    /// Freezes `account` so it can neither send nor receive (#1333).
+    pub fn freeze(env: Env, caller: Address, account: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_compliance(&env, &caller);
+        if account == env.current_contract_address() {
+            return Err(TokenError::CannotFreezeReserve);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::Frozen(account.clone()), &true);
+        events::emit_account_frozen(&env, &caller, &account);
+        Ok(())
+    }
+
+    /// Unfreezes `account` (#1333).
+    pub fn unfreeze(env: Env, caller: Address, account: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_compliance(&env, &caller);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Frozen(account.clone()));
+        events::emit_account_unfrozen(&env, &caller, &account);
+        Ok(())
+    }
+
+    /// Returns whether `account` is frozen.
+    pub fn is_frozen(env: Env, account: Address) -> bool {
+        Self::is_frozen_internal(&env, &account)
+    }
+
+    /// Seizes `amount` tokens from `from` into `to` (#1333). Works on frozen
+    /// accounts and bypasses lockups, pause state and transfer filters, as
+    /// legally required for court-ordered seizures.
+    pub fn clawback(
+        env: Env,
+        caller: Address,
+        from: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_compliance(&env, &caller);
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        let from_balance = Self::read_balance(&env, &from);
+        if from_balance < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+        if from != to {
+            let to_balance = Self::read_balance(&env, &to);
+            Self::write_balance(&env, &from, from_balance - amount);
+            Self::write_balance(&env, &to, to_balance + amount);
+        }
+        events::emit_tokens_clawback(&env, &caller, &from, &to, amount);
+        Ok(())
+    }
+
+    /// Sets the transfer filter mode: 0 none, 1 allowlist, 2 denylist (#1334). SuperAdmin only.
+    pub fn set_filter_mode(env: Env, caller: Address, mode: u32) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if mode > FILTER_DENYLIST {
+            return Err(TokenError::InvalidFilterMode);
+        }
+        env.storage().instance().set(&DataKey::FilterMode, &mode);
+        events::emit_filter_mode_set(&env, &caller, mode);
+        Ok(())
+    }
+
+    /// Returns the active filter mode.
+    pub fn get_filter_mode(env: Env) -> u32 {
+        Self::read_filter_mode(&env)
+    }
+
+    /// Returns the filter status of `account`.
+    pub fn get_filter_status(env: Env, account: Address) -> bool {
+        Self::read_filter_status(&env, &account)
+    }
+
+    /// Lists or delists one address (#1334). Compliance or SuperAdmin.
+    pub fn set_filter_status(
+        env: Env,
+        caller: Address,
+        account: Address,
+        status: bool,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        Self::require_compliance_or_super_admin(&env, &caller)?;
+        Self::write_filter_status(&env, &account, status);
+        events::emit_filter_status_set(&env, &caller, &account, status);
+        Ok(())
+    }
+
+    /// Lists or delists many addresses at once (#1334).
+    pub fn batch_set_filter_status(
+        env: Env,
+        caller: Address,
+        accounts: Vec<Address>,
+        status: bool,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        Self::require_compliance_or_super_admin(&env, &caller)?;
+        if accounts.is_empty() {
+            return Err(TokenError::BatchEmpty);
+        }
+        if accounts.len() > 50 {
+            return Err(TokenError::BatchTooLarge);
+        }
+        for account in accounts.iter() {
+            Self::write_filter_status(&env, &account, status);
+            events::emit_filter_status_set(&env, &caller, &account, status);
+        }
+        Ok(())
+    }
+
+    fn write_filter_status(env: &Env, account: &Address, status: bool) {
+        let key = DataKey::AddressFilter(account.clone());
+        if status {
+            env.storage().persistent().set(&key, &true);
+        } else {
+            env.storage().persistent().remove(&key);
+        }
+    }
+
+    /// Step one of the two-step ownership handoff (#1337).
+    pub fn propose_ownership(
+        env: Env,
+        caller: Address,
+        pending_admin: Address,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if admin::is_zero_address(&env, &pending_admin) {
+            return Err(TokenError::InvalidAmount);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingOwner, &pending_admin);
+        events::emit_ownership_proposed(&env, &caller, &pending_admin);
+        Ok(())
+    }
+
+    /// Step two: the nominated address accepts and becomes admin (#1337).
+    pub fn accept_ownership(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingOwner)
+            .ok_or(TokenError::NoPendingOwner)?;
+        if caller != pending {
+            return Err(TokenError::NotPendingOwner);
+        }
+        caller.require_auth();
+        let old_admin = admin::get_admin(&env);
+        admin::set_admin(&env, &caller);
+        env.storage().instance().remove(&DataKey::PendingOwner);
+        events::emit_ownership_transferred(&env, &old_admin, &caller);
+        Ok(())
+    }
+
+    /// Cancels a pending ownership handoff (#1337). Current admin only.
+    pub fn cancel_ownership_transfer(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        if !env.storage().instance().has(&DataKey::PendingOwner) {
+            return Err(TokenError::NoPendingOwner);
+        }
+        env.storage().instance().remove(&DataKey::PendingOwner);
+        events::emit_ownership_cancelled(&env, &caller);
+        Ok(())
+    }
+
+    /// Returns the address nominated to become admin, if any.
+    pub fn pending_owner(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingOwner)
+    }
+
     /// Returns the admin address.
     ///
     /// @notice Returns the address of the contract admin.
@@ -760,6 +1093,8 @@ impl BcForgeToken {
     }
 
     /// Transfers contract ownership to a new admin.
+    ///
+    /// @dev Deprecated: prefer `propose_ownership` / `accept_ownership` (#1337).
     ///
     /// @notice Transfers the admin role to `new_admin`. Only the current admin can call this function.
     /// @param env The Soroban environment.
