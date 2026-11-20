@@ -29,15 +29,8 @@ fn setup(
     let vesting_id = env.register(VestingContract, ());
     let vesting = VestingContractClient::new(env, &vesting_id);
     vesting.initialize(&admin, &token_id);
-    // Ownership transfer runs through the #914 privilege timelock.
-    token.propose_privilege_action(
-        &admin,
-        &bc_forge_admin::PrivilegeAction::TransferOwnership(vesting_id.clone()),
-    );
-    let mut info = env.ledger().get();
-    info.timestamp += 24 * 60 * 60;
-    env.ledger().set(info);
-    token.transfer_ownership(&vesting_id);
+    token.mint(&admin, &admin, &1_000_000);
+    token.approve(&admin, &vesting_id, &i128::MAX, &(env.ledger().sequence() + 10_000));
 
     (token, vesting, admin, beneficiary, vesting_id)
 }
@@ -49,7 +42,7 @@ fn test_create_vesting_mints_into_contract_and_emits_events() {
     env.ledger().set_sequence_number(10);
     let (token, vesting, _admin, beneficiary, vesting_id) = setup(&env);
 
-    let schedule_id = vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
+    let schedule_id = vesting.create_vesting(&admin, &beneficiary, &1_000, &5, &20, &true);
     let info = vesting.get_vesting_info(&beneficiary);
 
     assert_eq!(schedule_id, 0);
@@ -65,7 +58,7 @@ fn test_release_respects_cliff_linear_vesting_and_prevents_double_release() {
     env.ledger().set_sequence_number(10);
     let (token, vesting, _admin, beneficiary, vesting_id) = setup(&env);
 
-    vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
+    vesting.create_vesting(&admin, &beneficiary, &1_000, &5, &20, &true);
 
     env.ledger().set_sequence_number(14);
     assert_eq!(vesting.release(&beneficiary), 0);
@@ -96,7 +89,7 @@ fn test_revoke_returns_only_unvested_tokens() {
     env.ledger().set_sequence_number(10);
     let (token, vesting, admin, beneficiary, vesting_id) = setup(&env);
 
-    let schedule_id = vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
+    let schedule_id = vesting.create_vesting(&admin, &beneficiary, &1_000, &5, &20, &true);
 
     env.ledger().set_sequence_number(16);
     assert_eq!(vesting.release(&beneficiary), 300);
@@ -123,7 +116,7 @@ fn test_irrevocable_schedule_cannot_be_revoked() {
     env.ledger().set_sequence_number(10);
     let (_token, vesting, _admin, beneficiary, _vesting_id) = setup(&env);
 
-    let schedule_id = vesting.create_vesting(&beneficiary, &1_000, &5, &20, &false);
+    let schedule_id = vesting.create_vesting(&admin, &beneficiary, &1_000, &5, &20, &false);
 
     assert_eq!(
         vesting.try_revoke(&schedule_id),
@@ -138,8 +131,8 @@ fn test_multiple_schedules_per_beneficiary_release_together() {
     env.ledger().set_sequence_number(10);
     let (token, vesting, _admin, beneficiary, vesting_id) = setup(&env);
 
-    vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
-    vesting.create_vesting(&beneficiary, &500, &0, &10, &true);
+    vesting.create_vesting(&admin, &beneficiary, &1_000, &5, &20, &true);
+    vesting.create_vesting(&admin, &beneficiary, &500, &0, &10, &true);
 
     env.ledger().set_sequence_number(20);
     let info = vesting.get_vesting_info(&beneficiary);
@@ -238,6 +231,8 @@ pub struct ReenteringVestingTokenContract;
 impl ReenteringVestingTokenContract {
     pub fn mint(_env: Env, _admin: Address, _to: Address, _amount: i128) {}
 
+    pub fn transfer_from(_env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {}
+
     pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
         let vesting_id = env
             .storage()
@@ -279,7 +274,7 @@ fn test_reentrancy_on_vesting_release_reverts() {
             .set(&soroban_sdk::Symbol::new(&env, "ben"), &beneficiary);
     });
 
-    vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
+    vesting.create_vesting(&admin, &beneficiary, &1_000, &5, &20, &true);
 
     env.ledger().set_sequence_number(15);
     let result = vesting.try_release(&beneficiary);
