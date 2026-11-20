@@ -120,9 +120,51 @@ export function getClientConfig(overrides: NetworkOverrides = {}) {
   };
 }
 
+/**
+ * Resolves a signing secret without requiring it on the command line (#1318).
+ *
+ * Precedence: `--source` / `--secret-key` flag (discouraged, warns), then
+ * `STELLAR_SECRET_KEY`, then the legacy `SECRET_KEY`, then config files.
+ */
 export function getSecretKey() {
   const fileCfg = getFileConfig();
-  return (process.env.SECRET_KEY || fileCfg?.secretKey || storedConfig.secretKey || '') as string;
+  return (process.env.STELLAR_SECRET_KEY ||
+    process.env.SECRET_KEY ||
+    fileCfg?.secretKey ||
+    storedConfig.secretKey ||
+    '') as string;
+}
+
+/** Masked prompt callback; injected by callers so tests need no real TTY. */
+export type SecretPrompt = () => Promise<string>;
+
+/**
+ * Resolves the source secret for a command.
+ *
+ * Passing a secret on the command line still works but is logged with a
+ * security warning: argv leaks into shell history and process listings.
+ */
+export async function resolveSourceSecret(
+  flagValue?: string,
+  prompt?: SecretPrompt,
+): Promise<string> {
+  if (flagValue) {
+    logger.warn(
+      "Passing a secret via --source exposes it in shell history and process listings; use STELLAR_SECRET_KEY or an interactive prompt instead."
+    );
+    return flagValue;
+  }
+
+  const fromEnvironment = getSecretKey();
+  if (fromEnvironment) return fromEnvironment;
+
+  if (prompt && process.stdin.isTTY) {
+    return prompt();
+  }
+
+  throw new Error(
+    "No signing secret found: pass --source, set STELLAR_SECRET_KEY, or run in an interactive terminal."
+  );
 }
 
 export { loadConfigFile, saveConfigFile, validateConfig, type BcForgeConfig } from './config-parser.js';
