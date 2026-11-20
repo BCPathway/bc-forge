@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 use crate::{AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
@@ -93,7 +93,7 @@ fn test_initialize_emits_expected_events() {
     let decimal: u32 = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(decimal, 7);
 
-    // #924 — every event data tuple ends with the schema version.
+    // #924 â€” every event data tuple ends with the schema version.
     let version: u32 = data_vec.get(3).unwrap().try_into_val(&env).unwrap();
     assert_eq!(version, 1, "init event must carry schema version 1");
 }
@@ -733,7 +733,7 @@ fn test_unpause_when_not_paused_returns_error() {
     assert_eq!(result, Err(Ok(TokenError::NotPaused)));
 }
 
-// ─── #913: AllowanceData migration from legacy storage ───────────────────────
+// â”€â”€â”€ #913: AllowanceData migration from legacy storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn write_legacy_allowance(
     env: &Env,
@@ -875,7 +875,7 @@ fn test_fresh_approve_persists_only_allowance_data() {
     assert_eq!(data.expiration_ledger, 123_456);
 }
 
-// ─── #762: transfer / transfer_from pause hooks ───────────────────────────────
+// â”€â”€â”€ #762: transfer / transfer_from pause hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_transfer_succeeds_when_not_paused() {
@@ -974,7 +974,7 @@ fn test_transfer_and_transfer_from_resume_after_unpause() {
     assert_eq!(client.balance(&recipient), 125);
 }
 
-// ─── #912: execute_from_contract batch execution tests ───────────────────────
+// â”€â”€â”€ #912: execute_from_contract batch execution tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_execute_from_contract_happy_path() {
@@ -1114,7 +1114,7 @@ fn test_execute_from_contract_admin_function_rejected_at_enum_level() {
     assert_eq!(ops.len(), 2);
 }
 
-// ─── rescue_tokens (#921) ────────────────────────────────────────────────────
+// â”€â”€â”€ rescue_tokens (#921) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_rescue_tokens_admin_recovers_foreign_token() {
@@ -1231,7 +1231,7 @@ fn test_rescue_tokens_rejects_invalid_amount() {
     assert_eq!(foreign.balance(&recovery), 0);
 }
 
-// ─── Metadata updates (#911) ─────────────────────────────────────────────────
+// â”€â”€â”€ Metadata updates (#911) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Reads the last emitted event as `(emitter, topics, data)`.
 fn last_event(env: &Env) -> (Address, soroban_sdk::Vec<Val>, Val) {
@@ -1516,4 +1516,81 @@ fn test_update_metadata_rejects_unauthorized_caller() {
     assert!(result.is_err());
     assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
     assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
+}
+
+#[test]
+fn test_set_max_supply_below_circulating_supply_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    // use admin as minter for the test
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &holder, &1_000);
+    assert_eq!(client.supply(), 1_000);
+
+    // Cap below current supply must be rejected.
+    assert_eq!(
+        client.try_set_max_supply(&admin, &999),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    // Cap at current supply is allowed.
+    client.set_max_supply(&admin, &1_000);
+    assert_eq!(client.get_max_supply(), 1_000);
+}
+
+#[test]
+fn test_scheduled_cap_change_enforces_24h_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    client.schedule_max_supply(&admin, &5_000);
+
+    let pending = client.get_pending_max_supply().expect("pending cap change");
+    assert_eq!(pending.new_cap, 5_000);
+    // ledger timestamp starts at 0; execute_after is 24 hours later
+    assert_eq!(pending.execute_after, 24 * 60 * 60);
+
+    // Early application fails.
+    assert_eq!(
+        client.try_apply_max_supply(&admin),
+        Err(Ok(TokenError::CapTimelockActive))
+    );
+    assert_eq!(client.get_max_supply(), i128::MAX);
+
+    // After the delay the change applies and clears pending state.
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    assert_eq!(client.apply_max_supply(&admin), 5_000);
+    assert_eq!(client.get_max_supply(), 5_000);
+    assert_eq!(client.get_pending_max_supply(), None);
+    assert_eq!(
+        client.try_apply_max_supply(&admin),
+        Err(Ok(TokenError::NoPendingCapChange))
+    );
+}
+
+#[test]
+fn test_schedule_cap_change_rejects_value_below_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &holder, &500);
+
+    assert_eq!(
+        client.try_schedule_max_supply(&admin, &499),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(client.get_pending_max_supply(), None);
 }

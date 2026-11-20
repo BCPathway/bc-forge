@@ -90,6 +90,9 @@ pub enum DataKey {
     FeeExemption(Address),
     /// Nonce for contract wallet batch execution replay protection.
     Nonce(Address),
+    /// Scheduled maximum-supply change awaiting its timelock (#1330).
+    /// Appended last to preserve every previously deployed slot discriminant.
+    PendingMaxSupply,
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -137,6 +140,19 @@ pub struct LockupState {
     /// Unix timestamp (seconds since epoch) at which the locked tokens
     /// become withdrawable.
     pub unlock_timestamp: u64,
+}
+
+/// A scheduled maximum-supply change (#1330).
+///
+/// Stored as instance state under [`DataKey::PendingMaxSupply`] until the
+/// timelock elapses and the change is applied.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PendingCapChange {
+    /// The new supply cap to apply.
+    pub new_cap: i128,
+    /// Unix timestamp at or after which the change may be applied.
+    pub execute_after: u64,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -191,6 +207,10 @@ pub enum TokenError {
     LockupNotFound = 21,
     /// The holder's lock has not reached its unlock timestamp.
     TokensStillLocked = 22,
+    /// No scheduled maximum-supply change exists (#1330).
+    NoPendingCapChange = 23,
+    /// A scheduled maximum-supply change is still inside its timelock (#1330).
+    CapTimelockActive = 24,
 }
 
 #[contract]
@@ -259,6 +279,32 @@ impl BcForgeToken {
             .instance()
             .set(&DataKey::MaxSupply, &max_supply);
         ttl::extend_instance_ttl(env);
+    }
+
+    // Maximum-supply timelock (#1330).
+
+    /// Number of seconds a scheduled cap change must wait before application.
+    pub const MAX_SUPPLY_DELAY_SECS: u64 = 24 * 60 * 60;
+
+    fn read_pending_cap_change(env: &Env) -> Option<PendingCapChange> {
+        let key = DataKey::PendingMaxSupply;
+        if env.storage().instance().has(&key) {
+            ttl::extend_instance_ttl(env);
+        }
+        env.storage().instance().get(&key)
+    }
+
+    fn write_pending_cap_change(env: &Env, change: &PendingCapChange) {
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingMaxSupply, change);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn remove_pending_cap_change(env: &Env) {
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingMaxSupply);
     }
 
     fn remove_legacy_allowance_exp(env: &Env, from: &Address, spender: &Address) {
@@ -763,10 +809,75 @@ impl BcForgeToken {
         if max_supply < 0 {
             return Err(TokenError::InvalidAmount);
         }
+        // A cap below circulating supply would leave the contract in an
+        // invalid state where supply exceeds its own ceiling (#1330).
+        if max_supply < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
         admin::require_minter(&env, &caller);
         Self::write_max_supply(&env, max_supply);
         events::emit_max_supply_changed(&env, &caller, max_supply);
         Ok(())
+    }
+
+    /// Schedules a maximum-supply increase behind a 24-hour timelock (#1330).
+    ///
+    /// Requires `Role::SuperAdmin`. The new cap must cover current supply.
+    /// A single pending change is kept; applying it clears the pending state.
+    pub fn schedule_max_supply(
+        env: Env,
+        caller: Address,
+        new_max_supply: i128,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if new_max_supply < 0 || new_max_supply < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let execute_after = env
+            .ledger()
+            .timestamp()
+            .saturating_add(Self::MAX_SUPPLY_DELAY_SECS);
+        Self::write_pending_cap_change(
+            &env,
+            &PendingCapChange {
+                new_cap: new_max_supply,
+                execute_after,
+            },
+        );
+        events::emit_max_supply_scheduled(&env, &caller, new_max_supply, execute_after);
+        Ok(())
+    }
+
+    /// Applies a previously scheduled maximum-supply change (#1330).
+    ///
+    /// The change can only be applied once its 24-hour timelock has elapsed.
+    /// The supply floor is re-checked at application time in case supply grew
+    /// while the change was pending.
+    pub fn apply_max_supply(env: Env, caller: Address) -> Result<i128, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+
+        let change = Self::read_pending_cap_change(&env).ok_or(TokenError::NoPendingCapChange)?;
+        if env.ledger().timestamp() < change.execute_after {
+            return Err(TokenError::CapTimelockActive);
+        }
+        if change.new_cap < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        Self::write_max_supply(&env, change.new_cap);
+        Self::remove_pending_cap_change(&env);
+        events::emit_max_supply_applied(&env, &caller, change.new_cap);
+        Ok(change.new_cap)
+    }
+
+    /// Read-only view of the pending scheduled cap change (#1330).
+    pub fn get_pending_max_supply(env: Env) -> Option<PendingCapChange> {
+        Self::read_pending_cap_change(&env)
     }
 
     /// Transfers contract ownership to a new admin.

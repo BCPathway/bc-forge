@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 //! Storage-collision tests for initialization.
 //!
 //! A `BcForgeToken` instance is written by four `#[contracttype]` key enums:
@@ -27,7 +27,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 15] = [
+const DATA_KEY_SLOT_NAMES: [&str; 16] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -40,6 +40,7 @@ const DATA_KEY_SLOT_NAMES: [&str; 15] = [
     "Name",
     "Nonce",
     "PendingAdmin",
+    "PendingMaxSupply",
     "Supply",
     "Symbol",
     "Treasury",
@@ -95,10 +96,11 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::PendingMaxSupply => "PendingMaxSupply",
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 15] {
+fn all_data_keys(env: &Env) -> [DataKey; 16] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -116,7 +118,8 @@ fn all_data_keys(env: &Env) -> [DataKey; 15] {
         DataKey::Treasury,
         DataKey::FeeConfig,
         DataKey::FeeExemption(owner.clone()),
-        DataKey::Nonce(owner),
+        DataKey::Nonce(owner.clone()),
+        DataKey::PendingMaxSupply,
     ]
 }
 
