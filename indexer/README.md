@@ -102,6 +102,45 @@ Requests with a missing or incorrect token receive HTTP `401` with
 is registered outside the authenticated router and stays public so uptime
 probes keep working.
 
+## Outgoing webhook signatures (#1321)
+
+Outgoing webhook events delivered via `deliverIndexerEventToWebhooks` include HMAC-SHA256 signatures so receiver services can verify event integrity and authenticity.
+
+### Headers
+
+Every outgoing webhook POST includes the following headers:
+- `Content-Type: application/json`
+- `X-Indexer-Signature: sha256=<hex_hmac_sha256>`
+- `X-Indexer-Timestamp: <unix_epoch_milliseconds>`
+
+### Configuration
+
+Configure the shared webhook signing secret via environment variable:
+```bash
+INDEXER_WEBHOOK_SECRET=your-shared-webhook-signing-secret
+```
+
+### Verification example (Node.js)
+
+```typescript
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+export function verifyWebhookSignature(
+  rawPayload: string,
+  signatureHeader: string,
+  secret: string,
+): boolean {
+  if (!signatureHeader || !secret) {
+    return false;
+  }
+  const expected = `sha256=${createHmac('sha256', secret).update(rawPayload).digest('hex')}`;
+  if (expected.length !== signatureHeader.length) {
+    return false;
+  }
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+}
+```
+
 ## Vault, wrapper, vesting, and split events
 
 These families are decoded from the contract topics below and listed with the

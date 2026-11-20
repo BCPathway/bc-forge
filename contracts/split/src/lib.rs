@@ -11,6 +11,7 @@ mod test;
 mod upgrade_batch_test;
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, Address, BytesN, Env,
     String, Vec,
@@ -75,36 +76,58 @@ pub enum SplitError {
 pub struct SplitContract;
 
 impl SplitContract {
+    fn extend_storage_ttl_for_key<K>(env: &Env, key: &K)
+    where
+        K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
+    {
+        ttl::extend_storage_ttl_for_key(
+            env,
+            key,
+            ttl::BALANCE_LIFETIME_THRESHOLD,
+            ttl::BALANCE_BUMP_AMOUNT,
+        );
+    }
+
     fn ensure_invoice_exists(env: &Env, invoice_id: u64) -> Result<(), SplitError> {
         let key = DataKey::Invoice(invoice_id);
         if !env.storage().persistent().has(&key) {
             Err(SplitError::InvoiceNotFound)
         } else {
+            Self::extend_storage_ttl_for_key(env, &key);
             Ok(())
         }
     }
 
     fn read_invoice(env: &Env, invoice_id: u64) -> Result<Invoice, SplitError> {
         let key = DataKey::Invoice(invoice_id);
-        env.storage()
+        let invoice = env
+            .storage()
             .persistent()
             .get(&key)
-            .ok_or(SplitError::InvoiceNotFound)
+            .ok_or(SplitError::InvoiceNotFound)?;
+        Self::extend_storage_ttl_for_key(env, &key);
+        Ok(invoice)
     }
 
     fn write_invoice(env: &Env, invoice: &Invoice) {
         let key = DataKey::Invoice(invoice.invoice_id);
         env.storage().persistent().set(&key, invoice);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn read_failed_payout(env: &Env, invoice_id: u64, recipient: &Address) -> Option<FailedPayout> {
         let key = DataKey::FailedPayout(invoice_id, recipient.clone());
-        env.storage().persistent().get(&key)
+        let payout = env.storage().persistent().get(&key);
+        if payout.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        payout
     }
 
     fn write_failed_payout(env: &Env, failed_payout: &FailedPayout) {
         let key = DataKey::FailedPayout(failed_payout.invoice_id, failed_payout.recipient.clone());
         env.storage().persistent().set(&key, failed_payout);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn remove_failed_payout(env: &Env, invoice_id: u64, recipient: &Address) {
@@ -283,6 +306,7 @@ impl SplitContract {
         Self::write_invoice(&env, &invoice);
 
         events::emit_invoice_created(&env, invoice_id, total_amount);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -293,7 +317,9 @@ impl SplitContract {
     ) -> Result<(), SplitError> {
         reentrancy_guard!(&env, "release_payment", {
             admin::require_super_admin(&env, &admin_address);
-            Self::release_payment_inner(&env, invoice_id)
+            let res = Self::release_payment_inner(&env, invoice_id);
+            ttl::extend_instance_ttl(&env);
+            res
         })
     }
 
@@ -305,11 +331,14 @@ impl SplitContract {
     ) -> Result<(), SplitError> {
         reentrancy_guard!(&env, "retry_failed_payout", {
             admin::require_super_admin(&env, &admin_address);
-            Self::retry_failed_payout_inner(&env, invoice_id, &recipient)
+            let res = Self::retry_failed_payout_inner(&env, invoice_id, &recipient);
+            ttl::extend_instance_ttl(&env);
+            res
         })
     }
 
     pub fn get_invoice(env: Env, invoice_id: u64) -> Result<Invoice, SplitError> {
+        ttl::extend_instance_ttl(&env);
         Self::read_invoice(&env, invoice_id)
     }
 
@@ -318,6 +347,7 @@ impl SplitContract {
         invoice_id: u64,
         recipient: Address,
     ) -> Result<FailedPayout, SplitError> {
+        ttl::extend_instance_ttl(&env);
         let failed_payout_opt = Self::read_failed_payout(&env, invoice_id, &recipient);
         failed_payout_opt.ok_or(SplitError::FailedPayoutNotFound)
     }
@@ -334,26 +364,32 @@ impl SplitContract {
         admin::require_super_admin(&env, &upgrader);
         events::emit_upgraded(&env, &upgrader, &new_wasm_hash);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
     /// Configures the multi-sig admin pool used to gate WASM upgrades.
     pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
         admin::set_admin_pool(&env, pool, threshold);
+        ttl::extend_instance_ttl(&env);
     }
 
     /// Creates a multi-sig governance proposal for an upgrade (or other action).
     pub fn create_proposal(env: Env, creator: Address, description: String) -> u64 {
-        admin::create_proposal(&env, creator, description)
+        let id = admin::create_proposal(&env, creator, description);
+        ttl::extend_instance_ttl(&env);
+        id
     }
 
     /// Approves a multi-sig governance proposal.
     pub fn approve_proposal(env: Env, admin_address: Address, proposal_id: u64) {
         admin::approve_proposal(&env, admin_address, proposal_id);
+        ttl::extend_instance_ttl(&env);
     }
 
     /// Returns whether a governance proposal has met its approval quorum.
     pub fn is_proposal_ready(env: Env, proposal_id: u64) -> bool {
+        ttl::extend_instance_ttl(&env);
         admin::is_proposal_ready(&env, proposal_id)
     }
 
@@ -367,7 +403,9 @@ impl SplitContract {
         proposal_id: u64,
         wasm_hash: BytesN<32>,
     ) -> Result<(), admin::AdminError> {
-        admin::execute_upgrade(&env, executor, proposal_id, wasm_hash)
+        let res = admin::execute_upgrade(&env, executor, proposal_id, wasm_hash);
+        ttl::extend_instance_ttl(&env);
+        res
     }
 }
 

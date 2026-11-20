@@ -226,6 +226,7 @@ name = "bc-forge-rate-limit"
 version = "0.1.0"
 dependencies = [
  "bc-forge-admin",
+ "bc-forge-ttl",
  "soroban-sdk",
 ]
 
@@ -264,6 +265,7 @@ version = "0.1.0"
 dependencies = [
  "bc-forge-admin",
  "bc-forge-token",
+ "bc-forge-ttl",
  "soroban-sdk",
 ]
 
@@ -274,6 +276,7 @@ dependencies = [
  "bc-forge-admin",
  "bc-forge-lifecycle",
  "bc-forge-token",
+ "bc-forge-ttl",
  "soroban-sdk",
 ]
 

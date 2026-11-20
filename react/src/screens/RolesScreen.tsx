@@ -171,7 +171,7 @@ export const RolesScreen: React.FC<RolesScreenProps> = ({
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.setTimeout(() => URL.revokeObjectURL?.(url), 1000);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
