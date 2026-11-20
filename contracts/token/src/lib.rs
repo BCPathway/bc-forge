@@ -90,6 +90,8 @@ pub enum DataKey {
     FeeExemption(Address),
     /// Nonce for contract wallet batch execution replay protection.
     Nonce(Address),
+    /// Per-minter issuance budget (remaining allowance) in token units.
+    MinterAllowance(Address),
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -191,6 +193,8 @@ pub enum TokenError {
     LockupNotFound = 21,
     /// The holder's lock has not reached its unlock timestamp.
     TokensStillLocked = 22,
+    /// The minter has no configured issuance budget or has exceeded it.
+    MinterQuotaExceeded = 23,
 }
 
 #[contract]
@@ -426,6 +430,28 @@ impl BcForgeToken {
             .persistent()
             .set(&DataKey::Nonce(address.clone()), &nonce);
     }
+
+    fn read_minter_allowance(env: &Env, minter: &Address) -> Option<i128> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinterAllowance(minter.clone()))
+    }
+
+    fn write_minter_allowance(env: &Env, minter: &Address, allowance: i128) {
+        env.storage()
+            .instance()
+            .set(&DataKey::MinterAllowance(minter.clone()), &allowance);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn consume_minter_allowance(env: &Env, minter: &Address, amount: i128) -> Result<(), TokenError> {
+        let allowance = Self::read_minter_allowance(env, minter).ok_or(TokenError::MinterQuotaExceeded)?;
+        if allowance < amount {
+            return Err(TokenError::MinterQuotaExceeded);
+        }
+        Self::write_minter_allowance(env, minter, allowance - amount);
+        Ok(())
+    }
 }
 
 /// Lockup period state storage helpers (#719).
@@ -593,6 +619,31 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Sets the per-minter issuance allowance. Only SuperAdmin can call this.
+    pub fn set_minter_allowance(
+        env: Env,
+        caller: Address,
+        minter: Address,
+        allowance: i128,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        bc_forge_admin::require_super_admin(&env, &caller);
+        if allowance < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        Self::write_minter_allowance(&env, &minter, allowance);
+        events::emit_minter_allowance_set(&env, &caller, &minter, allowance);
+        Ok(())
+    }
+
+    /// Returns the configured per-minter issuance allowance, or 0 if none is set.
+    pub fn get_minter_allowance(env: Env, minter: Address) -> i128 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_minter_allowance(&env, &minter).unwrap_or(0)
+    }
+
     /// Returns the admin address.
     ///
     /// @notice Returns the address of the contract admin.
@@ -625,6 +676,7 @@ impl BcForgeToken {
             if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
                 return Err(TokenError::InvalidAmount);
             }
+            Self::consume_minter_allowance(&env, &minter, amount)?;
 
             Self::internal_mint(&env, &minter, &to, amount)
         })
@@ -667,6 +719,7 @@ impl BcForgeToken {
             if !crate::rate_limit::check_mint_rate_limit(&env, &minter, total_batch_amount) {
                 return Err(TokenError::InvalidAmount);
             }
+            Self::consume_minter_allowance(&env, &minter, total_batch_amount)?;
 
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");

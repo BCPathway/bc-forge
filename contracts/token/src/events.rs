@@ -422,3 +422,15 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
         (user.clone(), amount, EVENT_SCHEMA_VERSION),
     );
 }
+
+/// Emits the `m_allow` event when a minter issuance allowance is set.
+///
+/// @notice Publishes the admin caller, the minter address, and the configured
+///         remaining allowance.
+/// @dev The event topics include the `m_allow` symbol.
+pub fn emit_minter_allowance_set(env: &Env, admin: &Address, minter: &Address, allowance: i128) {
+    env.events().publish(
+        (symbol_short!("m_allow"),),
+        (admin.clone(), minter.clone(), allowance),
+    );
+}
