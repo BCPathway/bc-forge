@@ -11,9 +11,10 @@ mod test;
 mod upgrade_batch_test;
 
 use bc_forge_admin as admin;
+use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{
-    contract, contractclient, contracterror, contractimpl, contracttype, Address, BytesN, Env,
-    String, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token::TokenClient, Address,
+    BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
 /// Minimal SEP-41 client so this crate does not link `bc-forge-token`'s WASM
@@ -112,6 +113,28 @@ impl SplitContract {
         env.storage().persistent().remove(&key);
     }
 
+    fn authorize_current_contract_transfer(
+        env: &Env,
+        token_id: &Address,
+        from: &Address,
+        to: &Address,
+        amount: i128,
+    ) {
+        let context = ContractContext {
+            contract: token_id.clone(),
+            fn_name: symbol_short!("transfer"),
+            args: (from.clone(), to.clone(), amount).into_val(env),
+        };
+        let invocation = SubContractInvocation {
+            context,
+            sub_invocations: Vec::new(env),
+        };
+        env.authorize_as_current_contract(Vec::from_array(
+            env,
+            [InvokerContractAuthEntry::Contract(invocation)],
+        ));
+    }
+
     fn try_transfer(
         env: &Env,
         token_id: &Address,
@@ -119,13 +142,14 @@ impl SplitContract {
         to: &Address,
         amount: i128,
     ) -> bool {
-        let client = TokenClient::new(env, token_id);
-        let from_balance = client.balance(from);
-        if from_balance < amount || amount <= 0 {
+        if amount <= 0 {
             return false;
         }
-        client.transfer(from, to, &amount);
-        true
+        let client = TokenClient::new(env, token_id);
+        if from == &env.current_contract_address() {
+            Self::authorize_current_contract_transfer(env, token_id, from, to, amount);
+        }
+        matches!(client.try_transfer(from, to, &amount), Ok(Ok(())))
     }
 
     fn release_payment_inner(env: &Env, invoice_id: u64) -> Result<(), SplitError> {
