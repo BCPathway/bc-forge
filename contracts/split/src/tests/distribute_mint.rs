@@ -5,7 +5,14 @@ use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{vec, Address, Env, String};
 
-fn setup(env: &Env) -> (SplitContractClient<'_>, BcForgeTokenClient<'_>, Address, Address) {
+fn setup(
+    env: &Env,
+) -> (
+    SplitContractClient<'_>,
+    BcForgeTokenClient<'_>,
+    Address,
+    Address,
+) {
     env.mock_all_auths();
     let split_id = env.register(SplitContract, ());
     let split = SplitContractClient::new(env, &split_id);

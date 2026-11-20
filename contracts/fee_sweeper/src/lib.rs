@@ -108,11 +108,7 @@ pub fn compute_split(balance: i128, split_bps: u32) -> (i128, i128) {
 
 #[contractimpl]
 impl FeeSweeperContract {
-    pub fn initialize(
-        env: Env,
-        admin: Address,
-        config: SweeperConfig,
-    ) -> Result<(), SweeperError> {
+    pub fn initialize(env: Env, admin: Address, config: SweeperConfig) -> Result<(), SweeperError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(SweeperError::AlreadyInitialized);
         }
@@ -126,11 +122,7 @@ impl FeeSweeperContract {
         Ok(())
     }
 
-    pub fn set_config(
-        env: Env,
-        admin: Address,
-        config: SweeperConfig,
-    ) -> Result<(), SweeperError> {
+    pub fn set_config(env: Env, admin: Address, config: SweeperConfig) -> Result<(), SweeperError> {
         require_admin(&env, &admin)?;
         validate(&config)?;
         env.storage().instance().set(&DataKey::Config, &config);

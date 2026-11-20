@@ -346,8 +346,7 @@ impl SplitContract {
             let mut failed = Vec::new(&env);
 
             for (to, amount) in recipients.iter() {
-                let ok = amount > 0
-                    && matches!(client.try_mint(&minter, &to, &amount), Ok(Ok(())));
+                let ok = amount > 0 && matches!(client.try_mint(&minter, &to, &amount), Ok(Ok(())));
                 if ok {
                     success_count += 1;
                     total_minted += amount;

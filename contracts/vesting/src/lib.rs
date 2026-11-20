@@ -10,8 +10,8 @@ mod test;
 mod test_milestones;
 
 use bc_forge_admin as admin;
-use bc_forge_ttl as ttl;
 use bc_forge_token::BcForgeTokenClient;
+use bc_forge_ttl as ttl;
 use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal,

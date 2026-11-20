@@ -24,11 +24,11 @@ impl MockVault {
     pub fn deposit(env: Env, caller: Address, assets: i128) -> i128 {
         let token: Address = env.storage().instance().get(&VKey::Token).unwrap();
         let this = env.current_contract_address();
-        soroban_sdk::token::Client::new(&env, &token).transfer_from(
-            &this, &caller, &this, &assets,
-        );
+        soroban_sdk::token::Client::new(&env, &token).transfer_from(&this, &caller, &this, &assets);
         let total: i128 = env.storage().instance().get(&VKey::Deposited).unwrap_or(0);
-        env.storage().instance().set(&VKey::Deposited, &(total + assets));
+        env.storage()
+            .instance()
+            .set(&VKey::Deposited, &(total + assets));
         assets
     }
     pub fn deposited(env: Env) -> i128 {
@@ -73,7 +73,13 @@ fn setup(env: &Env, split_bps: u32) -> Ctx<'_> {
             min_interval_ledgers: 50,
         },
     );
-    Ctx { sweeper, token, vault, admin, treasury }
+    Ctx {
+        sweeper,
+        token,
+        vault,
+        admin,
+        treasury,
+    }
 }
 
 #[test]
@@ -90,7 +96,9 @@ fn test_sweep_splits_between_treasury_and_vault() {
     let c = setup(&env, 8_000);
     c.token.mint(&c.admin, &c.sweeper.address, &1_000);
 
-    let (t, v) = c.sweeper.sweep_fees(&Address::generate(&env), &c.token.address);
+    let (t, v) = c
+        .sweeper
+        .sweep_fees(&Address::generate(&env), &c.token.address);
 
     assert_eq!((t, v), (800, 200));
     assert_eq!(c.token.balance(&c.treasury), 800);
@@ -143,7 +151,8 @@ fn test_full_treasury_split_skips_vault_deposit() {
     let c = setup(&env, 10_000);
     c.token.mint(&c.admin, &c.sweeper.address, &400);
     assert_eq!(
-        c.sweeper.sweep_fees(&Address::generate(&env), &c.token.address),
+        c.sweeper
+            .sweep_fees(&Address::generate(&env), &c.token.address),
         (400, 0)
     );
     assert_eq!(c.vault.deposited(), 0);
@@ -161,8 +170,7 @@ fn test_invalid_config_and_admin_gating() {
     );
     cfg.split_bps = 5_000;
     assert_eq!(
-        c.sweeper
-            .try_set_config(&Address::generate(&env), &cfg),
+        c.sweeper.try_set_config(&Address::generate(&env), &cfg),
         Err(Ok(SweeperError::Unauthorized))
     );
     c.sweeper.set_config(&c.admin, &cfg);
