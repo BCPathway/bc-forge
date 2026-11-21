@@ -27,9 +27,10 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 15] = [
+const DATA_KEY_SLOT_NAMES: [&str; 17] = [
     "Admin",
     "Allowance",
+    "AdminContract",
     "AllowanceExp",
     "Balance",
     "Decimals",
@@ -40,6 +41,7 @@ const DATA_KEY_SLOT_NAMES: [&str; 15] = [
     "Name",
     "Nonce",
     "PendingAdmin",
+    "PendingMaxSupply",
     "Supply",
     "Symbol",
     "Treasury",
@@ -81,6 +83,7 @@ fn slot_name(env: &Env, key: impl IntoVal<Env, Val>) -> Symbol {
 fn data_key_name(key: &DataKey) -> &'static str {
     match key {
         DataKey::Admin => "Admin",
+        DataKey::AdminContract => "AdminContract",
         DataKey::PendingAdmin => "PendingAdmin",
         DataKey::Allowance(_, _) => "Allowance",
         DataKey::AllowanceExp(_, _) => "AllowanceExp",
@@ -95,14 +98,16 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::PendingMaxSupply => "PendingMaxSupply",
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 15] {
+fn all_data_keys(env: &Env) -> [DataKey; 17] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
         DataKey::Admin,
+        DataKey::AdminContract,
         DataKey::PendingAdmin,
         DataKey::Allowance(owner.clone(), spender.clone()),
         DataKey::AllowanceExp(owner.clone(), spender),
@@ -116,7 +121,8 @@ fn all_data_keys(env: &Env) -> [DataKey; 15] {
         DataKey::Treasury,
         DataKey::FeeConfig,
         DataKey::FeeExemption(owner.clone()),
-        DataKey::Nonce(owner),
+        DataKey::Nonce(owner.clone()),
+        DataKey::PendingMaxSupply,
     ]
 }
 

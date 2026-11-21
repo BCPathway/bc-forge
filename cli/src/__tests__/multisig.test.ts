@@ -68,6 +68,7 @@ describe("multisig ceremony", () => {
       "propose",
       "approve",
       "execute",
+      "propose-cap-change",
     ]);
   });
 

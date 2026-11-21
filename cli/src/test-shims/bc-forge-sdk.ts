@@ -80,6 +80,15 @@ export class bcForgeClient {
     return { success: true, hash: "mock-propose", returnValue: 1n };
   }
 
+  async proposeCapChange(
+    _creator: string,
+    _newCap: bigint,
+    _description: string,
+    _source?: unknown
+  ): Promise<TransactionResult> {
+    return { success: true, hash: "mock-propose-cap-change", returnValue: 1n };
+  }
+
   async approveProposal(
     _admin: string,
     _proposalId: bigint,

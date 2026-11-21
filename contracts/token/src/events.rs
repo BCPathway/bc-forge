@@ -249,6 +249,26 @@ pub fn emit_max_supply_changed(env: &Env, caller: &Address, new_max_supply: i128
     );
 }
 
+/// Emits `MaxSupplyScheduled` when a delayed cap change is proposed (#1330).
+///
+/// The data tuple is `(caller, new_cap, execute_after, EVENT_SCHEMA_VERSION)`.
+pub fn emit_max_supply_scheduled(env: &Env, caller: &Address, new_cap: i128, execute_after: u64) {
+    env.events().publish(
+        (Symbol::new(env, "max_sup_sched"),),
+        (caller.clone(), new_cap, execute_after, EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `MaxSupplyApplied` when a scheduled cap change takes effect (#1330).
+///
+/// The data tuple is `(caller, new_cap, EVENT_SCHEMA_VERSION)`.
+pub fn emit_max_supply_applied(env: &Env, caller: &Address, new_cap: i128) {
+    env.events().publish(
+        (Symbol::new(env, "max_sup_appl"),),
+        (caller.clone(), new_cap, EVENT_SCHEMA_VERSION),
+    );
+}
+
 /// Emits the `fee_cfg` event when the fee configuration is set.
 ///
 /// @notice Publishes fee config event data including the caller and the new fee configuration.

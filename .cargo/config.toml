@@ -1,0 +1,18 @@
+# Cargo configuration (see CONTRIBUTING.md, "Windows MinGW export ordinal limit")
+#
+# Everything below is commented out on purpose. The default configuration must
+# stay toolchain- and platform-neutral so Linux CI is unaffected. Uncomment a
+# block only on a machine where the documented Windows GNU linker failure
+# occurs, and prefer switching to the MSVC toolchain instead:
+#
+#   rustup toolchain install stable-x86_64-pc-windows-msvc
+#   rustup default stable-x86_64-pc-windows-msvc
+#
+# The PE/COFF export-ordinal limit (65,535) is hit because soroban-sdk's
+# testutils exports tens of thousands of host functions into a test cdylib.
+# No rustflag or target setting removes that limit; only a different toolchain
+# / linker (MSVC) or a different object format (Linux ELF via WSL/containers)
+# does. The commented example below is documentation, not an active override:
+#
+# [target.x86_64-pc-windows-gnu]
+# rustflags = ["-C", "link-arg=-Wl,--exclude-libs,ALL"]

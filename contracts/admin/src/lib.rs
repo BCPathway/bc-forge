@@ -326,6 +326,12 @@ pub enum AdminError {
     RoleProposalNotFound = 30,
     /// A role proposal must be executed through `execute_role_proposal`.
     RoleProposalRequiresExecution = 31,
+    /// No governance action is attached to the requested proposal (#1329).
+    ActionProposalNotFound = 32,
+    /// The governance action attached to the proposal has an unexpected type (#1329).
+    ActionProposalWrongType = 33,
+    /// A governance action carried invalid parameters (#1329).
+    InvalidAction = 34,
 }
 
 /// Storage keys for the access-control layer.
@@ -401,6 +407,9 @@ pub enum AdminKey {
     /// Role grant action attached to a legacy proposal, keyed by proposal ID.
     /// Appended to preserve every existing storage-key discriminant.
     RoleGrantProposal(u64),
+    /// Supply-policy action attached to a multisig proposal, keyed by
+    /// proposal ID (#1329). Appended last to preserve existing discriminants.
+    ActionProposal(u64),
 }
 
 /// Instance TTL and the count of known singleton admin keys.
