@@ -21,6 +21,7 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let name = String::from_str(env, "Fuzz Token");
     let symbol = String::from_str(env, "FUZZ");
     client.initialize(&admin, &7, &name, &symbol);
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     (client, admin)
 }

@@ -21,7 +21,9 @@ fn setup_test_env(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let name = String::from_str(env, "PropTest Token");
     let symbol = String::from_str(env, "PTT");
     client.initialize(&admin, &7, &name, &symbol);
-    
+    client
+        .set_minter_allowance(&admin, &admin, &i128::MAX);
+
     (client, admin)
 }
 
