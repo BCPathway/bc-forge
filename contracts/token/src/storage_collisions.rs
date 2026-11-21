@@ -27,7 +27,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 15] = [
+const DATA_KEY_SLOT_NAMES: [&str; 20] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -43,6 +43,11 @@ const DATA_KEY_SLOT_NAMES: [&str; 15] = [
     "Supply",
     "Symbol",
     "Treasury",
+    "Frozen",
+    "FilterMode",
+    "AddressFilter",
+    "IsTransferable",
+    "PendingOwner",
 ];
 
 fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
@@ -95,10 +100,15 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::Frozen(_) => "Frozen",
+        DataKey::FilterMode => "FilterMode",
+        DataKey::AddressFilter(_) => "AddressFilter",
+        DataKey::IsTransferable => "IsTransferable",
+        DataKey::PendingOwner => "PendingOwner",
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 15] {
+fn all_data_keys(env: &Env) -> [DataKey; 20] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -116,7 +126,12 @@ fn all_data_keys(env: &Env) -> [DataKey; 15] {
         DataKey::Treasury,
         DataKey::FeeConfig,
         DataKey::FeeExemption(owner.clone()),
-        DataKey::Nonce(owner),
+        DataKey::Nonce(owner.clone()),
+        DataKey::Frozen(owner.clone()),
+        DataKey::FilterMode,
+        DataKey::AddressFilter(owner),
+        DataKey::IsTransferable,
+        DataKey::PendingOwner,
     ]
 }
 
