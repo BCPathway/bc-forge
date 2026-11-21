@@ -661,6 +661,27 @@ impl WrapperContract {
         Ok(())
     }
 
+    /// Returns storage diagnostics for the wrapper contract.
+    pub fn get_storage_info(env: Env) -> StorageInfo {
+        Self::extend_instance_ttl_for_call(&env);
+        StorageInfo {
+            instance_ttl: Self::get_instance_ttl_value(&env),
+            instance_keys: Self::get_storage_key_counts_value(&env),
+        }
+    }
+
+    /// Returns the recorded remaining instance TTL in ledgers.
+    pub fn get_instance_ttl(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_instance_ttl_value(&env)
+    }
+
+    /// Returns the number of populated singleton instance keys.
+    pub fn get_storage_key_counts(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_storage_key_counts_value(&env)
+    }
+
     /// Wrap `amount` of the underlying token.
     ///
     /// Transfers `amount` of the underlying token from `caller` into this contract,
