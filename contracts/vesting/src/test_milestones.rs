@@ -337,3 +337,83 @@ fn test_revoke_refunds_unvested_and_freezes_future_vesting() {
     env.ledger().set_sequence_number(100);
     assert_eq!(vesting.release(&beneficiary), 0);
 }
+
+// ── #1461: cancel a single milestone tranche ──────────────────────────────
+
+#[test]
+fn test_cancel_milestone_removes_tranche_refunds_treasury_and_keeps_linear_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (token, vesting, admin, beneficiary, vesting_id) = setup(&env);
+    let schedule_id = create_schedule(&vesting, &beneficiary);
+
+    let milestones: Vec<Milestone> = vec![
+        &env,
+        Milestone {
+            unlock_ledger: 16,
+            amount: 400,
+        },
+        Milestone {
+            unlock_ledger: 20,
+            amount: 300,
+        },
+    ];
+    vesting.set_milestones(&schedule_id, &milestones);
+
+    assert_eq!(token.balance(&admin), 0);
+    assert_eq!(token.balance(&vesting_id), 1_000);
+
+    let refunded = vesting.cancel_milestone(&schedule_id, &0);
+    assert_eq!(refunded, 400);
+    assert_eq!(token.balance(&admin), 400);
+    assert_eq!(token.balance(&vesting_id), 600);
+
+    // The cancelled tranche no longer accelerates the claim, but the base
+    // linear curve is untouched: 1_000 * (17-10) / 20 = 350.
+    env.ledger().set_sequence_number(17);
+    assert_eq!(
+        vesting
+            .get_vesting_info(&beneficiary)
+            .get(0)
+            .unwrap()
+            .claimable_amount,
+        350
+    );
+
+    // The remaining tranche is still present and can be cancelled separately.
+    assert_eq!(vesting.cancel_milestone(&schedule_id, &0), 300);
+    assert_eq!(token.balance(&admin), 700);
+    assert_eq!(
+        vesting.try_cancel_milestone(&schedule_id, &0),
+        Err(Ok(VestingError::InvalidMilestoneIndex))
+    );
+}
+
+#[test]
+fn test_cancel_milestone_rejects_missing_milestones_and_bad_index() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (_token, vesting, _admin, beneficiary, _vesting_id) = setup(&env);
+    let schedule_id = create_schedule(&vesting, &beneficiary);
+
+    assert_eq!(
+        vesting.try_cancel_milestone(&schedule_id, &0),
+        Err(Ok(VestingError::MilestonesNotFound))
+    );
+
+    let milestones: Vec<Milestone> = vec![
+        &env,
+        Milestone {
+            unlock_ledger: 16,
+            amount: 400,
+        },
+    ];
+    vesting.set_milestones(&schedule_id, &milestones);
+
+    assert_eq!(
+        vesting.try_cancel_milestone(&schedule_id, &1),
+        Err(Ok(VestingError::InvalidMilestoneIndex))
+    );
+}
