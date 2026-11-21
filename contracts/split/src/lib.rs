@@ -16,6 +16,11 @@ use soroban_sdk::{
     String, Vec,
 };
 
+/// Maximum number of recipients allowed on a single invoice. Keeping this
+/// bounded prevents `release_payment` from exceeding Soroban's CPU limit and
+/// permanently locking funds.
+const MAX_RECIPIENTS: u32 = 100;
+
 /// Minimal SEP-41 client so this crate does not link `bc-forge-token`'s WASM
 /// exports (those collide with this contract's upgrade-governance entry points).
 #[contractclient(name = "TokenClient")]
@@ -69,6 +74,9 @@ pub enum SplitError {
     InsufficientBalance = 3,
     InvoiceAlreadyCompleted = 4,
     FailedPayoutNotFound = 5,
+    TooManyRecipients = 6,
+    DuplicateRecipient = 7,
+    InvalidAmount = 8,
 }
 
 #[contract]
@@ -252,6 +260,20 @@ impl SplitContract {
             return Err(SplitError::InvalidRecipient);
         }
 
+        if recipients.len() > MAX_RECIPIENTS {
+            return Err(SplitError::TooManyRecipients);
+        }
+
+        // Duplicate destinations would make a single payout ambiguous and can
+        // result in a recipient being paid twice from the same invoice.
+        for i in 0..recipients.len() {
+            for j in (i + 1)..recipients.len() {
+                if recipients.get(i).unwrap().to == recipients.get(j).unwrap().to {
+                    return Err(SplitError::DuplicateRecipient);
+                }
+            }
+        }
+
         let mut recipient_amounts: i128 = 0;
         for recipient in &recipients {
             if recipient.amount <= 0 {
@@ -295,6 +317,50 @@ impl SplitContract {
             admin::require_super_admin(&env, &admin_address);
             Self::release_payment_inner(&env, invoice_id)
         })
+    }
+
+    /// Releases several invoices in a single transaction.
+    ///
+    /// Returns the IDs that were successfully released. A missing or already
+    /// released invoice is skipped rather than aborting the rest of the batch.
+    pub fn release_payment_batch(env: Env, invoice_ids: Vec<u64>) -> Vec<u64> {
+        let admin_address = admin::get_admin(&env);
+        reentrancy_guard!(&env, "release_payment_batch", {
+            admin::require_super_admin(&env, &admin_address);
+            let mut released = Vec::new(&env);
+            for id in invoice_ids.iter() {
+                if Self::release_payment_inner(&env, id).is_ok() {
+                    released.push_back(id);
+                }
+            }
+            released
+        })
+    }
+
+    /// Rescues foreign SEP-41 tokens that were accidentally sent to this
+    /// contract. Admin only; emits a `token_rescued` event on success.
+    pub fn rescue_tokens(
+        env: Env,
+        caller: Address,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), SplitError> {
+        admin::require_admin(&env, &caller);
+
+        if amount <= 0 {
+            return Err(SplitError::InvalidAmount);
+        }
+
+        let client = TokenClient::new(&env, &token);
+        let contract_address = env.current_contract_address();
+        if client.balance(&contract_address) < amount {
+            return Err(SplitError::InsufficientBalance);
+        }
+
+        client.transfer(&contract_address, &to, &amount);
+        events::emit_token_rescued(&env, &token, &to, amount);
+        Ok(())
     }
 
     pub fn retry_failed_payout(
