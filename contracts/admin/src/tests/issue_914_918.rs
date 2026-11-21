@@ -569,3 +569,171 @@ fn test_privileged_mint_action_round_trips() {
         assert_eq!(crate::get_action_proposal(&env, id), Some(action));
     });
 }
+
+#[test]
+#[should_panic(expected = "Error(Contract, #34)")]
+fn test_create_action_proposal_rejects_negative_cap() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+
+    env.as_contract(&contract_id, || {
+        crate::create_action_proposal(
+            &env,
+            admin,
+            crate::ProposalAction::SetMaxSupply(-1),
+            String::from_str(&env, "negative cap"),
+        );
+    });
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #34)")]
+fn test_create_action_proposal_rejects_non_positive_mint() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let recipient = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        crate::create_action_proposal(
+            &env,
+            admin,
+            crate::ProposalAction::PrivilegedMint(recipient, 0),
+            String::from_str(&env, "zero mint"),
+        );
+    });
+}
+
+/// Creates a ready-to-consume action proposal and returns its id.
+fn create_ready_action_proposal(
+    env: &Env,
+    client: &AdminContractClient<'_>,
+    admin: &Address,
+) -> u64 {
+    let contract_id = client.address.clone();
+    let id = env.as_contract(&contract_id, || {
+        crate::create_action_proposal(
+            env,
+            admin.clone(),
+            crate::ProposalAction::SetMaxSupply(10_000),
+            String::from_str(env, "raise cap"),
+        )
+    });
+    advance_timestamp(env, 24 * 60 * 60);
+    id
+}
+
+#[test]
+fn test_consume_action_proposal_rejects_cancelled_proposal() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let id = create_ready_action_proposal(&env, &client, &admin);
+
+    env.as_contract(&contract_id, || {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&AdminKey::Proposal(id))
+            .expect("proposal");
+        proposal.cancelled = true;
+        env.storage()
+            .instance()
+            .set(&AdminKey::Proposal(id), &proposal);
+    });
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            crate::consume_action_proposal(&env, admin.clone(), id),
+            Err(AdminError::ProposalCancelled)
+        );
+    });
+}
+
+#[test]
+fn test_consume_action_proposal_rejects_expired_proposal() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let id = create_ready_action_proposal(&env, &client, &admin);
+
+    env.as_contract(&contract_id, || {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&AdminKey::Proposal(id))
+            .expect("proposal");
+        proposal.expiry_ledger = Some(0);
+        env.storage()
+            .instance()
+            .set(&AdminKey::Proposal(id), &proposal);
+    });
+    env.ledger().set_sequence_number(1);
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            crate::consume_action_proposal(&env, admin.clone(), id),
+            Err(AdminError::ProposalExpired)
+        );
+    });
+}
+
+#[test]
+fn test_consume_action_proposal_rejects_non_pool_executor() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let stranger = Address::generate(&env);
+    let id = create_ready_action_proposal(&env, &client, &admin);
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            crate::consume_action_proposal(&env, stranger, id),
+            Err(AdminError::UnauthorizedRole)
+        );
+    });
+}
+
+#[test]
+fn test_consume_action_proposal_rejects_pool_member_without_super_admin() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let second_admin = Address::generate(&env);
+    client.set_admin_pool(&vec![&env, admin.clone(), second_admin.clone()], &1);
+    let id = create_ready_action_proposal(&env, &client, &admin);
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            crate::consume_action_proposal(&env, second_admin, id),
+            Err(AdminError::UnauthorizedRole)
+        );
+    });
+}
+
+#[test]
+fn test_consume_action_proposal_rejects_unmet_threshold() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let second_admin = Address::generate(&env);
+    client.set_admin_pool(&vec![&env, admin.clone(), second_admin], &2);
+
+    let id = env.as_contract(&contract_id, || {
+        crate::create_action_proposal(
+            &env,
+            admin.clone(),
+            crate::ProposalAction::SetMaxSupply(10_000),
+            String::from_str(&env, "raise cap"),
+        )
+    });
+    advance_timestamp(&env, 24 * 60 * 60);
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            crate::consume_action_proposal(&env, admin.clone(), id),
+            Err(AdminError::ThresholdNotMet)
+        );
+    });
+}
