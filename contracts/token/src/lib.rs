@@ -726,6 +726,7 @@ impl BcForgeToken {
         symbol: String,
         is_transferable: bool,
     ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
         Self::initialize(env.clone(), admin_address, decimal, name, symbol)?;
         env.storage()
             .instance()
