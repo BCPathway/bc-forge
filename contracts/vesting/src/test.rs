@@ -285,3 +285,165 @@ fn test_reentrancy_on_vesting_release_reverts() {
     let result = vesting.try_release(&beneficiary);
     assert!(result.is_err());
 }
+
+// ── revoke_vesting_batch (#1458) ──────────────────────────────────────────
+
+#[test]
+fn test_revoke_vesting_batch_refunds_all_unvested_tokens() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (token, vesting, admin, beneficiary, vesting_id) = setup(&env);
+
+    let mut ids = soroban_sdk::vec![&env];
+    let mut expected_refund = 0i128;
+    for i in 1..=5 {
+        // Revoked before the cliff (ledger 15), so nothing has vested yet and
+        // the full grant must flow back to the treasury.
+        let amount = i128::from(i) * 1_000;
+        ids.push_back(vesting.create_vesting(&beneficiary, &amount, &5, &20, &true));
+        expected_refund += amount;
+    }
+
+    let revoked = vesting.revoke_vesting_batch(&ids);
+    assert_eq!(revoked, ids);
+    assert_eq!(token.balance(&admin), expected_refund);
+    assert_eq!(token.balance(&vesting_id), 0);
+
+    // Single revoke stays backward-compatible and sees the batch's writes.
+    assert_eq!(
+        vesting.try_revoke(&0),
+        Err(Ok(VestingError::AlreadyRevoked))
+    );
+}
+
+#[test]
+fn test_revoke_vesting_batch_skips_non_revocable_schedules() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (token, vesting, admin, beneficiary, vesting_id) = setup(&env);
+
+    // Even ids are revocable, odd ids are not.
+    for i in 0..5 {
+        vesting.create_vesting(&beneficiary, &1_000, &5, &20, &(i % 2 == 0));
+    }
+    let all_ids = soroban_sdk::vec![&env, 0, 1, 2, 3, 4];
+
+    // At ledger 16, 6 of 20 ledgers have elapsed: 300 vested, 700 unvested
+    // per revocable schedule.
+    env.ledger().set_sequence_number(16);
+    let revoked = vesting.revoke_vesting_batch(&all_ids);
+
+    assert_eq!(revoked, soroban_sdk::vec![&env, 0, 2, 4]);
+    assert_eq!(token.balance(&admin), 3 * 700);
+    assert_eq!(token.balance(&vesting_id), 2 * 1_000 + 3 * 300);
+
+    let info = vesting.get_vesting_info(&beneficiary);
+    assert!(info.get(0).unwrap().revoked);
+    assert!(!info.get(1).unwrap().revoked);
+    assert!(info.get(2).unwrap().revoked);
+    assert!(!info.get(3).unwrap().revoked);
+    assert!(info.get(4).unwrap().revoked);
+
+    // A missing id is skipped just like a non-revocable one.
+    assert_eq!(
+        vesting.revoke_vesting_batch(&soroban_sdk::vec![&env, 99]),
+        soroban_sdk::vec![&env]
+    );
+}
+
+#[test]
+fn test_revoke_vesting_batch_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_token, vesting, _admin, beneficiary, _vesting_id) = setup(&env);
+    let id = vesting.create_vesting(&beneficiary, &1_000, &0, &20, &true);
+
+    // Drop the blanket auths so the stored admin address cannot authorize.
+    env.mock_auths(&[]);
+    assert!(vesting
+        .try_revoke_vesting_batch(&soroban_sdk::vec![&env, id])
+        .is_err());
+}
+
+// ── rescue_tokens (#1459) ─────────────────────────────────────────────────
+
+fn setup_foreign_token<'a>(
+    env: &'a Env,
+    vesting_id: &Address,
+    amount: i128,
+) -> (BcForgeTokenClient<'a>, Address) {
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign = BcForgeTokenClient::new(env, &foreign_id);
+    let foreign_admin = Address::generate(env);
+    foreign.initialize(
+        &foreign_admin,
+        &7,
+        &String::from_str(env, "Foreign Token"),
+        &String::from_str(env, "FRG"),
+    );
+    foreign.mint(&foreign_admin, vesting_id, &amount);
+    (foreign, foreign_id)
+}
+
+#[test]
+fn test_rescue_tokens_recovers_foreign_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (token, vesting, _admin, _beneficiary, vesting_id) = setup(&env);
+    let (foreign, foreign_id) = setup_foreign_token(&env, &vesting_id, 5_000);
+    let recovery = Address::generate(&env);
+
+    vesting.rescue_tokens(&foreign_id, &recovery, &2_000);
+
+    assert_eq!(foreign.balance(&recovery), 2_000);
+    assert_eq!(foreign.balance(&vesting_id), 3_000);
+    // The vesting escrow itself is untouched.
+    assert_eq!(token.balance(&vesting_id), 0);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_vesting_token_and_invalid_amounts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (token, vesting, _admin, beneficiary, vesting_id) = setup(&env);
+    vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
+    let (foreign, foreign_id) = setup_foreign_token(&env, &vesting_id, 5_000);
+    let recovery = Address::generate(&env);
+
+    assert_eq!(
+        vesting.try_rescue_tokens(&token.address, &recovery, &100),
+        Err(Ok(VestingError::CannotRescueVestingToken))
+    );
+    assert_eq!(token.balance(&vesting_id), 1_000);
+
+    assert_eq!(
+        vesting.try_rescue_tokens(&foreign_id, &recovery, &0),
+        Err(Ok(VestingError::InvalidAmount))
+    );
+    assert_eq!(
+        vesting.try_rescue_tokens(&foreign_id, &recovery, &-1),
+        Err(Ok(VestingError::InvalidAmount))
+    );
+    assert_eq!(foreign.balance(&vesting_id), 5_000);
+    assert_eq!(foreign.balance(&recovery), 0);
+}
+
+#[test]
+fn test_rescue_tokens_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_token, vesting, _admin, _beneficiary, vesting_id) = setup(&env);
+    let (foreign, foreign_id) = setup_foreign_token(&env, &vesting_id, 5_000);
+    let recovery = Address::generate(&env);
+
+    env.mock_auths(&[]);
+    assert!(vesting
+        .try_rescue_tokens(&foreign_id, &recovery, &5_000)
+        .is_err());
+    assert_eq!(foreign.balance(&vesting_id), 5_000);
+    assert_eq!(foreign.balance(&recovery), 0);
+}
