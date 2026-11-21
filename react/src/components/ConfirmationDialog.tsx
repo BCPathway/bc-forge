@@ -97,7 +97,11 @@ const PANEL_BASE_STYLE: React.CSSProperties = {
   flexDirection: 'column',
   gap: 12,
   padding: 20,
-  border: '1px solid',
+  // Longhand border properties avoid a shorthand/longhand conflict when a
+  // variant overrides only borderColor (#1323).
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: theme.border,
   borderRadius: 12,
   backgroundColor: theme.surface,
   color: theme.text,
@@ -175,7 +179,9 @@ const KEYWORD_LABEL_STYLE: React.CSSProperties = {
 const KEYWORD_INPUT_BASE_STYLE: React.CSSProperties = {
   width: '100%',
   padding: '8px 12px',
-  border: `1px solid ${theme.border}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: theme.border,
   borderRadius: 6,
   backgroundColor: theme.surface,
   color: theme.text,
@@ -199,7 +205,9 @@ const ACTIONS_STYLE: React.CSSProperties = {
 
 const BUTTON_BASE_STYLE: React.CSSProperties = {
   padding: '9px 16px',
-  border: '1px solid',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: theme.border,
   borderRadius: 6,
   fontFamily: 'inherit',
   fontSize: 14,
