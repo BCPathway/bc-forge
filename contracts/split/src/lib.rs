@@ -282,6 +282,19 @@ impl SplitContract {
         admin::set_admin(&env, &admin_address);
         Self::write_invoice(&env, &invoice);
 
+        // Track the upper bound of the id space so `list_invoices` can walk
+        // invoices without a separate index. Invoice ids are caller-supplied,
+        // so keep the high-water mark (out-of-order creation is allowed).
+        let next_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextInvoiceId)
+            .unwrap_or(1);
+        env.storage().instance().set(
+            &DataKey::NextInvoiceId,
+            &next_id.max(invoice_id.saturating_add(1)),
+        );
+
         events::emit_invoice_created(&env, invoice_id, total_amount);
         Ok(())
     }
@@ -311,6 +324,44 @@ impl SplitContract {
 
     pub fn get_invoice(env: Env, invoice_id: u64) -> Result<Invoice, SplitError> {
         Self::read_invoice(&env, invoice_id)
+    }
+
+    /// Lists invoices in ascending invoice-id order using keyset pagination.
+    ///
+    /// `start_after` is the last invoice id returned by a previous page; the
+    /// scan resumes at `start_after + 1`. `limit` is capped at 50 entries so a
+    /// single view call cannot consume unbounded host resources. Missing ids
+    /// (invoices are created with caller-supplied ids) are skipped silently.
+    ///
+    /// # Arguments
+    /// * `env`         - The Soroban environment.
+    /// * `start_after` - Exclusive cursor. Pass `0` to start from the first id.
+    /// * `limit`       - Maximum entries to return; values above 50 are capped.
+    ///
+    /// # Returns
+    /// Up to 50 invoices with ids greater than `start_after`, ordered by id.
+    pub fn list_invoices(env: Env, start_after: u64, limit: u32) -> Vec<Invoice> {
+        let mut results = Vec::new(&env);
+        let cap = limit.min(50);
+        let next_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextInvoiceId)
+            .unwrap_or(1);
+
+        for id in start_after.saturating_add(1)..next_id {
+            if results.len() >= cap {
+                break;
+            }
+            if let Some(invoice) = env
+                .storage()
+                .persistent()
+                .get::<_, Invoice>(&DataKey::Invoice(id))
+            {
+                results.push_back(invoice);
+            }
+        }
+        results
     }
 
     pub fn get_failed_payout(
@@ -375,6 +426,9 @@ impl SplitContract {
 #[contracttype]
 enum DataKey {
     Invoice(u64),
+    /// High-water mark for caller-supplied invoice ids: one greater than the
+    /// largest id ever created. Defaults to `1` for an empty contract.
+    NextInvoiceId,
     Token,
     FailedPayout(u64, Address),
 }
