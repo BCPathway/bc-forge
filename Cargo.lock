@@ -275,6 +275,7 @@ dependencies = [
  "bc-forge-admin",
  "bc-forge-lifecycle",
  "bc-forge-token",
+ "bc-forge-ttl",
  "soroban-sdk",
 ]
 

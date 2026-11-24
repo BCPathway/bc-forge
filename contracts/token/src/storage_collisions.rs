@@ -27,7 +27,7 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 15] = [
+const DATA_KEY_SLOT_NAMES: [&str; 19] = [
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -35,9 +35,13 @@ const DATA_KEY_SLOT_NAMES: [&str; 15] = [
     "Decimals",
     "FeeConfig",
     "FeeExemption",
+    "InstanceLiveUntil",
     "Lockup",
     "MaxSupply",
+    "MintStream",
+    "MinterAllowance",
     "Name",
+    "NextMintStreamId",
     "Nonce",
     "PendingAdmin",
     "Supply",
@@ -95,10 +99,14 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::MinterAllowance(_) => "MinterAllowance",
+        DataKey::MintStream(_) => "MintStream",
+        DataKey::NextMintStreamId => "NextMintStreamId",
+        DataKey::InstanceLiveUntil => "InstanceLiveUntil",
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 15] {
+fn all_data_keys(env: &Env) -> [DataKey; 19] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -116,7 +124,11 @@ fn all_data_keys(env: &Env) -> [DataKey; 15] {
         DataKey::Treasury,
         DataKey::FeeConfig,
         DataKey::FeeExemption(owner.clone()),
-        DataKey::Nonce(owner),
+        DataKey::Nonce(owner.clone()),
+        DataKey::MinterAllowance(owner),
+        DataKey::MintStream(1),
+        DataKey::NextMintStreamId,
+        DataKey::InstanceLiveUntil,
     ]
 }
 
@@ -152,7 +164,8 @@ fn all_rate_limit_keys(env: &Env) -> [RateLimitKey; 6] {
     ]
 }
 
-/// `initialize` writes five metadata slots plus the admin slot in instance
+/// `initialize` writes five metadata slots plus the admin slot, the recorded
+/// instance-TTL slot that `extend_instance_ttl_for_call` lays down, in instance
 /// storage and one role entry in persistent storage, and touches nothing else.
 #[test]
 fn test_initialize_writes_only_its_documented_slots() {
@@ -165,9 +178,17 @@ fn test_initialize_writes_only_its_documented_slots() {
             let name = data_key_name(key);
             // Admin is set without `initialize` ever writing DataKey::Admin:
             // admin::set_admin writes AdminKey::Admin, which is the same slot.
+            // InstanceLiveUntil is laid down by the TTL extension that
+            // `initialize` performs first, before any of its own writes.
             let written = matches!(
                 name,
-                "Admin" | "Decimals" | "Name" | "Symbol" | "Supply" | "MaxSupply"
+                "Admin"
+                    | "Decimals"
+                    | "Name"
+                    | "Symbol"
+                    | "Supply"
+                    | "MaxSupply"
+                    | "InstanceLiveUntil"
             );
             assert_eq!(
                 env.storage().instance().has(key),
@@ -251,6 +272,8 @@ fn test_reinitialize_is_rejected_and_leaves_every_slot_intact() {
     let holder = Address::generate(&env);
     let stranger = Address::generate(&env);
 
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
+
     // Move supply and the cap off the values a second initialize would write.
     client.mint(&admin, &holder, &500);
     client.set_max_supply(&admin, &1_000_000);
@@ -316,8 +339,8 @@ fn test_reinitialize_is_rejected_and_leaves_every_slot_intact() {
     });
 }
 
-/// The slot a variant addresses is its NAME, so the thirteen `DataKey` variants
-/// occupy thirteen distinct slots and each one is fixed to the name a deployed
+/// The slot a variant addresses is its NAME, so the nineteen `DataKey` variants
+/// occupy nineteen distinct slots and each one is fixed to the name a deployed
 /// contract already stored under. Renaming a variant moves its slot and orphans
 /// the data; the frozen list is what makes that a failure rather than a silent
 /// migration.
@@ -481,6 +504,8 @@ fn test_per_address_slots_stay_independent_through_the_client() {
     let spender = Address::generate(&env);
     let untouched = Address::generate(&env);
 
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
+
     client.mint(&admin, &owner, &400);
     client.mint(&admin, &spender, &150);
     client.approve(&owner, &spender, &70, &u32::MAX);
@@ -528,6 +553,8 @@ fn test_rate_limit_counters_do_not_disturb_token_metadata() {
     let holder = Address::generate(&env);
     let op = String::from_str(&env, crate::rate_limit::OPERATION_MINT);
 
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
+
     client.mint(&admin, &holder, &100);
 
     env.as_contract(&contract_id, || {
@@ -570,6 +597,8 @@ fn test_guard_slot_shares_persistent_storage_with_no_collision() {
     let (client, admin) = setup(&env);
     let contract_id = client.address.clone();
     let holder = Address::generate(&env);
+
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     client.mint(&admin, &holder, &700);
 
