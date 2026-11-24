@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 use crate::{
-    InvoiceStatus, Recipient, RecipientBps, SplitContract, SplitContractClient, SplitError,
+    Invoice, InvoiceStatus, Recipient, RecipientBps, SplitContract, SplitContractClient, SplitError,
 };
 use bc_forge_admin as admin;
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
@@ -547,6 +547,132 @@ fn test_reentrancy_on_split_release_reverts() {
 
     let result = split_client.try_release_payment(&1u64, &split_admin);
     assert!(result.is_err());
+}
+// ─── Invoice keyset pagination (#1467) ────────────────────────────────────────
+
+fn create_invoice_for_listing(
+    env: &Env,
+    split_client: &SplitContractClient<'_>,
+    split_admin: &Address,
+    token: &Address,
+    invoice_id: u64,
+) {
+    let recipients = vec![
+        env,
+        Recipient {
+            to: Address::generate(env),
+            amount: 1_000,
+        },
+    ];
+    split_client.create_invoice(split_admin, &invoice_id, &1_000, &recipients, token);
+}
+
+fn invoice_ids(env: &Env, invoices: &soroban_sdk::Vec<Invoice>) -> soroban_sdk::Vec<u64> {
+    let mut ids = soroban_sdk::Vec::new(env);
+    for invoice in invoices.iter() {
+        ids.push_back(invoice.invoice_id);
+    }
+    ids
+}
+
+#[test]
+fn test_list_invoices_empty_when_none_created() {
+    let env = Env::default();
+    let (split_client, _token_client, _split_admin, _token_admin) = setup(&env);
+
+    let page = split_client.list_invoices(&0, &10);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_list_invoices_returns_created_invoices_in_id_order() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in &[3u64, 1, 2] {
+        create_invoice_for_listing(
+            &env,
+            &split_client,
+            &split_admin,
+            &token_client.address,
+            *id,
+        );
+    }
+
+    let page = split_client.list_invoices(&0, &10);
+    assert_eq!(invoice_ids(&env, &page), vec![&env, 1u64, 2, 3]);
+    for invoice in page.iter() {
+        assert_eq!(invoice.status, InvoiceStatus::Pending);
+        assert_eq!(invoice.total_amount, 1_000);
+    }
+}
+
+#[test]
+fn test_list_invoices_keyset_pagination() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in 1..=5u64 {
+        create_invoice_for_listing(&env, &split_client, &split_admin, &token_client.address, id);
+    }
+
+    let first = split_client.list_invoices(&0, &2);
+    assert_eq!(invoice_ids(&env, &first), vec![&env, 1u64, 2]);
+
+    let second = split_client.list_invoices(&2, &2);
+    assert_eq!(invoice_ids(&env, &second), vec![&env, 3u64, 4]);
+
+    let third = split_client.list_invoices(&4, &2);
+    assert_eq!(invoice_ids(&env, &third), vec![&env, 5u64]);
+
+    let exhausted = split_client.list_invoices(&5, &2);
+    assert_eq!(exhausted.len(), 0);
+}
+
+#[test]
+fn test_list_invoices_caps_limit_at_fifty() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in 1..=60u64 {
+        create_invoice_for_listing(&env, &split_client, &split_admin, &token_client.address, id);
+    }
+
+    let first = split_client.list_invoices(&0, &100);
+    assert_eq!(first.len(), 50);
+    assert_eq!(first.get(0).unwrap().invoice_id, 1);
+    assert_eq!(first.get(49).unwrap().invoice_id, 50);
+
+    let second = split_client.list_invoices(&50, &u32::MAX);
+    assert_eq!(second.len(), 10);
+    assert_eq!(second.get(0).unwrap().invoice_id, 51);
+    assert_eq!(second.get(9).unwrap().invoice_id, 60);
+}
+
+#[test]
+fn test_list_invoices_skips_missing_ids_and_zero_limit() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in &[1u64, 3, 5] {
+        create_invoice_for_listing(
+            &env,
+            &split_client,
+            &split_admin,
+            &token_client.address,
+            *id,
+        );
+    }
+
+    assert_eq!(
+        invoice_ids(&env, &split_client.list_invoices(&0, &10)),
+        vec![&env, 1u64, 3, 5]
+    );
+    assert_eq!(
+        invoice_ids(&env, &split_client.list_invoices(&3, &10)),
+        vec![&env, 5u64]
+    );
+    assert_eq!(split_client.list_invoices(&0, &0).len(), 0);
 }
 
 #[test]
