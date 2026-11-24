@@ -1305,6 +1305,69 @@ impl WrapperContract {
         Ok(queued.amount)
     }
 
+    /// Claim a partial (or full) portion of a queued withdrawal after the
+    /// cooldown release ledger has passed.
+    ///
+    /// Proportionally calculates the underlying payout for `shares_to_claim`,
+    /// deducts the claimed shares and payout from the stored
+    /// [`QueuedWithdrawal`] (removing it when fully claimed), and transfers
+    /// the underlying tokens to `caller`.
+    pub fn claim_withdrawal_partial(
+        env: Env,
+        caller: Address,
+        shares_to_claim: i128,
+    ) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if shares_to_claim <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let queued =
+            Self::read_queued_withdrawal(&env, &caller).ok_or(WrapperError::NoQueuedWithdrawal)?;
+
+        if env.ledger().sequence() < queued.release_ledger {
+            return Err(WrapperError::CooldownNotMet);
+        }
+
+        if shares_to_claim > queued.shares {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let payout_amount = if shares_to_claim == queued.shares {
+            queued.amount
+        } else {
+            let proportional = math::mul_div_down(queued.amount, shares_to_claim, queued.shares)
+                .ok_or(WrapperError::InvalidAmount)?;
+            if proportional <= 0 {
+                return Err(WrapperError::InvalidAmount);
+            }
+            proportional
+        };
+
+        Self::acquire_lock(&env)?;
+        if shares_to_claim == queued.shares {
+            Self::remove_queued_withdrawal(&env, &caller);
+        } else {
+            let updated = QueuedWithdrawal {
+                shares: queued.shares - shares_to_claim,
+                amount: queued.amount - payout_amount,
+                release_ledger: queued.release_ledger,
+            };
+            Self::write_queued_withdrawal(&env, &caller, &updated);
+        }
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+        underlying_client.transfer(&env.current_contract_address(), &caller, &payout_amount);
+
+        Self::release_lock(&env);
+        events::emit_withdraw(&env, &caller, shares_to_claim, payout_amount);
+        Ok(payout_amount)
+    }
+
     /// Withdraw `shares` of wrapped tokens and receive a proportional share of
     /// the vault's underlying assets, including any accrued yield.
     ///
