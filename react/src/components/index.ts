@@ -164,3 +164,20 @@ export { PausedBanner } from "./PausedBanner";
 export type { PausedBannerProps } from "./PausedBanner";
 export * from "./VestingScreen";
 export * from "./SplitScreen";
+
+export { TxSimulationModal, decodeSimulationError } from "./TxSimulationModal";
+export type {
+  TxSimulationModalProps,
+  BalanceChange,
+} from "./TxSimulationModal";
+
+export {
+  SplitInvoiceWidget,
+  validateStellarAddress,
+  validatePositiveAmount,
+  parseSplitInvoiceCsv,
+} from "./SplitInvoiceWidget";
+export type {
+  SplitInvoiceWidgetProps,
+  SplitRecipient,
+} from "./SplitInvoiceWidget";

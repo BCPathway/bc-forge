@@ -15,6 +15,11 @@ jest.unstable_mockModule('./utils', () => ({
   simulateTransaction: jest.fn(),
   simulationToDryRun: jest.fn(),
   hashToScVal: jest.fn(),
+  TransactionQueue: class MockTransactionQueue {
+    enqueue = jest.fn((_pubkey: string, fn: (acc?: any) => any) => fn());
+    invalidateSequence = jest.fn();
+    clear = jest.fn();
+  },
 }));
 
 let utils: typeof import('./utils');

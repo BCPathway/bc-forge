@@ -54,10 +54,11 @@ export async function buildInvokeTransaction(
   method: string,
   args: xdr.ScVal[],
   sourceKeypair: Keypair,
-  options?: { fee?: string | number | bigint },
+  options?: { fee?: string | number | bigint; sourceAccount?: Account },
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
-  const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
+  const sourceAccount =
+    options?.sourceAccount ?? (await server.getAccount(sourceKeypair.publicKey()));
 
   const contract = new Contract(contractId);
   const feeStr = options?.fee ? options.fee.toString() : '100';
@@ -437,9 +438,10 @@ export async function buildUnsignedTransaction(
   method: string,
   args: xdr.ScVal[],
   sourcePublicKey: string,
+  options?: { sourceAccount?: Account },
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
-  const sourceAccount = await server.getAccount(sourcePublicKey);
+  const sourceAccount = options?.sourceAccount ?? (await server.getAccount(sourcePublicKey));
 
   const contract = new Contract(contractId);
 
@@ -576,4 +578,123 @@ export function hashToScVal(hash: string | Buffer): xdr.ScVal {
   const buf = typeof hash === 'string' ? Buffer.from(hash, 'hex') : hash;
   if (buf.length !== 32) throw new Error('Hash must be exactly 32 bytes');
   return xdr.ScVal.scvBytes(buf);
+}
+
+/**
+ * In-flight transaction sequence number queue (#1528).
+ *
+ * Caches the source account's latest confirmed sequence number,
+ * increments locally for in-flight transactions, serializes submission
+ * promises to maintain strictly increasing sequence ordering, and
+ * invalidates cached sequence on rejection/failure to refetch latest on-chain state.
+ */
+export class TransactionQueue {
+  private rpcUrl: string;
+  private server: SorobanRpc.Server;
+  private cachedSequences: Map<string, bigint> = new Map();
+  private queues: Map<string, Promise<unknown>> = new Map();
+
+  constructor(rpcUrlOrServer: string | SorobanRpc.Server) {
+    if (typeof rpcUrlOrServer === 'string') {
+      this.rpcUrl = rpcUrlOrServer;
+      this.server = new SorobanRpc.Server(rpcUrlOrServer);
+    } else {
+      this.server = rpcUrlOrServer;
+      this.rpcUrl = (rpcUrlOrServer as any).serverURL?.toString?.() ?? '';
+    }
+  }
+
+  /**
+   * Invalidates cached sequence for the given account so next transaction refetches on-chain.
+   */
+  public invalidateSequence(publicKey: string): void {
+    this.cachedSequences.delete(publicKey);
+  }
+
+  /**
+   * Clears all cached sequence numbers and pending queue promises.
+   */
+  public clear(): void {
+    this.cachedSequences.clear();
+    this.queues.clear();
+  }
+
+  /**
+   * Returns current cached sequence for an account (if any).
+   */
+  public getCachedSequence(publicKey: string): bigint | undefined {
+    return this.cachedSequences.get(publicKey);
+  }
+
+  /**
+   * Fetches latest on-chain sequence for an account from RPC.
+   */
+  public async fetchOnChainSequence(publicKey: string): Promise<bigint> {
+    const account = await this.server.getAccount(publicKey);
+    return BigInt(account.sequenceNumber());
+  }
+
+  /**
+   * Retrieves an Account instance configured with the next sequence for an in-flight transaction.
+   * If not yet cached, fetches on-chain sequence first.
+   * Increments the cached sequence for the next in-flight transaction.
+   */
+  public async getNextAccount(publicKey: string): Promise<Account> {
+    let currentSeq = this.cachedSequences.get(publicKey);
+    if (currentSeq === undefined) {
+      currentSeq = await this.fetchOnChainSequence(publicKey);
+    }
+    const account = new Account(publicKey, currentSeq.toString());
+    this.cachedSequences.set(publicKey, currentSeq + 1n);
+    return account;
+  }
+
+  /**
+   * Enqueues and serializes a transaction execution promise for a specific source account.
+   * Maintains strictly increasing sequence ordering and invalidates cache on rejection.
+   */
+  public async enqueue<T>(
+    publicKey: string,
+    operation: (sourceAccount: Account) => Promise<T>,
+  ): Promise<T> {
+    const previousPromise = this.queues.get(publicKey) ?? Promise.resolve();
+
+    let resolveResult!: (value: T | PromiseLike<T>) => void;
+    let rejectResult!: (reason?: unknown) => void;
+    const taskPromise = new Promise<T>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+
+    const executionPromise = previousPromise
+      .catch(() => {})
+      .then(async () => {
+        try {
+          const account = await this.getNextAccount(publicKey);
+          const result = await operation(account);
+          if (
+            typeof result === 'object' &&
+            result !== null &&
+            'success' in result &&
+            !(result as any).success
+          ) {
+            this.invalidateSequence(publicKey);
+          }
+          resolveResult(result);
+        } catch (error) {
+          this.invalidateSequence(publicKey);
+          rejectResult(error);
+        }
+      });
+
+    this.queues.set(publicKey, executionPromise);
+
+    executionPromise.finally(() => {
+      if (this.queues.get(publicKey) === executionPromise) {
+        this.queues.delete(publicKey);
+      }
+    });
+
+    return taskPromise;
+  }
 }
