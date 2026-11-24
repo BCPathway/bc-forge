@@ -23,7 +23,9 @@ export function ExternalLink({
   const safeRel =
     target === "_blank"
       ? rel
-        ? Array.from(new Set(`${rel} noopener noreferrer`.trim().split(/\s+/))).join(" ")
+        ? Array.from(
+            new Set(`${rel} noopener noreferrer`.trim().split(/\s+/)),
+          ).join(" ")
         : "noopener noreferrer"
       : rel;
 

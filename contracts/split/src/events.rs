@@ -28,6 +28,14 @@ pub fn emit_payout_succeeded(env: &Env, invoice_id: u64, recipient: &Address, am
     );
 }
 
+/// Emitted when an admin rescues stranded SEP-41 tokens from the contract.
+pub fn emit_token_rescued(env: &Env, token: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("token_rsc"), token.clone(), to.clone()),
+        (token.clone(), to.clone(), amount),
+    );
+}
+
 /// Emitted when the split contract WASM is upgraded.
 pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) {
     env.events().publish(

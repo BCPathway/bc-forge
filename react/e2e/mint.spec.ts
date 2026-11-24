@@ -19,7 +19,7 @@ test.describe("Mint Tokens flow", () => {
     await expect(page.getByTestId("connected-wallet")).toBeVisible();
     await page.goto("/#/mint");
 
-    await page.getByTestId('nav-mint').click();
+    await page.getByTestId("nav-mint").click();
 
     // Heading assertion - must fail if missing
     await expect(

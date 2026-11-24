@@ -436,7 +436,11 @@ export class VaultClient {
    */
   async claimWithdrawal(signer?: Keypair | WalletAdapter): Promise<TransactionResult> {
     const source = signer ?? this.walletAdapter;
-    return this.invokeContract('claim_withdrawal', [addressToScVal((source as any)?.publicKey ?? '')], source);
+    return this.invokeContract(
+      'claim_withdrawal',
+      [addressToScVal((source as any)?.publicKey ?? '')],
+      source,
+    );
   }
 
   // ─── Offline Transaction Building & Simulation ───────────────────────────
@@ -650,8 +654,16 @@ export class VaultClient {
     args: xdr.ScVal[],
     source?: Keypair | WalletAdapter,
   ): Promise<TransactionResult> {
-    const isAdapter = Boolean(source && typeof (source as any).signTransaction === 'function' && typeof (source as any).secret !== 'function');
-    const adapter = isAdapter ? (source as unknown as WalletAdapter) : (source ? undefined : this.walletAdapter);
+    const isAdapter = Boolean(
+      source &&
+      typeof (source as any).signTransaction === 'function' &&
+      typeof (source as any).secret !== 'function',
+    );
+    const adapter = isAdapter
+      ? (source as unknown as WalletAdapter)
+      : source
+        ? undefined
+        : this.walletAdapter;
     const actualSource = isAdapter ? undefined : source;
 
     if (!actualSource && !adapter) throw new SignerRequiredError();
@@ -688,7 +700,8 @@ export class VaultClient {
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {
             success: true,
-            hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? response.txHash,
+            hash:
+              (response as unknown as { hash?: string; txHash?: string }).hash ?? response.txHash,
             returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
           };
         }
