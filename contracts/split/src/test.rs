@@ -35,6 +35,8 @@ fn setup(
         &String::from_str(env, "T"),
         &String::from_str(env, "T"),
     );
+    // mint now requires an explicit per-minter issuance allowance (#1327).
+    token_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
 
     (split_client, token_client, split_admin, token_admin)
 }

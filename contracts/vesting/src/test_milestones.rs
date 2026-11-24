@@ -37,6 +37,9 @@ fn setup(
     let vesting_id = env.register(VestingContract, ());
     let vesting = VestingContractClient::new(env, &vesting_id);
     vesting.initialize(&admin, &token_id);
+    // The vesting contract mints from the token on create_vesting; #1327
+    // requires an explicit allowance for that minter.
+    token.set_minter_allowance(&admin, &vesting_id, &i128::MAX);
     // Ownership transfer runs through the #914 privilege timelock.
     token.propose_privilege_action(
         &admin,
