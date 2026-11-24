@@ -17,6 +17,7 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
         &String::from_str(env, "T"),
         &String::from_str(env, "T"),
     );
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
     (client, admin)
 }
 
@@ -135,6 +136,7 @@ fn soulbound_allows_mint_burn_rejects_transfers() {
         &String::from_str(&env, "S"),
         &false,
     );
+    c.set_minter_allowance(&admin, &admin, &i128::MAX);
     assert!(!c.is_transferable());
     let a = Address::generate(&env);
     let b = Address::generate(&env);
