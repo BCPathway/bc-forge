@@ -1,115 +1,172 @@
-// SPDX-License-Identifier: MIT
-import { test, expect } from '@playwright/test';
-import { installFreighterStub, installNetworkStubs, MOCK_PUBLIC_KEY, MOCK_TX_HASH } from './stubs';
+
+import { test, expect, Page } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+import {
+  installFreighterStub,
+  installNetworkStubs,
+  MOCK_PUBLIC_KEY,
+  MOCK_TX_HASH,
+} from './stubs';
+
+/**
+ * Shared setup for BurnScreen tests.
+ * Installs the wallet and network mocks, connects the wallet,
+ * and navigates to the burn screen.
+ */
+async function setupConnectedBurnPage(
+  page: Page,
+  balance: bigint = 1000n,
+): Promise<void> {
+  await installFreighterStub(page, MOCK_PUBLIC_KEY);
+  await installNetworkStubs(page, { balance });
+
+  await page.goto('/#/');
+
+  const connectWalletButton = page.getByTestId('connect-freighter');
+  await expect(connectWalletButton).toBeVisible();
+  await connectWalletButton.click();
+
+  await expect(page.getByTestId('connected-wallet')).toBeVisible();
+
+  await page.goto('/#/burn');
+  await expect(
+    page.getByRole('heading', { name: 'Burn Tokens' }),
+  ).toBeVisible();
+}
 
 test.describe('Burn Tokens flow', () => {
-  test('submits a valid burn amount and shows success alert', async ({ page }) => {
-    await installFreighterStub(page, MOCK_PUBLIC_KEY);
-    await installNetworkStubs(page, { balance: 1000n });
+  test('submits a valid burn amount and shows success alert', async ({
+    page,
+  }) => {
+    await setupConnectedBurnPage(page, 1000n);
 
-    await page.goto('/#/');
-    await page.getByTestId('connect-freighter').click();
-    await expect(page.getByTestId('connected-wallet')).toBeVisible();
+    const burnAmountInput = page.locator('#burn-amount');
+    await expect(burnAmountInput).toBeVisible();
+    await burnAmountInput.fill('100');
 
-    await page.goto('/#/burn');
+    const submitButton = page.getByTestId('burn-submit');
+    await expect(submitButton).toBeEnabled();
+    await submitButton.click();
 
-    // Heading assertion - must fail if missing
-    await expect(page.getByRole('heading', { name: 'Burn Tokens' })).toBeVisible();
-
-    // Fill amount and submit
-    await page.locator('#burn-amount').fill('100');
-
-    const submitBtn = page.getByTestId('burn-submit');
-    await expect(submitBtn).toBeEnabled();
-    await submitBtn.click();
-
-    // Assert success state
     const successAlert = page.getByTestId('burn-success');
     await expect(successAlert).toBeVisible();
     await expect(successAlert).toContainText(MOCK_TX_HASH);
   });
 
-  test('disables submit button when burn amount exceeds mocked balance', async ({ page }) => {
-    await installFreighterStub(page, MOCK_PUBLIC_KEY);
-    await installNetworkStubs(page, { balance: 300n });
+  test('disables submit button when burn amount exceeds mocked balance', async ({
+    page,
+  }) => {
+    await setupConnectedBurnPage(page, 300n);
 
-    await page.goto('/#/');
-    await page.getByTestId('connect-freighter').click();
-    await expect(page.getByTestId('connected-wallet')).toBeVisible();
+    const burnAmountInput = page.locator('#burn-amount');
+    await expect(burnAmountInput).toBeVisible();
+    await burnAmountInput.fill('500');
 
-    await page.goto('/#/burn');
-
-    await expect(page.getByRole('heading', { name: 'Burn Tokens' })).toBeVisible();
-
-    await page.locator('#burn-amount').fill('500');
-
-    // Over-balance warning and disabled submit button assertion
     await expect(page.getByTestId('burn-over-balance')).toBeVisible();
-    const submitBtn = page.getByTestId('burn-submit');
-    await expect(submitBtn).toBeDisabled();
+
+    const submitButton = page.getByTestId('burn-submit');
+    await expect(submitButton).toBeDisabled();
   });
 });
 
 test.describe('BurnScreen Safety Modal & Execution Flow (#1254)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/burn');
-    await page.waitForLoadState('domcontentloaded');
+    await setupConnectedBurnPage(page);
   });
 
-  test('should keep confirm button disabled until safety confirmation checkbox is checked', async ({ page }) => {
-    // 1. Enter burn amount
-    const burnInput = page.locator('input[name="burnAmount"], [data-testid="burn-amount-input"]');
-    await expect(burnInput).toBeVisible();
-    await burnInput.fill('50.00');
+  test('confirm button remains disabled until safety checkbox is checked', async ({
+    page,
+  }) => {
+    const burnAmountInput = page.locator(
+      'input[name="burnAmount"], [data-testid="burn-amount-input"]',
+    );
 
-    // 2. Open safety confirmation modal
-    const initiateBurnBtn = page.locator('button:has-text("Burn Tokens"), [data-testid="initiate-burn-btn"]');
-    await initiateBurnBtn.click();
+    await expect(burnAmountInput).toBeVisible();
+    await burnAmountInput.fill('50.00');
 
-    // 3. Assert confirmation modal appears
-    const safetyModal = page.locator('[data-testid="burn-safety-modal"], text=Irreversible Action');
+    const initiateBurnButton = page.locator(
+      '[data-testid="initiate-burn-btn"]',
+    );
+
+    await expect(initiateBurnButton).toBeVisible();
+    await initiateBurnButton.click();
+
+    const safetyModal = page.getByTestId('burn-safety-modal');
     await expect(safetyModal).toBeVisible();
 
-    // 4. Assert confirm button is disabled initially
-    const confirmBurnBtn = page.locator('[data-testid="confirm-burn-submit-btn"], button:has-text("Confirm Burn")');
-    await expect(confirmBurnBtn).toBeDisabled();
+    const confirmBurnButton = page.getByTestId(
+      'confirm-burn-submit-btn',
+    );
 
-    // 5. Check irreversible warning checkbox
-    const safetyCheckbox = page.locator('input[type="checkbox"][name="irreversibleWarning"], [data-testid="burn-safety-checkbox"]');
+    await expect(confirmBurnButton).toBeDisabled();
+
+    const safetyCheckbox = page.getByTestId('burn-safety-checkbox');
+    await expect(safetyCheckbox).toBeVisible();
     await safetyCheckbox.check();
 
-    // 6. Assert confirm button is now enabled
-    await expect(confirmBurnBtn).toBeEnabled();
+    await expect(confirmBurnButton).toBeEnabled();
   });
 
-  test('should execute burn and verify supply decrement success alert', async ({ page }) => {
-    // Enter burn amount
-    const burnInput = page.locator('input[name="burnAmount"], [data-testid="burn-amount-input"]');
-    await burnInput.fill('25.00');
+  test('executes burn and displays success notification', async ({ page }) => {
+    const burnAmountInput = page.locator(
+      'input[name="burnAmount"], [data-testid="burn-amount-input"]',
+    );
 
-    // Initiate burn
-    const initiateBurnBtn = page.locator('button:has-text("Burn Tokens"), [data-testid="initiate-burn-btn"]');
-    await initiateBurnBtn.click();
+    await expect(burnAmountInput).toBeVisible();
+    await burnAmountInput.fill('25.00');
 
-    // Check safety modal checkbox & submit
-    const safetyCheckbox = page.locator('input[type="checkbox"][name="irreversibleWarning"], [data-testid="burn-safety-checkbox"]');
+    const initiateBurnButton = page.getByTestId(
+      'initiate-burn-btn',
+    );
+    await initiateBurnButton.click();
+
+    const safetyModal = page.getByTestId('burn-safety-modal');
+    await expect(safetyModal).toBeVisible();
+
+    const safetyCheckbox = page.getByTestId('burn-safety-checkbox');
     await safetyCheckbox.check();
 
-    const confirmBurnBtn = page.locator('[data-testid="confirm-burn-submit-btn"], button:has-text("Confirm Burn")');
-    await confirmBurnBtn.click();
+    const confirmBurnButton = page.getByTestId(
+      'confirm-burn-submit-btn',
+    );
+    await expect(confirmBurnButton).toBeEnabled();
+    await confirmBurnButton.click();
 
-    // Verify supply decrement success notification / alert
-    const successAlert = page.locator('text=Burn Successful, text=Total Supply Updated, [data-testid="burn-success-alert"]');
-    await expect(successAlert).toBeVisible({ timeout: 15000 });
+    const successAlert = page.getByTestId('burn-success-alert');
+
+    await expect(successAlert).toBeVisible({ timeout: 15_000 });
   });
 
-  test('should pass automated WCAG 2.1 AA accessibility audit on BurnScreen', async ({ page }) => {
+  test('passes automated WCAG 2.1 AA accessibility audit on BurnScreen', async ({
+    page,
+  }) => {
     const accessibilityScanResults = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .withTags([
+        'wcag2a',
+        'wcag2aa',
+        'wcag21a',
+        'wcag21aa',
+      ])
       .analyze();
 
     if (accessibilityScanResults.violations.length > 0) {
-      console.error('Accessibility violations found on BurnScreen:', JSON.stringify(accessibilityScanResults.violations, null, 2));
+      console.error(
+        'Accessibility violations found on BurnScreen:',
+        JSON.stringify(
+          accessibilityScanResults.violations.map((violation) => ({
+            id: violation.id,
+            impact: violation.impact,
+            description: violation.description,
+            help: violation.help,
+            nodes: violation.nodes.map((node) => ({
+              target: node.target,
+              failureSummary: node.failureSummary,
+            })),
+          })),
+          null,
+          2,
+        ),
+      );
     }
 
     expect(accessibilityScanResults.violations).toEqual([]);
