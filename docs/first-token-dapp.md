@@ -51,30 +51,30 @@ You should also have a basic understanding of public keys, secret keys, and bloc
 
 Create a directory for your project:
 
-\`\`\`bash
+```bash
 mkdir my-token-dapp
 cd my-token-dapp
-\`\`\`
+```
 
 Initialize a Node.js project:
 
-\`\`\`bash
+```bash
 npm init -y
-\`\`\`
+```
 
 Install the BC Forge CLI:
 
-\`\`\`bash
+```bash
 npm install --save-dev @bc-forge/cli
-\`\`\`
+```
 
 You can run the CLI through your local installation using `npx`.
 
 Check that it is available:
 
-\`\`\`bash
+```bash
 npx bc-forge --help
-\`\`\`
+```
 
 If the CLI binary is not available under that command, consult the installed package's binary mapping and use the documented entrypoint.
 
@@ -84,44 +84,44 @@ The BC Forge CLI provides an initialization command that allows you to configure
 
 Run:
 
-\`\`\`bash
+```bash
 npx bc-forge init
-\`\`\`
+```
 
 The CLI will guide you through the configuration process.
 
 For a non-interactive configuration, you can specify the required values:
 
-\`\`\`bash
-npx bc-forge init \\
-  --network testnet \\
-  --rpc-url https://soroban-testnet.stellar.org \\
-  --admin YOUR_ADMIN_PUBLIC_KEY \\
-  --name "My First Token" \\
-  --symbol MFT \\
-  --decimals 7 \\
+```bash
+npx bc-forge init 
+  --network testnet 
+  --rpc-url https://soroban-testnet.stellar.org 
+  --admin YOUR_ADMIN_PUBLIC_KEY 
+  --name "My First Token" 
+  --symbol MFT 
+  --decimals 7 
   --initial-supply 1000000
-\`\`\`
+```
 
-Replace \`YOUR_ADMIN_PUBLIC_KEY\` with the public key of your funded testnet account.
+Replace `YOUR_ADMIN_PUBLIC_KEY` with the public key of your funded testnet account.
 
 ### Configuration options
 
 | Option | Description |
 |---|---|
-| \`--network\` | Target network, such as testnet |
-| \`--rpc-url\` | Soroban RPC endpoint |
-| \`--admin\` | Administrator public key |
-| \`--name\` | Token name |
-| \`--symbol\` | Token symbol |
-| \`--decimals\` | Token precision |
-| \`--initial-supply\` | Initial token supply |
+| `--network` | Target network, such as testnet |
+| `--rpc-url` | Soroban RPC endpoint |
+| `--admin` | Administrator public key |
+| `--name` | Token name |
+| `--symbol` | Token symbol |
+| `--decimals` | Token precision |
+| `--initial-supply` | Initial token supply |
 
 The command generates a project configuration file containing public configuration information.
 
 Example configuration:
 
-\`\`\`json
+```json
 {
   "network": "testnet",
   "rpcUrl": "https://soroban-testnet.stellar.org",
@@ -131,7 +131,7 @@ Example configuration:
   "decimals": 7,
   "initialSupply": "1000000"
 }
-\`\`\`
+```
 
 The configuration contains public information only. Do not store secret keys in this file.
 
@@ -152,20 +152,20 @@ You can obtain testnet XLM through a Stellar testnet funding service.
 
 For local development, you may use environment variables to supply sensitive values to trusted scripts.
 
-Create a local \`.env\` file:
+Create a local `.env` file:
 
-\`\`\`env
+```env
 RPC_URL=https://soroban-testnet.stellar.org
 NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 SECRET_KEY=YOUR_ADMIN_SECRET_KEY
-\`\`\`
+```
 
-Add \`.env\` to your \`.gitignore\` file:
+Add `.env` to your `.gitignore` file:
 
-\`\`\`gitignore
+```gitignore
 .env
 .env.local
-\`\`\`
+```
 
 Never commit secret keys to Git.
 
@@ -175,15 +175,15 @@ The BC Forge CLI provides contract deployment and orchestration capabilities.
 
 Before deployment, inspect the deployment command available in your installed CLI version:
 
-\`\`\`bash
+```bash
 npx bc-forge --help
-\`\`\`
+```
 
 Then inspect the deployment-related command help:
 
-\`\`\`bash
+```bash
 npx bc-forge orchestrate --help
-\`\`\`
+```
 
 Use the deployment workflow documented by your installed CLI version to deploy the token WASM artifact and initialize the contract.
 
@@ -201,10 +201,10 @@ After a successful deployment, record the contract ID.
 
 Example:
 
-\`\`\`text
+```text
 Token Contract ID:
 CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-\`\`\`
+```
 
 You will use this contract ID when connecting the SDK and frontend.
 
@@ -212,15 +212,15 @@ You will use this contract ID when connecting the SDK and frontend.
 
 Use the BC Forge CLI status command to check whether your deployed contract is reachable:
 
-\`\`\`bash
+```bash
 npx bc-forge check-status
-\`\`\`
+```
 
 If your deployment configuration is stored in a custom file:
 
-\`\`\`bash
+```bash
 npx bc-forge check-status --config ./config.example.json
-\`\`\`
+```
 
 The CLI reports the contract's reachability status.
 
@@ -230,17 +230,17 @@ The SDK provides a TypeScript interface for interacting with BC Forge token cont
 
 Install the package:
 
-\`\`\`bash
+```bash
 npm install @bc-forge/sdk
-\`\`\`
+```
 
 The SDK can be used to read token information and perform supported token operations.
 
 ## 6. Connect to your token contract
 
-Create a file named \`src/token-client.ts\`.
+Create a file named `src/token-client.ts`.
 
-\`\`\`typescript
+```typescript
 import { bcForgeClient } from '@bc-forge/sdk';
 
 export const tokenClient = new bcForgeClient({
@@ -248,9 +248,9 @@ export const tokenClient = new bcForgeClient({
   networkPassphrase: 'Test SDF Network ; September 2015',
   contractId: 'YOUR_DEPLOYED_TOKEN_CONTRACT_ID',
 });
-\`\`\`
+```
 
-Replace \`YOUR_DEPLOYED_TOKEN_CONTRACT_ID\` with the contract ID obtained during deployment.
+Replace `YOUR_DEPLOYED_TOKEN_CONTRACT_ID` with the contract ID obtained during deployment.
 
 This client is now configured to communicate with the deployed token contract.
 
@@ -260,7 +260,7 @@ Token metadata provides information about the token, including its name, symbol,
 
 Create a script to read the token metadata.
 
-\`\`\`typescript
+```typescript
 import { tokenClient } from './token-client';
 
 async function readTokenMetadata() {
@@ -276,16 +276,16 @@ async function readTokenMetadata() {
 }
 
 readTokenMetadata().catch(console.error);
-\`\`\`
+```
 
 Expected output will depend on your token configuration:
 
-\`\`\`text
+```text
 Token name: My First Token
 Token symbol: MFT
 Token decimals: 7
 Total supply: ...
-\`\`\`
+```
 
 This demonstrates how to retrieve token information through the SDK without manually constructing Soroban contract calls.
 
@@ -293,7 +293,7 @@ This demonstrates how to retrieve token information through the SDK without manu
 
 You can use the SDK to query the balance of a Stellar account.
 
-\`\`\`typescript
+```typescript
 import { tokenClient } from './token-client';
 
 async function getTokenBalance(address: string) {
@@ -304,7 +304,7 @@ async function getTokenBalance(address: string) {
 
 getTokenBalance('GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
   .catch(console.error);
-\`\`\`
+```
 
 Replace the example address with the public key of the account you want to query.
 
@@ -320,7 +320,7 @@ These operations may require authorization from the account permitted by the con
 
 Minting creates new tokens and assigns them to a recipient.
 
-\`\`\`typescript
+```typescript
 import { Keypair } from '@stellar/stellar-sdk';
 import { tokenClient } from './token-client';
 
@@ -339,7 +339,7 @@ async function mintTokens() {
 }
 
 mintTokens().catch(console.error);
-\`\`\`
+```
 
 The example amount represents 10 tokens when the token uses seven decimal places.
 
@@ -349,7 +349,7 @@ The example amount represents 10 tokens when the token uses seven decimal places
 
 Transfers move tokens from one account to another, subject to the token contract's authorization rules.
 
-\`\`\`typescript
+```typescript
 import { Keypair } from '@stellar/stellar-sdk';
 import { tokenClient } from './token-client';
 
@@ -369,7 +369,7 @@ async function transferTokens() {
 }
 
 transferTokens().catch(console.error);
-\`\`\`
+```
 
 This example demonstrates the SDK transfer flow. In a production frontend, the sender should authorize the transaction through a wallet rather than exposing a secret key.
 
@@ -377,7 +377,7 @@ This example demonstrates the SDK transfer flow. In a production frontend, the s
 
 Burning removes tokens from circulation.
 
-\`\`\`typescript
+```typescript
 import { Keypair } from '@stellar/stellar-sdk';
 import { tokenClient } from './token-client';
 
@@ -396,7 +396,7 @@ async function burnTokens() {
 }
 
 burnTokens().catch(console.error);
-\`\`\`
+```
 
 The burn operation removes one token, assuming seven decimal places.
 
@@ -408,25 +408,25 @@ Now that the contract is deployed and the SDK is configured, you can build a fro
 
 Create a React application with Vite:
 
-\`\`\`bash
+```bash
 npm create vite@latest frontend -- --template react-ts
 cd frontend
 npm install
-\`\`\`
+```
 
 Install the BC Forge React package:
 
-\`\`\`bash
+```bash
 npm install @bc-forge/react
-\`\`\`
+```
 
 The React package provides provider-based integration and hooks for accessing BC Forge functionality.
 
 ## 11. Configure the React provider
 
-Create or update \`src/App.tsx\`.
+Create or update `src/App.tsx`.
 
-\`\`\`tsx
+```tsx
 import {
   BcForgeProvider,
   useBalance,
@@ -491,7 +491,7 @@ function App() {
 }
 
 export default App;
-\`\`\`
+```
 
 > If using the exact code above, import React hooks explicitly as shown in the next corrected version.
 
@@ -499,7 +499,7 @@ export default App;
 
 For React 19 and TypeScript, use explicit hook imports:
 
-\`\`\`tsx
+```tsx
 import { useState } from 'react';
 import {
   BcForgeProvider,
@@ -563,29 +563,29 @@ export default function App() {
     </BcForgeProvider>
   );
 }
-\`\`\`
+```
 
 ## 12. Configure your frontend environment
 
-Create a \`.env.local\` file in the frontend directory.
+Create a `.env.local` file in the frontend directory.
 
-\`\`\`env
+```env
 VITE_TOKEN_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-\`\`\`
+```
 
 The frontend uses this environment variable to identify the deployed token contract.
 
-Vite environment variables prefixed with \`VITE_\` are exposed to client-side code. Only public configuration should be stored in them.
+Vite environment variables prefixed with `VITE_` are exposed to client-side code. Only public configuration should be stored in them.
 
-Never put an administrator secret key, wallet secret, or private credentials in a \`VITE_\` variable.
+Never put an administrator secret key, wallet secret, or private credentials in a `VITE_` variable.
 
 ## 13. Run your dApp
 
 Start the frontend development server:
 
-\`\`\`bash
+```bash
 npm run dev
-\`\`\`
+```
 
 Open the local URL displayed by Vite in your browser.
 
@@ -614,11 +614,11 @@ Use the package's exported screens and components when appropriate instead of im
 
 Before importing a component, check the available exports in the installed package:
 
-\`\`\`typescript
+```typescript
 import * as BcForgeReact from '@bc-forge/react';
 
 console.log(Object.keys(BcForgeReact));
-\`\`\`
+```
 
 This can help identify the available exports in your installed version.
 
@@ -720,70 +720,4 @@ You can extend this project by adding:
 - [BC Forge React](https://www.npmjs.com/package/@bc-forge/react)
 
 Happy building!
-\`\`\`
-
-## File ready for your repository
-
-I recommend using a cleaned version of the tutorial below. I've removed the redundant React example and kept the code organized as a single progressive tutorial.
-
-Save this as:
-
-`docs/tutorials/first-token-dapp.md`
-
-<CodeBlock language="markdown" editable>
----
-title: Building Your First Soroban Token dApp
-description: Learn how to deploy a Soroban token contract, interact with it using the BC Forge SDK, and build a React frontend.
----
-
-# Building Your First Soroban Token dApp
-
-In this tutorial, you will build a simple token decentralized application (dApp) using the BC Forge ecosystem.
-
-You will learn how to:
-
-- Configure a Soroban testnet project using the BC Forge CLI.
-- Deploy and initialize a token contract.
-- Interact with your token using `@bc-forge/sdk`.
-- Integrate BC Forge React components and hooks into a frontend.
-- Read token balances and supply.
-- Perform basic token operations.
-- Verify that your application is connected to the correct contract and network.
-
-By the end of this tutorial, you will have the foundations of a token dApp with a smart contract, a TypeScript SDK integration, and a React user interface.
-
-## Architecture
-
-The application consists of three main layers:
-
-| Layer | Package | Responsibility |
-|---|---|---|
-| Smart contract | Soroban | Stores token state and executes token operations |
-| SDK | `@bc-forge/sdk` | Provides a TypeScript interface for interacting with the contract |
-| Frontend | `@bc-forge/react` | Provides React integration, hooks, and UI components |
-
-The frontend communicates with the contract through the SDK. Transactions requiring authorization are signed by the user's wallet rather than exposing secret keys in the frontend.
-
-## Prerequisites
-
-Before proceeding, ensure you have the following installed:
-
-- Node.js (LTS)
-- npm
-- Rust toolchain
-- Stellar CLI with Soroban contract support
-- A Stellar wallet such as Freighter
-- A Stellar testnet account funded with test XLM
-- Basic knowledge of TypeScript, React, and smart contracts
-
-You should also have a basic understanding of public keys, secret keys, and blockchain transactions.
-
-> This tutorial uses Stellar Testnet. Do not use production wallets, private keys, or real funds while learning.
-
-## 1. Create your project
-
-Create a directory for your project:
-
-```bash
-mkdir my-token-dapp
-cd my-token-dapp
+```
