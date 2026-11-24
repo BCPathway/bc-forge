@@ -141,6 +141,11 @@ jobs:
       - name: Check WASM size budgets (#956)
         run: python3 scripts/check_wasm_size.py
 
+      - name: Token invariant suite (#1347, 500+ randomized sequences)
+        env:
+          PROPTEST_CASES: 500
+        run: cargo test -p bc-forge-token --test invariants
+
       - name: Publish gas benchmarks summary (#961)
         if: always()
         run: cargo test -p bc-forge-admin gas_bench -- --nocapture | python3 scripts/parse_gas_bench.py >> $GITHUB_STEP_SUMMARY
@@ -264,6 +269,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify Indexer Event Parity
+        working-directory: .
+        run: |
+          python3 scripts/check_event_parity.py
+          python3 -m unittest scripts/test_check_event_parity.py
+
       - name: Run tests
         run: npm test
 
@@ -333,6 +344,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Check JS Bundle Sizes
+        working-directory: .
+        run: node scripts/check_bundle_size.mjs
 
   # ─── React peer-version matrix (#1041) ─────────────────────────────────
   # Packs @bc-forge/react (and the SDK it depends on) and installs those

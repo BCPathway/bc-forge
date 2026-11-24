@@ -61,6 +61,7 @@
 //! | `22` | `RoleAlreadyGranted` | `validate_role_not_granted` / `grant_role_checked` when the role is already held |
 //! | `23` | `ProposalExpired` | `execute_upgrade` / `execute_upgrade_batch` past the proposal expiry ledger |
 //! | `24` | `ProposalCancelled` | approve/execute on a legacy proposal cancelled by its creator |
+//! | `32` | `ThresholdExceedsPoolSize` | `remove_admin` when removing a member would drop pool size below threshold |
 //!
 //! ## Event Emissions
 //!
@@ -326,6 +327,8 @@ pub enum AdminError {
     RoleProposalNotFound = 30,
     /// A role proposal must be executed through `execute_role_proposal`.
     RoleProposalRequiresExecution = 31,
+    /// Removing an admin pool member would leave fewer members than the approval threshold.
+    ThresholdExceedsPoolSize = 32,
 }
 
 /// Storage keys for the access-control layer.
@@ -595,6 +598,10 @@ mod tests {
 
         pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
             super::set_admin_pool(&env, pool, threshold);
+        }
+
+        pub fn remove_admin(env: Env, member: Address) -> Result<(), AdminError> {
+            super::remove_admin(&env, member)
         }
 
         pub fn create_proposal(env: Env, creator: Address, description: String) -> u64 {
@@ -4661,5 +4668,134 @@ mod tests {
 
         let info = client.get_storage_info();
         assert_eq!(info.instance_ttl, extended_ttl);
+    }
+
+    #[test]
+    fn test_remove_admin_succeeds_when_remaining_pool_meets_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        client.set_admin(&admin1);
+        let pool = vec![&env, admin1.clone(), admin2.clone(), admin3.clone()];
+        client.set_admin_pool(&pool, &2);
+
+        client.remove_admin(&admin3);
+
+        let updated_pool = client.get_admin_pool();
+        assert_eq!(updated_pool.len(), 2);
+        assert!(updated_pool.contains(&admin1));
+        assert!(updated_pool.contains(&admin2));
+        assert!(!updated_pool.contains(&admin3));
+        assert_eq!(client.get_threshold(), 2);
+    }
+
+    #[test]
+    fn test_remove_admin_rejects_deadlock_when_pool_equals_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        client.set_admin(&admin1);
+        let pool = vec![&env, admin1.clone(), admin2.clone(), admin3.clone()];
+        client.set_admin_pool(&pool, &3);
+
+        let res = client.try_remove_admin(&admin3);
+        assert_eq!(res, Err(Ok(AdminError::ThresholdExceedsPoolSize)));
+
+        let remaining_pool = client.get_admin_pool();
+        assert_eq!(remaining_pool.len(), 3);
+        assert!(remaining_pool.contains(&admin3));
+    }
+
+    #[test]
+    fn test_remove_admin_blocks_second_removal_at_threshold_boundary() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        client.set_admin(&admin1);
+        let pool = vec![&env, admin1.clone(), admin2.clone(), admin3.clone()];
+        client.set_admin_pool(&pool, &2);
+
+        // 3 -> 2 satisfies threshold 2
+        client.remove_admin(&admin3);
+        assert_eq!(client.get_admin_pool().len(), 2);
+
+        // 2 -> 1 would drop below threshold 2 and deadlock governance
+        let res = client.try_remove_admin(&admin2);
+        assert_eq!(res, Err(Ok(AdminError::ThresholdExceedsPoolSize)));
+        assert_eq!(client.get_admin_pool().len(), 2);
+    }
+
+    #[test]
+    fn test_remove_admin_rejects_removing_sole_default_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.set_admin(&admin);
+
+        let res = client.try_remove_admin(&admin);
+        assert_eq!(res, Err(Ok(AdminError::ThresholdExceedsPoolSize)));
+        assert_eq!(client.get_admin_pool().len(), 1);
+    }
+
+    #[test]
+    fn test_remove_admin_rejects_non_member() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let outsider = Address::generate(&env);
+
+        client.set_admin(&admin1);
+        let pool = vec![&env, admin1.clone(), admin2.clone()];
+        client.set_admin_pool(&pool, &1);
+
+        let res = client.try_remove_admin(&outsider);
+        assert_eq!(res, Err(Ok(AdminError::RoleNotHeld)));
+        assert_eq!(client.get_admin_pool().len(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Auth, InvalidAction)")]
+    fn test_remove_admin_requires_admin_auth() {
+        let env = Env::default();
+        // Note: no mock_all_auths, so require_auth for the contract admin fails.
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            set_admin(&env, &admin1);
+            let pool = vec![&env, admin1.clone(), admin2.clone()];
+            env.storage().instance().set(&AdminKey::AdminPool, &pool);
+            env.storage().instance().set(&AdminKey::Threshold, &1u32);
+        });
+
+        client.remove_admin(&admin2);
     }
 }

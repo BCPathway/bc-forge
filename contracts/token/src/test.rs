@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 use crate::reentrancy_guard::ReentrancyGuardState;
-use crate::{AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, TokenError};
+use crate::{
+    AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, Recipient, TokenError,
+};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger as _;
@@ -20,6 +22,8 @@ fn init_default(env: &Env, client: &BcForgeTokenClient) -> Address {
         &String::from_str(env, "bc-forge Token"),
         &String::from_str(env, "SFG"),
     );
+    // mint/batch_mint now require an explicit per-minter issuance allowance (#1327).
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
     admin
 }
 
@@ -415,6 +419,7 @@ fn test_minter_can_mint_successfully() {
     env.as_contract(&contract_id, || {
         bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &minter);
     });
+    client.set_minter_allowance(&admin, &minter, &i128::MAX);
 
     // A non-admin address with Role::Minter can mint and the token accounting
     // updates exactly once for the recipient and total supply.
@@ -572,6 +577,7 @@ fn test_revoked_minter_cannot_mint() {
     env.as_contract(&contract_id, || {
         bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &minter);
     });
+    client.set_minter_allowance(&admin, &minter, &i128::MAX);
 
     // Assert that the newly minted tokens are added to the user's balance
     assert!(client.try_mint(&minter, &user, &100).is_ok());
@@ -1252,6 +1258,7 @@ fn test_rescue_tokens_admin_recovers_foreign_token() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     let recovery = Address::generate(&env);
     foreign.mint(&foreign_admin, &client.address, &5_000);
 
@@ -1283,6 +1290,7 @@ fn test_rescue_tokens_rejects_non_admin() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &client.address, &5_000);
 
     let stranger = Address::generate(&env);
@@ -1335,6 +1343,7 @@ fn test_rescue_tokens_rejects_invalid_amount() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &client.address, &5_000);
 
     let recovery = Address::generate(&env);
@@ -1633,4 +1642,163 @@ fn test_update_metadata_rejects_unauthorized_caller() {
     assert!(result.is_err());
     assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
     assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
+}
+
+// ─── per-minter allowances (#1327), mint streams (#1328), diagnostics (#1325) ──
+
+#[test]
+fn test_minter_allowance_is_consumed_and_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let minter = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &minter);
+    });
+    client.set_minter_allowance(&admin, &minter, &100);
+    assert_eq!(client.get_minter_allowance(&minter), 100);
+
+    client.mint(&minter, &user, &60);
+    assert_eq!(client.get_minter_allowance(&minter), 40);
+    assert_eq!(client.balance(&user), 60);
+
+    assert_eq!(
+        client.try_mint(&minter, &user, &50),
+        Err(Ok(TokenError::MinterQuotaExceeded))
+    );
+
+    // Negative allowances are rejected.
+    assert_eq!(
+        client.try_set_minter_allowance(&admin, &minter, &-1),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+
+    // A batch mint charges the aggregated amount once, not per recipient.
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: user.clone(),
+            amount: 20,
+        },
+        Recipient {
+            to: admin.clone(),
+            amount: 20,
+        },
+    ];
+    client.batch_mint(&minter, &recipients);
+    assert_eq!(client.get_minter_allowance(&minter), 0);
+    assert_eq!(client.balance(&user), 80);
+
+    // The allowance can be replenished, and an over-budget batch is rejected.
+    client.set_minter_allowance(&admin, &minter, &25);
+    assert_eq!(client.get_minter_allowance(&minter), 25);
+    let too_big = vec![
+        &env,
+        Recipient {
+            to: user.clone(),
+            amount: 20,
+        },
+        Recipient {
+            to: admin.clone(),
+            amount: 20,
+        },
+    ];
+    assert_eq!(
+        client.try_batch_mint(&minter, &too_big),
+        Err(Ok(TokenError::MinterQuotaExceeded))
+    );
+}
+
+fn advance_to_sequence(env: &Env, sequence: u32) {
+    env.ledger().set_sequence_number(sequence);
+}
+
+#[test]
+fn test_mint_stream_cliff_and_linear_vesting() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    let stream_id = client.create_mint_stream(&admin, &recipient, &1_000, &10, &20, &15);
+    assert_eq!(stream_id, 0);
+
+    // Before the cliff nothing is claimable.
+    assert_eq!(client.claim_stream_mint(&stream_id), 0);
+    advance_to_sequence(&env, 10);
+    assert_eq!(client.claim_stream_mint(&stream_id), 0);
+
+    // Half way through the ten-ledger window, after the cliff: half vests.
+    advance_to_sequence(&env, 15);
+    assert_eq!(client.claim_stream_mint(&stream_id), 500);
+    assert_eq!(client.balance(&recipient), 500);
+
+    // The remainder vests at the end; repeated claims are empty.
+    advance_to_sequence(&env, 20);
+    assert_eq!(client.claim_stream_mint(&stream_id), 500);
+    assert_eq!(client.claim_stream_mint(&stream_id), 0);
+
+    assert_eq!(client.balance(&recipient), 1_000);
+    assert_eq!(client.supply(), 1_000);
+}
+
+#[test]
+fn test_create_mint_stream_validates_input_and_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    // No Minter or SuperAdmin role.
+    assert_eq!(
+        client.try_create_mint_stream(&stranger, &recipient, &100, &1, &10, &5),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    // Invalid amounts and ledger windows.
+    assert_eq!(
+        client.try_create_mint_stream(&admin, &recipient, &0, &1, &10, &5),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(
+        client.try_create_mint_stream(&admin, &recipient, &100, &10, &10, &10),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(
+        client.try_create_mint_stream(&admin, &recipient, &100, &10, &20, &9),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(
+        client.try_create_mint_stream(&admin, &recipient, &100, &10, &20, &21),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+
+    // A stream that would breach the configured cap is rejected.
+    client.set_max_supply(&admin, &500);
+    assert_eq!(
+        client.try_create_mint_stream(&admin, &recipient, &1_000, &1, &10, &5),
+        Err(Ok(TokenError::MaxSupplyExceeded))
+    );
+
+    // Claiming a stream that does not exist fails.
+    assert_eq!(
+        client.try_claim_stream_mint(&999),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_token_storage_diagnostics_views() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = setup(&env);
+
+    let info = client.get_storage_info();
+    assert_eq!(info.instance_ttl, client.get_instance_ttl());
+    assert_eq!(info.instance_keys, client.get_storage_key_counts());
+    assert!(info.instance_ttl > 0);
+    assert!(info.instance_keys > 0);
 }
