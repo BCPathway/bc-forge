@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { z } from 'zod';
+import { z } from "zod";
 
 // ─── Environment validation (#1146) ─────────────────────────────────────────
 
@@ -13,13 +13,14 @@ export const CONTRACT_ID_PATTERN = /^C[A-Z0-9]{55}$/;
 const HTTP_URL_PATTERN = /^https?:\/\/[^\s/$.?#][^\s]*$/i;
 
 /** Soroban RPC endpoint used when `VITE_RPC_URL` is not set. */
-export const DEFAULT_RPC_URL = 'https://soroban-testnet.stellar.org';
+export const DEFAULT_RPC_URL = "https://soroban-testnet.stellar.org";
 
 /** Passphrase used when `VITE_NETWORK_PASSPHRASE` is not set. */
-export const DEFAULT_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
+export const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 
 /** Contract id used when `VITE_CONTRACT_ID` is not set. */
-export const DEFAULT_CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
+export const DEFAULT_CONTRACT_ID =
+  "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM";
 
 // Validations are expressed as `refine` predicates so the schema stays
 // readable and the screen can own the wording; zod supplies the structure,
@@ -28,18 +29,18 @@ const rpcUrlSchema = z
   .string()
   .refine(
     (value) => HTTP_URL_PATTERN.test(value.trim()),
-    'must be an absolute http(s) URL such as https://soroban-testnet.stellar.org',
+    "must be an absolute http(s) URL such as https://soroban-testnet.stellar.org",
   );
 
 const passphraseSchema = z
   .string()
-  .refine((value) => value.trim().length > 0, 'must not be blank');
+  .refine((value) => value.trim().length > 0, "must not be blank");
 
 const contractIdSchema = z
   .string()
   .refine(
     (value) => CONTRACT_ID_PATTERN.test(value.trim()),
-    'must be a Stellar contract id: C followed by 55 uppercase base32 characters',
+    "must be a Stellar contract id: C followed by 55 uppercase base32 characters",
   );
 
 const demoEnvSchema = z.object({
@@ -79,8 +80,7 @@ export interface DemoConfig {
 
 /** Discriminated result of {@link loadConfig}. */
 export type ConfigResult =
-  | { ok: true; config: DemoConfig }
-  | { ok: false; issues: ConfigIssue[] };
+  { ok: true; config: DemoConfig } | { ok: false; issues: ConfigIssue[] };
 
 /** Copy-pasteable `.env` shown alongside the configuration errors. */
 export const ENV_TEMPLATE = `# react/demo/.env
@@ -93,19 +93,24 @@ VITE_CONTRACT_ID=${DEFAULT_CONTRACT_ID}
 /** What each variable must look like, and how to fix it. */
 const FIELD_HELP: Record<string, { expected: string; hint: string }> = {
   VITE_RPC_URL: {
-    expected: 'An absolute http(s) URL, e.g. https://soroban-testnet.stellar.org',
-    hint: 'Point VITE_RPC_URL at the Soroban RPC endpoint the demo should talk to. ' +
-      'Local: http://localhost:8000. Restart `npm run dev` after editing .env.',
+    expected:
+      "An absolute http(s) URL, e.g. https://soroban-testnet.stellar.org",
+    hint:
+      "Point VITE_RPC_URL at the Soroban RPC endpoint the demo should talk to. " +
+      "Local: http://localhost:8000. Restart `npm run dev` after editing .env.",
   },
   VITE_NETWORK_PASSPHRASE: {
-    expected: 'A non-empty passphrase, e.g. Test SDF Network ; September 2015',
-    hint: 'Copy the passphrase verbatim, including the trailing date. It must match ' +
-      'VITE_RPC_URL and the network the wallet extension is on.',
+    expected: "A non-empty passphrase, e.g. Test SDF Network ; September 2015",
+    hint:
+      "Copy the passphrase verbatim, including the trailing date. It must match " +
+      "VITE_RPC_URL and the network the wallet extension is on.",
   },
   VITE_CONTRACT_ID: {
-    expected: 'A Stellar contract id: C followed by 55 uppercase base32 characters',
-    hint: 'Deploy the token contract and paste the printed contract id here. ' +
-      'See deployments/ and the contract README for the deploy command.',
+    expected:
+      "A Stellar contract id: C followed by 55 uppercase base32 characters",
+    hint:
+      "Deploy the token contract and paste the printed contract id here. " +
+      "See deployments/ and the contract README for the deploy command.",
   },
 };
 
@@ -124,24 +129,27 @@ function readEnv(
 ): string {
   const value = env[key];
   if (value === undefined) {
-    received[key] = '(not set)';
+    received[key] = "(not set)";
     return fallback;
   }
-  const text = typeof value === 'string' ? value : String(value);
+  const text = typeof value === "string" ? value : String(value);
   received[key] = text;
   return text;
 }
 
 /** Trims an optional environment value, mapping blanks to `undefined`. */
 function optionalText(value: string | boolean | undefined): string | undefined {
-  if (typeof value !== 'string') return undefined;
+  if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
 /** Turns a zod issue into the developer-facing {@link ConfigIssue}. */
-function toConfigIssue(issue: RawIssue, received: Record<string, string>): ConfigIssue {
-  const field = String(issue.path[0] ?? '(env)');
+function toConfigIssue(
+  issue: RawIssue,
+  received: Record<string, string>,
+): ConfigIssue {
+  const field = String(issue.path[0] ?? "(env)");
   const help = FIELD_HELP[field];
   const value = received[field];
   return {
@@ -167,19 +175,26 @@ function toConfigIssue(issue: RawIssue, received: Record<string, string>): Confi
 export function loadConfig(env: RawEnv = import.meta.env): ConfigResult {
   const received: Record<string, string> = {};
   const raw = {
-    VITE_RPC_URL: readEnv(env, 'VITE_RPC_URL', DEFAULT_RPC_URL, received),
+    VITE_RPC_URL: readEnv(env, "VITE_RPC_URL", DEFAULT_RPC_URL, received),
     VITE_NETWORK_PASSPHRASE: readEnv(
       env,
-      'VITE_NETWORK_PASSPHRASE',
+      "VITE_NETWORK_PASSPHRASE",
       DEFAULT_NETWORK_PASSPHRASE,
       received,
     ),
-    VITE_CONTRACT_ID: readEnv(env, 'VITE_CONTRACT_ID', DEFAULT_CONTRACT_ID, received),
+    VITE_CONTRACT_ID: readEnv(
+      env,
+      "VITE_CONTRACT_ID",
+      DEFAULT_CONTRACT_ID,
+      received,
+    ),
   };
 
   const parsed = demoEnvSchema.safeParse(raw);
   if (!parsed.success) {
-    const issues = parsed.error.issues.map((issue) => toConfigIssue(issue, received));
+    const issues = parsed.error.issues.map((issue) =>
+      toConfigIssue(issue, received),
+    );
     return { ok: false, issues };
   }
 
@@ -201,16 +216,19 @@ export function loadConfig(env: RawEnv = import.meta.env): ConfigResult {
  */
 export function describeConfigError(issues: readonly ConfigIssue[]): string {
   const header = `The bc-forge React demo cannot start with the current environment (${issues.length} problem${
-    issues.length === 1 ? '' : 's'
+    issues.length === 1 ? "" : "s"
   }).`;
   const details = issues.map((issue) => {
     const lines = [`- ${issue.message}`];
     if (issue.received !== undefined) {
-      lines.push(`    received: ${issue.received === '' ? '(empty string)' : issue.received}`);
+      lines.push(
+        `    received: ${issue.received === "" ? "(empty string)" : issue.received}`,
+      );
     }
-    if (issue.expected !== undefined) lines.push(`    expected: ${issue.expected}`);
+    if (issue.expected !== undefined)
+      lines.push(`    expected: ${issue.expected}`);
     if (issue.hint !== undefined) lines.push(`    hint: ${issue.hint}`);
-    return lines.join('\n');
+    return lines.join("\n");
   });
-  return [header, ...details].join('\n');
+  return [header, ...details].join("\n");
 }

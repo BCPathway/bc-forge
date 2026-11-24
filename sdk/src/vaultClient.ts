@@ -579,8 +579,16 @@ export class VaultClient {
     args: xdr.ScVal[],
     source?: Keypair,
   ): Promise<TransactionResult> {
-    const isAdapter = Boolean(source && typeof (source as any).signTransaction === 'function' && typeof (source as any).secret !== 'function');
-    const adapter = isAdapter ? (source as unknown as WalletAdapter) : (source ? undefined : this.walletAdapter);
+    const isAdapter = Boolean(
+      source &&
+      typeof (source as any).signTransaction === 'function' &&
+      typeof (source as any).secret !== 'function',
+    );
+    const adapter = isAdapter
+      ? (source as unknown as WalletAdapter)
+      : source
+        ? undefined
+        : this.walletAdapter;
     const actualSource = isAdapter ? undefined : source;
 
     if (!actualSource && !adapter) throw new SignerRequiredError();
@@ -617,7 +625,8 @@ export class VaultClient {
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {
             success: true,
-            hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? response.txHash,
+            hash:
+              (response as unknown as { hash?: string; txHash?: string }).hash ?? response.txHash,
             returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
           };
         }

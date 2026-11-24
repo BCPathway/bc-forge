@@ -494,11 +494,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildMintWhere(address, fromLedger);
@@ -516,11 +514,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildTransferWhere(address, fromLedger);
@@ -538,11 +534,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildBurnWhere(address, fromLedger);
@@ -560,11 +554,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildAddressFieldWhere("caller", address, fromLedger);
@@ -587,11 +579,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildAddressFieldWhere("caller", address, fromLedger);
@@ -614,11 +604,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildAddressFieldWhere("beneficiary", address, fromLedger);
@@ -641,11 +629,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildAddressFieldWhere("recipient", address, fromLedger);
@@ -671,11 +657,9 @@ export function createApiRouter(
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildHolderWhere(address, fromLedger);
@@ -695,11 +679,9 @@ export function createApiRouter(
     asyncHandler(async (req, res) => {
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid from_ledger: must be a non-negative integer",
-          });
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
         return;
       }
       const where = buildSupplyPointWhere(fromLedger);
