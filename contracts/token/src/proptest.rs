@@ -6,33 +6,34 @@
 
 #![cfg(test)]
 
+use crate::{BcForgeToken, BcForgeTokenClient};
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
-use crate::{BcForgeToken, BcForgeTokenClient};
 
 /// Helper: setup a fresh environment and initialized client.
 fn setup_test_env(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     env.mock_all_auths();
     let contract_id = env.register(BcForgeToken, ());
     let client = BcForgeTokenClient::new(env, &contract_id);
-    
+
     let admin = Address::generate(env);
     let name = String::from_str(env, "PropTest Token");
     let symbol = String::from_str(env, "PTT");
     client.initialize(&admin, &7, &name, &symbol);
-    
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
+
     (client, admin)
 }
 
 /// Helper: setup a fresh environment with rate limiting enabled.
 fn setup_test_env_with_rate_limiting(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let (client, admin) = setup_test_env(env);
-    
+
     // Set up rate limiting for mint operations
     // Note: This requires the bc-forge-rate-limit contract to be deployed
     // For testing purposes, we'll use the client's internal methods
-    
+
     (client, admin)
 }
 
@@ -79,7 +80,7 @@ proptest! {
 
         client.mint(&admin, &user, &mint1);
         client.mint(&admin, &user, &mint2);
-        
+
         let expected_supply = mint1 + mint2;
         assert_eq!(client.supply(), expected_supply);
 
@@ -122,7 +123,7 @@ proptest! {
                 current_balance_a -= amt;
                 current_balance_b += amt;
             }
-            
+
             if current_balance_b >= amt / 2 {
                 client.transfer(&user_b, &user_c, &(amt / 2));
                 current_balance_b -= amt / 2;
@@ -153,17 +154,17 @@ proptest! {
         // Test that reentrant calls are blocked
         // This is a basic test - in real scenarios we'd need to simulate cross-contract calls
         // For now, we verify that the guard state is properly set
-        
+
         // The reentrancy guard should prevent multiple simultaneous calls
         // We'll test by attempting to call mint twice in quick succession
         // This is a simplified test since true reentrancy requires cross-contract calls
-        
+
         // First mint should succeed
         client.mint(&admin, &user_b, &100);
-        
+
         // Second mint should also succeed (not reentrant)
         client.mint(&admin, &user_b, &200);
-        
+
         // The key is that the guard prevents the same function from being called recursively
         // during execution, which this test verifies indirectly
         assert_eq!(client.balance(&user_b), 300);
@@ -185,7 +186,7 @@ proptest! {
         // In a real test, we would configure rate limits and then test
         // that exceeding them causes failures
         // For now, we verify the rate limit functions exist and can be called
-        
+
         // This is a basic integration test
         assert!(true); // Placeholder - actual rate limit testing requires deployment
     }
@@ -205,7 +206,7 @@ proptest! {
 
         // Initial mint
         client.mint(&admin, &user_a, &initial_mint);
-        
+
         // Verify supply invariant
         let initial_supply = client.supply();
         assert_eq!(client.balance(&user_a), initial_mint);

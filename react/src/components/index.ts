@@ -162,3 +162,5 @@ export type {
 
 export { PausedBanner } from "./PausedBanner";
 export type { PausedBannerProps } from "./PausedBanner";
+export * from "./VestingScreen";
+export * from "./SplitScreen";

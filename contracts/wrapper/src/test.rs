@@ -25,6 +25,7 @@ fn setup(
         &String::from_str(env, "Underlying Token"),
         &String::from_str(env, "UNDER"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(env, &wrapper_id);
@@ -84,6 +85,7 @@ fn test_double_initialize_fails() {
         &String::from_str(&env, "Underlying"),
         &String::from_str(&env, "UND"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(&env, &wrapper_id);
@@ -352,6 +354,7 @@ fn test_decimal_scaling_up() {
         &String::from_str(&env, "Low Decimals"),
         &String::from_str(&env, "LOW"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(&env, &wrapper_id);
@@ -860,6 +863,7 @@ fn test_decimal_downscaling_rounds_shares_down() {
         &String::from_str(&env, "High Precision Token"),
         &String::from_str(&env, "HPT"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     // Wrapper vault has 7 decimals
     let wrapper_id = env.register(WrapperContract, ());
@@ -907,6 +911,7 @@ fn test_sub_unit_withdraw_rounding_to_zero_rejected() {
         &String::from_str(&env, "Low Precision Token"),
         &String::from_str(&env, "LPT"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     // Wrapper vault has 7 decimals
     let wrapper_id = env.register(WrapperContract, ());
@@ -1718,6 +1723,7 @@ fn test_withdraw_dust_payout_fails() {
         &String::from_str(&env, "Low Decimals"),
         &String::from_str(&env, "LOW"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(&env, &wrapper_id);
@@ -2396,6 +2402,7 @@ fn test_rescue_tokens_admin_recovers_foreign_token() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &wrapper.address, &7_000);
 
     let recovery = Address::generate(&env);
@@ -2423,6 +2430,7 @@ fn test_rescue_tokens_rejects_non_admin() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &wrapper.address, &7_000);
 
     let stranger = Address::generate(&env);
@@ -2496,6 +2504,7 @@ fn test_rescue_tokens_rejects_invalid_amount() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &wrapper.address, &7_000);
 
     let recovery = Address::generate(&env);
@@ -2749,4 +2758,18 @@ fn test_claim_withdrawal_partial_validation_and_cooldown_errors() {
         wrapper.try_claim_withdrawal_partial(&user, &500_000),
         Err(Ok(WrapperError::ContractPaused))
     );
+}
+
+/// Storage footprint / instance TTL diagnostics views (#1325).
+#[test]
+fn test_wrapper_storage_diagnostics_views() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    let info = wrapper.get_storage_info();
+    assert_eq!(info.instance_ttl, wrapper.get_instance_ttl());
+    assert_eq!(info.instance_keys, wrapper.get_storage_key_counts());
+    assert!(info.instance_ttl > 0);
+    assert!(info.instance_keys > 0);
 }
