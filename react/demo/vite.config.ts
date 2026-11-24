@@ -25,15 +25,15 @@
  * cold load, but they are content-hash stable across deploys, so they are
  * cached independently of the app code and never invalidate the entry chunk.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { defineConfig, type Plugin } from 'vite';
-import react from '@vitejs/plugin-react';
-import { demoAliases, demoManualChunks, sharedAliases } from './aliases';
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { defineConfig, type Plugin } from "vite";
+import react from "@vitejs/plugin-react";
+import { demoAliases, demoManualChunks, sharedAliases } from "./aliases";
 
 const DEV_SERVER_PORT = 5173;
 const PREVIEW_SERVER_PORT = 4173;
-const MANIFEST_FILE = 'dist/.vite/manifest.json';
+const MANIFEST_FILE = "dist/.vite/manifest.json";
 
 /** The sub-200 kB initial-chunk budget from the issue's acceptance criteria. */
 const INITIAL_CHUNK_BUDGET_KB = 200;
@@ -62,13 +62,13 @@ interface ManifestChunk {
  */
 function bundleBudgetPlugin(): Plugin {
   return {
-    name: 'bc-forge:bundle-budget',
-    apply: 'build',
+    name: "bc-forge:bundle-budget",
+    apply: "build",
     closeBundle() {
       let manifest: Record<string, ManifestChunk>;
       try {
         manifest = JSON.parse(
-          readFileSync(resolve(MANIFEST_FILE), 'utf8'),
+          readFileSync(resolve(MANIFEST_FILE), "utf8"),
         ) as Record<string, ManifestChunk>;
       } catch {
         console.warn(
@@ -95,17 +95,18 @@ function bundleBudgetPlugin(): Plugin {
         const chunk = manifest[key];
         if (!chunk) continue;
         const bytes = Buffer.byteLength(
-          readFileSync(resolve('dist', chunk.file), 'utf8'),
+          readFileSync(resolve("dist", chunk.file), "utf8"),
         );
         total += bytes;
         lines.push(`  ${chunk.file}  ${(bytes / 1024).toFixed(1)} kB`);
       }
 
       const kb = total / 1024;
-      const verdict = kb <= INITIAL_CHUNK_BUDGET_KB ? 'within budget' : 'OVER BUDGET';
+      const verdict =
+        kb <= INITIAL_CHUNK_BUDGET_KB ? "within budget" : "OVER BUDGET";
       console.info(
         `[bc-forge] Initial chunk (#1139): ${kb.toFixed(1)} kB uncompressed, ` +
-          `${verdict} (budget ${INITIAL_CHUNK_BUDGET_KB} kB)\n${lines.sort().join('\n')}`,
+          `${verdict} (budget ${INITIAL_CHUNK_BUDGET_KB} kB)\n${lines.sort().join("\n")}`,
       );
     },
   };
@@ -117,7 +118,7 @@ export default defineConfig(({ command }) => ({
       // The automatic JSX runtime is the default, but pinning the plugin's
       // `jsxRuntime` keeps the transform identical between the dev server and
       // the production build.
-      jsxRuntime: 'automatic',
+      jsxRuntime: "automatic",
     }),
     bundleBudgetPlugin(),
   ],
@@ -143,7 +144,7 @@ export default defineConfig(({ command }) => ({
      * Reacts, broken hooks" failure once the SDK and the demo both pull React
      * in.
      */
-    dedupe: ['react', 'react-dom'],
+    dedupe: ["react", "react-dom"],
   },
 
   /**
@@ -157,10 +158,10 @@ export default defineConfig(({ command }) => ({
     // Fail loudly instead of silently moving to 5174 — a moved port would make
     // every e2e spec time out against a server that is not there.
     strictPort: true,
-    host: '127.0.0.1',
+    host: "127.0.0.1",
     open: false,
     // HMR needs its own headers kept fresh; never cache a dev asset.
-    headers: { 'Cache-Control': 'no-store' },
+    headers: { "Cache-Control": "no-store" },
   },
 
   /**
@@ -170,7 +171,7 @@ export default defineConfig(({ command }) => ({
   preview: {
     port: PREVIEW_SERVER_PORT,
     strictPort: true,
-    host: '127.0.0.1',
+    host: "127.0.0.1",
     open: false,
   },
 
@@ -181,8 +182,8 @@ export default defineConfig(({ command }) => ({
    * the production build.
    */
   esbuild: {
-    target: 'es2022',
-    legalComments: 'none',
+    target: "es2022",
+    legalComments: "none",
   },
 
   css: {
@@ -194,14 +195,14 @@ export default defineConfig(({ command }) => ({
   build: {
     // ES2022 matches the esbuild target above; browsers that need more
     // downlevelling can be added here without touching anything else.
-    target: 'es2022',
-    outDir: 'dist',
-    assetsDir: 'assets',
-    sourcemap: command === 'build' ? 'hidden' : false,
+    target: "es2022",
+    outDir: "dist",
+    assetsDir: "assets",
+    sourcemap: command === "build" ? "hidden" : false,
     // `hidden` still emits full source maps — they just do not get a
     // `//# sourceMappingURL` comment appended, so they are only downloaded by
     // dev tools (e.g. an error reporter) and never by an end user.
-    minify: 'esbuild',
+    minify: "esbuild",
     cssMinify: true,
     // Required for `manualChunks` to see the whole module graph, and required by
     // `bundleBudgetPlugin` above.
@@ -231,9 +232,9 @@ export default defineConfig(({ command }) => ({
         onlyExplicitManualChunks: true,
         // Readable filenames in a human-facing demo build; hashed filenames
         // still separate app code from the stable vendor chunks.
-        entryFileNames: 'assets/[name]-[hash].js',
-        chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash][extname]',
+        entryFileNames: "assets/[name]-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
       },
     },
   },

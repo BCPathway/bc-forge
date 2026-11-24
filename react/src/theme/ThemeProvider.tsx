@@ -25,46 +25,52 @@ import React, {
   useMemo,
   useState,
   type ReactNode,
-} from 'react';
-import { cssVariablesFor } from '../theme';
+} from "react";
+import { cssVariablesFor } from "../theme";
 
 /**
  * The preference a consumer stores: an explicit choice, or `'system'` to defer
  * to `prefers-color-scheme`.
  */
-export type Theme = 'light' | 'dark' | 'system';
+export type Theme = "light" | "dark" | "system";
 
 /** The concrete scheme actually applied to the document. Never `'system'`. */
-export type ResolvedTheme = 'light' | 'dark';
+export type ResolvedTheme = "light" | "dark";
 
 /** `localStorage` key used when {@link ThemeProviderProps.storageKey} is unset. */
-export const DEFAULT_THEME_STORAGE_KEY = 'bc-forge-theme';
+export const DEFAULT_THEME_STORAGE_KEY = "bc-forge-theme";
 
 /** Class added to `<html>` while the resolved scheme is dark. */
-export const DARK_CLASS = 'dark';
+export const DARK_CLASS = "dark";
 
 /** Attribute added to `<html>` carrying the resolved scheme. */
-export const THEME_ATTRIBUTE = 'data-theme';
+export const THEME_ATTRIBUTE = "data-theme";
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
 /** Narrows an unknown stored value to a {@link Theme}, or `null` if invalid. */
 function parseTheme(value: string | null | undefined): Theme | null {
-  return value === 'light' || value === 'dark' || value === 'system' ? value : null;
+  return value === "light" || value === "dark" || value === "system"
+    ? value
+    : null;
 }
 
 /** Whether `matchMedia` is usable in this environment. */
 function hasMatchMedia(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+  return (
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+  );
 }
 
 /** Reads the OS colour-scheme preference, defaulting to light. */
 function systemTheme(): ResolvedTheme {
-  if (!hasMatchMedia()) return 'light';
+  if (!hasMatchMedia()) return "light";
   try {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
   } catch {
-    return 'light';
+    return "light";
   }
 }
 
@@ -82,7 +88,7 @@ export function resolveTheme(
   theme: Theme,
   system: ResolvedTheme = systemTheme(),
 ): ResolvedTheme {
-  return theme === 'system' ? system : theme;
+  return theme === "system" ? system : theme;
 }
 
 /**
@@ -94,9 +100,9 @@ export function resolveTheme(
  */
 export function readStoredTheme(
   storageKey: string = DEFAULT_THEME_STORAGE_KEY,
-  fallback: Theme = 'system',
+  fallback: Theme = "system",
 ): Theme {
-  if (typeof window === 'undefined') return fallback;
+  if (typeof window === "undefined") return fallback;
   try {
     return parseTheme(window.localStorage.getItem(storageKey)) ?? fallback;
   } catch {
@@ -119,7 +125,7 @@ export function storeTheme(
   theme: Theme,
   storageKey: string = DEFAULT_THEME_STORAGE_KEY,
 ): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === "undefined") return false;
   try {
     window.localStorage.setItem(storageKey, theme);
     return true;
@@ -161,7 +167,9 @@ export function storeTheme(
 export function createThemeScript(
   options: { storageKey?: string } = {},
 ): string {
-  const storageKey = JSON.stringify(options.storageKey ?? DEFAULT_THEME_STORAGE_KEY);
+  const storageKey = JSON.stringify(
+    options.storageKey ?? DEFAULT_THEME_STORAGE_KEY,
+  );
   return `(function(){try{var k=${storageKey};var p=window.localStorage.getItem(k);if(p!=="light"&&p!=="dark"&&p!=="system"){p="system"}var d=p==="dark"||(p==="system"&&typeof window.matchMedia==="function"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.classList.toggle("dark",d);e.setAttribute("data-theme",d?"dark":"light");e.style.colorScheme=d?"dark":"light"}catch(_){}})();`;
 }
 
@@ -178,7 +186,7 @@ interface AppliedTheme {
 }
 
 function readElement(): HTMLElement | null {
-  return typeof document === 'undefined' ? null : document.documentElement;
+  return typeof document === "undefined" ? null : document.documentElement;
 }
 
 /**
@@ -199,7 +207,7 @@ function applyTheme(
   const colorScheme = element.style.colorScheme;
   const previousVariables = new Map<string, string>();
 
-  element.classList.toggle(DARK_CLASS, resolved === 'dark');
+  element.classList.toggle(DARK_CLASS, resolved === "dark");
   element.setAttribute(THEME_ATTRIBUTE, resolved);
   element.style.colorScheme = resolved;
 
@@ -230,7 +238,7 @@ function restoreTheme(applied: AppliedTheme | null): void {
   element.style.colorScheme = applied.colorScheme;
 
   for (const [name, value] of applied.previousVariables) {
-    if (value === '') element.style.removeProperty(name);
+    if (value === "") element.style.removeProperty(name);
     else element.style.setProperty(name, value);
   }
 }
@@ -266,8 +274,8 @@ export interface ThemeContextValue {
  * of throwing.
  */
 export const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'system',
-  resolvedTheme: 'light',
+  theme: "system",
+  resolvedTheme: "light",
   setTheme: () => {},
   toggleTheme: () => {},
   isSystem: true,
@@ -320,7 +328,7 @@ export interface ThemeProviderProps {
  */
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({
   children,
-  defaultTheme = 'system',
+  defaultTheme = "system",
   storageKey = DEFAULT_THEME_STORAGE_KEY,
 }) => {
   // Reading storage during the first render (rather than in an effect) is what
@@ -336,21 +344,21 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     if (!hasMatchMedia()) return;
     let query: MediaQueryList;
     try {
-      query = window.matchMedia('(prefers-color-scheme: dark)');
+      query = window.matchMedia("(prefers-color-scheme: dark)");
     } catch {
       return;
     }
     const onChange = (event: MediaQueryListEvent) => {
-      setSystem(event.matches ? 'dark' : 'light');
+      setSystem(event.matches ? "dark" : "light");
     };
-    setSystem(query.matches ? 'dark' : 'light');
+    setSystem(query.matches ? "dark" : "light");
 
     // Safari < 14 only has the deprecated `addListener`/`removeListener`.
-    if (typeof query.addEventListener === 'function') {
-      query.addEventListener('change', onChange);
-      return () => query.removeEventListener('change', onChange);
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
     }
-    if (typeof query.addListener === 'function') {
+    if (typeof query.addListener === "function") {
       query.addListener(onChange);
       return () => query.removeListener(onChange);
     }
@@ -359,14 +367,14 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
 
   /** Keep other tabs of the same origin in sync. */
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
     const onStorage = (event: StorageEvent) => {
       if (event.key !== null && event.key !== storageKey) return;
       const next = parseTheme(event.newValue);
       if (next) setThemeState(next);
     };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, [storageKey]);
 
   const resolvedTheme = resolveTheme(theme, system);
@@ -389,7 +397,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     // Resolve `'system'` to what is actually on screen before flipping, so the
     // first click from a dark OS lands on light. The write is a side effect and
     // deliberately lives outside the state updater, which must stay pure.
-    const next: Theme = resolveTheme(theme, system) === 'dark' ? 'light' : 'dark';
+    const next: Theme =
+      resolveTheme(theme, system) === "dark" ? "light" : "dark";
     setThemeState(next);
     storeTheme(next, storageKey);
   }, [storageKey, system, theme]);
@@ -400,12 +409,14 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
       resolvedTheme,
       setTheme,
       toggleTheme,
-      isSystem: theme === 'system',
+      isSystem: theme === "system",
     }),
     [theme, resolvedTheme, setTheme, toggleTheme],
   );
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 };
 
 /**
