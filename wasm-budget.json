@@ -1,9 +1,9 @@
 {
-  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects lock_tokens, withdraw_locked (#1076, #1077), role proposals (#914, #918, #1308), and the per-minter allowances, scheduled mint streams and storage/TTL diagnostics added in #1374; vesting links the token crate, so that same code is included in its WASM. The rate-limit and split budgets are raised by #914/#918 as well: both contracts link the bc-forge-admin crate, whose privileged-action timelock, role renounce, and proposal listing additions compile into their WASMs.",
-  "_measured_on": "cargo 1.96.0, wasm32-unknown-unknown, --release, zero warnings. #914/#918 re-measured on 1.94.0; rate-limit/split re-measured on 1.96.0; token/vesting re-measured on 1.96.0 (#1308); token re-measured on 1.96.0 after #1374 (206864 bytes, budget 218000).",
+  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects lock_tokens, withdraw_locked (#1076, #1077), role proposals (#914, #918, #1308), and the per-minter allowances, scheduled mint streams and storage/TTL diagnostics added in #1374; vesting links the token crate, so that same code is included in its WASM. The rate-limit and split budgets are raised by #914/#918 as well: both contracts link the bc-forge-admin crate, whose privileged-action timelock, role renounce, and proposal listing additions compile into their WASMs. Split raised for batch release and token rescue (#1464-#1466).",
+  "_measured_on": "cargo 1.96.0, wasm32-unknown-unknown, --release, zero warnings. #914/#918 re-measured on 1.94.0; rate-limit/split re-measured on 1.96.0; token/vesting re-measured on 1.96.0 (#1308); token re-measured on 1.96.0 after #1374 (206864 bytes, budget 218000). Split re-measured with #1464-#1466 applied.",
   "budgets": {
-    "bc_forge_rate_limit.wasm": 54603,
-    "bc_forge_split.wasm": 94692,
+    "bc_forge_rate_limit.wasm": 56000,
+    "bc_forge_split.wasm": 105000,
     "bc_forge_token.wasm": 218000,
     "bc_forge_vesting.wasm": 240000,
     "bc_forge_wrapper.wasm": 140000,
