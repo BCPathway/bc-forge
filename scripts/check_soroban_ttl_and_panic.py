@@ -37,7 +37,7 @@ def is_production_source(path: pathlib.Path) -> bool:
 
 TARGET_FILES = sorted(
     path
-    for crate in ("token", "admin")
+    for crate in ("token", "admin", "vesting", "split", "wrapper", "rate-limit")
     for path in (ROOT / "contracts" / crate / "src").rglob("*.rs")
     if is_production_source(path)
 )

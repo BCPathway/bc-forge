@@ -342,29 +342,46 @@ impl WrapperContract {
         env.storage().instance().set(&DataKey::VaultState, state);
     }
 
+    fn extend_storage_ttl_for_key<K>(env: &Env, key: &K)
+    where
+        K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
+    {
+        ttl::extend_storage_ttl_for_key(
+            env,
+            key,
+            ttl::BALANCE_LIFETIME_THRESHOLD,
+            ttl::BALANCE_BUMP_AMOUNT,
+        );
+    }
+
     fn read_balance(env: &Env, id: &Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Balance(id.clone()))
-            .unwrap_or(0)
+        let key = DataKey::Balance(id.clone());
+        let val = env.storage().persistent().get(&key);
+        if val.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        val.unwrap_or(0)
     }
 
     fn write_balance(env: &Env, id: &Address, balance: i128) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Balance(id.clone()), &balance);
+        let key = DataKey::Balance(id.clone());
+        env.storage().persistent().set(&key, &balance);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn read_unlock_time(env: &Env, user: &Address) -> Option<u64> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::UnlockTime(user.clone()))
+        let key = DataKey::UnlockTime(user.clone());
+        let val = env.storage().persistent().get(&key);
+        if val.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        val
     }
 
     fn write_unlock_time(env: &Env, user: &Address, unlock_timestamp: u64) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::UnlockTime(user.clone()), &unlock_timestamp);
+        let key = DataKey::UnlockTime(user.clone());
+        env.storage().persistent().set(&key, &unlock_timestamp);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn remove_unlock_time(env: &Env, user: &Address) {
@@ -419,28 +436,28 @@ impl WrapperContract {
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> i128 {
         // Check expiration first
-        if let Some(exp) = env
-            .storage()
-            .persistent()
-            .get::<_, u32>(&DataKey::AllowanceExp(from.clone(), spender.clone()))
-        {
+        let exp_key = DataKey::AllowanceExp(from.clone(), spender.clone());
+        if let Some(exp) = env.storage().persistent().get::<_, u32>(&exp_key) {
+            Self::extend_storage_ttl_for_key(env, &exp_key);
             if exp > 0 && env.ledger().sequence() > exp {
                 return 0;
             }
         }
-        env.storage()
-            .persistent()
-            .get(&DataKey::Allowance(from.clone(), spender.clone()))
-            .unwrap_or(0)
+        let key = DataKey::Allowance(from.clone(), spender.clone());
+        let val = env.storage().persistent().get(&key);
+        if val.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        val.unwrap_or(0)
     }
 
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &amount);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AllowanceExp(from.clone(), spender.clone()), &exp);
+        let key = DataKey::Allowance(from.clone(), spender.clone());
+        let exp_key = DataKey::AllowanceExp(from.clone(), spender.clone());
+        env.storage().persistent().set(&key, &amount);
+        env.storage().persistent().set(&exp_key, &exp);
+        Self::extend_storage_ttl_for_key(env, &key);
+        Self::extend_storage_ttl_for_key(env, &exp_key);
     }
 
     fn move_balance(
@@ -550,15 +567,18 @@ impl WrapperContract {
     }
 
     fn read_queued_withdrawal(env: &Env, user: &Address) -> Option<QueuedWithdrawal> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::QueuedWithdrawal(user.clone()))
+        let key = DataKey::QueuedWithdrawal(user.clone());
+        let val = env.storage().persistent().get(&key);
+        if val.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        val
     }
 
     fn write_queued_withdrawal(env: &Env, user: &Address, queued: &QueuedWithdrawal) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::QueuedWithdrawal(user.clone()), queued);
+        let key = DataKey::QueuedWithdrawal(user.clone());
+        env.storage().persistent().set(&key, queued);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn remove_queued_withdrawal(env: &Env, user: &Address) {
@@ -568,15 +588,18 @@ impl WrapperContract {
     }
 
     fn read_user_emergency_state(env: &Env, user: &Address) -> Option<UserEmergencyState> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::UserEmergencyState(user.clone()))
+        let key = DataKey::UserEmergencyState(user.clone());
+        let val = env.storage().persistent().get(&key);
+        if val.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        val
     }
 
     fn write_user_emergency_state(env: &Env, user: &Address, state: &UserEmergencyState) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::UserEmergencyState(user.clone()), state);
+        let key = DataKey::UserEmergencyState(user.clone());
+        env.storage().persistent().set(&key, state);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn check_and_update_emergency_cap(
@@ -658,6 +681,7 @@ impl WrapperContract {
         Self::write_supply(&env, 0);
 
         events::emit_initialized(&env, &admin, &token_contract_id);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -730,6 +754,7 @@ impl WrapperContract {
 
         Self::release_lock(&env);
         events::emit_wrap(&env, &caller, amount, wrapped_amount);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -825,6 +850,7 @@ impl WrapperContract {
 
         Self::release_lock(&env);
         events::emit_deposit(&env, &caller, assets, shares_out);
+        ttl::extend_instance_ttl(&env);
         Ok(shares_out)
     }
 
@@ -881,6 +907,7 @@ impl WrapperContract {
 
         Self::release_lock(&env);
         events::emit_unwrap(&env, &caller, wrapped_amount, underlying_amount);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -951,6 +978,7 @@ impl WrapperContract {
 
         client.transfer(&env.current_contract_address(), &to, &amount);
         events::emit_rescued(&env, &caller, &token, &to, amount);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -997,6 +1025,7 @@ impl WrapperContract {
         }
         bc_forge_lifecycle::pause(env.clone(), current_admin.clone());
         events::emit_paused(&env, &current_admin);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1008,6 +1037,7 @@ impl WrapperContract {
         }
         bc_forge_lifecycle::unpause(env.clone(), current_admin.clone());
         events::emit_unpaused(&env, &current_admin);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1019,6 +1049,7 @@ impl WrapperContract {
         }
         bc_forge_lifecycle::pause(env.clone(), caller.clone());
         events::emit_paused(&env, &caller);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1030,6 +1061,7 @@ impl WrapperContract {
         }
         bc_forge_lifecycle::unpause(env.clone(), caller.clone());
         events::emit_unpaused(&env, &caller);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1088,6 +1120,7 @@ impl WrapperContract {
 
         Self::release_lock(&env);
         events::emit_distribute_rewards(&env, &caller, amount);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1217,6 +1250,7 @@ impl WrapperContract {
 
         Self::write_cooldown_config(&env, &config);
         events::emit_cooldown_config_set(&env, &caller, &config);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1257,6 +1291,7 @@ impl WrapperContract {
 
         Self::release_lock(&env);
         events::emit_withdraw(&env, &caller, queued.shares, queued.amount);
+        ttl::extend_instance_ttl(&env);
         Ok(queued.amount)
     }
 
@@ -1408,11 +1443,13 @@ impl WrapperContract {
             Self::write_queued_withdrawal(&env, &caller, &queued);
             Self::release_lock(&env);
             events::emit_withdraw_queued(&env, &caller, shares, tokens_out, release_ledger);
+            ttl::extend_instance_ttl(&env);
             Ok(0)
         } else {
             underlying_client.transfer(&env.current_contract_address(), &caller, &tokens_out);
             Self::release_lock(&env);
             events::emit_withdraw(&env, &caller, shares, tokens_out);
+            ttl::extend_instance_ttl(&env);
             Ok(tokens_out)
         }
     }
@@ -1446,6 +1483,7 @@ impl WrapperContract {
         admin::require_admin(&env, &caller);
         Self::write_unlock_time(&env, &user, unlock_timestamp);
         events::emit_unlock_time_set(&env, &caller, &user, unlock_timestamp);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1465,6 +1503,7 @@ impl WrapperContract {
         admin::require_admin(&env, &caller);
         Self::remove_unlock_time(&env, &user);
         events::emit_unlock_time_cleared(&env, &caller, &user);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
     /// Returns the timestamp at which `user`'s deposit becomes withdrawable,
@@ -1504,6 +1543,7 @@ impl WrapperContract {
 
         Self::write_vault_state(&env, &state);
         events::emit_vault_state_set(&env, &caller, &state);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -1584,6 +1624,7 @@ impl TokenInterface for WrapperContract {
         }
         Self::write_allowance(&env, &from, &spender, amount, exp);
         events::emit_approve(&env, &from, &spender, amount);
+        ttl::extend_instance_ttl(&env);
     }
 
     fn balance(env: Env, id: Address) -> i128 {
@@ -1602,6 +1643,7 @@ impl TokenInterface for WrapperContract {
 
         Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
         events::emit_transfer(&env, &from, &to, amount);
+        ttl::extend_instance_ttl(&env);
     }
 
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
@@ -1627,6 +1669,7 @@ impl TokenInterface for WrapperContract {
             .unwrap_or(0);
         Self::write_allowance(&env, &from, &spender, allowance - amount, exp);
         events::emit_transfer_from(&env, &spender, &from, &to, amount);
+        ttl::extend_instance_ttl(&env);
     }
 
     fn burn(env: Env, from: Address, amount: i128) {
@@ -1646,6 +1689,7 @@ impl TokenInterface for WrapperContract {
         Self::write_balance(&env, &from, balance - amount);
         Self::write_supply(&env, Self::read_supply(&env) - amount);
         events::emit_burn(&env, &from, amount);
+        ttl::extend_instance_ttl(&env);
     }
 
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -1676,6 +1720,7 @@ impl TokenInterface for WrapperContract {
         Self::write_balance(&env, &from, balance - amount);
         Self::write_supply(&env, Self::read_supply(&env) - amount);
         events::emit_burn(&env, &from, amount);
+        ttl::extend_instance_ttl(&env);
     }
 
     fn decimals(env: Env) -> u32 {

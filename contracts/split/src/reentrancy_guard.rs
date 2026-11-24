@@ -30,6 +30,7 @@ impl ReentrancyGuard {
     }
 
     /// Enters the guard, returning `true` if successful or `false` if already entered.
+    // ttl-allow: callers extend instance TTL before taking the guard
     pub fn enter(&self, env: &Env) -> bool {
         let current_state = env
             .storage()
@@ -48,6 +49,7 @@ impl ReentrancyGuard {
     }
 
     /// Exits the guard, releasing the lock.
+    // ttl-allow: callers extend instance TTL before taking the guard
     pub fn exit(&self, env: &Env) {
         env.storage()
             .persistent()
@@ -65,6 +67,8 @@ impl ReentrancyGuard {
     }
 
     /// Requires that the guard is not entered, panicking if it is.
+    // ttl-allow: callers extend instance TTL before taking the guard
+    // panic-allow: reentrancy invariant violation halts execution
     pub fn require_not_entered(&self, env: &Env) {
         assert!(
             self.enter(env),

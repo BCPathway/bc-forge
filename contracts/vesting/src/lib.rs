@@ -11,6 +11,7 @@ mod test_milestones;
 
 use bc_forge_admin as admin;
 use bc_forge_token::BcForgeTokenClient;
+use bc_forge_ttl as ttl;
 use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal,
@@ -155,31 +156,48 @@ impl VestingContract {
         id
     }
 
+    fn extend_storage_ttl_for_key<K>(env: &Env, key: &K)
+    where
+        K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
+    {
+        ttl::extend_storage_ttl_for_key(
+            env,
+            key,
+            ttl::BALANCE_LIFETIME_THRESHOLD,
+            ttl::BALANCE_BUMP_AMOUNT,
+        );
+    }
+
     fn read_schedule(env: &Env, schedule_id: u64) -> Result<StoredVestingSchedule, VestingError> {
-        env.storage()
+        let key = DataKey::Schedule(schedule_id);
+        let schedule = env
+            .storage()
             .persistent()
-            .get(&DataKey::Schedule(schedule_id))
-            .ok_or(VestingError::ScheduleNotFound)
+            .get(&key)
+            .ok_or(VestingError::ScheduleNotFound)?;
+        Self::extend_storage_ttl_for_key(env, &key);
+        Ok(schedule)
     }
 
     fn write_schedule(env: &Env, schedule_id: u64, schedule: &StoredVestingSchedule) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Schedule(schedule_id), schedule);
+        let key = DataKey::Schedule(schedule_id);
+        env.storage().persistent().set(&key, schedule);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn beneficiary_schedule_ids(env: &Env, beneficiary: &Address) -> Vec<u64> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::BeneficiarySchedules(beneficiary.clone()))
-            .unwrap_or_else(|| Vec::new(env))
+        let key = DataKey::BeneficiarySchedules(beneficiary.clone());
+        let ids = env.storage().persistent().get(&key);
+        if ids.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        ids.unwrap_or_else(|| Vec::new(env))
     }
 
     fn write_beneficiary_schedule_ids(env: &Env, beneficiary: &Address, schedule_ids: &Vec<u64>) {
-        env.storage().persistent().set(
-            &DataKey::BeneficiarySchedules(beneficiary.clone()),
-            schedule_ids,
-        );
+        let key = DataKey::BeneficiarySchedules(beneficiary.clone());
+        env.storage().persistent().set(&key, schedule_ids);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     /// Vested amount under the linear curve, given the effective (possibly
@@ -229,16 +247,18 @@ impl VestingContract {
     }
 
     fn read_milestones(env: &Env, schedule_id: u64) -> soroban_sdk::Vec<Milestone> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Milestones(schedule_id))
-            .unwrap_or_else(|| soroban_sdk::Vec::new(env))
+        let key = DataKey::Milestones(schedule_id);
+        let tranches = env.storage().persistent().get(&key);
+        if tranches.is_some() {
+            Self::extend_storage_ttl_for_key(env, &key);
+        }
+        tranches.unwrap_or_else(|| soroban_sdk::Vec::new(env))
     }
 
     fn write_milestones(env: &Env, schedule_id: u64, milestones: &soroban_sdk::Vec<Milestone>) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Milestones(schedule_id), milestones);
+        let key = DataKey::Milestones(schedule_id);
+        env.storage().persistent().set(&key, milestones);
+        Self::extend_storage_ttl_for_key(env, &key);
     }
 
     fn claimable_amount(env: &Env, schedule: &StoredVestingSchedule, current_ledger: u32) -> i128 {
@@ -319,6 +339,7 @@ impl VestingContract {
             .instance()
             .set(&DataKey::NextScheduleId, &0u64);
         admin::set_admin(&env, &admin_address);
+        ttl::extend_instance_ttl(&env);
         Ok(())
     }
 
@@ -380,6 +401,7 @@ impl VestingContract {
                 end_ledger,
                 revocable,
             );
+            ttl::extend_instance_ttl(&env);
             Ok(schedule_id)
         })
     }
@@ -458,6 +480,7 @@ impl VestingContract {
             if total_to_release > 0 {
                 events::emit_tokens_released(&env, &beneficiary, total_to_release);
             }
+            ttl::extend_instance_ttl(&env);
             Ok(total_to_release)
         })
     }
@@ -485,12 +508,14 @@ impl VestingContract {
 
             Self::transfer_from_vault(&env, &admin_address, unvested);
             events::emit_vesting_revoked(&env, schedule_id, &stored.schedule.beneficiary, unvested);
+            ttl::extend_instance_ttl(&env);
             Ok(unvested)
         })
     }
 
     pub fn get_vesting_info(env: Env, beneficiary: Address) -> Vec<VestingInfo> {
         Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        ttl::extend_instance_ttl(&env);
 
         let current_ledger = env.ledger().sequence();
         let schedule_ids = Self::beneficiary_schedule_ids(&env, &beneficiary);
@@ -560,6 +585,7 @@ impl VestingContract {
 
             Self::write_milestones(&env, schedule_id, &milestones);
             events::emit_milestones_set(&env, schedule_id, total);
+            ttl::extend_instance_ttl(&env);
             Ok(())
         })
     }
@@ -616,11 +642,12 @@ impl VestingContract {
             Self::ensure_initialized(&env)?;
             beneficiary.require_auth();
 
-            let mut delegates: Vec<Address> = env
-                .storage()
-                .persistent()
-                .get(&DataKey::ClaimDelegates(beneficiary.clone()))
-                .unwrap_or_else(|| Vec::new(&env));
+            let key = DataKey::ClaimDelegates(beneficiary.clone());
+            let delegates_opt: Option<Vec<Address>> = env.storage().persistent().get(&key);
+            if delegates_opt.is_some() {
+                Self::extend_storage_ttl_for_key(&env, &key);
+            }
+            let mut delegates = delegates_opt.unwrap_or_else(|| Vec::new(&env));
 
             let currently = delegates.contains(&delegate);
             if authorize && !currently {
@@ -636,9 +663,9 @@ impl VestingContract {
                 delegates = filtered;
             }
 
-            env.storage()
-                .persistent()
-                .set(&DataKey::ClaimDelegates(beneficiary), &delegates);
+            env.storage().persistent().set(&key, &delegates);
+            Self::extend_storage_ttl_for_key(&env, &key);
+            ttl::extend_instance_ttl(&env);
             Ok(())
         })
     }
@@ -657,11 +684,12 @@ impl VestingContract {
             caller.require_auth();
 
             if caller != beneficiary {
-                let delegates: Vec<Address> = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::ClaimDelegates(beneficiary.clone()))
-                    .unwrap_or_else(|| Vec::new(&env));
+                let key = DataKey::ClaimDelegates(beneficiary.clone());
+                let delegates_opt: Option<Vec<Address>> = env.storage().persistent().get(&key);
+                if delegates_opt.is_some() {
+                    Self::extend_storage_ttl_for_key(&env, &key);
+                }
+                let delegates = delegates_opt.unwrap_or_else(|| Vec::new(&env));
                 if !delegates.contains(&caller) {
                     return Err(VestingError::UnauthorizedClaimer);
                 }
@@ -693,6 +721,7 @@ impl VestingContract {
             if total_to_release > 0 {
                 events::emit_tokens_released(&env, &beneficiary, total_to_release);
             }
+            ttl::extend_instance_ttl(&env);
             Ok(total_to_release)
         })
     }

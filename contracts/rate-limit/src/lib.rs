@@ -7,6 +7,7 @@
 #![no_std]
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
 
 #[derive(Clone)]
@@ -117,6 +118,7 @@ impl BcForgeRateLimit {
         operation_type: &String,
         _amount: u64,
     ) -> bool {
+        ttl::extend_instance_ttl(env);
         let current_time = Self::get_current_timestamp(env);
 
         // Check global rate limit first
@@ -184,6 +186,7 @@ impl BcForgeRateLimit {
         env.storage()
             .instance()
             .set(&DataKey::GlobalRateLimit(operation_type.clone()), &config);
+        ttl::extend_instance_ttl(env);
     }
 
     /// Set per-address rate limit for an operation type
@@ -202,6 +205,7 @@ impl BcForgeRateLimit {
             &DataKey::AddressRateLimit(address.clone(), operation_type.clone()),
             &config,
         );
+        ttl::extend_instance_ttl(env);
     }
 }
 
@@ -216,7 +220,14 @@ impl BcForgeRateLimit {
         _amount: u64,
     ) -> bool {
         let address_ref = address.as_ref();
-        BcForgeRateLimit::internal_check_rate_limit(&env, address_ref, &operation_type, _amount)
+        let allowed = BcForgeRateLimit::internal_check_rate_limit(
+            &env,
+            address_ref,
+            &operation_type,
+            _amount,
+        );
+        ttl::extend_instance_ttl(&env);
+        allowed
     }
 
     /// Set global rate limit for an operation type
@@ -233,7 +244,8 @@ impl BcForgeRateLimit {
             &operation_type,
             limit,
             window_seconds,
-        )
+        );
+        ttl::extend_instance_ttl(&env);
     }
 
     /// Set per-address rate limit for an operation type
@@ -252,7 +264,8 @@ impl BcForgeRateLimit {
             &operation_type,
             limit,
             window_seconds,
-        )
+        );
+        ttl::extend_instance_ttl(&env);
     }
 }
 

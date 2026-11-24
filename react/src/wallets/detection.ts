@@ -9,29 +9,33 @@
  * no browser API is touched unless {@link isBrowser} says it exists, so the
  * module is safe to import during server-side rendering.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { WalletName } from '../context';
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { WalletName } from "../context";
 
 /** Wallets offered by this package, in the order the UI renders them. */
-export const WALLET_NAMES: readonly WalletName[] = ['freighter', 'albedo'];
+export const WALLET_NAMES: readonly WalletName[] = ["freighter", "albedo"];
 
 /** Display label for each supported wallet. */
 export const WALLET_LABELS: Readonly<Record<WalletName, string>> = {
-  freighter: 'Freighter',
-  albedo: 'Albedo',
+  freighter: "Freighter",
+  albedo: "Albedo",
 };
 
 /** Where a visitor is sent to install Freighter (#1169). */
-export const FREIGHTER_INSTALL_URL = 'https://www.freighter.app/';
+export const FREIGHTER_INSTALL_URL = "https://www.freighter.app/";
 
 /** Where a visitor is sent to open Albedo in a new tab (#1170). */
-export const ALBEDO_INSTALL_URL = 'https://albedo.link/';
+export const ALBEDO_INSTALL_URL = "https://albedo.link/";
 
 /** Extension download page; Albedo ships no extension of its own. */
-export const ALBEDO_EXTENSION_URL = 'https://albedo.link/';
+export const ALBEDO_EXTENSION_URL = "https://albedo.link/";
 
 /** CDN build of `@albedo-link/intent`, injected on demand (#1170). */
-export const ALBEDO_SCRIPT_URL = 'https://albedo.link/intent';
+export const ALBEDO_SCRIPT_URL = "https://albedo.link/intent";
+
+/** Subresource Integrity (SRI) hash for the Albedo intent script (#1322). */
+export const ALBEDO_SCRIPT_INTEGRITY =
+  "sha384-xDYWOVpjYYXgRb3Uon4r9grw1NY7p/YtpmhPevm9VQG2AkgA2nZYagrtnwIoBpT5";
 
 /** How long {@link loadAlbedoScript} waits for the CDN script. @default 10000 */
 export const ALBEDO_SCRIPT_TIMEOUT_MS = 10_000;
@@ -46,29 +50,29 @@ export const ALBEDO_POLL_INTERVAL_MS = 50;
 export const FREIGHTER_READY_TIMEOUT_MS = 1_000;
 
 /** `data-bc-forge` attribute identifying a script this module injected. */
-export const ALBEDO_SCRIPT_ID = 'bc-forge-albedo-intent';
+export const ALBEDO_SCRIPT_ID = "bc-forge-albedo-intent";
 
 /** One or more calls the Freighter extension may expose to prove it is alive. */
 type FreighterProbeMethod =
-  | 'getPublicKey'
-  | 'signTransaction'
-  | 'getNetwork'
-  | 'getNetworkDetails'
-  | 'enable';
+  | "getPublicKey"
+  | "signTransaction"
+  | "getNetwork"
+  | "getNetworkDetails"
+  | "enable";
 
 const FREIGHTER_PROBE_METHODS: readonly FreighterProbeMethod[] = [
-  'getPublicKey',
-  'signTransaction',
-  'getNetwork',
-  'getNetworkDetails',
-  'enable',
+  "getPublicKey",
+  "signTransaction",
+  "getNetwork",
+  "getNetworkDetails",
+  "enable",
 ];
 
 const ALBEDO_PROBE_METHODS: readonly (keyof AlbedoIntentApi)[] = [
-  'publicKey',
-  'signTransaction',
-  'signTx',
-  'tx',
+  "publicKey",
+  "signTransaction",
+  "signTx",
+  "tx",
 ];
 
 /**
@@ -78,7 +82,10 @@ const ALBEDO_PROBE_METHODS: readonly (keyof AlbedoIntentApi)[] = [
  */
 export interface FreighterExtensionApi {
   getPublicKey?: () => Promise<string | undefined>;
-  signTransaction?: (xdr: string, options?: { networkPassphrase?: string }) => Promise<unknown>;
+  signTransaction?: (
+    xdr: string,
+    options?: { networkPassphrase?: string },
+  ) => Promise<unknown>;
   getNetwork?: () => Promise<unknown>;
   getNetworkDetails?: () => Promise<unknown>;
   enable?: () => Promise<unknown>;
@@ -87,7 +94,10 @@ export interface FreighterExtensionApi {
 /** Minimal shape of the `window.albedo` API this module probes. */
 export interface AlbedoIntentApi {
   publicKey?: () => Promise<unknown>;
-  signTransaction?: (xdr: string, options?: { network?: string }) => Promise<unknown>;
+  signTransaction?: (
+    xdr: string,
+    options?: { network?: string },
+  ) => Promise<unknown>;
   signTx?: (xdr: string, options?: { network?: string }) => Promise<unknown>;
   tx?: (options: { xdr: string; network?: string }) => Promise<unknown>;
 }
@@ -143,7 +153,7 @@ export interface AlbedoLoadResult {
  * module under Node (SSR, a plain unit test) neither throws nor reads globals.
  */
 export function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof document !== 'undefined';
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 // ─── Storage primitives (#1172) ─────────────────────────────────────────────
@@ -154,7 +164,7 @@ const memoryStore = new Map<string, string>();
 let cachedStorage: Storage | null = null;
 
 /** Scratch key used to find out whether `localStorage` can be written to. */
-const STORAGE_PROBE_KEY = 'bc-forge:storage-probe';
+const STORAGE_PROBE_KEY = "bc-forge:storage-probe";
 
 /**
  * The usable `localStorage`, or `null`.
@@ -170,7 +180,7 @@ export function getLocalStorage(): Storage | null {
   if (!isBrowser()) return null;
   try {
     const storage = window.localStorage;
-    storage.setItem(STORAGE_PROBE_KEY, '1');
+    storage.setItem(STORAGE_PROBE_KEY, "1");
     storage.removeItem(STORAGE_PROBE_KEY);
     cachedStorage = storage;
   } catch {
@@ -261,7 +271,10 @@ export function removeStoredValue(key: string): void {
  * A `storage` event with `key === null` is `localStorage.clear()` and is
  * treated as a change to every watched key.
  */
-export function subscribeToStoredKeys(keys: readonly string[], listener: () => void): () => void {
+export function subscribeToStoredKeys(
+  keys: readonly string[],
+  listener: () => void,
+): () => void {
   const watched = new Set(keys);
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== null && !watched.has(event.key)) return;
@@ -269,11 +282,11 @@ export function subscribeToStoredKeys(keys: readonly string[], listener: () => v
   };
 
   storageSubscribers.add(listener);
-  if (isBrowser()) window.addEventListener('storage', handleStorage);
+  if (isBrowser()) window.addEventListener("storage", handleStorage);
 
   return () => {
     storageSubscribers.delete(listener);
-    if (isBrowser()) window.removeEventListener('storage', handleStorage);
+    if (isBrowser()) window.removeEventListener("storage", handleStorage);
   };
 }
 
@@ -288,7 +301,7 @@ function getAlbedoGlobal(): unknown {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
 /**
@@ -300,15 +313,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * link instead of letting the adapter fail later.
  */
 function isUsableFreighter(value: unknown): boolean {
-  if (typeof value === 'function') return true;
+  if (typeof value === "function") return true;
   if (!isRecord(value)) return false;
-  return FREIGHTER_PROBE_METHODS.some((method) => typeof value[method] === 'function');
+  return FREIGHTER_PROBE_METHODS.some(
+    (method) => typeof value[method] === "function",
+  );
 }
 
 /** Whether `value` exposes at least one callable Albedo intent method. */
 function isUsableAlbedo(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  return ALBEDO_PROBE_METHODS.some((method) => typeof value[method] === 'function');
+  return ALBEDO_PROBE_METHODS.some(
+    (method) => typeof value[method] === "function",
+  );
 }
 
 /**
@@ -334,17 +351,20 @@ export function isAlbedoAvailable(): boolean {
 /** The `@albedo-link/intent` script tags this page has, ours or the app's. */
 function getAlbedoScriptTags(): HTMLScriptElement[] {
   if (!isBrowser()) return [];
-  return Array.from(document.querySelectorAll('script')).filter((tag) => {
-    const src = tag.getAttribute('src') ?? '';
-    return tag.getAttribute('data-bc-forge') === ALBEDO_SCRIPT_ID || src === ALBEDO_SCRIPT_URL;
+  return Array.from(document.querySelectorAll("script")).filter((tag) => {
+    const src = tag.getAttribute("src") ?? "";
+    return (
+      tag.getAttribute("data-bc-forge") === ALBEDO_SCRIPT_ID ||
+      src === ALBEDO_SCRIPT_URL
+    );
   });
 }
 
 /** Ids of injected Albedo scripts this page marked as failed. */
 function getFailedAlbedoScriptIds(): string[] {
   return getAlbedoScriptTags()
-    .filter((tag) => tag.getAttribute('data-bc-forge-failed') === 'true')
-    .map((tag) => tag.getAttribute('data-bc-forge') ?? ALBEDO_SCRIPT_ID);
+    .filter((tag) => tag.getAttribute("data-bc-forge-failed") === "true")
+    .map((tag) => tag.getAttribute("data-bc-forge") ?? ALBEDO_SCRIPT_ID);
 }
 
 /** Options for {@link whenFreighterReady}. */
@@ -370,7 +390,9 @@ export interface WhenFreighterReadyOptions {
  * the extension is missing. This polls for a bounded time and never rejects, so
  * callers can `await` it from an effect without a `try`/`catch`.
  */
-export function whenFreighterReady(options: WhenFreighterReadyOptions = {}): Promise<boolean> {
+export function whenFreighterReady(
+  options: WhenFreighterReadyOptions = {},
+): Promise<boolean> {
   const {
     timeoutMs = FREIGHTER_READY_TIMEOUT_MS,
     intervalMs = FREIGHTER_READY_TIMEOUT_MS,
@@ -392,11 +414,11 @@ export function whenFreighterReady(options: WhenFreighterReadyOptions = {}): Pro
       if (settled) return;
       settled = true;
       if (timer !== undefined) clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
+      signal?.removeEventListener("abort", onAbort);
       resolve(ready);
     }
 
-    signal?.addEventListener('abort', onAbort);
+    signal?.addEventListener("abort", onAbort);
 
     const poll = () => {
       if (settled) return;
@@ -420,16 +442,21 @@ export function whenFreighterReady(options: WhenFreighterReadyOptions = {}): Pro
 // ─── Albedo intent script (#1170) ───────────────────────────────────────────
 
 function createAlbedoScript(timeoutMs: number): HTMLScriptElement {
-  const script = document.createElement('script');
+  const script = document.createElement("script");
   script.src = ALBEDO_SCRIPT_URL;
   script.async = true;
   script.defer = true;
+  script.crossOrigin = "anonymous";
+  script.integrity = ALBEDO_SCRIPT_INTEGRITY;
   // The intent script is third-party code: do not leak the page URL to the CDN.
-  script.referrerPolicy = 'no-referrer';
-  script.setAttribute('data-bc-forge', ALBEDO_SCRIPT_ID);
+  script.referrerPolicy = "no-referrer";
+  script.setAttribute("data-bc-forge", ALBEDO_SCRIPT_ID);
   // Small bump over our own budget so the script's own self-initialise timeout
   // runs out after ours and its global is always there when we check.
-  script.setAttribute('data-albedo-intent', `timeoutMs=${timeoutMs + ALBEDO_INTENT_TIMEOUT_MS}`);
+  script.setAttribute(
+    "data-albedo-intent",
+    `timeoutMs=${timeoutMs + ALBEDO_INTENT_TIMEOUT_MS}`,
+  );
   return script;
 }
 
@@ -451,10 +478,15 @@ let albedoLoad: Promise<AlbedoLoadResult> | null = null;
  * calls report the failure immediately instead of retrying the network on every
  * render.
  */
-export function loadAlbedoScript(options: { timeoutMs?: number } = {}): Promise<AlbedoLoadResult> {
+export function loadAlbedoScript(
+  options: { timeoutMs?: number } = {},
+): Promise<AlbedoLoadResult> {
   if (albedoLoad) return albedoLoad;
   if (!isBrowser()) {
-    return Promise.resolve({ available: false, reason: 'Albedo is only available in a browser.' });
+    return Promise.resolve({
+      available: false,
+      reason: "Albedo is only available in a browser.",
+    });
   }
   if (isAlbedoAvailable()) {
     return Promise.resolve({ available: true, reason: null });
@@ -464,7 +496,9 @@ export function loadAlbedoScript(options: { timeoutMs?: number } = {}): Promise<
   const [failedTag] = getFailedAlbedoScriptIds();
   const existing = failedTag
     ? undefined
-    : getAlbedoScriptTags().find((tag) => tag.getAttribute('data-bc-forge-failed') !== 'true');
+    : getAlbedoScriptTags().find(
+        (tag) => tag.getAttribute("data-bc-forge-failed") !== "true",
+      );
 
   if (failedTag) {
     return Promise.resolve({
@@ -482,14 +516,14 @@ export function loadAlbedoScript(options: { timeoutMs?: number } = {}): Promise<
 
     const cleanup = () => {
       if (timer !== undefined) clearTimeout(timer);
-      script.removeEventListener('load', onLoad);
-      script.removeEventListener('error', onError);
+      script.removeEventListener("load", onLoad);
+      script.removeEventListener("error", onError);
     };
     const settle = (available: boolean, reason: string | null) => {
       if (settled) return;
       settled = true;
       cleanup();
-      if (!available) script.setAttribute('data-bc-forge-failed', 'true');
+      if (!available) script.setAttribute("data-bc-forge-failed", "true");
       // Allow a later call to retry explicitly, but keep this promise so
       // concurrent callers still share one result.
       albedoLoad = null;
@@ -499,7 +533,10 @@ export function loadAlbedoScript(options: { timeoutMs?: number } = {}): Promise<
       poll();
     }
     function onError() {
-      settle(false, `Could not load the Albedo wallet from ${ALBEDO_SCRIPT_URL}.`);
+      settle(
+        false,
+        `Could not load the Albedo wallet from ${ALBEDO_SCRIPT_URL}.`,
+      );
     }
 
     // The script can fire `load` before it self-initialises, so poll for the
@@ -519,8 +556,8 @@ export function loadAlbedoScript(options: { timeoutMs?: number } = {}): Promise<
       timer = setTimeout(poll, slice);
     };
 
-    script.addEventListener('load', onLoad);
-    script.addEventListener('error', onError);
+    script.addEventListener("load", onLoad);
+    script.addEventListener("error", onError);
     if (!existing) document.head.appendChild(script);
     poll();
   });
@@ -568,8 +605,13 @@ export function detectWallets(): WalletDetection {
 
   return {
     wallets: WALLET_NAMES.map((name) => {
-      const installed = name === 'freighter' ? isFreighterInstalled() : isAlbedoAvailable();
-      return buildAvailability(name, installed, name === 'albedo' && albedoFailed);
+      const installed =
+        name === "freighter" ? isFreighterInstalled() : isAlbedoAvailable();
+      return buildAvailability(
+        name,
+        installed,
+        name === "albedo" && albedoFailed,
+      );
     }),
     failedAlbedoScriptIds,
   };
