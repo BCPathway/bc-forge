@@ -3,6 +3,8 @@
 This guide covers how to perform network upgrades for bc-forge Soroban smart
 contracts. There are two upgrade paths depending on your governance model.
 
+For an operational emergency checklist and step-by-step multisig ceremony runbook, see the [Upgrade Playbook](/UPGRADE_PLAYBOOK).
+
 ## Prerequisites
 
 | Tool | Version | Purpose |
