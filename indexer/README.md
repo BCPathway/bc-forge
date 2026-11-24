@@ -736,3 +736,18 @@ docker compose logs -f indexer           # Compose stack
 - **Secret handling and security policy** — [`SECURITY.md`](../SECURITY.md)
 - **Pause/unpause during an incident** — [`SECURITY.md` — Incident Response](../SECURITY.md#incident-response)
 - **Admin key hygiene** — [`docs/ADMIN_KEYS.md`](../docs/ADMIN_KEYS.md)
+
+## Event parity check
+
+CI runs `python3 scripts/check_event_parity.py` to make sure every contract event
+(`env.events().publish((symbol_short!("..."), ...), ...)` in `contracts/*/src`) has
+an indexer handler (a `case '<topic>':` arm in `src/indexer.ts` / `src/events.ts`).
+The script prints a table of handled, waived and missing events and exits 1 if any
+event is missing.
+
+- Adding a contract event: add a handler in the indexer, or, if the event is
+  intentionally not indexed yet, add `"<contract>:<topic>": "<reason>"` to
+  `scripts/event_parity_allowlist.json`.
+- Implementing a handler for a waived event requires removing its waiver (stale
+  waivers also fail the check).
+- Self-test: `python3 -m unittest scripts/test_check_event_parity.py` (covers mock omissions).

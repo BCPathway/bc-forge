@@ -140,7 +140,9 @@ const CLOSE_BUTTON_STYLE: React.CSSProperties = {
   height: 30,
   flexShrink: 0,
   padding: 0,
-  border: "1px solid transparent",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "transparent",
   borderRadius: 6,
   backgroundColor: "transparent",
   color: theme.neutralText,
@@ -330,7 +332,9 @@ function WalletOption({
       onClick={() => onSelect(wallet.name)}
       style={{
         ...OPTION_BASE_STYLE,
-        border: `1px solid ${wallet.installed ? theme.primaryBorder : theme.border}`,
+        borderWidth: 1,
+        borderStyle: "solid",
+        borderColor: wallet.installed ? theme.primaryBorder : theme.border,
         backgroundColor: wallet.installed
           ? theme.primaryBackground
           : theme.surface,
