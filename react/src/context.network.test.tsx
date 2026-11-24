@@ -151,7 +151,7 @@ const WalletStatusProbe: React.FC = () => {
 };
 
 /** Not part of {@link NetworkId}, so the provider has to reject it. */
-const UNKNOWN_NETWORK = "mainnet" as NetworkId;
+const UNKNOWN_NETWORK = "unknown" as NetworkId;
 
 /** Attempts to select an id the provider does not know about. */
 const UnknownNetworkProbe: React.FC = () => {
@@ -178,11 +178,12 @@ describe("useNetwork (#1148)", () => {
   it("offers testnet, futurenet and the local standalone node", () => {
     render(<NetworkOnlyProbe />);
     expect(screen.getByTestId("network-options")).toHaveTextContent(
-      "testnet,futurenet,local",
+      "testnet,futurenet,mainnet,local",
     );
     expect(STELLAR_NETWORKS.map((entry) => entry.id)).toEqual([
       "testnet",
       "futurenet",
+      "mainnet",
       "local",
     ]);
     expect(STELLAR_NETWORKS.map((entry) => entry.defaultRpcUrl)).toContain(
