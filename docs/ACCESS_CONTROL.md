@@ -150,7 +150,10 @@ The table below lists every RBAC-guarded entrypoint across the workspace.
 | `revoke_role` | SuperAdmin or Admin | `require_super_admin` |
 | `set_admin_pool` | Admin | `admin.require_auth` |
 | `create_proposal` | Admin-pool member | pool membership + `require_auth` |
+| `create_upgrade_proposal` | Admin-pool member | pool membership + `require_auth` (binds WASM hash to proposal) |
 | `approve_proposal` | Admin-pool member | pool membership + `require_auth` |
+| `execute_upgrade` | Admin-pool member | pool membership + `require_auth` + timelock + quorum + WASM hash match |
+| `execute_upgrade_proposal` | Admin-pool member | pool membership + `require_auth` + timelock + quorum + uses bound WASM hash |
 | `mark_executed` | Admin | `admin.require_auth` (threshold check) |
 
 ### Lifecycle module (`contracts/lifecycle`)
@@ -210,6 +213,8 @@ stateDiagram-v2
 | 4 | `InvalidAddress` | Operation attempted with the zero-address sentinel |
 | 5 | `InvalidRole` | Unrecognized role discriminant supplied |
 | 6 | `AlreadyInitialized` | `init_storage` called on an already-initialized contract |
+| 32 | `ThresholdExceedsPoolSize` | `remove_admin` when removing a member would drop pool size below threshold |
+| 33 | `WasmHashMismatch` | `execute_upgrade` / `emergency_execute_upgrade` when supplied hash differs from proposal hash |
 
 ## Events
 
