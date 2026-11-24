@@ -81,8 +81,10 @@ export interface bcForgeClientConfig {
   contractId: string;
   /** Optional wallet adapter for browser-based signing flows */
   walletAdapter?: WalletAdapter;
-  /** Max retry attempts for transient sequence or fee errors (default: 3) */
+  /** Maximum total attempts for retryable SDK operations (default: 3). */
   maxRetryAttempts?: number;
+  /** Base retry delay in milliseconds (default: 1000). Set to 0 in tests. */
+  retryDelayMs?: number;
   /** Maximum fee cap in stroops for fee bump retries (default: 10000000) */
   maxFeeCap?: string | number | bigint;
 }
@@ -210,7 +212,8 @@ export class bcForgeClient {
   private server: SorobanRpc.Server;
   private contract: Contract;
   private walletAdapter?: WalletAdapter;
-  private maxRetryAttempts?: number;
+  private maxRetryAttempts: number;
+  private retryDelayMs: number;
   private maxFeeCap?: string | number | bigint;
   private readCache = new Map<string, { value: unknown; ledger: number }>();
   private cachedLedgerSequence: number = 0;
@@ -222,7 +225,8 @@ export class bcForgeClient {
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
     this.walletAdapter = config.walletAdapter;
-    this.maxRetryAttempts = config.maxRetryAttempts;
+    this.maxRetryAttempts = config.maxRetryAttempts ?? 3;
+    this.retryDelayMs = config.retryDelayMs ?? 1000;
     this.maxFeeCap = config.maxFeeCap;
   }
 
@@ -1764,14 +1768,22 @@ export class bcForgeClient {
   // ─── Internal Helpers ────────────────────────────────────────────────────
 
   /**
-   * Internal helper to execute a task with retries.
+   * Internal helper to execute an operation with bounded retries and exponential
+   * backoff. `attempts` counts the initial request, so a value of 3 means
+   * one initial attempt plus at most two retries.
+   *
+   * Contract/simulation/signer errors are non-retryable. RPC and transport
+   * failures may be retried; delay grows as baseDelay * 2^(retry index).
+   * The base delay can be set to 0 to make tests deterministic and fast.
    */
-  private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
+  private async withRetry<T>(fn: () => Promise<T>, attempts: number = this.maxRetryAttempts): Promise<T> {
+    const boundedAttempts = Math.max(1, Math.floor(attempts));
     let lastError: unknown;
-    for (let i = 0; i < retries; i++) {
+
+    for (let attempt = 0; attempt < boundedAttempts; attempt++) {
       try {
         return await fn();
-      } catch (error) {
+      } catch (error: unknown) {
         if (
           error instanceof ContractError ||
           error instanceof SimulationError ||
@@ -1779,13 +1791,17 @@ export class bcForgeClient {
         ) {
           throw error;
         }
+
         lastError = error;
-        // Only retry on certain errors (e.g., network/RPC errors)
-        if (i < retries - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+        if (attempt === boundedAttempts - 1) break;
+
+        const delayMs = this.retryDelayMs * 2 ** attempt;
+        if (delayMs > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
         }
       }
     }
+
     throw lastError;
   }
 
