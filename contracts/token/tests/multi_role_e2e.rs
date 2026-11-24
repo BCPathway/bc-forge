@@ -33,6 +33,8 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address, Address, Address) {
         &String::from_str(env, "bc-forge Token"),
         &String::from_str(env, "SFG"),
     );
+    // mint now requires an explicit per-minter issuance allowance (#1327).
+    client.set_minter_allowance(&admin, &operator, &i128::MAX);
 
     (client, admin, operator, recipient)
 }
