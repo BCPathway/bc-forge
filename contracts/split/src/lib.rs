@@ -16,6 +16,11 @@ use soroban_sdk::{
     String, Vec,
 };
 
+/// Maximum number of recipients allowed on a single invoice. Keeping this
+/// bounded prevents `release_payment` from exceeding Soroban's CPU limit and
+/// permanently locking funds.
+const MAX_RECIPIENTS: u32 = 100;
+
 /// Minimal SEP-41 client so this crate does not link `bc-forge-token`'s WASM
 /// exports (those collide with this contract's upgrade-governance entry points).
 #[contractclient(name = "TokenClient")]
@@ -29,6 +34,15 @@ pub trait TokenInterface {
 pub struct Recipient {
     pub to: Address,
     pub amount: i128,
+}
+
+/// A recipient expressed as a share of the invoice total in basis points
+/// (#1463). 10,000 bps is 100%.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecipientBps {
+    pub to: Address,
+    pub bps: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -69,6 +83,13 @@ pub enum SplitError {
     InsufficientBalance = 3,
     InvoiceAlreadyCompleted = 4,
     FailedPayoutNotFound = 5,
+    /// Basis-point shares must add up to exactly 10,000 (#1463).
+    InvalidBasisPointsTotal = 6,
+    /// The split contract has no token configured yet (#1463).
+    TokenNotConfigured = 7,
+    TooManyRecipients = 8,
+    DuplicateRecipient = 9,
+    InvalidAmount = 10,
 }
 
 #[contract]
@@ -95,6 +116,23 @@ impl SplitContract {
     fn write_invoice(env: &Env, invoice: &Invoice) {
         let key = DataKey::Invoice(invoice.invoice_id);
         env.storage().persistent().set(&key, invoice);
+    }
+
+    fn next_invoice_id(env: &Env) -> u64 {
+        let mut id = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextInvoiceId)
+            .unwrap_or(0u64);
+        // Invoice ids may also be supplied manually via `create_invoice`;
+        // never overwrite one of those.
+        while env.storage().persistent().has(&DataKey::Invoice(id)) {
+            id += 1;
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::NextInvoiceId, &(id + 1));
+        id
     }
 
     fn read_failed_payout(env: &Env, invoice_id: u64, recipient: &Address) -> Option<FailedPayout> {
@@ -252,6 +290,20 @@ impl SplitContract {
             return Err(SplitError::InvalidRecipient);
         }
 
+        if recipients.len() > MAX_RECIPIENTS {
+            return Err(SplitError::TooManyRecipients);
+        }
+
+        // Duplicate destinations would make a single payout ambiguous and can
+        // result in a recipient being paid twice from the same invoice.
+        for i in 0..recipients.len() {
+            for j in (i + 1)..recipients.len() {
+                if recipients.get(i).unwrap().to == recipients.get(j).unwrap().to {
+                    return Err(SplitError::DuplicateRecipient);
+                }
+            }
+        }
+
         let mut recipient_amounts: i128 = 0;
         for recipient in &recipients {
             if recipient.amount <= 0 {
@@ -299,6 +351,115 @@ impl SplitContract {
         Ok(())
     }
 
+    /// Creates an invoice from basis-point (percentage) shares (#1463) using
+    /// the token already configured on this contract.
+    pub fn create_split_percentage(
+        env: Env,
+        payer: Address,
+        total_amount: i128,
+        recipients: Vec<RecipientBps>,
+    ) -> Result<u64, SplitError> {
+        // Validate the shares first so callers always get the basis-point
+        // error for an invalid split, even on a fresh contract.
+        if total_amount <= 0 {
+            return Err(SplitError::InvalidRecipient);
+        }
+        let mut total_bps: u32 = 0;
+        for r in recipients.iter() {
+            total_bps = total_bps
+                .checked_add(r.bps)
+                .ok_or(SplitError::InvalidBasisPointsTotal)?;
+        }
+        if total_bps != 10_000 {
+            return Err(SplitError::InvalidBasisPointsTotal);
+        }
+
+        let token_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(SplitError::TokenNotConfigured)?;
+
+        Self::create_split_bps_with_token(env, payer, total_amount, recipients, token_address)
+    }
+
+    /// Percentage-split entry point for a contract that has no token
+    /// configured yet (#1463).
+    ///
+    /// `bps` values must add up to exactly 10,000. The calculated amounts are
+    /// stored as a regular invoice, so release/retry behave exactly as they do
+    /// for invoices created with absolute amounts. Any rounding remainder is
+    /// assigned to the last recipient so the invoice still balances to
+    /// `total_amount`.
+    pub fn create_split_bps_with_token(
+        env: Env,
+        payer: Address,
+        total_amount: i128,
+        recipients: Vec<RecipientBps>,
+        token_address: Address,
+    ) -> Result<u64, SplitError> {
+        // `create_invoice` below enforces the super-admin guard, which also
+        // authorizes `payer` for this invocation.
+        if total_amount <= 0 {
+            return Err(SplitError::InvalidRecipient);
+        }
+
+        let mut total_bps: u32 = 0;
+        let mut split_recipients: Vec<Recipient> = Vec::new(&env);
+        let mut allocated = 0i128;
+
+        for r in recipients.iter() {
+            total_bps = total_bps
+                .checked_add(r.bps)
+                .ok_or(SplitError::InvalidBasisPointsTotal)?;
+
+            let recipient_amount = total_amount
+                .checked_mul(r.bps as i128)
+                .ok_or(SplitError::InvalidRecipient)?
+                / 10_000;
+            if recipient_amount <= 0 {
+                return Err(SplitError::InvalidRecipient);
+            }
+
+            allocated = allocated
+                .checked_add(recipient_amount)
+                .ok_or(SplitError::InvalidRecipient)?;
+            split_recipients.push_back(Recipient {
+                to: r.to,
+                amount: recipient_amount,
+            });
+        }
+
+        if total_bps != 10_000 {
+            return Err(SplitError::InvalidBasisPointsTotal);
+        }
+
+        // Integer division can leave dust; give it to the last recipient so
+        // the standard invoice validation (sum == total_amount) still passes.
+        if allocated < total_amount {
+            let last_index = split_recipients.len() - 1;
+            let mut last = split_recipients
+                .get(last_index)
+                .ok_or(SplitError::InvalidRecipient)?;
+            last.amount = last
+                .amount
+                .checked_add(total_amount - allocated)
+                .ok_or(SplitError::InvalidRecipient)?;
+            split_recipients.set(last_index, last);
+        }
+
+        let invoice_id = Self::next_invoice_id(&env);
+        Self::create_invoice(
+            env,
+            payer,
+            invoice_id,
+            total_amount,
+            split_recipients,
+            token_address,
+        )?;
+        Ok(invoice_id)
+    }
+
     pub fn release_payment(
         env: Env,
         invoice_id: u64,
@@ -308,6 +469,50 @@ impl SplitContract {
             admin::require_super_admin(&env, &admin_address);
             Self::release_payment_inner(&env, invoice_id)
         })
+    }
+
+    /// Releases several invoices in a single transaction.
+    ///
+    /// Returns the IDs that were successfully released. A missing or already
+    /// released invoice is skipped rather than aborting the rest of the batch.
+    pub fn release_payment_batch(env: Env, invoice_ids: Vec<u64>) -> Vec<u64> {
+        let admin_address = admin::get_admin(&env);
+        reentrancy_guard!(&env, "release_payment_batch", {
+            admin::require_super_admin(&env, &admin_address);
+            let mut released = Vec::new(&env);
+            for id in invoice_ids.iter() {
+                if Self::release_payment_inner(&env, id).is_ok() {
+                    released.push_back(id);
+                }
+            }
+            released
+        })
+    }
+
+    /// Rescues foreign SEP-41 tokens that were accidentally sent to this
+    /// contract. Admin only; emits a `token_rescued` event on success.
+    pub fn rescue_tokens(
+        env: Env,
+        caller: Address,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), SplitError> {
+        admin::require_admin(&env, &caller);
+
+        if amount <= 0 {
+            return Err(SplitError::InvalidAmount);
+        }
+
+        let client = TokenClient::new(&env, &token);
+        let contract_address = env.current_contract_address();
+        if client.balance(&contract_address) < amount {
+            return Err(SplitError::InsufficientBalance);
+        }
+
+        client.transfer(&contract_address, &to, &amount);
+        events::emit_token_rescued(&env, &token, &to, amount);
+        Ok(())
     }
 
     pub fn retry_failed_payout(
