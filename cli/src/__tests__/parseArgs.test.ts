@@ -2,13 +2,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildProgram } from "../parseArgs.js";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function argv(...args: string[]): string[] {
   return ["node", "bc-forge", ...args];
 }
 
-// ─── Tests ──────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe("CLI Parser (#705)", () => {
   // Commander calls process.exit(0) for --version and --help
@@ -241,7 +241,8 @@ describe("CLI Parser (#705)", () => {
       expect(parsedOpts.rpcUrl).toBe("https://soroban-testnet.stellar.org");
     });
 
-    it("rejects when --source is missing", async () => {
+    it("accepts a missing --source when STELLAR_SECRET_KEY is set", async () => {
+      process.env.STELLAR_SECRET_KEY = "S" + "A".repeat(55);
       const program = buildProgram();
       const stderr: string[] = [];
       program.configureOutput({
@@ -252,7 +253,8 @@ describe("CLI Parser (#705)", () => {
         program.parseAsync(
           argv("upgrade", "--wasm", "./artifacts/token.wasm", "--contract-id", "CX", "--rpc-url", "http://localhost")
         )
-      ).rejects.toThrow();
+      ).resolves.not.toThrow();
+      delete process.env.STELLAR_SECRET_KEY;
     });
 
     it("shows upgrade help with --help", () => {
@@ -475,7 +477,8 @@ describe("CLI Parser (#705)", () => {
       expect(parsedOpts.rpcUrl).toBe("https://soroban-testnet.stellar.org");
     });
 
-    it("rejects when --source is missing", async () => {
+    it("accepts a missing --source when STELLAR_SECRET_KEY is set", async () => {
+      process.env.STELLAR_SECRET_KEY = "S" + "A".repeat(55);
       const program = buildProgram();
       const stderr: string[] = [];
       program.configureOutput({
@@ -486,7 +489,8 @@ describe("CLI Parser (#705)", () => {
         program.parseAsync(
           argv("smoke-test", "--contract-id", "CX", "--rpc-url", "http://localhost")
         )
-      ).rejects.toThrow();
+      ).resolves.not.toThrow();
+      delete process.env.STELLAR_SECRET_KEY;
     });
 
     it("shows smoke-test help with --help", () => {

@@ -4,6 +4,7 @@ import { getPrismaClient } from './lib/prisma';
 import { logger } from './lib/logger';
 import { createApiRateLimiter, type ApiRateLimiterOptions } from './lib/rateLimit';
 import { subscribeIndexerEvents, type IndexerEvent } from './events';
+import { validateWebhookUrl } from './lib/urlSafety';
 
 /**
  * Authenticated, rate-limited indexer read API.
@@ -421,28 +422,13 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
     '/webhooks',
     asyncHandler(async (req, res) => {
       const rawUrl = (req.body as { url?: unknown } | undefined)?.url;
-      if (typeof rawUrl !== 'string') {
-        res.status(400).json({ error: 'url must be an HTTPS URL' });
+      const safety = await validateWebhookUrl(rawUrl);
+      if (!safety.ok) {
+        res.status(400).json({ error: safety.reason ?? 'invalid webhook url' });
         return;
       }
 
-      let parsed: URL;
-      try {
-        parsed = new URL(rawUrl);
-      } catch {
-        res.status(400).json({ error: 'url must be an HTTPS URL' });
-        return;
-      }
-
-      if (
-        parsed.protocol !== 'https:' ||
-        parsed.username.length > 0 ||
-        parsed.password.length > 0
-      ) {
-        res.status(400).json({ error: 'url must be an HTTPS URL without embedded credentials' });
-        return;
-      }
-
+      const parsed = new URL(rawUrl as string);
       const webhook = await getPrismaClient().webhook.upsert({
         where: { url: parsed.toString() },
         update: {},

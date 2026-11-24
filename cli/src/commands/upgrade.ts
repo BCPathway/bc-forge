@@ -13,10 +13,8 @@ import { prepareSignAndSubmit } from "../utils/soroban-tx.js";
 import logger from "../utils/logger.js";
 import { writeJson } from "../utils/output.js";
 import { resolveContractIdOption } from "../utils/registry.js";
-import {
-  appendUpgradeHistory,
-  getLastGoodHash,
-} from "../utils/upgrade-history.js";
+import { appendUpgradeHistory, getLastGoodHash } from "../utils/upgrade-history.js";
+import { resolveSourceSecret } from "../utils/config.js";
 
 export interface FeeEstimate {
   baseFee: string;
@@ -154,7 +152,7 @@ export function createUpgradeCommand(): Command {
       "--contract-id <id>",
       "Contract ID, or a deployment alias for the selected network",
     )
-    .requiredOption("--source <secret>", "Source account secret key")
+    .option("--source <secret>", "Source account secret key (use STELLAR_SECRET_KEY instead)")
     .option("--proposal-id <id>", "Existing proposal ID to execute")
     .option("--dry-run", "Simulate without submitting on-chain", false)
     .option(
@@ -190,6 +188,7 @@ export function createUpgradeCommand(): Command {
       const contractId = resolveContractIdOption(command, opts.contractId);
       const result = await runUpgrade({
         ...opts,
+        source: await resolveSourceSecret(opts.source),
         contractId: contractId ?? opts.contractId,
         wasmPath: opts.wasmPath ?? opts.wasm ?? "",
         toLastGood: opts.toLastGood ?? false,

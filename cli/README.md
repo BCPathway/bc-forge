@@ -78,7 +78,8 @@ The CLI resolves connection settings and contract metadata from environment vari
 | `RPC_URL` | Soroban RPC endpoint URL | `https://soroban-testnet.stellar.org` |
 | `NETWORK_PASSPHRASE` | Stellar network passphrase | `Test SDF Network ; September 2015` |
 | `CONTRACT_ID` | Default contract ID for operations | `""` |
-| `SECRET_KEY` | Admin / source account secret seed (`S...`) | `""` |
+| `STELLAR_SECRET_KEY` | Preferred source/admin secret seed (`S...`); avoids putting a key in shell history or process listings (`--source` still works but warns) | `""` |
+| `SECRET_KEY` | Legacy source account secret seed (`S...`) | `""` |
 | `STELLAR_CLI_BIN` | Path to Stellar CLI executable | `stellar` (fallback: `SOROBAN_CLI_BIN`) |
 
 ### Deployment Configuration (`.bc-forge.json`)
