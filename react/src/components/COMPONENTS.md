@@ -7,7 +7,7 @@ import or Tailwind setup required).
 import { Alert } from '@bc-forge/react';
 ```
 
-The **primitives** below (`Alert`, `Badge`, `Dropdown`) take no SDK
+The **primitives** below (`Alert`, `Badge`, `Dropdown`, `Modal`) take no SDK
 configuration. The **product components** further down (#950) read from the
 chain through the SDK and accept props as an override.
 
@@ -30,6 +30,148 @@ Inline notification banner. The ARIA role is derived from the variant:
 <Alert variant="danger" onDismiss={() => setError(null)}>Mint failed.</Alert>
 ```
 
+## WalletSelectModal
+
+Wallet picker dialog. It is self-contained — it portals into `document.body`
+through `react-dom`, traps `Tab`, closes on Escape or a backdrop click, and
+returns focus to the trigger — and it reads `useWallet()` itself, so it only
+needs `open` and `onClose` from the host.
+
+Each wallet is a `<button>` with a stable accessible name ("Connect with
+Freighter") plus a description carrying the installation state. The state is
+never colour-only: the badge reads `Installed` / `Not installed`, and a missing
+wallet gets an install link. A missing wallet stays clickable — Albedo's intent
+script is injected on demand, and Freighter reports a readable error — so the
+link is an offer, not a gate. Closing is blocked while a wallet prompt is open.
+
+| Prop          | Type              | Default                 | Description                                     |
+| ------------- | ----------------- | ----------------------- | ----------------------------------------------- |
+| `open`        | `boolean`         | — (required)            | Renders the dialog only when true.              |
+| `onClose`     | `() => void`      | — (required)            | Escape, backdrop click, and the close button.   |
+| `title`       | `string`          | `'Connect a wallet'`    | Heading and accessible name.                    |
+| `description` | `React.ReactNode` | `'Choose how …'`        | Line under the heading; `null` hides it.        |
+
+```tsx
+const [open, setOpen] = useState(false);
+<button onClick={() => setOpen(true)}>Connect</button>
+<WalletSelectModal open={open} onClose={() => setOpen(false)} />
+```
+
+## Button
+
+Button primitive with `primary`, `secondary`, `danger`, and `ghost` variants.
+`loading` disables interaction and announces the busy state; `loadingText` can
+replace the button label while work is in progress. Native button props and a
+ref are forwarded.
+
+```tsx
+<Button variant="primary" loading={saving} loadingText="Saving...">Save</Button>
+```
+
+## Breadcrumbs
+
+Provide ordered `{ label, href? }` items. The final item is marked as the
+current page and rendered as text, while earlier items with an `href` are
+links. `ariaLabel` and `separator` customize the navigation landmark.
+
+```tsx
+<Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Vaults' }]} />
+```
+
+## Footer
+
+Compact footer with optional children and a network latency indicator. Pass
+`latencyMs` to show a reading, or `null`/omit it to show unavailable status.
+`latencyWarningMs` and `latencyErrorMs` set the warning and error thresholds.
+
+```tsx
+<Footer network="Testnet" latencyMs={84}>Build 42</Footer>
+```
+
+## Tabs and SegmentedControl
+
+`Tabs` accepts `{ label, value, content, disabled? }` items and supports
+controlled (`value`/`onChange`) or uncontrolled (`defaultValue`) selection.
+Arrow keys move between enabled tabs; Home and End select the first and last.
+`SegmentedControl` uses `{ label, value, disabled? }` options in an accessible
+radio group and supports the same controlled/uncontrolled selection pattern.
+
+```tsx
+<Tabs items={[
+	{ label: 'Overview', value: 'overview', content: <Overview /> },
+	{ label: 'Activity', value: 'activity', content: <Activity /> },
+]} />
+<SegmentedControl ariaLabel="View" options={[
+	{ label: 'List', value: 'list' }, { label: 'Grid', value: 'grid' },
+]} />
+```
+
+## Accordion and Collapsible
+
+`Accordion` renders a data-driven set of disclosure sections. It allows one
+open section at a time by default; set `multiple` to allow several. `value` and
+`defaultValue` accept one id or an array of ids, and `onValueChange` receives
+the selected value. `Collapsible` is the standalone controlled-or-uncontrolled
+version.
+
+```tsx
+<Accordion items={[
+	{ id: 'fees', title: 'Fees', content: <p>Network fees apply.</p> },
+	{ id: 'limits', title: 'Limits', content: <p>Review the vault limits.</p> },
+]} />
+<Collapsible title="Advanced settings" defaultOpen={false}>
+	<AdvancedSettings />
+</Collapsible>
+```
+
+Both components use native buttons, `aria-expanded`, and labelled regions.
+
+## ExternalLink
+
+External destinations open in a new tab with `noopener noreferrer` by default.
+Set `target` to opt into another browsing context, and `showIcon={false}` to
+hide the decorative external-link mark.
+
+```tsx
+<ExternalLink href={`${explorerBaseUrl}/tx/${hash}`}>View transaction</ExternalLink>
+```
+
+## TopNavigationBar
+
+Responsive top-level navigation. The links collapse behind a labelled menu
+button below `mobileBreakpoint` pixels (768 by default). Mark the active link
+with `current`, and use `external` for links that should open safely in a new
+tab.
+
+```tsx
+<TopNavigationBar
+	brand={<a href="/">BC Forge</a>}
+	items={[
+		{ label: 'Vaults', href: '/vaults', current: true },
+		{ label: 'Explorer', href: explorerUrl, external: true },
+	]}
+	actions={<ConnectWallet />}
+/>
+```
+
+## ToastProvider
+
+Wrap the part of the app that creates notifications, then call `showToast`
+from `useToast`. `duration: 0` keeps a toast visible until dismissed. Errors
+and warnings use assertive alerts; informational and success messages use
+polite status announcements.
+
+```tsx
+<ToastProvider position="top-right" defaultDuration={5000}>
+	<App />
+</ToastProvider>
+
+function SaveButton() {
+	const { showToast } = useToast();
+	return <button onClick={() => showToast({ message: 'Changes saved', variant: 'success' })}>Save</button>;
+}
+```
+
 ## Badge
 
 Small label used for statuses, counts, or categories. When `onClick` is
@@ -47,6 +189,41 @@ provided the badge becomes a keyboard-focusable interactive control
 <Badge variant="primary">Live</Badge>
 <Badge variant="success" size="sm">Verified</Badge>
 <Badge variant="warning" onClick={() => alert('clicked')}>Dismiss</Badge>
+```
+
+## Modal
+
+Accessible modal dialog (#1149). Rendered through a portal on `document.body`
+behind a blurred backdrop, with `role="dialog"` and `aria-modal="true"`.
+
+While open it moves focus into the dialog, cycles `Tab` / `Shift+Tab` inside it,
+dismisses on `Escape` and on a backdrop click, restores focus to the trigger on
+close, and locks the page behind it from scrolling. `onClose` is called for every
+dismissal path — the consumer owns `open`, so the dialog never closes itself.
+Stacked dialogs cooperate: only the topmost one traps focus and reacts to
+`Escape`, and the scroll lock is released when the last one closes.
+
+| Prop                   | Type                                | Default          | Description                                            |
+| ---------------------- | ----------------------------------- | ---------------- | ------------------------------------------------------ |
+| `open`                 | `boolean`                           | — (required)     | Mounts the dialog.                                     |
+| `onClose`              | `() => void`                        | — (required)     | Called for every dismissal path.                       |
+| `title`                | `React.ReactNode`                   | —                | Heading; becomes the dialog's accessible name.         |
+| `description`          | `React.ReactNode`                   | —                | Wired through `aria-describedby`.                     |
+| `children`             | `React.ReactNode`                   | —                | Dialog body.                                           |
+| `footer`               | `React.ReactNode`                   | —                | Actions under the body.                                |
+| `size`                 | `'sm' \| 'md' \| 'lg'`              | `'md'`           | Maximum width of the dialog surface.                   |
+| `closeOnBackdropClick` | `boolean`                           | `true`           | Dismiss on a backdrop click.                           |
+| `closeOnEscape`        | `boolean`                           | `true`           | Dismiss on `Escape`.                                   |
+| `initialFocusRef`      | `RefObject<HTMLElement \| null>`    | first focusable  | Element focused when the dialog opens.                 |
+| `labelledBy`           | `string`                            | —                | `id` of an external label; overrides `title`.          |
+| `ariaLabel`            | `string`                            | `'Dialog'`       | Accessible name when there is no title.                |
+| `closeLabel`           | `string`                            | `'Close dialog'` | Accessible name of the close button.                   |
+| `className` / `style`  | `string` / `React.CSSProperties`    | —                | Merged into the dialog surface.                        |
+
+```tsx
+<Modal open={open} onClose={close} title="Confirm" description="This cannot be undone.">
+  <Button onClick={close}>Cancel</Button>
+</Modal>
 ```
 
 ## Pagination

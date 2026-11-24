@@ -31,8 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: https://registry.npmjs.org
+          node-version: "22"
 
       - name: Check npm before publish
         run: node scripts/check-version-tag.mjs --before-changeset-publish --component ${{ matrix.component }}
@@ -70,8 +69,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: https://registry.npmjs.org
+          node-version: "22"
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -101,11 +99,12 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          commit: 'chore: release packages'
-          title: 'chore: release packages'
+          commit: "chore: release packages"
+          title: "chore: release packages"
           publish: npm run release:publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.WORKFLOW_APPROVER_PAT || secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # The publish step bumps the version in the working tree, so the version
       # that reached npm only exists in the Changesets output (#1046).
@@ -124,7 +123,7 @@ jobs:
       - name: Attach component release notes
         env:
           PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_APPROVER_PAT || secrets.GITHUB_TOKEN }}
         run: node scripts/release-notes.mjs --attach
 
   # Post-publish verification (#1046): proves the exact version that reached

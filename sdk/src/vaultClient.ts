@@ -139,6 +139,13 @@ export class VaultClient {
     return scValToNative(result) as string;
   }
 
+  /** Get an address's balance of the vault's underlying token. */
+  async getUnderlyingBalance(address: string): Promise<bigint> {
+    const tokenContract = new Contract(await this.getUnderlyingToken());
+    const result = await this.queryContract('balance', [addressToScVal(address)], tokenContract);
+    return BigInt(scValToNative(result) as string | number | bigint);
+  }
+
   /**
    * Get the human-readable vault share token name.
    */
@@ -529,7 +536,11 @@ export class VaultClient {
     throw lastError;
   }
 
-  private async queryContract(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
+  private async queryContract(
+    method: string,
+    args: xdr.ScVal[],
+    contract: Contract = this.contract,
+  ): Promise<xdr.ScVal> {
     return this.withRetry(async () => {
       try {
         const account = new (await import('@stellar/stellar-sdk')).Account(
@@ -541,7 +552,7 @@ export class VaultClient {
           fee: '100',
           networkPassphrase: this.networkPassphrase,
         })
-          .addOperation(this.contract.call(method, ...args))
+          .addOperation(contract.call(method, ...args))
           .setTimeout(30)
           .build();
 
@@ -568,23 +579,34 @@ export class VaultClient {
     args: xdr.ScVal[],
     source?: Keypair,
   ): Promise<TransactionResult> {
-    const adapter = source ? undefined : this.walletAdapter;
-    if (!source && !adapter) throw new SignerRequiredError();
-    if (!source && (!adapter?.connected || !adapter.publicKey)) {
+    const isAdapter = Boolean(
+      source &&
+      typeof (source as any).signTransaction === 'function' &&
+      typeof (source as any).secret !== 'function',
+    );
+    const adapter = isAdapter
+      ? (source as unknown as WalletAdapter)
+      : source
+        ? undefined
+        : this.walletAdapter;
+    const actualSource = isAdapter ? undefined : source;
+
+    if (!actualSource && !adapter) throw new SignerRequiredError();
+    if (!actualSource && (!adapter?.connected || !adapter.publicKey)) {
       throw new SignerRequiredError('Wallet adapter is not connected');
     }
 
     return this.withRetry(async () => {
       try {
         let txXdr: string;
-        if (source) {
+        if (actualSource) {
           txXdr = await buildInvokeTransaction(
             this.rpcUrl,
             this.networkPassphrase,
             this.contractId,
             method,
             args,
-            source,
+            actualSource,
           );
         } else {
           const unsignedXdr = await buildUnsignedTransaction(
@@ -603,14 +625,15 @@ export class VaultClient {
         if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
           return {
             success: true,
-            hash: response.txHash,
+            hash:
+              (response as unknown as { hash?: string; txHash?: string }).hash ?? response.txHash,
             returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
           };
         }
 
         return {
           success: false,
-          hash: response.txHash,
+          hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? response.txHash,
         };
       } catch (error: unknown) {
         if (error instanceof SimulationError || error instanceof SignerRequiredError) throw error;

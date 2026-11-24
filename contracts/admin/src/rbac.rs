@@ -487,7 +487,7 @@ pub fn grant_role(env: &Env, caller: &Address, role: Role, address: &Address) {
 /// - [`AdminError::RoleAlreadyGranted`] — `address` already holds `role` (#768).
 /// # Events
 /// Emits `role_grnt` with data `(admin, role, address)`.
-fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
+pub(crate) fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Address) {
     require_non_zero_address(env, address);
     let bit = match role_bit(role) {
         Some(bit) => bit,
@@ -644,7 +644,34 @@ pub fn revoke_role(
     require_valid_role(env, role);
     require_non_zero_address(env, address);
 
+    if role == Role::SuperAdmin && is_last_super_admin(env, address) {
+        return Err(AdminError::LastSuperAdmin);
+    }
+
     _revoke_role(env, role, address)
+}
+
+/// Returns whether removing this holder would leave the configured admin set
+/// without any effective SuperAdmin.
+pub(crate) fn is_last_super_admin(env: &Env, address: &Address) -> bool {
+    if !has_role(env, Role::SuperAdmin, address) {
+        return false;
+    }
+    let admin = get_admin(env);
+    if admin != *address {
+        return false;
+    }
+    let pool = crate::multisig::get_admin_pool(env);
+    for i in 0..pool.len() {
+        let member = pool.get(i).expect("index in range");
+        if member != *address {
+            let mask = load_raw_role_mask(env, &member);
+            if mask & (ROLE_BIT_ADMIN | ROLE_BIT_SUPER_ADMIN) != 0 {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// Removes a role assignment without performing authorization.

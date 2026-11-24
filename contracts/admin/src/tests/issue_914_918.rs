@@ -32,6 +32,66 @@ fn wasm_hash(env: &Env, byte: u8) -> BytesN<32> {
     BytesN::from_array(env, &[byte; 32])
 }
 
+#[test]
+fn test_role_proposal_requires_quorum_and_executes_the_bound_grant() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let second_admin = Address::generate(&env);
+    let target = Address::generate(&env);
+    client.set_admin_pool(&vec![&env, admin.clone(), second_admin.clone()], &2);
+
+    let proposal_id = client.create_role_proposal(
+        &admin,
+        &Role::Minter,
+        &target,
+        &String::from_str(&env, "Grant Minter to target"),
+    );
+    let details = client
+        .get_role_proposal(&proposal_id)
+        .expect("role proposal details are available");
+    assert_eq!(details.role, Role::Minter);
+    assert_eq!(details.target, target);
+    assert_eq!(details.approvals, 1);
+    assert_eq!(details.quorum, 2);
+    assert!(!details.executed);
+
+    assert_eq!(
+        client.try_execute_role_proposal(&admin, &proposal_id),
+        Err(Ok(AdminError::ThresholdNotMet)),
+    );
+    assert_eq!(
+        client.try_mark_executed(&proposal_id),
+        Err(Ok(soroban_sdk::Error::from_contract_error(
+            AdminError::RoleProposalRequiresExecution as u32
+        ))),
+    );
+
+    client.approve_proposal(&second_admin, &proposal_id);
+    assert_eq!(
+        client.try_execute_role_proposal(&second_admin, &proposal_id),
+        Err(Ok(AdminError::UnauthorizedRole)),
+    );
+    client.execute_role_proposal(&admin, &proposal_id);
+    assert!(client.has_role(&Role::Minter, &target));
+    assert!(
+        client
+            .get_role_proposal(&proposal_id)
+            .expect("executed proposal remains readable")
+            .executed
+    );
+}
+
+#[test]
+fn test_revoke_role_rejects_removing_the_only_configured_super_admin() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+
+    assert_eq!(
+        client.try_revoke_role(&admin, &Role::SuperAdmin, &admin),
+        Err(Ok(AdminError::LastSuperAdmin)),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // #914 — privileged-action timelock
 // ─────────────────────────────────────────────────────────────────────────────

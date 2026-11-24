@@ -27,6 +27,7 @@ export type {
   BatchMintRecipient,
   bcForgeClientConfig,
   RbacInitResult,
+  RoleHierarchy,
   TransactionResult,
 } from './client';
 /**
@@ -36,7 +37,15 @@ export type {
  */
 export type { DryRunResult, DryRunFootprint } from './client';
 export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
-export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents, onMint, onTransfer, onVaultDeposit } from './events';
+export {
+  bcForgeEventType,
+  decodeEvent,
+  decodeDiagnosticEvent,
+  subscribeEvents,
+  onMint,
+  onTransfer,
+  onVaultDeposit,
+} from './events';
 export type { bcForgeEvent, SubscriptionOptions, EventListenerOptions } from './events';
 export * from './errors';
 export * from './mockClient';
@@ -64,13 +73,7 @@ export {
   compoundingPeriodsPerYear,
   timeWeightedYield,
 } from './apy';
-export type {
-  ApyOptions,
-  ApyResult,
-  ApySnapshot,
-  CompoundingFrequency,
-  YieldWindow,
-} from './apy';
+export type { ApyOptions, ApyResult, ApySnapshot, CompoundingFrequency, YieldWindow } from './apy';
 
 // ─── Generated Contract Bindings (#926) ──────────────────────────────────────
 // Auto-generated TypeScript bindings from `stellar contract bindings typescript`.

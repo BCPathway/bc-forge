@@ -25,7 +25,7 @@ import { join, resolve } from 'node:path';
 // unavailable. The package scripts run from the SDK directory, which is where
 // `npm test` and the CI job both start.
 const SDK_ROOT = process.cwd();
-const TSC = resolve(SDK_ROOT, '..', 'node_modules', '.bin', 'tsc');
+const TSC = resolve(SDK_ROOT, '..', 'node_modules', 'typescript', 'bin', 'tsc');
 
 /** Fail loudly if the suite is launched from somewhere other than the SDK. */
 function assertSdkRoot(): void {

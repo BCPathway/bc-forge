@@ -22,6 +22,7 @@ pub mod math;
 mod test;
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
@@ -88,6 +89,14 @@ pub struct UserEmergencyState {
     pub window_start_ledger: u32,
 }
 
+/// Instance storage footprint and TTL diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct StorageInfo {
+    pub instance_ttl: u32,
+    pub instance_keys: u32,
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -134,6 +143,8 @@ pub enum DataKey {
     QueuedWithdrawal(Address),
     /// Emergency cap tracking state for a user.
     UserEmergencyState(Address),
+    /// Recorded live-until ledger for instance TTL diagnostics.
+    InstanceLiveUntil,
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -186,6 +197,65 @@ pub struct WrapperContract;
 
 impl WrapperContract {
     // ── Guards ───────────────────────────────────────────────────────────────
+
+    fn read_recorded_live_until(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::InstanceLiveUntil)
+            .unwrap_or(0)
+    }
+
+    fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+        let current = env.ledger().sequence();
+        let stored = Self::read_recorded_live_until(env);
+        let remaining = stored.saturating_sub(current);
+        if stored == 0 || remaining <= threshold {
+            let requested = current.saturating_add(extend_to);
+            if requested > stored {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::InstanceLiveUntil, &requested);
+            }
+        }
+    }
+
+    fn extend_instance_ttl(env: &Env) {
+        ttl::extend_instance_ttl(env);
+        Self::remember_instance_extension(
+            env,
+            ttl::INSTANCE_LIFETIME_THRESHOLD,
+            ttl::INSTANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn extend_instance_ttl_for_call(env: &Env) {
+        Self::extend_instance_ttl(env);
+    }
+
+    fn get_instance_ttl_value(env: &Env) -> u32 {
+        Self::read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+    }
+
+    fn get_storage_key_counts_value(env: &Env) -> u32 {
+        let keys = [
+            DataKey::UnderlyingToken,
+            DataKey::Decimals,
+            DataKey::Symbol,
+            DataKey::Name,
+            DataKey::Supply,
+            DataKey::PendingRewards,
+            DataKey::CooldownConfig,
+        ];
+        let mut count = 0u32;
+        let mut i = 0;
+        while i < keys.len() {
+            if env.storage().instance().has(&keys[i]) {
+                count += 1;
+            }
+            i += 1;
+        }
+        count
+    }
 
     fn ensure_initialized(env: &Env) -> Result<(), WrapperError> {
         if admin::has_admin(env) {
@@ -589,6 +659,27 @@ impl WrapperContract {
 
         events::emit_initialized(&env, &admin, &token_contract_id);
         Ok(())
+    }
+
+    /// Returns storage diagnostics for the wrapper contract.
+    pub fn get_storage_info(env: Env) -> StorageInfo {
+        Self::extend_instance_ttl_for_call(&env);
+        StorageInfo {
+            instance_ttl: Self::get_instance_ttl_value(&env),
+            instance_keys: Self::get_storage_key_counts_value(&env),
+        }
+    }
+
+    /// Returns the recorded remaining instance TTL in ledgers.
+    pub fn get_instance_ttl(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_instance_ttl_value(&env)
+    }
+
+    /// Returns the number of populated singleton instance keys.
+    pub fn get_storage_key_counts(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_storage_key_counts_value(&env)
     }
 
     /// Wrap `amount` of the underlying token.
@@ -1167,6 +1258,69 @@ impl WrapperContract {
         Self::release_lock(&env);
         events::emit_withdraw(&env, &caller, queued.shares, queued.amount);
         Ok(queued.amount)
+    }
+
+    /// Claim a partial (or full) portion of a queued withdrawal after the
+    /// cooldown release ledger has passed.
+    ///
+    /// Proportionally calculates the underlying payout for `shares_to_claim`,
+    /// deducts the claimed shares and payout from the stored
+    /// [`QueuedWithdrawal`] (removing it when fully claimed), and transfers
+    /// the underlying tokens to `caller`.
+    pub fn claim_withdrawal_partial(
+        env: Env,
+        caller: Address,
+        shares_to_claim: i128,
+    ) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if shares_to_claim <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let queued =
+            Self::read_queued_withdrawal(&env, &caller).ok_or(WrapperError::NoQueuedWithdrawal)?;
+
+        if env.ledger().sequence() < queued.release_ledger {
+            return Err(WrapperError::CooldownNotMet);
+        }
+
+        if shares_to_claim > queued.shares {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let payout_amount = if shares_to_claim == queued.shares {
+            queued.amount
+        } else {
+            let proportional = math::mul_div_down(queued.amount, shares_to_claim, queued.shares)
+                .ok_or(WrapperError::InvalidAmount)?;
+            if proportional <= 0 {
+                return Err(WrapperError::InvalidAmount);
+            }
+            proportional
+        };
+
+        Self::acquire_lock(&env)?;
+        if shares_to_claim == queued.shares {
+            Self::remove_queued_withdrawal(&env, &caller);
+        } else {
+            let updated = QueuedWithdrawal {
+                shares: queued.shares - shares_to_claim,
+                amount: queued.amount - payout_amount,
+                release_ledger: queued.release_ledger,
+            };
+            Self::write_queued_withdrawal(&env, &caller, &updated);
+        }
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+        underlying_client.transfer(&env.current_contract_address(), &caller, &payout_amount);
+
+        Self::release_lock(&env);
+        events::emit_withdraw(&env, &caller, shares_to_claim, payout_amount);
+        Ok(payout_amount)
     }
 
     /// Withdraw `shares` of wrapped tokens and receive a proportional share of

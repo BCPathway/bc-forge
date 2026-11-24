@@ -28,7 +28,7 @@ function packReact(root) {
     );
     const tarball = readdirSync(dest).find((name) => name.endsWith('.tgz'));
     if (!tarball) throw new Error('React pack did not produce a tarball');
-    const listing = execFileSync('tar', ['-tzf', path.join(dest, tarball)], { encoding: 'utf8' });
+    const listing = execFileSync('tar', ['--force-local', '-tzf', path.join(dest, tarball)], { encoding: 'utf8' });
     assertReactTarballListing(listing.split(/\r?\n/));
     return tarball;
   } finally {

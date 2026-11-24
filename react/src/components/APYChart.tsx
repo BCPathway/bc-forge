@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-import React, { useCallback, useEffect, useState } from 'react';
-import { calculateApy } from '@bc-forge/sdk';
-import type { ApyOptions, ApyResult } from '@bc-forge/sdk';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { calculateApy } from "@bc-forge/sdk";
+import type { ApyOptions, ApyResult } from "@bc-forge/sdk";
 
-import { formatApy } from '../utils';
-import { Alert } from './Alert';
+import { formatApy } from "../utils";
+import { Alert } from "./Alert";
 
 /** One labelled sample of the series the chart plots. */
 export interface ApyChartPoint {
@@ -44,30 +44,38 @@ export interface APYChartProps {
 }
 
 const PLOT_PADDING = 8;
+type ApyChartRange = "7d" | "30d" | "90d";
+
+const RANGE_LOOKBACK_LEDGERS: Record<ApyChartRange, number> = {
+  "7d": 120_960,
+  "30d": 518_400,
+  "90d": 1_555_200,
+};
+const APY_RANGES: ApyChartRange[] = ["7d", "30d", "90d"];
 
 const CARD_STYLE: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
+  display: "flex",
+  flexDirection: "column",
   gap: 8,
   padding: 16,
-  border: '1px solid #e5e7eb',
+  border: "1px solid #e5e7eb",
   borderRadius: 8,
-  backgroundColor: '#f9fafb',
-  fontFamily: 'inherit',
+  backgroundColor: "#f9fafb",
+  fontFamily: "inherit",
 };
 
 const CAPTION_STYLE: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
+  display: "flex",
+  justifyContent: "space-between",
   fontSize: 12,
-  color: '#6b7280',
+  color: "#6b7280",
 };
 
 const AXIS_LABEL_STYLE: React.CSSProperties = {
   fontSize: 12,
-  color: '#6b7280',
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
+  color: "#6b7280",
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
 };
 
 function extent(values: number[]): { min: number; max: number; flat: boolean } {
@@ -85,7 +93,11 @@ function toPolyline(
   points: ApyChartPoint[],
   width: number,
   height: number,
-): { polyline: string; yForValue: (value: number) => number; xForIndex: (index: number) => number } {
+): {
+  polyline: string;
+  yForValue: (value: number) => number;
+  xForIndex: (index: number) => number;
+} {
   const { min, max, flat } = extent(points.map((p) => p.value));
   const span = flat ? 1 : max - min;
   const drawableWidth = width - PLOT_PADDING * 2;
@@ -98,8 +110,11 @@ function toPolyline(
     PLOT_PADDING + drawableHeight * (1 - (flat ? 0.5 : (value - min) / span));
 
   const polyline = points
-    .map((point, index) => `${xForIndex(index).toFixed(2)},${yForValue(point.value).toFixed(2)}`)
-    .join(' ');
+    .map(
+      (point, index) =>
+        `${xForIndex(index).toFixed(2)},${yForValue(point.value).toFixed(2)}`,
+    )
+    .join(" ");
 
   return { polyline, yForValue, xForIndex };
 }
@@ -111,9 +126,9 @@ function toAreaPath(
   width: number,
   height: number,
 ): string {
-  if (points.length < 2) return '';
+  if (points.length < 2) return "";
   const baseline = height - PLOT_PADDING;
-  return `M ${polyline.replace(/ /g, ' L ')} L ${width - PLOT_PADDING},${baseline} L ${PLOT_PADDING},${baseline} Z`;
+  return `M ${polyline.replace(/ /g, " L ")} L ${width - PLOT_PADDING},${baseline} L ${PLOT_PADDING},${baseline} Z`;
 }
 
 /**
@@ -142,9 +157,9 @@ export const APYChart: React.FC<APYChartProps> = ({
   options,
   height = 180,
   width = 640,
-  title = 'Vault APY',
+  title = "Vault APY",
   formatValue = formatApy,
-  emptyMessage = 'No APY data available.',
+  emptyMessage = "No APY data available.",
   style,
   className,
 }) => {
@@ -152,21 +167,29 @@ export const APYChart: React.FC<APYChartProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [range, setRange] = useState<ApyChartRange>("30d");
 
   const shouldFetch = !points && !result && Boolean(options);
+  const fetchOptions = useMemo(
+    () =>
+      options
+        ? { ...options, lookbackLedgers: RANGE_LOOKBACK_LEDGERS[range] }
+        : undefined,
+    [options, range],
+  );
 
   const load = useCallback(async () => {
-    if (!options) return;
+    if (!fetchOptions) return;
     try {
       setLoading(true);
       setError(null);
-      setFetched(await calculateApy(options));
+      setFetched(await calculateApy(fetchOptions));
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setLoading(false);
     }
-  }, [options]);
+  }, [fetchOptions]);
 
   useEffect(() => {
     if (!shouldFetch) return;
@@ -176,15 +199,47 @@ export const APYChart: React.FC<APYChartProps> = ({
   }, [shouldFetch, load, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const rangeSelector = shouldFetch ? (
+    <div
+      role="group"
+      aria-label="APY time range"
+      style={{ display: "flex", gap: 4 }}
+    >
+      {APY_RANGES.map((option) => (
+        <button
+          key={option}
+          type="button"
+          aria-pressed={range === option}
+          data-testid={`apy-range-${option}`}
+          disabled={loading}
+          onClick={() => setRange(option)}
+          style={{
+            padding: "4px 8px",
+            border: "1px solid #d1d5db",
+            borderRadius: 4,
+            backgroundColor: range === option ? "#2563eb" : "#ffffff",
+            color: range === option ? "#ffffff" : "#374151",
+            cursor: loading ? "progress" : "pointer",
+            fontFamily: "inherit",
+            fontSize: 12,
+          }}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  ) : null;
 
   const activeResult = result ?? fetched ?? undefined;
-  const source = points ?? (activeResult ? pointsFromResult(activeResult) : undefined);
+  const source =
+    points ?? (activeResult ? pointsFromResult(activeResult) : undefined);
   const usable = (source ?? []).filter((point) => Number.isFinite(point.value));
 
   if (shouldFetch && loading && usable.length === 0) {
     return (
       <div className={className} data-testid="apy-chart" style={style}>
-        <div style={{ fontSize: 14, color: '#4b5563' }}>Loading APY…</div>
+        {rangeSelector}
+        <div style={{ fontSize: 14, color: "#4b5563" }}>Loading APY…</div>
       </div>
     );
   }
@@ -192,6 +247,7 @@ export const APYChart: React.FC<APYChartProps> = ({
   if (error) {
     return (
       <div className={className} data-testid="apy-chart" style={style}>
+        {rangeSelector}
         <Alert variant="danger" title="APY unavailable">
           {error.message}
         </Alert>
@@ -200,13 +256,13 @@ export const APYChart: React.FC<APYChartProps> = ({
           onClick={retry}
           style={{
             marginTop: 8,
-            padding: '6px 12px',
-            backgroundColor: '#ffffff',
-            color: '#374151',
-            border: '1px solid #d1d5db',
+            padding: "6px 12px",
+            backgroundColor: "#ffffff",
+            color: "#374151",
+            border: "1px solid #d1d5db",
             borderRadius: 6,
-            cursor: 'pointer',
-            fontFamily: 'inherit',
+            cursor: "pointer",
+            fontFamily: "inherit",
           }}
         >
           Retry
@@ -218,7 +274,11 @@ export const APYChart: React.FC<APYChartProps> = ({
   if (usable.length === 0) {
     return (
       <div className={className} data-testid="apy-chart" style={style}>
-        <div style={{ fontSize: 14, color: '#4b5563' }} data-testid="apy-chart-empty">
+        {rangeSelector}
+        <div
+          style={{ fontSize: 14, color: "#4b5563" }}
+          data-testid="apy-chart-empty"
+        >
           {emptyMessage}
         </div>
       </div>
@@ -226,28 +286,42 @@ export const APYChart: React.FC<APYChartProps> = ({
   }
 
   const { min, max } = extent(usable.map((p) => p.value));
+  const first = usable[0];
   const latest = usable[usable.length - 1];
+  // Unreachable: a zero-length series already returned the empty state above.
+  // Narrowing here keeps the reads below honest under `noUncheckedIndexedAccess`.
+  if (first === undefined || latest === undefined) return null;
+
   const { polyline, yForValue, xForIndex } = toPolyline(usable, width, height);
   const areaPath = toAreaPath(polyline, usable, width, height);
-  const summary = `${title}: ${usable.length} point${usable.length === 1 ? '' : 's'} from ${formatValue(
+  const summary = `${title}: ${usable.length} point${usable.length === 1 ? "" : "s"} from ${formatValue(
     min,
   )} to ${formatValue(max)}, latest ${formatValue(latest.value)}`;
 
   return (
-    <div className={className} data-testid="apy-chart" style={{ ...CARD_STYLE, ...style }}>
+    <div
+      className={className}
+      data-testid="apy-chart"
+      style={{ ...CARD_STYLE, ...style }}
+    >
       <div
         style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          justifyContent: 'space-between',
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
           gap: 8,
         }}
       >
         <span style={AXIS_LABEL_STYLE}>{title}</span>
-        <span data-testid="apy-chart-latest" style={{ fontSize: 20, fontWeight: 600 }}>
+        <span
+          data-testid="apy-chart-latest"
+          style={{ fontSize: 20, fontWeight: 600 }}
+        >
           {formatValue(latest.value)}
         </span>
       </div>
+
+      {rangeSelector}
 
       <svg
         role="img"
@@ -256,15 +330,15 @@ export const APYChart: React.FC<APYChartProps> = ({
         width="100%"
         height={height}
         preserveAspectRatio="none"
-        style={{ display: 'block' }}
+        style={{ display: "block" }}
       >
         {areaPath ? <path d={areaPath} fill="rgba(37, 99, 235, 0.12)" /> : null}
         {usable.length === 1 ? (
           <line
             x1={PLOT_PADDING}
-            y1={yForValue(usable[0].value)}
+            y1={yForValue(first.value)}
             x2={width - PLOT_PADDING}
-            y2={yForValue(usable[0].value)}
+            y2={yForValue(first.value)}
             stroke="#2563eb"
             strokeWidth={2}
             strokeLinecap="round"
@@ -298,23 +372,23 @@ export const APYChart: React.FC<APYChartProps> = ({
       </div>
 
       <div style={{ ...CAPTION_STYLE, fontSize: 11 }}>
-        <span>{usable[0].label}</span>
+        <span>{first.label}</span>
         {shouldFetch ? (
           <button
             type="button"
             onClick={retry}
             disabled={loading}
             style={{
-              border: 'none',
-              background: 'transparent',
-              color: '#2563eb',
-              cursor: loading ? 'progress' : 'pointer',
-              fontFamily: 'inherit',
+              border: "none",
+              background: "transparent",
+              color: "#2563eb",
+              cursor: loading ? "progress" : "pointer",
+              fontFamily: "inherit",
               fontSize: 11,
               padding: 0,
             }}
           >
-            {loading ? 'Refreshing…' : 'Refresh'}
+            {loading ? "Refreshing…" : "Refresh"}
           </button>
         ) : (
           <span>{latest.label}</span>

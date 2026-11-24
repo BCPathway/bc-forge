@@ -66,3 +66,28 @@ describe('bcForgeClient.dryRun', () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+describe('bcForgeClient.accountExists', () => {
+  const client = new bcForgeClient({
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+    contractId: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('returns true when the account is found and false when not found', async () => {
+    const spy = jest.spyOn(SorobanRpc.Server.prototype, 'getAccount');
+    spy.mockResolvedValueOnce({} as never);
+    await expect(client.accountExists(Keypair.random().publicKey())).resolves.toBe(true);
+    spy.mockRejectedValueOnce(new Error('Account not found'));
+    await expect(client.accountExists(Keypair.random().publicKey())).resolves.toBe(false);
+  });
+
+  it('rethrows unrelated RPC errors', async () => {
+    jest.spyOn(SorobanRpc.Server.prototype, 'getAccount').mockRejectedValue(new Error('timeout'));
+    await expect(client.accountExists(Keypair.random().publicKey())).rejects.toThrow('timeout');
+  });
+});

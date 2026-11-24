@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@bc-forge/react": ["../src/index.ts"],
+      "@bc-forge/ui": ["../src/components/index.ts"],
+      "@bc-forge/ui/Badge": ["../src/components/Badge"],
+      "@bc-forge/ui/Alert": ["../src/components/Alert"],
+      "@bc-forge/ui/Dropdown": ["../src/components/Dropdown"],
+      "@bc-forge/ui/ConnectWallet": ["../src/components/ConnectWallet"],
+      "@bc-forge/ui/TokenCard": ["../src/components/TokenCard"],
+      "@bc-forge/ui/MintForm": ["../src/components/MintForm"],
+      "@bc-forge/ui/VaultDepositWidget": ["../src/components/VaultDepositWidget"],
+      "@bc-forge/ui/APYChart": ["../src/components/APYChart"],
+      "@bc-forge/ui/ProposalVotingPanel": ["../src/components/ProposalVotingPanel"],
+      "@bc-forge/ui/TransactionToast": ["../src/components/TransactionToast"],
+      "@demo/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "aliases.ts", "vite.config.ts"]
+}

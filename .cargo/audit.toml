@@ -1,0 +1,7 @@
+# Configuration for cargo-audit (#883)
+[advisories]
+ignore = [
+    "RUSTSEC-2024-0388", # derivative is unmaintained
+    "RUSTSEC-2024-0436", # paste is unmaintained
+    "RUSTSEC-2026-0387", # crypto-bigint timing variability - transitive through soroban-sdk 22 (soroban-env-host)
+]

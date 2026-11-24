@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>bc-forge React Demo</title>
+    <!--
+      #1141 — Blocking, dependency-free theme bootstrap.
+
+      This is the literal output of `createThemeScript()` in
+      `@bc-forge/react` (with the default `storageKey`). It runs while the
+      document is still parsing, so the `dark` class, the `data-theme`
+      attribute and `color-scheme` are all in place before the first paint —
+      there is no flash of the wrong theme while React hydrates.
+
+      `ThemeProvider` in `src/App.tsx` then adopts exactly the same key and
+      applies the `--bc-*` custom properties on mount. Keep the key in sync:
+      if you change `storageKey` on the provider, pass the same value here (or
+      render `<ThemeScript storageKey="…" />` instead of this literal).
+    -->
+    <script>
+      (function(){try{var k="bc-forge-theme";var p=window.localStorage.getItem(k);if(p!=="light"&&p!=="dark"&&p!=="system"){p="system"}var d=p==="dark"||(p==="system"&&typeof window.matchMedia==="function"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.classList.toggle("dark",d);e.setAttribute("data-theme",d?"dark":"light");e.style.colorScheme=d?"dark":"light"}catch(_){}})();
+    </script>
   </head>
   <body>
     <div id="root"></div>

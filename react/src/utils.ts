@@ -55,26 +55,31 @@ export function formatTokenAmount(
   decimals: number | undefined,
   options: FormatTokenAmountOptions = {},
 ): string {
-  const { trim = true, placeholder = '—' } = options;
+  const { trim = true, placeholder = "—" } = options;
   if (amount === null || amount === undefined) return placeholder;
   if (decimals === undefined || decimals <= 0) return amount.toString();
 
-  const sign = amount < 0n ? '-' : '';
+  const sign = amount < 0n ? "-" : "";
   const digits = (amount < 0n ? -amount : amount).toString();
-  const padded = digits.padStart(decimals + 1, '0');
+  const padded = digits.padStart(decimals + 1, "0");
   const whole = padded.slice(0, padded.length - decimals);
   const fraction = padded.slice(padded.length - decimals);
 
   if (!trim) return `${sign}${whole}.${fraction}`;
-  const trimmedFraction = fraction.replace(/0+$/, '');
-  return trimmedFraction ? `${sign}${whole}.${trimmedFraction}` : `${sign}${whole}`;
+  const trimmedFraction = fraction.replace(/0+$/, "");
+  return trimmedFraction
+    ? `${sign}${whole}.${trimmedFraction}`
+    : `${sign}${whole}`;
 }
 
 /**
  * Percentage string for a decimal fraction, e.g. `0.1234` -> `'12.34%'`.
  */
-export function formatApy(apy: number | null | undefined, fractionDigits = 2): string {
-  if (apy === null || apy === undefined || !Number.isFinite(apy)) return '—';
+export function formatApy(
+  apy: number | null | undefined,
+  fractionDigits = 2,
+): string {
+  if (apy === null || apy === undefined || !Number.isFinite(apy)) return "—";
   return `${(apy * 100).toFixed(fractionDigits)}%`;
 }
 
@@ -94,7 +99,7 @@ export interface TruncateMiddleOptions {
  */
 export function truncateMiddle(
   value: string,
-  { lead = 4, tail = 4, separator = '…' }: TruncateMiddleOptions = {},
+  { lead = 4, tail = 4, separator = "…" }: TruncateMiddleOptions = {},
 ): string {
   if (value.length <= lead + tail) return value;
   return `${value.slice(0, lead)}${separator}${value.slice(-tail)}`;
@@ -103,38 +108,52 @@ export function truncateMiddle(
 /**
  * Known error patterns and their user-friendly descriptions.
  */
-const WALLET_ERROR_PATTERNS: Array<{ test: (msg: string) => boolean; message: string }> = [
+const WALLET_ERROR_PATTERNS: Array<{
+  test: (msg: string) => boolean;
+  message: string;
+}> = [
   {
     // Matches Freighter, Albedo, and standard wallet rejection messages:
     // "User declined", "User rejected", "User cancelled", "transaction was rejected", etc.
     test: (msg) =>
       /user\s*(declined|rejected|cancelled|canceled|denied)/i.test(msg) ||
-      /transaction\s*(was\s*)?(declined|rejected|cancelled|canceled)/i.test(msg) ||
+      /transaction\s*(was\s*)?(declined|rejected|cancelled|canceled)/i.test(
+        msg,
+      ) ||
       /rejected\s*by\s*user/i.test(msg) ||
       /declined\s*by\s*user/i.test(msg) ||
       /signature\s*rejected/i.test(msg) ||
       /request\s*rejected/i.test(msg),
-    message: 'Transaction cancelled by user',
+    message: "Transaction cancelled by user",
   },
   {
     test: (msg) =>
-      /not\s*connected|disconnected|no\s*wallet\s*connected|unauthenticated/i.test(msg),
-    message: 'Wallet is not connected. Please connect your wallet first.',
+      /not\s*connected|disconnected|no\s*wallet\s*connected|unauthenticated/i.test(
+        msg,
+      ),
+    message: "Wallet is not connected. Please connect your wallet first.",
   },
   {
     test: (msg) =>
-      /wrong\s*network|different\s*stellar\s*network|network\s*mismatch/i.test(msg),
-    message: 'Wallet is connected to a different Stellar network than expected.',
+      /wrong\s*network|different\s*stellar\s*network|network\s*mismatch/i.test(
+        msg,
+      ),
+    message:
+      "Wallet is connected to a different Stellar network than expected.",
   },
   {
     test: (msg) =>
-      /timeout|timed\s*out|network\s*error|econnrefused|failed\s*to\s*fetch/i.test(msg),
-    message: 'Network request timed out or failed. Please check your connection and try again.',
+      /timeout|timed\s*out|network\s*error|econnrefused|failed\s*to\s*fetch/i.test(
+        msg,
+      ),
+    message:
+      "Network request timed out or failed. Please check your connection and try again.",
   },
   {
     test: (msg) =>
       /hardware\s*wallet|ledger.*(timed?\s*out|disconnected)/i.test(msg),
-    message: 'Hardware wallet confirmation timed out or device was disconnected.',
+    message:
+      "Hardware wallet confirmation timed out or device was disconnected.",
   },
 ];
 
@@ -147,19 +166,19 @@ const WALLET_ERROR_PATTERNS: Array<{ test: (msg: string) => boolean; message: st
  * @returns Human-readable, actionable error message suitable for toasts and alert dialogs.
  */
 export function parseWalletError(error: unknown): string {
-  if (!error) return 'An unexpected error occurred.';
+  if (!error) return "An unexpected error occurred.";
 
   const rawMessage =
     error instanceof Error
       ? error.message
-      : typeof error === 'string'
+      : typeof error === "string"
         ? error
-        : typeof error === 'object' && error !== null && 'message' in error
+        : typeof error === "object" && error !== null && "message" in error
           ? String((error as { message: unknown }).message)
           : String(error);
 
   const trimmed = rawMessage.trim();
-  if (!trimmed) return 'An unexpected error occurred.';
+  if (!trimmed) return "An unexpected error occurred.";
 
   for (const { test, message } of WALLET_ERROR_PATTERNS) {
     if (test(trimmed)) {
@@ -170,3 +189,55 @@ export function parseWalletError(error: unknown): string {
   return trimmed;
 }
 
+export type RbacReportFormat = "csv" | "json";
+
+const stringifyReportValue = (value: unknown, space?: number) =>
+  JSON.stringify(
+    value,
+    (_key, nestedValue: unknown) =>
+      typeof nestedValue === "bigint" ? nestedValue.toString() : nestedValue,
+    space,
+  );
+
+/** Creates a timestamped role assignment and audit-history download. */
+export function exportRbacReport(
+  address: string,
+  roles: Record<string, boolean>,
+  auditHistory: unknown[],
+  format: RbacReportFormat,
+  exportedAt = new Date().toISOString(),
+): { filename: string; mimeType: string; content: string } {
+  const timestamp = exportedAt.replace(/[:.]/g, "-");
+  if (format === "json") {
+    return {
+      filename: `rbac-report-${timestamp}.json`,
+      mimeType: "application/json",
+      content: stringifyReportValue(
+        { exportedAt, roleAssignments: [{ address, roles }], auditHistory },
+        2,
+      ),
+    };
+  }
+
+  const rows = Object.entries(roles).map(([role, granted]) => [
+    "role",
+    address,
+    role,
+    String(granted),
+    "",
+  ]);
+  for (const event of auditHistory)
+    rows.push(["audit", "", "", "", stringifyReportValue(event)]);
+  const csvCell = (value: string) => {
+    const safeValue = /^[=+\-@]/.test(value) ? `'${value}` : value;
+    return `"${safeValue.replace(/"/g, '""')}"`;
+  };
+
+  return {
+    filename: `rbac-report-${timestamp}.csv`,
+    mimeType: "text/csv",
+    content: [["kind", "address", "role", "granted", "event"], ...rows]
+      .map((row) => row.map(csvCell).join(","))
+      .join("\r\n"),
+  };
+}

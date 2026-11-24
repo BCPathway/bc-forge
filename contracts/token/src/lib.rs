@@ -90,6 +90,14 @@ pub enum DataKey {
     FeeExemption(Address),
     /// Nonce for contract wallet batch execution replay protection.
     Nonce(Address),
+    /// Per-minter issuance budget (remaining allowance) in token units.
+    MinterAllowance(Address),
+    /// Scheduled mint stream by id.
+    MintStream(u64),
+    /// Next mint stream id counter.
+    NextMintStreamId,
+    /// Recorded live-until ledger for instance TTL diagnostics.
+    InstanceLiveUntil,
 }
 
 /// Fee configuration for dynamic contract fee charging.
@@ -137,6 +145,26 @@ pub struct LockupState {
     /// Unix timestamp (seconds since epoch) at which the locked tokens
     /// become withdrawable.
     pub unlock_timestamp: u64,
+}
+
+/// A scheduled mint stream that mints tokens to a recipient over time.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MintStream {
+    pub recipient: Address,
+    pub total_amount: i128,
+    pub minted_amount: i128,
+    pub start_ledger: u32,
+    pub end_ledger: u32,
+    pub cliff_ledger: u32,
+}
+
+/// Instance storage footprint and TTL diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct StorageInfo {
+    pub instance_ttl: u32,
+    pub instance_keys: u32,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -191,6 +219,8 @@ pub enum TokenError {
     LockupNotFound = 21,
     /// The holder's lock has not reached its unlock timestamp.
     TokensStillLocked = 22,
+    /// The minter has no configured issuance budget or has exceeded it.
+    MinterQuotaExceeded = 23,
 }
 
 #[contract]
@@ -236,20 +266,20 @@ impl BcForgeToken {
     fn read_supply(env: &Env) -> i128 {
         let key = DataKey::Supply;
         if env.storage().instance().has(&key) {
-            ttl::extend_instance_ttl(env);
+            Self::extend_instance_ttl(env);
         }
         env.storage().instance().get(&key).unwrap_or(0)
     }
 
     fn write_supply(env: &Env, supply: i128) {
         env.storage().instance().set(&DataKey::Supply, &supply);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn read_max_supply(env: &Env) -> i128 {
         let key = DataKey::MaxSupply;
         if env.storage().instance().has(&key) {
-            ttl::extend_instance_ttl(env);
+            Self::extend_instance_ttl(env);
         }
         env.storage().instance().get(&key).unwrap_or(i128::MAX)
     }
@@ -258,7 +288,7 @@ impl BcForgeToken {
         env.storage()
             .instance()
             .set(&DataKey::MaxSupply, &max_supply);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn remove_legacy_allowance_exp(env: &Env, from: &Address, spender: &Address) {
@@ -322,8 +352,63 @@ impl BcForgeToken {
         }
     }
 
-    fn extend_instance_ttl_for_call(env: &Env) {
+    fn read_recorded_live_until(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::InstanceLiveUntil)
+            .unwrap_or(0)
+    }
+
+    fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+        let current = env.ledger().sequence();
+        let stored = Self::read_recorded_live_until(env);
+        let remaining = stored.saturating_sub(current);
+        if stored == 0 || remaining <= threshold {
+            let requested = current.saturating_add(extend_to);
+            if requested > stored {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::InstanceLiveUntil, &requested);
+            }
+        }
+    }
+
+    fn extend_instance_ttl(env: &Env) {
         ttl::extend_instance_ttl(env);
+        Self::remember_instance_extension(
+            env,
+            ttl::INSTANCE_LIFETIME_THRESHOLD,
+            ttl::INSTANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn extend_instance_ttl_for_call(env: &Env) {
+        Self::extend_instance_ttl(env);
+    }
+
+    fn get_instance_ttl_value(env: &Env) -> u32 {
+        Self::read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+    }
+
+    fn get_storage_key_counts_value(env: &Env) -> u32 {
+        let keys = [
+            DataKey::Decimals,
+            DataKey::Name,
+            DataKey::Symbol,
+            DataKey::Supply,
+            DataKey::MaxSupply,
+            DataKey::Treasury,
+            DataKey::FeeConfig,
+        ];
+        let mut count = 0u32;
+        let mut i = 0;
+        while i < keys.len() {
+            if env.storage().instance().has(&keys[i]) {
+                count += 1;
+            }
+            i += 1;
+        }
+        count
     }
 
     fn write_allowance(env: &Env, from: &Address, spender: &Address, amount: i128, exp: u32) {
@@ -392,26 +477,26 @@ impl BcForgeToken {
 
     fn write_fee_config(env: &Env, config: &FeeConfig) {
         env.storage().instance().set(&DataKey::FeeConfig, config);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn write_treasury(env: &Env, treasury: &Address) {
         env.storage().instance().set(&DataKey::Treasury, treasury);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn write_fee_exemption(env: &Env, address: &Address, exemption: &FeeExemption) {
         env.storage()
             .instance()
             .set(&DataKey::FeeExemption(address.clone()), exemption);
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn delete_fee_exemption(env: &Env, address: &Address) {
         env.storage()
             .instance()
             .remove(&DataKey::FeeExemption(address.clone()));
-        ttl::extend_instance_ttl(env);
+        Self::extend_instance_ttl(env);
     }
 
     fn read_nonce(env: &Env, address: &Address) -> u64 {
@@ -425,6 +510,85 @@ impl BcForgeToken {
         env.storage()
             .persistent()
             .set(&DataKey::Nonce(address.clone()), &nonce);
+    }
+
+    fn read_minter_allowance(env: &Env, minter: &Address) -> Option<i128> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinterAllowance(minter.clone()))
+    }
+
+    fn write_minter_allowance(env: &Env, minter: &Address, allowance: i128) {
+        env.storage()
+            .instance()
+            .set(&DataKey::MinterAllowance(minter.clone()), &allowance);
+        Self::extend_instance_ttl(env);
+    }
+
+    fn consume_minter_allowance(
+        env: &Env,
+        minter: &Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        let allowance =
+            Self::read_minter_allowance(env, minter).ok_or(TokenError::MinterQuotaExceeded)?;
+        if allowance < amount {
+            return Err(TokenError::MinterQuotaExceeded);
+        }
+        Self::write_minter_allowance(env, minter, allowance - amount);
+        Ok(())
+    }
+
+    fn read_next_mint_stream_id(env: &Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::NextMintStreamId)
+            .unwrap_or(0u64)
+    }
+
+    fn write_next_mint_stream_id(env: &Env, id: u64) {
+        env.storage()
+            .instance()
+            .set(&DataKey::NextMintStreamId, &id);
+        Self::extend_instance_ttl(env);
+    }
+
+    fn read_mint_stream(env: &Env, stream_id: u64) -> Result<MintStream, TokenError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MintStream(stream_id))
+            .ok_or(TokenError::InvalidAmount)
+    }
+
+    fn write_mint_stream(env: &Env, stream_id: u64, stream: &MintStream) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::MintStream(stream_id), stream);
+    }
+
+    fn claimable_stream_amount(stream: &MintStream, current_ledger: u32) -> i128 {
+        let vested = if current_ledger < stream.cliff_ledger {
+            0
+        } else if current_ledger >= stream.end_ledger {
+            stream.total_amount
+        } else {
+            let elapsed = (current_ledger - stream.start_ledger) as i128;
+            let duration = (stream.end_ledger - stream.start_ledger) as i128;
+            if duration <= 0 {
+                stream.total_amount
+            } else {
+                stream
+                    .total_amount
+                    .saturating_mul(elapsed)
+                    .checked_div(duration)
+                    .unwrap_or(0)
+            }
+        };
+        if vested <= stream.minted_amount {
+            0
+        } else {
+            vested - stream.minted_amount
+        }
     }
 }
 
@@ -593,6 +757,126 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Returns storage diagnostics for the token contract.
+    pub fn get_storage_info(env: Env) -> StorageInfo {
+        Self::extend_instance_ttl_for_call(&env);
+        StorageInfo {
+            instance_ttl: Self::get_instance_ttl_value(&env),
+            instance_keys: Self::get_storage_key_counts_value(&env),
+        }
+    }
+
+    /// Returns the recorded remaining instance TTL in ledgers.
+    pub fn get_instance_ttl(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_instance_ttl_value(&env)
+    }
+
+    /// Returns the number of populated singleton instance keys.
+    pub fn get_storage_key_counts(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_storage_key_counts_value(&env)
+    }
+
+    /// Creates a scheduled mint stream for a recipient.
+    pub fn create_mint_stream(
+        env: Env,
+        caller: Address,
+        recipient: Address,
+        total_amount: i128,
+        start_ledger: u32,
+        end_ledger: u32,
+        cliff_ledger: u32,
+    ) -> Result<u64, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        let is_super_admin =
+            bc_forge_admin::has_role(&env, bc_forge_admin::Role::SuperAdmin, &caller);
+        let is_minter = bc_forge_admin::has_role(&env, bc_forge_admin::Role::Minter, &caller);
+        if !is_super_admin && !is_minter {
+            return Err(TokenError::InvalidAmount);
+        }
+        if total_amount <= 0
+            || end_ledger <= start_ledger
+            || cliff_ledger < start_ledger
+            || cliff_ledger > end_ledger
+        {
+            return Err(TokenError::InvalidAmount);
+        }
+        let current_supply = Self::read_supply(&env);
+        let projected = current_supply
+            .checked_add(total_amount)
+            .ok_or(TokenError::InvalidAmount)?;
+        if projected > Self::read_max_supply(&env) {
+            return Err(TokenError::MaxSupplyExceeded);
+        }
+
+        let stream_id = Self::read_next_mint_stream_id(&env);
+        Self::write_next_mint_stream_id(&env, stream_id + 1);
+        let stream = MintStream {
+            recipient: recipient.clone(),
+            total_amount,
+            minted_amount: 0,
+            start_ledger,
+            end_ledger,
+            cliff_ledger,
+        };
+        Self::write_mint_stream(&env, stream_id, &stream);
+        events::emit_stream_mint_created(&env, stream_id, &recipient, total_amount);
+        Ok(stream_id)
+    }
+
+    /// Claims currently vested tokens from a mint stream.
+    pub fn claim_stream_mint(env: Env, stream_id: u64) -> Result<i128, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        let mut stream = Self::read_mint_stream(&env, stream_id)?;
+        let current_ledger = env.ledger().sequence();
+        let claimable = Self::claimable_stream_amount(&stream, current_ledger);
+        if claimable <= 0 {
+            return Ok(0);
+        }
+        Self::internal_mint(
+            &env,
+            &env.current_contract_address(),
+            &stream.recipient,
+            claimable,
+        )?;
+        stream.minted_amount = stream
+            .minted_amount
+            .checked_add(claimable)
+            .ok_or(TokenError::InvalidAmount)?;
+        Self::write_mint_stream(&env, stream_id, &stream);
+        events::emit_stream_mint_claimed(&env, stream_id, &stream.recipient, claimable);
+        Ok(claimable)
+    }
+
+    /// Sets the per-minter issuance allowance. Only SuperAdmin can call this.
+    pub fn set_minter_allowance(
+        env: Env,
+        caller: Address,
+        minter: Address,
+        allowance: i128,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        bc_forge_admin::require_super_admin(&env, &caller);
+        if allowance < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        Self::write_minter_allowance(&env, &minter, allowance);
+        events::emit_minter_allowance_set(&env, &caller, &minter, allowance);
+        Ok(())
+    }
+
+    /// Returns the configured per-minter issuance allowance, or 0 if none is set.
+    pub fn get_minter_allowance(env: Env, minter: Address) -> i128 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        Self::read_minter_allowance(&env, &minter).unwrap_or(0)
+    }
+
     /// Returns the admin address.
     ///
     /// @notice Returns the address of the contract admin.
@@ -625,6 +909,7 @@ impl BcForgeToken {
             if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
                 return Err(TokenError::InvalidAmount);
             }
+            Self::consume_minter_allowance(&env, &minter, amount)?;
 
             Self::internal_mint(&env, &minter, &to, amount)
         })
@@ -633,7 +918,7 @@ impl BcForgeToken {
     /// Mints new tokens to multiple recipients in a single call.
     ///
     /// @notice Mints tokens to each recipient in the `recipients` list. Only authorized miners can call this function.
-    /// @dev Requires the caller to have the Minter role. Rate limits are checked per recipient. The total supply is updated atomically.
+    /// @dev Requires the caller to have the Minter role. Rate limits are checked against the aggregated batch amount. The total supply is updated atomically.
     /// @param env The Soroban environment.
     /// @param minter The address of the minter calling this function.
     /// @param recipients A list of recipients with amounts to mint to each.
@@ -648,21 +933,29 @@ impl BcForgeToken {
             Self::ensure_initialized(&env)?;
             Self::ensure_not_paused(&env)?;
 
-            // Check for any invalid amounts before requiring minter role
+            // Check for any invalid amounts and aggregate total batch amount before
+            // requiring minter role so callers cannot bypass volume-based rate limits
+            // by splitting a large issuance across many recipients.
+            let mut total_batch_amount: i128 = 0;
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
                 if recipient.amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
+                total_batch_amount = total_batch_amount
+                    .checked_add(recipient.amount)
+                    .ok_or(TokenError::InvalidAmount)?;
             }
 
             bc_forge_admin::has_role!(&env, bc_forge_admin::Role::Minter, &minter);
 
+            if !crate::rate_limit::check_mint_rate_limit(&env, &minter, total_batch_amount) {
+                return Err(TokenError::InvalidAmount);
+            }
+            Self::consume_minter_allowance(&env, &minter, total_batch_amount)?;
+
             for i in 0..recipients.len() {
                 let recipient = recipients.get(i).expect("recipient should exist");
-                if !crate::rate_limit::check_mint_rate_limit(&env, &minter, recipient.amount) {
-                    return Err(TokenError::InvalidAmount);
-                }
                 Self::internal_mint(&env, &minter, &recipient.to, recipient.amount)?;
             }
 
@@ -912,6 +1205,11 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Returns whether token operations are currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        bc_forge_lifecycle::is_paused(&env)
+    }
+
     /// Pauses the contract.
     ///
     /// @notice Pauses all token operations. Only the admin (or SuperAdmin/Pauser role holder) can call this function.
@@ -1136,6 +1434,41 @@ impl BcForgeToken {
         admin::create_proposal(&env, creator, description)
     }
 
+    /// Checks whether an address holds a role.
+    pub fn has_role(env: Env, role: admin::Role, address: Address) -> bool {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::has_role(&env, role, &address)
+    }
+
+    /// Grants a role to an address through the shared admin module.
+    pub fn grant_role(env: Env, caller: Address, role: admin::Role, address: Address) {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::grant_role(&env, &caller, role, &address);
+    }
+
+    /// Revokes a role from an address through the shared admin module.
+    pub fn revoke_role(
+        env: Env,
+        caller: Address,
+        role: admin::Role,
+        address: Address,
+    ) -> Result<(), admin::AdminError> {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::revoke_role(&env, &caller, role, &address)
+    }
+
+    /// Creates a multisig proposal that grants a role after approval.
+    pub fn create_role_proposal(
+        env: Env,
+        creator: Address,
+        role: admin::Role,
+        target: Address,
+        description: String,
+    ) -> u64 {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::create_role_proposal(&env, creator, role, target, description)
+    }
+
     /// Approves a multi-sig governance proposal.
     ///
     /// @notice Records `admin`'s approval for `proposal_id`.
@@ -1151,10 +1484,53 @@ impl BcForgeToken {
         admin::is_proposal_ready(&env, proposal_id)
     }
 
+    /// Returns the details for a legacy multisig proposal.
+    pub fn get_proposal(env: Env, proposal_id: u64) -> Option<admin::Proposal> {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::get_proposal(&env, proposal_id)
+    }
+
+    /// Returns role action details and approval tally for a proposal.
+    pub fn get_role_proposal(
+        env: Env,
+        proposal_id: u64,
+    ) -> Option<admin::RoleGrantProposalDetails> {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::get_role_proposal(&env, proposal_id)
+    }
+
+    /// Lists pending and approved legacy multisig proposals by page.
+    pub fn list_legacy_proposals(env: Env, start_after: u64) -> admin::LegacyProposalLists {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::list_legacy_proposals(&env, start_after)
+    }
+
+    /// Executes a role grant after its multisig proposal reaches quorum.
+    pub fn execute_role_proposal(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), admin::AdminError> {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::execute_role_proposal(&env, executor, proposal_id)
+    }
+
     /// Configures the multi-sig admin pool and approval threshold for upgrades.
     pub fn set_admin_pool(env: Env, pool: Vec<Address>, threshold: u32) {
         Self::ensure_initialized(&env).expect("token must be initialized");
         admin::set_admin_pool(&env, pool, threshold);
+    }
+
+    /// Returns the configured multisig admin pool.
+    pub fn get_admin_pool(env: Env) -> Vec<Address> {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::get_admin_pool(&env)
+    }
+
+    /// Returns the configured multisig approval threshold.
+    pub fn get_threshold(env: Env) -> u32 {
+        Self::ensure_initialized(&env).expect("token must be initialized");
+        admin::get_threshold(&env)
     }
 
     /// Executes a quorum-approved WASM upgrade on this token contract.

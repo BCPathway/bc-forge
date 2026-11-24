@@ -25,6 +25,7 @@ fn setup(
         &String::from_str(env, "Underlying Token"),
         &String::from_str(env, "UNDER"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(env, &wrapper_id);
@@ -84,6 +85,7 @@ fn test_double_initialize_fails() {
         &String::from_str(&env, "Underlying"),
         &String::from_str(&env, "UND"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(&env, &wrapper_id);
@@ -352,6 +354,7 @@ fn test_decimal_scaling_up() {
         &String::from_str(&env, "Low Decimals"),
         &String::from_str(&env, "LOW"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(&env, &wrapper_id);
@@ -860,6 +863,7 @@ fn test_decimal_downscaling_rounds_shares_down() {
         &String::from_str(&env, "High Precision Token"),
         &String::from_str(&env, "HPT"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     // Wrapper vault has 7 decimals
     let wrapper_id = env.register(WrapperContract, ());
@@ -907,6 +911,7 @@ fn test_sub_unit_withdraw_rounding_to_zero_rejected() {
         &String::from_str(&env, "Low Precision Token"),
         &String::from_str(&env, "LPT"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     // Wrapper vault has 7 decimals
     let wrapper_id = env.register(WrapperContract, ());
@@ -1718,6 +1723,7 @@ fn test_withdraw_dust_payout_fails() {
         &String::from_str(&env, "Low Decimals"),
         &String::from_str(&env, "LOW"),
     );
+    underlying.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     let wrapper_id = env.register(WrapperContract, ());
     let wrapper = WrapperContractClient::new(&env, &wrapper_id);
@@ -2396,6 +2402,7 @@ fn test_rescue_tokens_admin_recovers_foreign_token() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &wrapper.address, &7_000);
 
     let recovery = Address::generate(&env);
@@ -2423,6 +2430,7 @@ fn test_rescue_tokens_rejects_non_admin() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &wrapper.address, &7_000);
 
     let stranger = Address::generate(&env);
@@ -2496,6 +2504,7 @@ fn test_rescue_tokens_rejects_invalid_amount() {
         &String::from_str(&env, "Foreign"),
         &String::from_str(&env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, &wrapper.address, &7_000);
 
     let recovery = Address::generate(&env);
@@ -2594,4 +2603,173 @@ fn test_emergency_cap_blocks_excessive_withdrawals_in_window() {
 
     let third = wrapper.withdraw(&user, &200_000);
     assert_eq!(third, 200_000);
+}
+
+#[test]
+fn test_claim_withdrawal_partial_reduces_queued_balance_accurately() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    wrapper.deposit(&user, &1_000_000);
+    assert_eq!(wrapper.withdraw(&user, &1_000_000), 0);
+
+    let queued = wrapper.get_queued_withdrawal(&user).unwrap();
+    let release_ledger = queued.release_ledger;
+    assert_eq!(queued.shares, 1_000_000);
+    assert_eq!(queued.amount, 1_000_000);
+
+    env.ledger().set_sequence_number(release_ledger);
+
+    // First partial claim: 25% of queued shares
+    let first = wrapper.claim_withdrawal_partial(&user, &250_000);
+    assert_eq!(first, 250_000);
+    assert_eq!(underlying.balance(&user), 9_250_000);
+
+    let after_first = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(after_first.shares, 750_000);
+    assert_eq!(after_first.amount, 750_000);
+    assert_eq!(after_first.release_ledger, release_ledger);
+
+    // Second partial claim: 500_000 shares
+    let second = wrapper.claim_withdrawal_partial(&user, &500_000);
+    assert_eq!(second, 500_000);
+    assert_eq!(underlying.balance(&user), 9_750_000);
+
+    let after_second = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(after_second.shares, 250_000);
+    assert_eq!(after_second.amount, 250_000);
+
+    // Final partial claim for remaining shares removes the queued entry
+    let third = wrapper.claim_withdrawal_partial(&user, &250_000);
+    assert_eq!(third, 250_000);
+    assert_eq!(underlying.balance(&user), 10_000_000);
+    assert!(wrapper.get_queued_withdrawal(&user).is_none());
+
+    // Claiming again after full depletion fails
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &1),
+        Err(Ok(WrapperError::NoQueuedWithdrawal))
+    );
+}
+
+#[test]
+fn test_claim_withdrawal_partial_proportional_with_yield_and_final_full_claim() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    wrapper.deposit(&user, &1_000_000);
+    wrapper.distribute_rewards(&user, &500_000);
+
+    assert_eq!(wrapper.withdraw(&user, &1_000_000), 0);
+    let queued = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(queued.shares, 1_000_000);
+    assert!(queued.amount > 1_000_000);
+
+    env.ledger().set_sequence_number(queued.release_ledger + 1);
+
+    let expected_first = (queued.amount * 400_000) / 1_000_000;
+    let first = wrapper.claim_withdrawal_partial(&user, &400_000);
+    assert_eq!(first, expected_first);
+
+    let remaining = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(remaining.shares, 600_000);
+    assert_eq!(remaining.amount, queued.amount - expected_first);
+
+    // Finish the remaining queued balance via full claim_withdrawal
+    let balance_before_final = underlying.balance(&user);
+    let second = wrapper.claim_withdrawal(&user);
+    assert_eq!(second, remaining.amount);
+    assert_eq!(first + second, queued.amount);
+    assert_eq!(underlying.balance(&user), balance_before_final + second);
+    assert!(wrapper.get_queued_withdrawal(&user).is_none());
+}
+
+#[test]
+fn test_claim_withdrawal_partial_validation_and_cooldown_errors() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    // Non-positive share amounts are rejected
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &-100),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    // No queued withdrawal
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &100),
+        Err(Ok(WrapperError::NoQueuedWithdrawal))
+    );
+
+    wrapper.deposit(&user, &1_000_000);
+    assert_eq!(wrapper.withdraw(&user, &1_000_000), 0);
+    let queued = wrapper.get_queued_withdrawal(&user).unwrap();
+
+    // Before cooldown release ledger
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &500_000),
+        Err(Ok(WrapperError::CooldownNotMet))
+    );
+
+    // Advance past cooldown release ledger
+    env.ledger().set_sequence_number(queued.release_ledger);
+
+    // Exceeding queued shares is rejected without mutating state
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &1_000_001),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(wrapper.get_queued_withdrawal(&user), Some(queued));
+
+    // Paused contract rejects partial claims
+    wrapper.pause();
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &500_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+}
+
+/// Storage footprint / instance TTL diagnostics views (#1325).
+#[test]
+fn test_wrapper_storage_diagnostics_views() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, _user, _wrapper_id) = setup(&env);
+
+    let info = wrapper.get_storage_info();
+    assert_eq!(info.instance_ttl, wrapper.get_instance_ttl());
+    assert_eq!(info.instance_keys, wrapper.get_storage_key_counts());
+    assert!(info.instance_ttl > 0);
+    assert!(info.instance_keys > 0);
 }

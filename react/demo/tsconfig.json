@@ -1,19 +1,4 @@
 {
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
-    "forceConsistentCasingInFileNames": true,
-    "noEmit": true,
-    "baseUrl": ".",
-    "paths": {
-      "@bc-forge/react": ["../src/index.ts"]
-    }
-  },
-  "include": ["src"]
+  "//": "#1139 — Every module alias in this project is declared once, in `react/demo/aliases.ts`, and consumed by `react/demo/vite.config.ts` (and by `react/.storybook/main.ts`). TypeScript cannot execute code in a JSON file, so the mirrored `compilerOptions.paths` block lives in the sibling `tsconfig.demo.json` and is inherited from here. Keeping the two blocks in lockstep is what stops the editor/`tsc` and the bundler from disagreeing about which file `@bc-forge/react` or `@bc-forge/ui` actually points at.",
+  "extends": "./tsconfig.demo.json"
 }

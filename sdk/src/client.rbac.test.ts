@@ -220,12 +220,105 @@ describe('bcForgeClient RBAC init', () => {
     });
   });
 
+  describe('getAdminPool', () => {
+    it('reads and decodes the configured admin addresses', async () => {
+      const pool = [Keypair.random().publicKey(), Keypair.random().publicKey()];
+      const queryContract = jest.fn(async () =>
+        xdr.ScVal.scvVec(pool.map((address) => addressToScVal(address))),
+      );
+      (client as unknown as { queryContract: typeof queryContract }).queryContract = queryContract;
+
+      await expect(client.getAdminPool()).resolves.toEqual(pool);
+      expect(queryContract).toHaveBeenCalledWith('get_admin_pool', []);
+    });
+  });
+
+  describe('role grant proposals', () => {
+    it('creates a proposal bound to the requested role and target', async () => {
+      const target = Keypair.random().publicKey();
+      const invokeContract = jest.fn(async () => ({
+        success: true,
+        hash: 'proposal-hash',
+        returnValue: 3n,
+      }));
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
+
+      await client.createRoleProposal(
+        adminKeypair.publicKey(),
+        Role.Minter,
+        target,
+        'Grant Minter',
+        adminKeypair,
+      );
+
+      const [method, args] = invokeContract.mock.calls[0] as unknown as [string, xdr.ScVal[]];
+      expect(method).toBe('create_role_proposal');
+      expect(args[0].toXDR('base64')).toBe(
+        addressToScVal(adminKeypair.publicKey()).toXDR('base64'),
+      );
+      expect(args[1].sym().toString()).toBe(Role.Minter);
+      expect(args[2].toXDR('base64')).toBe(addressToScVal(target).toXDR('base64'));
+    });
+
+    it('reads the proposal action and current approval tally', async () => {
+      const target = Keypair.random().publicKey();
+      const queryContract = jest.fn(async () =>
+        xdr.ScVal.scvMap([
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('description'),
+            val: xdr.ScVal.scvString('Grant Minter'),
+          }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('role'),
+            val: xdr.ScVal.scvSymbol('Minter'),
+          }),
+          new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('target'), val: addressToScVal(target) }),
+          new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('approvals'), val: xdr.ScVal.scvU32(2) }),
+          new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('quorum'), val: xdr.ScVal.scvU32(3) }),
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol('executed'),
+            val: xdr.ScVal.scvBool(false),
+          }),
+        ]),
+      );
+      (client as unknown as { queryContract: typeof queryContract }).queryContract = queryContract;
+
+      await expect(client.getRoleProposal(7n)).resolves.toEqual({
+        description: 'Grant Minter',
+        role: Role.Minter,
+        target,
+        approvals: 2,
+        quorum: 3,
+        executed: false,
+      });
+    });
+
+    it('executes the approved role proposal as the connected admin', async () => {
+      const invokeContract = jest.fn(async () => ({ success: true, hash: 'execute-hash' }));
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
+
+      await client.executeRoleProposal(adminKeypair.publicKey(), 7n, adminKeypair);
+
+      const [method, args] = invokeContract.mock.calls[0] as unknown as [string, xdr.ScVal[]];
+      expect(method).toBe('execute_role_proposal');
+      expect(args[0].toXDR('base64')).toBe(
+        addressToScVal(adminKeypair.publicKey()).toXDR('base64'),
+      );
+      expect(args[1].u64().toString()).toBe('7');
+    });
+  });
+
   describe('proposal listings (#917)', () => {
     function listingMap() {
       return xdr.ScVal.scvMap([
         new xdr.ScMapEntry({
           key: xdr.ScVal.scvSymbol('pending_ids'),
-          val: xdr.ScVal.scvVec([xdr.ScVal.scvU64(new xdr.Uint64(1)), xdr.ScVal.scvU64(new xdr.Uint64(3))]),
+          val: xdr.ScVal.scvVec([
+            xdr.ScVal.scvU64(new xdr.Uint64(1)),
+            xdr.ScVal.scvU64(new xdr.Uint64(3)),
+          ]),
         }),
         new xdr.ScMapEntry({
           key: xdr.ScVal.scvSymbol('approved_ids'),

@@ -66,6 +66,10 @@ export class MockBcForgeClient {
     return this.adminAddress;
   }
 
+  async getRoleAdmin(_role: Role | string): Promise<string> {
+    return this.adminAddress;
+  }
+
   async setAdmin(admin: string): Promise<TransactionResult> {
     this.adminAddress = admin;
     return { success: true, hash: 'mock-hash', returnValue: null };
@@ -211,6 +215,17 @@ export class MockBcForgeClient {
     this.accounts[to].balance += amount;
     this.accounts[owner].allowances[spender] -= amount;
     return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async getFlashLoanLockStatus(
+    _address: string,
+    _guardContractId?: string,
+  ): Promise<{ isLocked: boolean; depositBlock: number | null; currentLedger: number }> {
+    return { isLocked: false, depositBlock: null, currentLedger: 100 };
+  }
+
+  async getSplitInvoice(_invoiceId: number | bigint, _splitContractId?: string): Promise<any> {
+    return null;
   }
 }
 
@@ -428,5 +443,106 @@ export class MockVaultClient {
     if (!this.allowances[from]) this.allowances[from] = {};
     this.allowances[from][spender] = amount;
     return { success: true, hash: 'mock-hash', returnValue: null };
+  }
+
+  async extendTtl(
+    _thresholdLedgers?: number,
+    _extendToLedgers?: number,
+    _source?: unknown,
+  ): Promise<TransactionResult> {
+    return { success: true, hash: 'mock-ttl-bump-hash', returnValue: null };
+  }
+
+  async getVestingInfo(_beneficiary: string, _vestingContractId?: string): Promise<unknown[]> {
+    return [];
+  }
+
+  private mockEvents: unknown[] = [];
+  private mockAccountSequences: Record<string, bigint> = {};
+  private mockContractTtlRemaining: number = 500;
+  private mockRateLimits: Record<
+    string,
+    { limit: bigint; windowSeconds: bigint; currentUsage: bigint; cooldownSeconds: bigint }
+  > = {};
+
+  setEvents(events: unknown[]): void {
+    this.mockEvents = events;
+  }
+
+  async getEvents(_startLedger?: number): Promise<unknown[]> {
+    return this.mockEvents;
+  }
+
+  setAccountSequence(address: string, seq: bigint): void {
+    this.mockAccountSequences[address] = seq;
+  }
+
+  async getAccountSequence(address: string): Promise<string> {
+    const seq = this.mockAccountSequences[address] ?? 100n;
+    return seq.toString();
+  }
+
+  setContractTtlRemaining(remaining: number): void {
+    this.mockContractTtlRemaining = remaining;
+  }
+
+  async getContractTtl(_contractId?: string): Promise<{
+    currentLedger: number;
+    liveUntilLedgerSeq: number;
+    ledgersRemaining: number;
+  }> {
+    const current = 1000;
+    return {
+      currentLedger: current,
+      liveUntilLedgerSeq: current + this.mockContractTtlRemaining,
+      ledgersRemaining: this.mockContractTtlRemaining,
+    };
+  }
+
+  setRateLimitStatus(
+    address: string,
+    status: {
+      limit: bigint;
+      windowSeconds: bigint;
+      currentUsage: bigint;
+      cooldownSeconds?: bigint;
+    },
+  ): void {
+    this.mockRateLimits[address] = {
+      limit: status.limit,
+      windowSeconds: status.windowSeconds,
+      currentUsage: status.currentUsage,
+      cooldownSeconds: status.cooldownSeconds ?? 0n,
+    };
+  }
+
+  async getRateLimitStatus(
+    address: string,
+    _operation: string = 'mint',
+  ): Promise<{
+    limit: bigint;
+    windowSeconds: bigint;
+    currentUsage: bigint;
+    remainingQuota: bigint;
+    cooldownSeconds: bigint;
+    isThrottled: boolean;
+  }> {
+    const config = this.mockRateLimits[address] ?? {
+      limit: 1000n,
+      windowSeconds: 3600n,
+      currentUsage: 0n,
+      cooldownSeconds: 0n,
+    };
+    const remainingQuota =
+      config.currentUsage >= config.limit ? 0n : config.limit - config.currentUsage;
+    const isThrottled = config.currentUsage >= config.limit;
+    return {
+      limit: config.limit,
+      windowSeconds: config.windowSeconds,
+      currentUsage: config.currentUsage,
+      remainingQuota,
+      cooldownSeconds: config.cooldownSeconds,
+      isThrottled,
+    };
   }
 }
