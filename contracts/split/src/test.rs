@@ -404,6 +404,7 @@ fn test_rescue_tokens_admin_recovers_foreign_token() {
         &String::from_str(&env, "F"),
         &String::from_str(&env, "F"),
     );
+    foreign_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
 
     let recovery = Address::generate(&env);
     foreign_client.mint(&token_admin, &split_client.address, &5_000);
@@ -427,6 +428,7 @@ fn test_rescue_tokens_rejects_non_admin() {
         &String::from_str(&env, "F"),
         &String::from_str(&env, "F"),
     );
+    foreign_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
     foreign_client.mint(&token_admin, &split_client.address, &5_000);
 
     let stranger = Address::generate(&env);
@@ -450,6 +452,7 @@ fn test_rescue_tokens_rejects_invalid_amount() {
         &String::from_str(&env, "F"),
         &String::from_str(&env, "F"),
     );
+    foreign_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
     foreign_client.mint(&token_admin, &split_client.address, &5_000);
 
     let recovery = Address::generate(&env);
