@@ -314,3 +314,64 @@ fn test_reentrancy_on_split_release_reverts() {
     let result = split_client.try_release_payment(&1u64, &split_admin);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_cancel_invoice_full_refund() {
+    let env = Env::default();
+    let (split, token, split_admin, token_admin) = setup(&env);
+    let recipient = Address::generate(&env);
+    let invoice_id = 10u64;
+
+    token.mint(&token_admin, &split.address, &100);
+    split.create_invoice(
+        &split_admin,
+        &invoice_id,
+        &100,
+        &vec![
+            &env,
+            Recipient {
+                to: recipient,
+                amount: 100,
+            },
+        ],
+        &token.address,
+    );
+
+    assert_eq!(split.cancel_invoice(&split_admin, &invoice_id), 100);
+    assert_eq!(
+        split.get_invoice(&invoice_id).status,
+        InvoiceStatus::Cancelled
+    );
+    assert_eq!(token.balance(&split_admin), 100);
+}
+
+#[test]
+fn test_cancel_invoice_already_completed_and_unauthorized() {
+    let env = Env::default();
+    let (split, token, split_admin, token_admin) = setup(&env);
+    let recipient = Address::generate(&env);
+    let outsider = Address::generate(&env);
+    let invoice_id = 11u64;
+
+    token.mint(&token_admin, &split.address, &100);
+    split.create_invoice(
+        &split_admin,
+        &invoice_id,
+        &100,
+        &vec![
+            &env,
+            Recipient {
+                to: recipient,
+                amount: 100,
+            },
+        ],
+        &token.address,
+    );
+    split.release_payment(&invoice_id, &split_admin);
+
+    assert!(split.try_cancel_invoice(&outsider, &invoice_id).is_err());
+    assert_eq!(
+        split.try_cancel_invoice(&split_admin, &invoice_id),
+        Err(Ok(crate::SplitError::InvoiceCannotBeCancelled))
+    );
+}

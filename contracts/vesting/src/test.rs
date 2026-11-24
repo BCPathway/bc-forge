@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::Vec;
 use soroban_sdk::{Address, Env, String};
 
-use crate::{VestingContract, VestingContractClient, VestingError};
+use crate::{VestingContract, VestingContractClient, VestingError, VestingScheduleInput};
 
 fn setup(
     env: &Env,
@@ -287,4 +288,90 @@ fn test_reentrancy_on_vesting_release_reverts() {
     env.ledger().set_sequence_number(15);
     let result = vesting.try_release(&beneficiary);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_create_vesting_batch_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (_token, vesting, admin, _beneficiary, _vesting_id) = setup(&env);
+
+    let schedules = Vec::from_array(
+        &env,
+        [
+            VestingScheduleInput {
+                beneficiary: Address::generate(&env),
+                total_amount: 100,
+                cliff_ledgers: 5,
+                duration_ledgers: 20,
+                revocable: true,
+            },
+            VestingScheduleInput {
+                beneficiary: Address::generate(&env),
+                total_amount: 200,
+                cliff_ledgers: 10,
+                duration_ledgers: 30,
+                revocable: false,
+            },
+        ],
+    );
+
+    let ids = vesting.create_vesting_batch(&admin, &schedules);
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids.get(0), Some(0));
+    assert_eq!(ids.get(1), Some(1));
+    assert_eq!(
+        vesting
+            .get_vesting_info(&schedules.get(0).unwrap().beneficiary)
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn test_create_vesting_batch_empty_and_too_large() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_token, vesting, admin, _beneficiary, _vesting_id) = setup(&env);
+
+    assert_eq!(
+        vesting.try_create_vesting_batch(&admin, &Vec::new(&env)),
+        Err(Ok(VestingError::BatchEmpty))
+    );
+
+    let mut schedules = Vec::new(&env);
+    for _ in 0..51 {
+        schedules.push_back(VestingScheduleInput {
+            beneficiary: Address::generate(&env),
+            total_amount: 100,
+            cliff_ledgers: 5,
+            duration_ledgers: 20,
+            revocable: false,
+        });
+    }
+    assert_eq!(
+        vesting.try_create_vesting_batch(&admin, &schedules),
+        Err(Ok(VestingError::BatchTooLarge))
+    );
+}
+
+#[test]
+fn test_vesting_pause_blocks_release() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(10);
+    let (_token, vesting, admin, beneficiary, _vesting_id) = setup(&env);
+
+    vesting.create_vesting(&beneficiary, &1_000, &5, &20, &true);
+    vesting.pause(&admin);
+
+    assert_eq!(vesting.is_paused(), true);
+    assert_eq!(
+        vesting.try_release(&beneficiary),
+        Err(Ok(VestingError::ContractPaused))
+    );
+
+    vesting.unpause(&admin);
+    assert_eq!(vesting.is_paused(), false);
 }

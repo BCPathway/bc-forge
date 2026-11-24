@@ -11,6 +11,7 @@ mod test;
 mod upgrade_batch_test;
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, Address, BytesN, Env,
     String, Vec,
@@ -38,6 +39,7 @@ pub enum InvoiceStatus {
     PartiallyReleased,
     FullyReleased,
     Failed,
+    Cancelled,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,6 +55,7 @@ pub struct FailedPayout {
 #[contracttype]
 pub struct Invoice {
     pub invoice_id: u64,
+    pub creator: Address,
     pub total_amount: i128,
     pub released_amount: i128,
     pub status: InvoiceStatus,
@@ -69,6 +72,8 @@ pub enum SplitError {
     InsufficientBalance = 3,
     InvoiceAlreadyCompleted = 4,
     FailedPayoutNotFound = 5,
+    UnauthorizedCancellation = 6,
+    InvoiceCannotBeCancelled = 7,
 }
 
 #[contract]
@@ -269,6 +274,7 @@ impl SplitContract {
 
         let invoice = Invoice {
             invoice_id,
+            creator: admin_address.clone(),
             total_amount,
             released_amount: 0,
             status: InvoiceStatus::Pending,
@@ -306,6 +312,53 @@ impl SplitContract {
         reentrancy_guard!(&env, "retry_failed_payout", {
             admin::require_super_admin(&env, &admin_address);
             Self::retry_failed_payout_inner(&env, invoice_id, &recipient)
+        })
+    }
+
+    pub fn cancel_invoice(env: Env, caller: Address, invoice_id: u64) -> Result<i128, SplitError> {
+        reentrancy_guard!(&env, "cancel_invoice", {
+            ttl::extend_instance_ttl(&env);
+            caller.require_auth();
+
+            let mut invoice = Self::read_invoice(&env, invoice_id)?;
+            let authorized = caller == invoice.creator
+                || admin::has_role(&env, admin::Role::SuperAdmin, &caller);
+            if !authorized {
+                return Err(SplitError::UnauthorizedCancellation);
+            }
+
+            if invoice.status != InvoiceStatus::Pending
+                && invoice.status != InvoiceStatus::PartiallyReleased
+            {
+                return Err(SplitError::InvoiceCannotBeCancelled);
+            }
+
+            let unreleased = invoice
+                .total_amount
+                .checked_sub(invoice.released_amount)
+                .ok_or(SplitError::InsufficientBalance)?;
+            if unreleased < 0 {
+                return Err(SplitError::InsufficientBalance);
+            }
+
+            if unreleased > 0 {
+                let token_address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Token)
+                    .ok_or(SplitError::InsufficientBalance)?;
+                let token = TokenClient::new(&env, &token_address);
+                token.transfer(
+                    &env.current_contract_address(),
+                    &invoice.creator,
+                    &unreleased,
+                );
+            }
+
+            invoice.status = InvoiceStatus::Cancelled;
+            Self::write_invoice(&env, &invoice);
+            events::emit_invoice_cancelled(&env, invoice_id, &caller, unreleased);
+            Ok(unreleased)
         })
     }
 

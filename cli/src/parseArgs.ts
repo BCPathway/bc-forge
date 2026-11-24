@@ -21,6 +21,9 @@ import { createInitCommand } from "./commands/init.js";
 import { createDeploymentsCommand } from "./commands/deployments.js";
 import { createCompletionsCommand } from "./commands/completions.js";
 import { addNetworkOptions, attachNetworkResolution } from "./network.js";
+import { createRbacCommand } from "./commands/rbac.js";
+import { createVestingCommand } from "./commands/vesting.js";
+import { createSplitCommand } from "./commands/split.js";
 
 const VERSION = "0.1.0";
 
@@ -72,7 +75,10 @@ export function buildProgram(): Command {
     .addCommand(createPauseCommand("pause"))
     .addCommand(createPauseCommand("unpause"))
     .addCommand(createMultisigCommand())
-    .addCommand(createCompletionsCommand());
+    .addCommand(createCompletionsCommand())
+    .addCommand(createRbacCommand())
+    .addCommand(createVestingCommand())
+    .addCommand(createSplitCommand());
 
   return program;
 }
