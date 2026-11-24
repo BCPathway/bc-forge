@@ -162,3 +162,9 @@ export type {
 
 export { PausedBanner } from "./PausedBanner";
 export type { PausedBannerProps } from "./PausedBanner";
+
+export {
+  NetworkSelector,
+  NETWORK_SELECTOR_MISMATCH_MESSAGE,
+} from "./NetworkSelector";
+export type { NetworkSelectorProps } from "./NetworkSelector";
