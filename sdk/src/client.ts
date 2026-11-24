@@ -2290,8 +2290,6 @@ export class bcForgeClient {
           }
           throw error;
         }
-          throw error;
-        }
       });
     };
 
