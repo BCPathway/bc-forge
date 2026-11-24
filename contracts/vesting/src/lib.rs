@@ -107,10 +107,14 @@ pub enum VestingError {
     /// The vesting is still inside its cliff: nothing is claimable yet
     /// (#918 makes the cliff an explicit, testable error path).
     CliffNotReached = 13,
+    /// No milestone tranches are stored for the schedule (#1461).
+    MilestonesNotFound = 14,
+    /// The requested milestone index does not exist (#1461).
+    InvalidMilestoneIndex = 15,
     /// `rescue_tokens` was called with the registered vesting token. Every
     /// balance of that token held by this contract is escrowed grant money and
     /// can never be drained through the rescue hatch (#1459).
-    CannotRescueVestingToken = 14,
+    CannotRescueVestingToken = 16,
 }
 
 #[contract]
@@ -411,6 +415,56 @@ impl VestingContract {
         })
     }
 
+    /// Adds tokens to an existing schedule without creating a new id (#1460).
+    ///
+    /// The admin funds the additional amount, the schedule total grows, and
+    /// previously released amounts are left untouched so the linear curve
+    /// simply recalculates from the new total. An optional `new_end_ledger`
+    /// may extend (never shorten) the vesting timeline.
+    pub fn top_up_schedule(
+        env: Env,
+        schedule_id: u64,
+        additional_amount: i128,
+        new_end_ledger: Option<u32>,
+    ) -> Result<(), VestingError> {
+        reentrancy_guard!(&env, "top_up_schedule", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
+
+            if additional_amount <= 0 {
+                return Err(VestingError::InvalidAmount);
+            }
+
+            let mut stored = Self::read_schedule(&env, schedule_id)?;
+
+            let new_total = stored
+                .schedule
+                .total_amount
+                .checked_add(additional_amount)
+                .ok_or(VestingError::InvalidAmount)?;
+
+            // Pull the extra tokens from the admin into the vesting vault.
+            Self::token_client(&env).transfer(
+                &admin_address,
+                &env.current_contract_address(),
+                &additional_amount,
+            );
+
+            stored.schedule.total_amount = new_total;
+
+            if let Some(end) = new_end_ledger {
+                if end > stored.schedule.end_ledger {
+                    stored.schedule.end_ledger = end;
+                }
+            }
+
+            Self::write_schedule(&env, schedule_id, &stored);
+            events::emit_schedule_topped_up(&env, schedule_id, additional_amount);
+            Ok(())
+        })
+    }
+
     pub fn release(env: Env, beneficiary: Address) -> Result<i128, VestingError> {
         reentrancy_guard!(&env, "release", {
             Self::ensure_initialized(&env)?;
@@ -499,6 +553,16 @@ impl VestingContract {
         result
     }
 
+    /// Read-only lookup of a single schedule by its id (#1462).
+    ///
+    /// Callers that only know the schedule id (dApps, indexers) no longer
+    /// need to know the beneficiary address. No storage is mutated.
+    pub fn get_schedule(env: Env, schedule_id: u64) -> Result<VestingSchedule, VestingError> {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        let stored = Self::read_schedule(&env, schedule_id)?;
+        Ok(stored.schedule)
+    }
+
     /// Attaches milestone tranches to an existing schedule (#918).
     ///
     /// Admin-only (the grantor shapes the grant). Tranches must be sorted by
@@ -539,6 +603,45 @@ impl VestingContract {
             Self::write_milestones(&env, schedule_id, &milestones);
             events::emit_milestones_set(&env, schedule_id, total);
             Ok(())
+        })
+    }
+
+    /// Cancels one unachieved milestone tranche (#1461).
+    ///
+    /// The schedule itself (and therefore its linear vesting floor) and all
+    /// other tranches remain intact. The cancelled tranche's tokens are
+    /// returned to the admin treasury.
+    pub fn cancel_milestone(
+        env: Env,
+        schedule_id: u64,
+        milestone_index: u32,
+    ) -> Result<i128, VestingError> {
+        reentrancy_guard!(&env, "cancel_milestone", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
+
+            let mut milestones: soroban_sdk::Vec<Milestone> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Milestones(schedule_id))
+                .ok_or(VestingError::MilestonesNotFound)?;
+
+            if milestone_index as usize >= milestones.len() as usize {
+                return Err(VestingError::InvalidMilestoneIndex);
+            }
+
+            let removed = milestones
+                .get(milestone_index)
+                .ok_or(VestingError::InvalidMilestoneIndex)?;
+            milestones.remove(milestone_index);
+            Self::write_milestones(&env, schedule_id, &milestones);
+
+            // Refund the unused tranche to the treasury. `transfer_from_vault`
+            // supplies the contract's sub-invocation authorization.
+            Self::transfer_from_vault(&env, &admin_address, removed.amount);
+            events::emit_milestone_cancelled(&env, schedule_id, milestone_index, removed.amount);
+            Ok(removed.amount)
         })
     }
 
