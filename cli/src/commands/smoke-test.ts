@@ -14,6 +14,7 @@ import logger from "../utils/logger.js";
 import { writeJson } from "../utils/output.js";
 import { resolveContractIdOption } from "../utils/registry.js";
 import { loadAccounts, resolveAccount } from "../utils/address-book.js";
+import { resolveSourceSecret } from "../utils/config.js";
 
 /** Default delay between passes in --watch mode (#940). */
 export const DEFAULT_WATCH_INTERVAL_MS = 15000;
@@ -62,7 +63,7 @@ export function createSmokeTestCommand(): Command {
       "--contract-id <id>",
       "Contract ID, or a deployment alias for the selected network"
     )
-    .requiredOption("--source <secret>", "Admin/source account secret key")
+    .option("--source <secret>", "Admin/source account secret key (use STELLAR_SECRET_KEY instead)")
     .option(
       "--recipient <address>",
       "Recipient public key or address-book name (auto-generated if omitted)"
@@ -89,6 +90,7 @@ export function createSmokeTestCommand(): Command {
       const accounts = loadAccounts();
       const resolved = {
         ...opts,
+        source: await resolveSourceSecret(opts.source),
         contractId: contractId ?? opts.contractId,
         recipient: opts.recipient
           ? resolveAccount(opts.recipient, accounts)
