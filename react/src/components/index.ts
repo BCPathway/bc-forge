@@ -164,7 +164,6 @@ export { PausedBanner } from "./PausedBanner";
 export type { PausedBannerProps } from "./PausedBanner";
 export * from "./VestingScreen";
 export * from "./SplitScreen";
-
 export { TxSimulationModal, decodeSimulationError } from "./TxSimulationModal";
 export type {
   TxSimulationModalProps,
@@ -181,3 +180,9 @@ export type {
   SplitInvoiceWidgetProps,
   SplitRecipient,
 } from "./SplitInvoiceWidget";
+
+export {
+  NetworkSelector,
+  NETWORK_SELECTOR_MISMATCH_MESSAGE,
+} from "./NetworkSelector";
+export type { NetworkSelectorProps } from "./NetworkSelector";

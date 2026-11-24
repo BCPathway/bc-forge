@@ -43,6 +43,16 @@ pub fn emit_milestones_set(env: &Env, schedule_id: u64, total_amount: i128) {
     env.events()
         .publish((symbol_short!("miles_set"),), (schedule_id, total_amount));
 }
+/// Emitted when the admin rescues a foreign SEP-41 token balance that was
+/// accidentally sent to the vesting contract (#1459).
+///
+/// @notice Topics: `rescue`. Data: `(admin, token, to, amount)`.
+pub fn emit_rescued(env: &Env, admin: &Address, token: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("rescue"),),
+        (admin.clone(), token.clone(), to.clone(), amount),
+    );
+}
 
 /// Emitted when a single milestone tranche is cancelled (#1461).
 ///

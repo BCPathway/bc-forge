@@ -111,6 +111,10 @@ pub enum VestingError {
     MilestonesNotFound = 14,
     /// The requested milestone index does not exist (#1461).
     InvalidMilestoneIndex = 15,
+    /// `rescue_tokens` was called with the registered vesting token. Every
+    /// balance of that token held by this contract is escrowed grant money and
+    /// can never be drained through the rescue hatch (#1459).
+    CannotRescueVestingToken = 16,
 }
 
 #[contract]
@@ -298,6 +302,33 @@ impl VestingContract {
         );
         Self::token_client(env).transfer(&current_contract, to, &amount);
     }
+
+    /// State transition shared by `revoke` and `revoke_vesting_batch`.
+    ///
+    /// Callers are responsible for initialization, admin authorization and
+    /// reentrancy protection. Returning an error (rather than panicking) is
+    /// what lets a batch skip an invalid entry and keep processing the rest.
+    fn revoke_internal(env: &Env, schedule_id: u64) -> Result<i128, VestingError> {
+        let current_ledger = env.ledger().sequence();
+        let admin_address = Self::read_admin(env);
+        let mut stored = Self::read_schedule(env, schedule_id)?;
+
+        if !stored.schedule.revocable {
+            return Err(VestingError::NotRevocable);
+        }
+        if stored.revoked_at_ledger.is_some() {
+            return Err(VestingError::AlreadyRevoked);
+        }
+
+        let vested = Self::vested_amount(env, &stored, current_ledger);
+        let unvested = stored.schedule.total_amount - vested;
+        stored.revoked_at_ledger = Some(current_ledger);
+        Self::write_schedule(env, schedule_id, &stored);
+
+        Self::transfer_from_vault(env, &admin_address, unvested);
+        events::emit_vesting_revoked(env, schedule_id, &stored.schedule.beneficiary, unvested);
+        Ok(unvested)
+    }
 }
 
 #[contractimpl]
@@ -467,25 +498,36 @@ impl VestingContract {
             Self::ensure_initialized(&env)?;
             let admin_address = Self::read_admin(&env);
             admin::require_admin(&env, &admin_address);
+            Self::revoke_internal(&env, schedule_id)
+        })
+    }
 
-            let current_ledger = env.ledger().sequence();
-            let mut stored = Self::read_schedule(&env, schedule_id)?;
+    /// Revokes several schedules in a single transaction (#1458).
+    ///
+    /// Admin-gated and backward-compatible with `revoke`. Each id is applied
+    /// through the same internal state transition; ids that are missing,
+    /// already revoked, or non-revocable are skipped rather than aborting the
+    /// whole batch. The returned vector contains only the ids that were
+    /// actually revoked, in input order. Unvested tokens from every successful
+    /// revocation are refunded to the treasury (the admin address).
+    pub fn revoke_vesting_batch(
+        env: Env,
+        schedule_ids: Vec<u64>,
+    ) -> Result<Vec<u64>, VestingError> {
+        // Reuse the single-revoke guard key so a token callback cannot re-enter
+        // either entry point while the batch is transferring refunds.
+        reentrancy_guard!(&env, "revoke", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
 
-            if !stored.schedule.revocable {
-                return Err(VestingError::NotRevocable);
+            let mut revoked = Vec::new(&env);
+            for schedule_id in schedule_ids.iter() {
+                if Self::revoke_internal(&env, schedule_id).is_ok() {
+                    revoked.push_back(schedule_id);
+                }
             }
-            if stored.revoked_at_ledger.is_some() {
-                return Err(VestingError::AlreadyRevoked);
-            }
-
-            let vested = Self::vested_amount(&env, &stored, current_ledger);
-            let unvested = stored.schedule.total_amount - vested;
-            stored.revoked_at_ledger = Some(current_ledger);
-            Self::write_schedule(&env, schedule_id, &stored);
-
-            Self::transfer_from_vault(&env, &admin_address, unvested);
-            events::emit_vesting_revoked(&env, schedule_id, &stored.schedule.beneficiary, unvested);
-            Ok(unvested)
+            Ok(revoked)
         })
     }
 
@@ -694,6 +736,49 @@ impl VestingContract {
                 events::emit_tokens_released(&env, &beneficiary, total_to_release);
             }
             Ok(total_to_release)
+        })
+    }
+
+    /// Rescues a foreign SEP-41 token that was accidentally sent here (#1459).
+    ///
+    /// Admin-gated: authorization follows the contract's stored admin exactly
+    /// like `revoke` and `create_vesting`. The registered vesting token is
+    /// explicitly protected — every balance of it held by this contract is
+    /// escrowed grant money, so draining it would be indistinguishable from
+    /// theft. Any other token id can be recovered to `to`.
+    pub fn rescue_tokens(
+        env: Env,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), VestingError> {
+        reentrancy_guard!(&env, "rescue_tokens", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
+
+            if amount <= 0 {
+                return Err(VestingError::InvalidAmount);
+            }
+            if token == Self::read_token(&env) {
+                return Err(VestingError::CannotRescueVestingToken);
+            }
+
+            let current_contract = env.current_contract_address();
+            Self::authorize_current_contract_call(
+                &env,
+                &token,
+                symbol_short!("transfer"),
+                (&current_contract, &to, amount).into_val(&env),
+            );
+            soroban_sdk::token::TokenClient::new(&env, &token).transfer(
+                &current_contract,
+                &to,
+                &amount,
+            );
+
+            events::emit_rescued(&env, &admin_address, &token, &to, amount);
+            Ok(())
         })
     }
 }
