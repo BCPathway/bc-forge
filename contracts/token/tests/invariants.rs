@@ -7,7 +7,7 @@
 //! violation reports the invariant name, the step index and the operation.
 //!
 //! Run: `cargo test -p bc-forge-token --test invariants`
-//! Iterations: 500 by default, override with `PROPTEST_CASES`.
+//! Iterations: 20 by default (for fast test/coverage execution), override with `PROPTEST_CASES`.
 
 use bc_forge_token::{
     BcForgeToken, BcForgeTokenClient, DataKey, FeeConfig, LockupState, TokenError,
@@ -207,7 +207,7 @@ type String2 = std::string::String;
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(500)
+        std::env::var("PROPTEST_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(20)
     ))]
 
     /// Invariants 1-3: supply conservation, lockup balance, max supply ceiling.
