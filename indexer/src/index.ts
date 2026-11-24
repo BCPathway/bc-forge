@@ -4,6 +4,7 @@ import apiRouter, { jsonErrorHandler } from './api';
 import { healthHandler } from './health';
 import { healthzHandler } from './healthz';
 import { versionHandler } from './version';
+import { getMetrics, getMetricsContentType } from './metrics';
 import { disconnectPrismaClient } from './lib/prisma';
 import { logFatalIndexerError, logShutdown, logStartup } from './lib/lifecycle';
 import dotenv from 'dotenv';
@@ -22,6 +23,14 @@ app.use('/api/v1', apiRouter);
 // so hosting probes never need the API token.
 app.get('/health', (req, res) => {
   void healthHandler(req, res);
+});
+
+// Prometheus exposition — outside the authenticated /api/v1 router.
+app.get('/metrics', (_req, res) => {
+  void (async () => {
+    res.set('Content-Type', getMetricsContentType());
+    res.send(await getMetrics());
+  })();
 });
 
 app.get('/healthz', (req, res) => {
