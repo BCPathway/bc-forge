@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-import React from 'react';
-import { Dropdown, type DropdownItem } from './Dropdown';
-import { useNetwork, useWallet, type NetworkId } from '../context';
-import { theme } from '../theme';
+import React from "react";
+import { Dropdown, type DropdownItem } from "./Dropdown";
+import { useNetwork, useWallet, type NetworkId } from "../context";
+import { theme } from "../theme";
 
 /** Shown when the connected wallet and the dApp are on different networks (#1497). */
 export const NETWORK_SELECTOR_MISMATCH_MESSAGE =
-  'Your wallet is connected to a different Stellar network than this dApp. Switch your wallet to the selected network.';
+  "Your wallet is connected to a different Stellar network than this dApp. Switch your wallet to the selected network.";
 
 export interface NetworkSelectorProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Optional label rendered above the control. */
@@ -50,12 +50,16 @@ export function NetworkSelector({
       {...rest}
       data-testid="network-selector"
       role="group"
-      aria-label={label ?? 'Stellar network'}
+      aria-label={label ?? "Stellar network"}
       className={className}
       style={style}
     >
       {label ? (
-        <div style={{ marginBottom: 4, color: theme.neutralText, fontSize: 12 }}>{label}</div>
+        <div
+          style={{ marginBottom: 4, color: theme.neutralText, fontSize: 12 }}
+        >
+          {label}
+        </div>
       ) : null}
       <Dropdown
         data-testid="network-selector-dropdown"
@@ -66,13 +70,13 @@ export function NetworkSelector({
         onChange={handleChange}
         disabled={isSwitching}
       />
-      {wallet.status === 'wrong-network' ? (
+      {wallet.status === "wrong-network" ? (
         <div
           data-testid="network-mismatch-warning"
           role="alert"
           style={{
             marginTop: 6,
-            padding: '6px 8px',
+            padding: "6px 8px",
             border: `1px solid ${theme.warningBorder}`,
             borderRadius: 6,
             background: theme.warningBackground,
@@ -89,7 +93,7 @@ export function NetworkSelector({
           role="alert"
           style={{
             marginTop: 6,
-            padding: '6px 8px',
+            padding: "6px 8px",
             border: `1px solid ${theme.dangerBorder}`,
             borderRadius: 6,
             background: theme.dangerBackground,
