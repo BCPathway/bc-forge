@@ -213,7 +213,8 @@ stateDiagram-v2
 | 4 | `InvalidAddress` | Operation attempted with the zero-address sentinel |
 | 5 | `InvalidRole` | Unrecognized role discriminant supplied |
 | 6 | `AlreadyInitialized` | `init_storage` called on an already-initialized contract |
-| 32 | `WasmHashMismatch` | `execute_upgrade` / `emergency_execute_upgrade` when supplied hash differs from proposal hash |
+| 32 | `ThresholdExceedsPoolSize` | `remove_admin` when removing a member would drop pool size below threshold |
+| 33 | `WasmHashMismatch` | `execute_upgrade` / `emergency_execute_upgrade` when supplied hash differs from proposal hash |
 
 ## Events
 

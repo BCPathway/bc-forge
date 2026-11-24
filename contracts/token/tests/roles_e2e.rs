@@ -35,6 +35,8 @@ fn setup_roles_fixture(
         &String::from_str(env, "bc-forge Token"),
         &String::from_str(env, "SFG"),
     );
+    // mint now requires an explicit per-minter issuance allowance (#1327).
+    client.set_minter_allowance(&admin, &minter, &i128::MAX);
 
     // Directly assign Minter and Pauser roles to designated accounts in persistent storage
     env.as_contract(&contract_id, || {

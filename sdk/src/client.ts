@@ -379,6 +379,22 @@ export class bcForgeClient {
   }
 
   /**
+   * Check whether `spender` has at least `amount` spending allowance from `owner`.
+   *
+   * @param owner - The token owner's Stellar public key
+   * @param spender - The spender's Stellar public key
+   * @param amount - The required minimum allowance amount
+   * @returns `true` if the current allowance is greater than or equal to `amount`, `false` otherwise
+   */
+  async hasSufficientAllowance(owner: string, spender: string, amount: bigint): Promise<boolean> {
+    if (amount < 0n) {
+      throw new RangeError('amount must be non-negative');
+    }
+    const allowance = await this.getAllowance(owner, spender);
+    return allowance >= amount;
+  }
+
+  /**
    * Get the contract version string.
    */
   async getVersion(): Promise<string> {
@@ -2198,14 +2214,18 @@ export class bcForgeClient {
             this.clearCache();
             return {
               success: true,
-              hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+              hash:
+                (response as unknown as { hash?: string; txHash?: string }).hash ??
+                (response as any).txHash,
               returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
             };
           }
 
           return {
             success: false,
-            hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+            hash:
+              (response as unknown as { hash?: string; txHash?: string }).hash ??
+              (response as any).txHash,
           };
         }
 
@@ -2238,14 +2258,18 @@ export class bcForgeClient {
           this.clearCache();
           return {
             success: true,
-            hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+            hash:
+              (response as unknown as { hash?: string; txHash?: string }).hash ??
+              (response as any).txHash,
             returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
           };
         }
 
         return {
           success: false,
-          hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+          hash:
+            (response as unknown as { hash?: string; txHash?: string }).hash ??
+            (response as any).txHash,
         };
       } catch (error: unknown) {
         // Don't retry on simulation errors or missing signer errors
@@ -2273,14 +2297,18 @@ export class bcForgeClient {
       this.clearCache();
       return {
         success: true,
-        hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+        hash:
+          (response as unknown as { hash?: string; txHash?: string }).hash ??
+          (response as any).txHash,
         returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
       };
     }
 
     return {
       success: false,
-      hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+      hash:
+        (response as unknown as { hash?: string; txHash?: string }).hash ??
+        (response as any).txHash,
     };
   }
 }
