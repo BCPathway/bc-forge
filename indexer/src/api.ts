@@ -1,9 +1,17 @@
-import express, { type NextFunction, type Request, type Response } from 'express';
-import { timingSafeEqual } from 'node:crypto';
-import { getPrismaClient } from './lib/prisma';
-import { logger } from './lib/logger';
-import { createApiRateLimiter, type ApiRateLimiterOptions } from './lib/rateLimit';
-import { subscribeIndexerEvents, type IndexerEvent } from './events';
+import express, {
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
+import { timingSafeEqual } from "node:crypto";
+import { getPrismaClient } from "./lib/prisma";
+import { logger } from "./lib/logger";
+import {
+  createApiRateLimiter,
+  type ApiRateLimiterOptions,
+} from "./lib/rateLimit";
+import { subscribeIndexerEvents, type IndexerEvent } from "./events";
+import { validateWebhookUrl } from "./lib/urlSafety";
 
 /**
  * Authenticated, rate-limited indexer read API.
@@ -17,7 +25,7 @@ import { subscribeIndexerEvents, type IndexerEvent } from './events';
  * token is never logged. The `GET /health` probe in `index.ts` is registered
  * outside this router and stays unauthenticated so uptime checks keep working.
  */
-const BEARER_PREFIX = 'Bearer ';
+const BEARER_PREFIX = "Bearer ";
 
 /**
  * Constant-time comparison of the presented token against the configured one.
@@ -39,15 +47,23 @@ function tokensMatch(presented: string, expected: string): boolean {
  * The expected token is read from the environment on every request so that
  * dotenv has finished loading and tests can configure it per run.
  */
-export function requireApiToken(req: Request, res: Response, next: NextFunction): void {
+export function requireApiToken(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
   const expectedToken = process.env.INDEXER_API_TOKEN;
-  const header = req.get('authorization') ?? '';
+  const header = req.get("authorization") ?? "";
   const presentedToken = header.startsWith(BEARER_PREFIX)
     ? header.slice(BEARER_PREFIX.length)
-    : '';
+    : "";
 
-  if (!expectedToken || !presentedToken || !tokensMatch(presentedToken, expectedToken)) {
-    res.status(401).json({ error: 'Unauthorized' });
+  if (
+    !expectedToken ||
+    !presentedToken ||
+    !tokensMatch(presentedToken, expectedToken)
+  ) {
+    res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
@@ -70,13 +86,13 @@ type PaginatedDelegate = {
  * Returns the effective limit (capped at MAX_LIMIT) or `null` when the
  * caller supplied a non-integer or a value below 1.
  */
-function parseLimit(query: Request['query']): number | null {
+function parseLimit(query: Request["query"]): number | null {
   const raw = query.limit;
   if (raw === undefined) {
     return DEFAULT_LIMIT;
   }
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return null;
   }
   const parsed = Number(value);
@@ -90,13 +106,13 @@ function parseLimit(query: Request['query']): number | null {
  * Extract the `cursor` query param (the id of the last row from the
  * previous page). Empty or missing values mean "first page".
  */
-function parseCursor(query: Request['query']): string | undefined {
+function parseCursor(query: Request["query"]): string | undefined {
   const raw = query.cursor;
   if (raw === undefined) {
     return undefined;
   }
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== "string" || value.length === 0) {
     return undefined;
   }
   return value;
@@ -106,13 +122,13 @@ function parseCursor(query: Request['query']): string | undefined {
  * Extract the optional `address` query param.
  * Empty or missing values return undefined (no filter).
  */
-function parseAddress(query: Request['query']): string | undefined {
+function parseAddress(query: Request["query"]): string | undefined {
   const raw = query.address;
   if (raw === undefined) {
     return undefined;
   }
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== "string" || value.length === 0) {
     return undefined;
   }
   return value;
@@ -124,13 +140,13 @@ function parseAddress(query: Request['query']): string | undefined {
  * Returns the ledger number, `undefined` when absent, or `null` when
  * the supplied value is not a valid non-negative integer.
  */
-function parseFromLedger(query: Request['query']): number | null | undefined {
+function parseFromLedger(query: Request["query"]): number | null | undefined {
   const raw = query.from_ledger;
   if (raw === undefined) {
     return undefined;
   }
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return null;
   }
   const parsed = Number(value);
@@ -146,12 +162,12 @@ function parseFromLedger(query: Request['query']): number | null | undefined {
  * Returns `true` or `false` when present, or `null` when the value is
  * not one of those strings.
  */
-function parseResolved(query: Request['query']): boolean | null | undefined {
+function parseResolved(query: Request["query"]): boolean | null | undefined {
   const raw = query.resolved;
   if (raw === undefined) return undefined;
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (value === 'true') return true;
-  if (value === 'false') return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
   return null;
 }
 
@@ -300,7 +316,7 @@ async function handlePaginatedList(
 ): Promise<void> {
   const limit = parseLimit(req.query);
   if (limit === null) {
-    res.status(400).json({ error: 'Invalid limit: must be an integer >= 1' });
+    res.status(400).json({ error: "Invalid limit: must be an integer >= 1" });
     return;
   }
   const cursor = parseCursor(req.query);
@@ -311,15 +327,15 @@ async function handlePaginatedList(
       take: limit + 1,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       ...(where ? { where } : {}),
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
   } catch (err: unknown) {
     if (
-      typeof err === 'object' &&
+      typeof err === "object" &&
       err !== null &&
-      (err as { code?: string }).code === 'P2025'
+      (err as { code?: string }).code === "P2025"
     ) {
-      res.status(400).json({ error: 'Invalid cursor' });
+      res.status(400).json({ error: "Invalid cursor" });
       return;
     }
     throw err;
@@ -329,7 +345,8 @@ async function handlePaginatedList(
   const data = hasNextPage ? rows.slice(0, limit) : rows;
   res.json({
     data,
-    nextCursor: hasNextPage && data.length > 0 ? data[data.length - 1].id : null,
+    nextCursor:
+      hasNextPage && data.length > 0 ? data[data.length - 1].id : null,
   });
 }
 
@@ -362,7 +379,7 @@ export function jsonErrorHandler(
   res: Response,
   next: NextFunction,
 ): void {
-  logger.error('request failed', {
+  logger.error("request failed", {
     method: req.method,
     path: req.path,
     error: err instanceof Error ? err.message : String(err),
@@ -373,7 +390,7 @@ export function jsonErrorHandler(
     return;
   }
 
-  res.status(500).json({ error: 'internal_error' });
+  res.status(500).json({ error: "internal_error" });
 }
 
 /**
@@ -387,7 +404,9 @@ export function jsonErrorHandler(
  * `GET /health` is registered on the app in `index.ts`, outside this router, so
  * uptime probes are never counted against the limit.
  */
-export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Router {
+export function createApiRouter(
+  options: ApiRateLimiterOptions = {},
+): express.Router {
   const router = express.Router();
 
   // Applies to every route below. Routes added by other modules before this
@@ -401,16 +420,16 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * GET /events/stream
    * Stream newly persisted mint, transfer, and burn rows using SSE.
    */
-  router.get('/events/stream', (req, res) => {
+  router.get("/events/stream", (req, res) => {
     res.status(200);
     res.set({
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache, no-transform',
-      connection: 'keep-alive',
-      'x-accel-buffering': 'no',
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
     });
     res.flushHeaders();
-    res.write(': connected\n\n');
+    res.write(": connected\n\n");
 
     const unsubscribe = subscribeIndexerEvents((event: IndexerEvent) => {
       if (res.writableEnded || res.destroyed) {
@@ -423,8 +442,8 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
     const cleanup = () => {
       unsubscribe();
     };
-    req.once('close', cleanup);
-    res.once('close', cleanup);
+    req.once("close", cleanup);
+    res.once("close", cleanup);
   });
 
   /**
@@ -433,31 +452,16 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * idempotent and returns the existing row.
    */
   router.post(
-    '/webhooks',
+    "/webhooks",
     asyncHandler(async (req, res) => {
       const rawUrl = (req.body as { url?: unknown } | undefined)?.url;
-      if (typeof rawUrl !== 'string') {
-        res.status(400).json({ error: 'url must be an HTTPS URL' });
+      const safety = await validateWebhookUrl(rawUrl);
+      if (!safety.ok) {
+        res.status(400).json({ error: safety.reason ?? "invalid webhook url" });
         return;
       }
 
-      let parsed: URL;
-      try {
-        parsed = new URL(rawUrl);
-      } catch {
-        res.status(400).json({ error: 'url must be an HTTPS URL' });
-        return;
-      }
-
-      if (
-        parsed.protocol !== 'https:' ||
-        parsed.username.length > 0 ||
-        parsed.password.length > 0
-      ) {
-        res.status(400).json({ error: 'url must be an HTTPS URL without embedded credentials' });
-        return;
-      }
-
+      const parsed = new URL(rawUrl as string);
       const webhook = await getPrismaClient().webhook.upsert({
         where: { url: parsed.toString() },
         update: {},
@@ -473,17 +477,19 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Remove a previously registered webhook target.
    */
   router.delete(
-    '/webhooks/:id',
+    "/webhooks/:id",
     asyncHandler(async (req, res) => {
       try {
-        await getPrismaClient().webhook.delete({ where: { id: req.params.id } });
+        await getPrismaClient().webhook.delete({
+          where: { id: req.params.id },
+        });
       } catch (error: unknown) {
         if (
-          typeof error === 'object' &&
+          typeof error === "object" &&
           error !== null &&
-          (error as { code?: string }).code === 'P2025'
+          (error as { code?: string }).code === "P2025"
         ) {
-          res.status(404).json({ error: 'webhook_not_found' });
+          res.status(404).json({ error: "webhook_not_found" });
           return;
         }
         throw error;
@@ -498,12 +504,16 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve mint logs (paginated, optionally filtered).
    */
   router.get(
-    '/mints',
+    "/mints",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
       const where = buildMintWhere(address, fromLedger);
@@ -516,12 +526,16 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve transfer logs (paginated, optionally filtered).
    */
   router.get(
-    '/transfers',
+    "/transfers",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
       const where = buildTransferWhere(address, fromLedger);
@@ -534,12 +548,16 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve burn logs (paginated, optionally filtered).
    */
   router.get(
-    '/burns',
+    "/burns",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
       const where = buildBurnWhere(address, fromLedger);
@@ -552,16 +570,25 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve yield-vault and wrapper deposit logs.
    */
   router.get(
-    '/vault-deposits',
+    "/vault-deposits",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
-      const where = buildAddressFieldWhere('caller', address, fromLedger);
-      await handlePaginatedList(req, res, getPrismaClient().vaultDeposit, where);
+      const where = buildAddressFieldWhere("caller", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().vaultDeposit,
+        where,
+      );
     }),
   );
 
@@ -570,16 +597,25 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve wrapper wrap and unwrap logs.
    */
   router.get(
-    '/wrapper-updates',
+    "/wrapper-updates",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
-      const where = buildAddressFieldWhere('caller', address, fromLedger);
-      await handlePaginatedList(req, res, getPrismaClient().wrapperUpdate, where);
+      const where = buildAddressFieldWhere("caller", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().wrapperUpdate,
+        where,
+      );
     }),
   );
 
@@ -588,16 +624,25 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve vesting token-release logs.
    */
   router.get(
-    '/vesting-claims',
+    "/vesting-claims",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
-      const where = buildAddressFieldWhere('beneficiary', address, fromLedger);
-      await handlePaginatedList(req, res, getPrismaClient().vestingClaim, where);
+      const where = buildAddressFieldWhere("beneficiary", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().vestingClaim,
+        where,
+      );
     }),
   );
 
@@ -606,16 +651,25 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve successful split payout logs.
    */
   router.get(
-    '/split-distributions',
+    "/split-distributions",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
-      const where = buildAddressFieldWhere('recipient', address, fromLedger);
-      await handlePaginatedList(req, res, getPrismaClient().splitDistribution, where);
+      const where = buildAddressFieldWhere("recipient", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().splitDistribution,
+        where,
+      );
     }),
   );
 
@@ -627,12 +681,16 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * ingestion time; holders with a zero balance are not listed.
    */
   router.get(
-    '/holders',
+    "/holders",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
       const where = buildHolderWhere(address, fromLedger);
@@ -648,11 +706,15 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * with the authoritative supply reported by the indexed event.
    */
   router.get(
-    '/supply-history',
+    "/supply-history",
     asyncHandler(async (req, res) => {
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
       const where = buildSupplyPointWhere(fromLedger);
@@ -665,7 +727,7 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve basic token operation stats.
    */
   router.get(
-    '/stats',
+    "/stats",
     asyncHandler(async (req, res) => {
       const prisma = getPrismaClient();
       const [mintCount, transferCount, burnCount] = await Promise.all([
@@ -687,16 +749,25 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve vault withdrawal logs.
    */
   router.get(
-    '/vault-withdrawals',
+    "/vault-withdrawals",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
-      const where = buildAddressFieldWhere('caller', address, fromLedger);
-      await handlePaginatedList(req, res, getPrismaClient().vaultWithdrawal as any, where);
+      const where = buildAddressFieldWhere("caller", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().vaultWithdrawal as any,
+        where,
+      );
     }),
   );
 
@@ -705,16 +776,25 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve vault claim logs.
    */
   router.get(
-    '/vault-claims',
+    "/vault-claims",
     asyncHandler(async (req, res) => {
       const address = parseAddress(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
-      const where = buildAddressFieldWhere('caller', address, fromLedger);
-      await handlePaginatedList(req, res, getPrismaClient().vaultClaim as any, where);
+      const where = buildAddressFieldWhere("caller", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().vaultClaim as any,
+        where,
+      );
     }),
   );
 
@@ -723,35 +803,50 @@ export function createApiRouter(options: ApiRateLimiterOptions = {}): express.Ro
    * Retrieve failed split payout logs.
    */
   router.get(
-    '/split-failures',
+    "/split-failures",
     asyncHandler(async (req, res) => {
-      const invoiceId = typeof req.query.invoice_id === 'string'
-        ? req.query.invoice_id
-        : undefined;
-      const recipient = typeof req.query.recipient === 'string'
-        ? req.query.recipient
-        : undefined;
+      const invoiceId =
+        typeof req.query.invoice_id === "string"
+          ? req.query.invoice_id
+          : undefined;
+      const recipient =
+        typeof req.query.recipient === "string"
+          ? req.query.recipient
+          : undefined;
       const resolved = parseResolved(req.query);
       const fromLedger = parseFromLedger(req.query);
       if (resolved === null) {
-        res.status(400).json({ error: 'Invalid resolved: must be true or false' });
+        res
+          .status(400)
+          .json({ error: "Invalid resolved: must be true or false" });
         return;
       }
       if (fromLedger === null) {
-        res.status(400).json({ error: 'Invalid from_ledger: must be a non-negative integer' });
+        res
+          .status(400)
+          .json({
+            error: "Invalid from_ledger: must be a non-negative integer",
+          });
         return;
       }
       const conditions: Record<string, unknown>[] = [];
       if (invoiceId) conditions.push({ invoiceId });
       if (recipient) conditions.push({ recipient });
       if (resolved !== undefined) conditions.push({ resolved });
-      if (fromLedger !== undefined) conditions.push({ ledger: { gte: fromLedger } });
-      const where = conditions.length === 0
-        ? undefined
-        : conditions.length === 1
-          ? conditions[0]
-          : { AND: conditions };
-      await handlePaginatedList(req, res, getPrismaClient().splitFailure as any, where);
+      if (fromLedger !== undefined)
+        conditions.push({ ledger: { gte: fromLedger } });
+      const where =
+        conditions.length === 0
+          ? undefined
+          : conditions.length === 1
+            ? conditions[0]
+            : { AND: conditions };
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().splitFailure as any,
+        where,
+      );
     }),
   );
 

@@ -5717,3 +5717,157 @@ export function useRateLimitStatus(
 
   return { data, loading, error, isThrottled, refetch };
 }
+
+// ─── Vesting and Split hooks (#1345) ───────────────────────────────────────
+
+/** Result shape returned by vesting/split write actions. */
+export interface ContractActionResult {
+  success: boolean;
+  hash?: string;
+  error?: string;
+}
+
+/** Minimal write client the claim hook needs; implemented by a vesting contract client. */
+export interface VestingClaimClientLike {
+  /** Submits the vesting contract `release(beneficiary)` transaction via the wallet adapter. */
+  claim(contractId: string, beneficiary: string): Promise<ContractActionResult>;
+}
+
+export interface UseVestingClaimResult {
+  isClaiming: boolean;
+  error: Error | null;
+  /** Execute the claim transaction. Rejects with a normalised error on failure. */
+  claim: () => Promise<ContractActionResult>;
+}
+
+/**
+ * Claim vested tokens for a beneficiary (#1345). Pair with
+ * {@link useVestingSchedule} (read side) and refetch after a successful claim.
+ */
+export function useVestingClaim(
+  contractId: string | undefined,
+  beneficiaryAddress: string | undefined,
+  client: VestingClaimClientLike | undefined,
+): UseVestingClaimResult {
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const claim = useCallback(async () => {
+    if (!client || !contractId || !beneficiaryAddress) {
+      throw new Error(
+        "Vesting client, contract id and beneficiary are required",
+      );
+    }
+    setIsClaiming(true);
+    setError(null);
+    try {
+      const result = await client.claim(contractId, beneficiaryAddress);
+      if (!result.success) setError(new Error(result.error ?? "Claim failed"));
+      return result;
+    } catch (err) {
+      const e = normalizeHookError(err, "release");
+      setError(e);
+      throw e;
+    } finally {
+      setIsClaiming(false);
+    }
+  }, [client, contractId, beneficiaryAddress]);
+
+  return { isClaiming, error, claim };
+}
+
+export type SplitPayoutStatus = "Success" | "Failed";
+
+export interface SplitPayoutRow {
+  invoiceId: number | bigint;
+  recipient: string;
+  amount: bigint;
+  status: SplitPayoutStatus;
+}
+
+/** Minimal client shape the split hook needs; implemented by a split contract client. */
+export interface SplitClientLike {
+  getSplitHistory(contractId: string): Promise<SplitPayoutRow[]>;
+  /** Calls the contract `retry_failed_payout` for one failed row. */
+  retryFailed(
+    contractId: string,
+    invoiceId: number | bigint,
+    recipient: string,
+  ): Promise<ContractActionResult>;
+}
+
+export interface UseSplitHistoryResult {
+  payouts: SplitPayoutRow[];
+  failedCount: number;
+  isLoading: boolean;
+  isRetrying: boolean;
+  error: Error | null;
+  /** Retry every failed payout sequentially, then refresh. Returns how many succeeded. */
+  retryFailed: () => Promise<number>;
+  refresh: () => Promise<void>;
+}
+
+/** Load split payout history and expose a `retryFailed` action. */
+export function useSplitHistory(
+  contractId: string | undefined,
+  client: SplitClientLike | undefined,
+): UseSplitHistoryResult {
+  const [payouts, setPayouts] = useState<SplitPayoutRow[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!client || !contractId) return;
+    setIsLoading(true);
+    try {
+      setPayouts(await client.getSplitHistory(contractId));
+      setError(null);
+    } catch (err) {
+      setError(normalizeHookError(err, "get_invoice"));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [client, contractId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const retryFailed = useCallback(async () => {
+    if (!client || !contractId) {
+      throw new Error("Split client and contract id are required");
+    }
+    setIsRetrying(true);
+    let ok = 0;
+    try {
+      for (const row of payouts.filter((p) => p.status === "Failed")) {
+        const res = await client.retryFailed(
+          contractId,
+          row.invoiceId,
+          row.recipient,
+        );
+        if (res.success) ok += 1;
+        else setError(new Error(res.error ?? "Retry failed"));
+      }
+      await refresh();
+      return ok;
+    } catch (err) {
+      const e = normalizeHookError(err, "retry_failed_payout");
+      setError(e);
+      throw e;
+    } finally {
+      setIsRetrying(false);
+    }
+  }, [client, contractId, payouts, refresh]);
+
+  return {
+    payouts,
+    failedCount: payouts.filter((p) => p.status === "Failed").length,
+    isLoading,
+    isRetrying,
+    error,
+    retryFailed,
+    refresh,
+  };
+}

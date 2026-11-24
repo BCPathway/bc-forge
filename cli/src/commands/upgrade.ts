@@ -13,7 +13,11 @@ import { prepareSignAndSubmit } from "../utils/soroban-tx.js";
 import logger from "../utils/logger.js";
 import { writeJson } from "../utils/output.js";
 import { resolveContractIdOption } from "../utils/registry.js";
-import { appendUpgradeHistory, getLastGoodHash } from "../utils/upgrade-history.js";
+import {
+  appendUpgradeHistory,
+  getLastGoodHash,
+} from "../utils/upgrade-history.js";
+import { resolveSourceSecret } from "../utils/config.js";
 
 export interface FeeEstimate {
   baseFee: string;
@@ -52,25 +56,28 @@ export function createUpgradeCommand(): Command {
     .option("--wasm <path>", "Path to the new WASM binary")
     .requiredOption(
       "--contract-id <id>",
-      "Contract ID, or a deployment alias for the selected network"
+      "Contract ID, or a deployment alias for the selected network",
     )
-    .requiredOption("--source <secret>", "Source account secret key")
+    .option(
+      "--source <secret>",
+      "Source account secret key (use STELLAR_SECRET_KEY instead)",
+    )
     .option("--proposal-id <id>", "Existing proposal ID to execute")
     .option("--dry-run", "Simulate without submitting on-chain", false)
     .option(
       "--estimate",
       "Dry-run to estimate total fee cost without submitting",
-      false
+      false,
     )
     .option(
       "--timeout <ms>",
       "Timeout in milliseconds to wait for on-chain confirmation",
-      "30000"
+      "30000",
     )
     .option(
       "--to-last-good",
       "Propose the previous WASM hash stored in local upgrade history (rollback)",
-      false
+      false,
     )
     .option("--json", "Print the transaction hash and WASM hash as JSON");
 
@@ -84,6 +91,7 @@ export function createUpgradeCommand(): Command {
       const contractId = resolveContractIdOption(command, opts.contractId);
       const result = await runUpgrade({
         ...opts,
+        source: await resolveSourceSecret(opts.source),
         contractId: contractId ?? opts.contractId,
         wasmPath: opts.wasmPath ?? opts.wasm ?? "",
         toLastGood: opts.toLastGood ?? false,
@@ -179,7 +187,8 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
   if (result.success && !opts.dryRun && !opts.estimate && result.txHash) {
     // Retrieve the current "last good" hash (which will become the previous
     // hash for the next upgrade) before we overwrite it.
-    const previousHash = getLastGoodHash(opts.contractId, opts.historyPath) ?? wasmHash;
+    const previousHash =
+      getLastGoodHash(opts.contractId, opts.historyPath) ?? wasmHash;
     try {
       appendUpgradeHistory(
         opts.contractId,
@@ -211,7 +220,9 @@ interface UpgradeWithHashOptions {
   isRollback: boolean;
 }
 
-async function runUpgradeWithHash(opts: UpgradeWithHashOptions): Promise<UpgradeResult> {
+async function runUpgradeWithHash(
+  opts: UpgradeWithHashOptions,
+): Promise<UpgradeResult> {
   const wasmHash = opts.hash;
 
   // When rolling back we pass the hash directly as bytes; when deploying a

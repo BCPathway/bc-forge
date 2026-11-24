@@ -422,7 +422,6 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
         (user.clone(), amount, EVENT_SCHEMA_VERSION),
     );
 }
-
 /// Emits the `fee_chg` event when a fee is charged during a transfer.
 ///
 /// @notice Publishes fee charge event data including the sender, treasury address, and fee amount.
@@ -435,5 +434,43 @@ pub fn emit_fee_charged(env: &Env, from: &Address, treasury: &Address, fee: i128
     env.events().publish(
         (symbol_short!("fee_chg"),),
         (from.clone(), treasury.clone(), fee, EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits the `m_allow` event when a minter issuance allowance is set.
+///
+/// @notice Publishes the admin caller, the minter address, and the configured
+///         remaining allowance.
+/// @dev The event topics include the `m_allow` symbol.
+pub fn emit_minter_allowance_set(env: &Env, admin: &Address, minter: &Address, allowance: i128) {
+    env.events().publish(
+        (symbol_short!("m_allow"),),
+        (admin.clone(), minter.clone(), allowance),
+    );
+}
+
+/// Emits the `strm_new` event when a mint stream is created.
+pub fn emit_stream_mint_created(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    total_amount: i128,
+) {
+    env.events().publish(
+        (symbol_short!("strm_new"),),
+        (stream_id, recipient.clone(), total_amount),
+    );
+}
+
+/// Emits the `strm_clm` event when streamed mint tokens are claimed.
+pub fn emit_stream_mint_claimed(
+    env: &Env,
+    stream_id: u64,
+    recipient: &Address,
+    claimed_amount: i128,
+) {
+    env.events().publish(
+        (symbol_short!("strm_clm"),),
+        (stream_id, recipient.clone(), claimed_amount),
     );
 }
