@@ -5,7 +5,6 @@ use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env};
 
 #[test]
-#[test]
 fn test_prevents_same_block_withdrawal_with_typed_error() {
     let env = Env::default();
     env.mock_all_auths();

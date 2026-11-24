@@ -33,6 +33,7 @@
   "token:upgraded": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:withdraw_locked": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "vesting:miles_set": "Not yet indexed; tracked as backlog (no indexer table for this event)",
+  "vesting:rescue": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "vesting:v_create": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "vesting:v_revoke": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "wrapper:approve": "Not yet indexed; tracked as backlog (no indexer table for this event)",
