@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: MIT
 import {
   parseContractError,
+  decodeContractError,
+  extractContractErrorCode,
   TokenInsufficientBalanceError,
   TokenContractPausedError,
+  ContractPausedError,
+  RateLimitExceededError,
+  UnauthorizedError,
+  AdminUnauthorizedError,
   AdminUnauthorizedRoleError,
 } from './errors';
 
@@ -43,5 +49,57 @@ describe('Map contract error codes to typed SDK errors (#929)', () => {
     const parsed = parseContractError(rawError);
 
     expect(parsed).toBeNull();
+  });
+
+  it('extracts numeric contract error codes from Soroban simulation responses', () => {
+    expect(extractContractErrorCode('HostError: Error(Contract, #4)')).toBe(4);
+    expect(extractContractErrorCode('Error(Contract, #20)')).toBe(20);
+    expect(extractContractErrorCode('contract error #7')).toBe(7);
+    expect(extractContractErrorCode('Unrelated network failure')).toBeNull();
+  });
+
+  it('decodes paused contract simulation error into ContractPausedError', () => {
+    const rawError = 'HostError: Error(Contract, #6)';
+    const parsed = decodeContractError(rawError);
+
+    expect(parsed).toBeInstanceOf(ContractPausedError);
+    expect(parsed).toBeInstanceOf(TokenContractPausedError);
+    expect(parsed?.numericCode).toBe(6);
+    expect(parsed?.rawMessage).toBe(rawError);
+  });
+
+  it('decodes rate limit simulation error into RateLimitExceededError', () => {
+    const vaultRawError = 'HostError: Error(Contract, #7)';
+    const vaultParsed = decodeContractError(vaultRawError, 'deposit');
+
+    expect(vaultParsed).toBeInstanceOf(RateLimitExceededError);
+    expect(vaultParsed?.code).toBe('RATE_LIMIT_EXCEEDED');
+    expect(vaultParsed?.numericCode).toBe(7);
+    expect(vaultParsed?.contractModule).toBe('vault');
+
+    const textRawError = 'RateLimitExceeded: Operation rate limit exceeded';
+    const textParsed = decodeContractError(textRawError);
+    expect(textParsed).toBeInstanceOf(RateLimitExceededError);
+  });
+
+  it('decodes unauthorized simulation errors into UnauthorizedError', () => {
+    const rawGeneral = 'HostError: Error(Contract, #20)';
+    const parsedGeneral = decodeContractError(rawGeneral);
+
+    expect(parsedGeneral).toBeInstanceOf(UnauthorizedError);
+    expect(parsedGeneral).toBeInstanceOf(AdminUnauthorizedError);
+    expect(parsedGeneral?.code).toBe('ADMIN_UNAUTHORIZED');
+    expect(parsedGeneral?.numericCode).toBe(20);
+
+    const rawRole = 'HostError: Error(Contract, #3)';
+    const parsedRole = decodeContractError(rawRole, 'grant_role');
+
+    expect(parsedRole).toBeInstanceOf(UnauthorizedError);
+    expect(parsedRole).toBeInstanceOf(AdminUnauthorizedRoleError);
+    expect(parsedRole?.numericCode).toBe(3);
+  });
+
+  it('returns null for unmapped numeric contract error codes', () => {
+    expect(decodeContractError('HostError: Error(Contract, #999)')).toBeNull();
   });
 });

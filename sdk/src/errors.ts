@@ -25,7 +25,7 @@ export class ContractError extends bcForgeError {
     public readonly numericCode: number,
     message: string,
     public readonly docsAnchor: string,
-    public readonly contractModule: 'token' | 'admin' | 'unknown' = 'unknown',
+    public readonly contractModule: 'token' | 'admin' | 'vault' | 'unknown' = 'unknown',
     public readonly rawMessage?: string,
   ) {
     const docsUrl = `${ContractError.DOCS_BASE_URL}#${docsAnchor}`;
@@ -71,10 +71,37 @@ export class TokenInsufficientAllowanceError extends ContractError {
   }
 }
 
-export class TokenContractPausedError extends ContractError {
+export class ContractPausedError extends ContractError {
   constructor(rawMessage?: string) {
     super('TOKEN_CONTRACT_PAUSED', 6, 'The contract is currently paused and operations are rejected', 'token-contract-paused', 'token', rawMessage);
+    this.name = 'ContractPausedError';
+  }
+}
+
+export class TokenContractPausedError extends ContractPausedError {
+  constructor(rawMessage?: string) {
+    super(rawMessage);
     this.name = 'TokenContractPausedError';
+  }
+}
+
+export class RateLimitExceededError extends ContractError {
+  constructor(rawMessage?: string) {
+    super('RATE_LIMIT_EXCEEDED', 7, 'Operation rate limit exceeded', 'rate-limit-exceeded', 'vault', rawMessage);
+    this.name = 'RateLimitExceededError';
+  }
+}
+
+export class UnauthorizedError extends ContractError {
+  constructor(
+    rawMessage?: string,
+    code: string = 'ADMIN_UNAUTHORIZED',
+    numericCode: number = 20,
+    message: string = 'General authorization failure',
+    docsAnchor: string = 'admin-unauthorized',
+  ) {
+    super(code, numericCode, message, docsAnchor, 'admin', rawMessage);
+    this.name = 'UnauthorizedError';
   }
 }
 
@@ -171,9 +198,9 @@ export class AdminRoleNotHeldError extends ContractError {
   }
 }
 
-export class AdminUnauthorizedRoleError extends ContractError {
+export class AdminUnauthorizedRoleError extends UnauthorizedError {
   constructor(rawMessage?: string) {
-    super('ADMIN_UNAUTHORIZED_ROLE', 3, 'require_role_guard failed: caller is not authorized for this role', 'admin-unauthorized-role', 'admin', rawMessage);
+    super(rawMessage, 'ADMIN_UNAUTHORIZED_ROLE', 3, 'require_role_guard failed: caller is not authorized for this role', 'admin-unauthorized-role');
     this.name = 'AdminUnauthorizedRoleError';
   }
 }
@@ -290,9 +317,9 @@ export class AdminDuplicateVoteError extends ContractError {
   }
 }
 
-export class AdminUnauthorizedError extends ContractError {
+export class AdminUnauthorizedError extends UnauthorizedError {
   constructor(rawMessage?: string) {
-    super('ADMIN_UNAUTHORIZED', 20, 'General authorization failure', 'admin-unauthorized', 'admin', rawMessage);
+    super(rawMessage, 'ADMIN_UNAUTHORIZED', 20, 'General authorization failure', 'admin-unauthorized');
     this.name = 'AdminUnauthorizedError';
   }
 }
@@ -373,11 +400,15 @@ const ADMIN_ERROR_MAP: Record<number, new (msg?: string) => ContractError> = {
   24: AdminProposalCancelledError,
 };
 
+const VAULT_ERROR_MAP: Record<number, new (msg?: string) => ContractError> = {
+  7: RateLimitExceededError,
+};
+
 /**
- * Parses raw simulation/transaction error text to return a typed ContractError.
- * If the error message does not contain a known contract error code, returns null.
+ * Extracts the numeric Soroban contract error code from a raw simulation or RPC error string.
+ * Matches patterns like `HostError: Error(Contract, #4)` or `contract error #4`.
  */
-export function parseContractError(errorMsg: string, method?: string): ContractError | null {
+export function extractContractErrorCode(errorMsg: string): number | null {
   if (!errorMsg) return null;
 
   const match = errorMsg.match(/Error\(Contract,\s*#?(\d+)\)/i) || errorMsg.match(/contract error #?(\d+)/i);
@@ -385,17 +416,48 @@ export function parseContractError(errorMsg: string, method?: string): ContractE
     return null;
   }
 
-  const codeNum = parseInt(match[1], 10);
-  const isMethodAdmin = method && (
-    method.includes('role') ||
-    method.includes('proposal') ||
-    method.includes('admin') ||
-    method.includes('upgrade') ||
-    method.includes('threshold')
-  );
+  return parseInt(match[1], 10);
+}
+
+/**
+ * Parses raw simulation/transaction error text to return a typed ContractError.
+ * If the error message does not contain a known contract error code, returns null.
+ */
+export function parseContractError(errorMsg: string, method?: string): ContractError | null {
+  if (!errorMsg) return null;
+
+  const codeNum = extractContractErrorCode(errorMsg);
+  if (codeNum === null) {
+    if (/RateLimitExceeded/i.test(errorMsg)) {
+      return new RateLimitExceededError(errorMsg);
+    }
+    return null;
+  }
+
+  const normalizedMethod = method?.toLowerCase();
+  const isMethodAdmin = Boolean(normalizedMethod && (
+    normalizedMethod.includes('role') ||
+    normalizedMethod.includes('proposal') ||
+    normalizedMethod.includes('admin') ||
+    normalizedMethod.includes('upgrade') ||
+    normalizedMethod.includes('threshold')
+  ));
+
+  const isMethodVaultOrRateLimit = Boolean(normalizedMethod && (
+    normalizedMethod.includes('vault') ||
+    normalizedMethod.includes('deposit') ||
+    normalizedMethod.includes('withdraw') ||
+    normalizedMethod.includes('redeem') ||
+    normalizedMethod.includes('rate_limit')
+  ));
 
   if (isMethodAdmin && ADMIN_ERROR_MAP[codeNum]) {
     const Factory = ADMIN_ERROR_MAP[codeNum];
+    return new Factory(errorMsg);
+  }
+
+  if (isMethodVaultOrRateLimit && VAULT_ERROR_MAP[codeNum]) {
+    const Factory = VAULT_ERROR_MAP[codeNum];
     return new Factory(errorMsg);
   }
 
@@ -409,8 +471,18 @@ export function parseContractError(errorMsg: string, method?: string): ContractE
     return new Factory(errorMsg);
   }
 
+  if (VAULT_ERROR_MAP[codeNum]) {
+    const Factory = VAULT_ERROR_MAP[codeNum];
+    return new Factory(errorMsg);
+  }
+
   return null;
 }
+
+/**
+ * Alias for {@link parseContractError} for decoding Soroban simulation failures.
+ */
+export const decodeContractError = parseContractError;
 
 /**
  * Thrown when a contract simulation fails.
