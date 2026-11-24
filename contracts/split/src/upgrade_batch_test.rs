@@ -53,6 +53,8 @@ fn setup_multisig_pair(
         &String::from_str(env, "T"),
         &String::from_str(env, "T"),
     );
+    // mint now requires an explicit per-minter issuance allowance (#1327).
+    token_client.set_minter_allowance(&governor_a, &governor_a, &i128::MAX);
     token_client.set_admin_pool(&vec![env, governor_a.clone(), governor_b.clone()], &2);
 
     (split_client, token_client, governor_a, governor_b)
@@ -77,6 +79,7 @@ fn assert_inter_contract_payout_succeeds(env: &Env) {
         &String::from_str(env, "T"),
         &String::from_str(env, "T"),
     );
+    token_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
 
     let recipient1 = Address::generate(env);
     let recipient2 = Address::generate(env);

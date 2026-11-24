@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import '@testing-library/jest-dom';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import {
   ConfirmationDialog,
@@ -120,7 +120,7 @@ describe('ConfirmationDialog', () => {
     const { onConfirm } = renderDialog({ confirmationMode: 'checkbox' });
 
     const checkbox = screen.getByTestId('confirmation-dialog-checkbox');
-    checkbox.focus();
+    act(() => checkbox.focus());
     expect(document.activeElement).toBe(checkbox);
 
     fireEvent.click(checkbox);
@@ -218,10 +218,10 @@ describe('ConfirmationDialog', () => {
   });
 
   it('locks both buttons and shows the busy label while busy', () => {
-    renderDialog({ confirmationMode: 'none', busy: true, busyLabel: 'Submitting…' });
+    renderDialog({ confirmationMode: 'none', busy: true, busyLabel: 'Submittingâ€¦' });
 
     expect(screen.getByTestId('confirmation-dialog-confirm')).toBeDisabled();
-    expect(screen.getByTestId('confirmation-dialog-confirm')).toHaveTextContent('Submitting…');
+    expect(screen.getByTestId('confirmation-dialog-confirm')).toHaveTextContent('Submittingâ€¦');
     expect(screen.getByTestId('confirmation-dialog-cancel')).toBeDisabled();
   });
 
@@ -285,7 +285,7 @@ describe('ConfirmationDialog', () => {
     const trigger = document.createElement('button');
     trigger.type = 'button';
     document.body.appendChild(trigger);
-    trigger.focus();
+    act(() => trigger.focus());
 
     const { rerender } = render(
       <ConfirmationDialog
@@ -329,29 +329,29 @@ describe('ConfirmationDialog', () => {
     expect(confirm).not.toBeDisabled();
 
     // Tab from the last control wraps back to the first.
-    confirm.focus();
+    act(() => confirm.focus());
     expect(document.activeElement).toBe(confirm);
     fireEvent.keyDown(dialog, { key: 'Tab' });
     expect(document.activeElement).toBe(checkbox);
 
     // Tab in the middle of the order is left to the browser.
-    cancel.focus();
+    act(() => cancel.focus());
     fireEvent.keyDown(dialog, { key: 'Tab' });
     expect(document.activeElement).toBe(cancel);
 
     // Shift+Tab from the first control wraps forward to the last.
-    checkbox.focus();
+    act(() => checkbox.focus());
     fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(confirm);
 
     // Shift+Tab from the panel itself also wraps forward.
-    dialog.focus();
+    act(() => dialog.focus());
     expect(document.activeElement).toBe(dialog);
     fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(confirm);
 
     // Non-Tab keys never move focus.
-    dialog.focus();
+    act(() => dialog.focus());
     fireEvent.keyDown(dialog, { key: 'ArrowDown' });
     expect(document.activeElement).toBe(dialog);
 
