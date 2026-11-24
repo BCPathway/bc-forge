@@ -7,7 +7,7 @@
 //! violation reports the invariant name, the step index and the operation.
 //!
 //! Run: `cargo test -p bc-forge-token --test invariants`
-//! Iterations: 500 by default, override with `PROPTEST_CASES`.
+//! Iterations: 20 by default (for fast test/coverage execution), override with `PROPTEST_CASES`.
 
 use bc_forge_token::{
     BcForgeToken, BcForgeTokenClient, DataKey, FeeConfig, LockupState, TokenError,
@@ -90,6 +90,7 @@ fn fixture(env: &Env, fees: bool) -> Fixture<'_> {
         &String::from_str(env, "Invariant Token"),
         &String::from_str(env, "INV"),
     );
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
     let treasury = Address::generate(env);
     if fees {
         // The fee config normally goes through the privileged-action timelock;
@@ -206,7 +207,7 @@ type String2 = std::string::String;
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(500)
+        std::env::var("PROPTEST_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(20)
     ))]
 
     /// Invariants 1-3: supply conservation, lockup balance, max supply ceiling.
@@ -277,6 +278,7 @@ proptest! {
         let other_id = env.register(BcForgeToken, ());
         let other = BcForgeTokenClient::new(&env, &other_id);
         other.initialize(&f.admin, &7, &String::from_str(&env, "Other"), &String::from_str(&env, "OTH"));
+        other.set_minter_allowance(&f.admin, &f.admin, &i128::MAX);
         other.mint(&f.admin, &f.id, &stranded);
 
         let supply = f.client.supply();

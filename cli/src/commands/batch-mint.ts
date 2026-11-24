@@ -39,7 +39,10 @@ export function createBatchMintCommand(): Command {
       "Parse a batch_mint invocation: contract, source, and repeatable address:amount recipients",
     )
     .requiredOption("--contract-id <id>", "Contract ID of the token to mint")
-    .option("--source <secret>", "Minter source account secret key (use STELLAR_SECRET_KEY instead)")
+    .option(
+      "--source <secret>",
+      "Minter source account secret key (use STELLAR_SECRET_KEY instead)",
+    )
     .option(
       "--recipient <address:amount>",
       "Recipient public key or address-book name, and amount (repeatable)",
@@ -52,22 +55,24 @@ export function createBatchMintCommand(): Command {
 
   addNetworkOptions(cmd);
 
-  cmd.action(async (opts: { recipient?: BatchMintRecipient[]; source?: string }) => {
-    const recipients = opts.recipient ?? [];
-    if (recipients.length === 0) {
-      throw new Error(
-        "batch-mint requires at least one --recipient <address>:<amount>.",
-      );
-    }
-    // Validate secret resolution even though this command only parses the
-    // invocation: supplying it on the argv is warned about (#1318).
-    await resolveSourceSecret(opts.source);
-    const accounts = loadAccounts();
-    opts.recipient = recipients.map((recipient) => ({
-      to: resolveAccount(recipient.to, accounts),
-      amount: recipient.amount,
-    }));
-  });
+  cmd.action(
+    async (opts: { recipient?: BatchMintRecipient[]; source?: string }) => {
+      const recipients = opts.recipient ?? [];
+      if (recipients.length === 0) {
+        throw new Error(
+          "batch-mint requires at least one --recipient <address>:<amount>.",
+        );
+      }
+      // Validate secret resolution even though this command only parses the
+      // invocation: supplying it on the argv is warned about (#1318).
+      await resolveSourceSecret(opts.source);
+      const accounts = loadAccounts();
+      opts.recipient = recipients.map((recipient) => ({
+        to: resolveAccount(recipient.to, accounts),
+        amount: recipient.amount,
+      }));
+    },
+  );
 
   return cmd;
 }
