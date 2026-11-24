@@ -386,6 +386,7 @@ fn setup_foreign_token<'a>(
         &String::from_str(env, "Foreign Token"),
         &String::from_str(env, "FRG"),
     );
+    foreign.set_minter_allowance(&foreign_admin, &foreign_admin, &i128::MAX);
     foreign.mint(&foreign_admin, vesting_id, &amount);
     (foreign, foreign_id)
 }
