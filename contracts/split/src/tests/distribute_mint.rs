@@ -30,6 +30,7 @@ fn setup(
     );
     // Approve the split contract as a minter (the minter budget).
     token.grant_role(&token_admin, &admin::Role::Minter, &split_id);
+    token.set_minter_allowance(&token_admin, &split_id, &i128::MAX);
     (split, token, split_admin, token_admin)
 }
 

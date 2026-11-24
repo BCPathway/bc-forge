@@ -57,6 +57,7 @@ fn setup(env: &Env, split_bps: u32) -> Ctx<'_> {
         &String::from_str(env, "T"),
         &String::from_str(env, "T"),
     );
+    token.set_minter_allowance(&admin, &admin, &i128::MAX);
     let vault_id = env.register(MockVault, ());
     let vault = MockVaultClient::new(env, &vault_id);
     vault.init(&token_id);
