@@ -5,7 +5,16 @@
 
 import { jest } from '@jest/globals';
 import { bcForgeClient, Role, ZERO_ADDRESS, isZeroAddress } from './client';
-import { Keypair, Networks, xdr } from '@stellar/stellar-sdk';
+import { TransactionQueue } from './utils';
+import {
+  Account,
+  Keypair,
+  Networks,
+  rpc as SorobanRpc,
+  SorobanDataBuilder,
+  TransactionBuilder,
+  xdr,
+} from '@stellar/stellar-sdk';
 
 // Mock data for testing
 const MOCK_RPC_URL = 'https://soroban-testnet.stellar.org';
@@ -307,5 +316,203 @@ describe('isZeroAddress', () => {
 
   it('should export the ZERO_ADDRESS constant', () => {
     expect(ZERO_ADDRESS).toBe('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
+  });
+});
+
+describe('TransactionQueue and bcForgeClient concurrent sequence handling (#1528)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('serializes concurrent tasks for the same source account with strictly increasing sequence numbers', async () => {
+    const publicKey = Keypair.random().publicKey();
+    const fetchSequence = jest.fn(async (_pk: string) => '100');
+    const queue = new TransactionQueue(MOCK_RPC_URL, { fetchSequence });
+
+    const observedSequences: string[] = [];
+    const executionOrder: string[] = [];
+
+    const results = await Promise.all([
+      queue.enqueue(publicKey, async (account) => {
+        executionOrder.push('start-1');
+        account.incrementSequenceNumber();
+        observedSequences.push(account.sequenceNumber());
+        await new Promise((r) => setTimeout(r, 25));
+        executionOrder.push('end-1');
+        return 'tx-1';
+      }),
+      queue.enqueue(publicKey, async (account) => {
+        executionOrder.push('start-2');
+        account.incrementSequenceNumber();
+        observedSequences.push(account.sequenceNumber());
+        await new Promise((r) => setTimeout(r, 10));
+        executionOrder.push('end-2');
+        return 'tx-2';
+      }),
+      queue.enqueue(publicKey, async (account) => {
+        executionOrder.push('start-3');
+        account.incrementSequenceNumber();
+        observedSequences.push(account.sequenceNumber());
+        executionOrder.push('end-3');
+        return 'tx-3';
+      }),
+    ]);
+
+    expect(results).toEqual(['tx-1', 'tx-2', 'tx-3']);
+    expect(fetchSequence).toHaveBeenCalledTimes(1);
+    expect(observedSequences).toEqual(['101', '102', '103']);
+    expect(executionOrder).toEqual(['start-1', 'end-1', 'start-2', 'end-2', 'start-3', 'end-3']);
+    expect(queue.getCachedSequence(publicKey)).toBe(103n);
+  });
+
+  it('invalidates cached sequence on rejection and refetches on-chain state for subsequent calls', async () => {
+    const publicKey = Keypair.random().publicKey();
+    let onChainSeq = 200n;
+    const fetchSequence = jest.fn(async () => onChainSeq.toString());
+    const queue = new TransactionQueue(MOCK_RPC_URL, { fetchSequence });
+
+    await queue.enqueue(publicKey, async (account) => {
+      account.incrementSequenceNumber();
+      return 'ok-1';
+    });
+    expect(queue.getCachedSequence(publicKey)).toBe(201n);
+    expect(fetchSequence).toHaveBeenCalledTimes(1);
+
+    // Simulate rejection; on-chain sequence actually advanced externally to 250
+    onChainSeq = 250n;
+    await expect(
+      queue.enqueue(publicKey, async () => {
+        throw new Error('simulated RPC rejection');
+      }),
+    ).rejects.toThrow('simulated RPC rejection');
+
+    expect(queue.getCachedSequence(publicKey)).toBeNull();
+
+    // Next call must refetch on-chain sequence (250) and use 251
+    let resyncedSeq = '';
+    await queue.enqueue(publicKey, async (account) => {
+      account.incrementSequenceNumber();
+      resyncedSeq = account.sequenceNumber();
+      return 'ok-2';
+    });
+
+    expect(fetchSequence).toHaveBeenCalledTimes(2);
+    expect(resyncedSeq).toBe('251');
+    expect(queue.getCachedSequence(publicKey)).toBe(251n);
+  });
+
+  it('automatically resynchronizes and retries once on txBAD_SEQ rejection', async () => {
+    const publicKey = Keypair.random().publicKey();
+    let onChainSeq = 300n;
+    const fetchSequence = jest.fn(async () => onChainSeq.toString());
+    const queue = new TransactionQueue(MOCK_RPC_URL, { fetchSequence });
+
+    let attempts = 0;
+    const observed: string[] = [];
+
+    const result = await queue.enqueue(publicKey, async (account) => {
+      attempts++;
+      account.incrementSequenceNumber();
+      observed.push(account.sequenceNumber());
+      if (attempts === 1) {
+        onChainSeq = 310n;
+        throw new Error('Transaction submission failed: txBAD_SEQ');
+      }
+      return 'resynced-ok';
+    });
+
+    expect(result).toBe('resynced-ok');
+    expect(attempts).toBe(2);
+    expect(fetchSequence).toHaveBeenCalledTimes(2);
+    expect(observed).toEqual(['301', '311']);
+    expect(queue.getCachedSequence(publicKey)).toBe(311n);
+  });
+
+  it('maintains independent sequence caches for different source accounts', async () => {
+    const pkA = Keypair.random().publicKey();
+    const pkB = Keypair.random().publicKey();
+    const seqMap: Record<string, string> = { [pkA]: '10', [pkB]: '500' };
+    const fetchSequence = jest.fn(async (pk: string) => seqMap[pk]);
+    const queue = new TransactionQueue(MOCK_RPC_URL, { fetchSequence });
+
+    const [seqA, seqB] = await Promise.all([
+      queue.enqueue(pkA, async (acc) => {
+        acc.incrementSequenceNumber();
+        return acc.sequenceNumber();
+      }),
+      queue.enqueue(pkB, async (acc) => {
+        acc.incrementSequenceNumber();
+        return acc.sequenceNumber();
+      }),
+    ]);
+
+    expect(seqA).toBe('11');
+    expect(seqB).toBe('501');
+    expect(queue.getCachedSequence(pkA)).toBe(11n);
+    expect(queue.getCachedSequence(pkB)).toBe(501n);
+  });
+
+  it('bcForgeClient concurrent invokeContract calls succeed without txBAD_SEQ', async () => {
+    const sourceKeypair = Keypair.random();
+    const recipient = Keypair.random().publicKey();
+    let ledgerSequence = 1000n;
+    const submittedSequences: string[] = [];
+
+    const getAccountSpy = jest
+      .spyOn(SorobanRpc.Server.prototype, 'getAccount')
+      .mockImplementation(async (pk: string) => new Account(pk, ledgerSequence.toString()));
+
+    jest
+      .spyOn(SorobanRpc.Server.prototype, 'simulateTransaction')
+      .mockImplementation(async () => ({
+        id: 'sim-1',
+        latestLedger: 1,
+        events: [],
+        minResourceFee: '100',
+        results: [{ auth: [], xdr: xdr.ScVal.scvVoid().toXDR('base64') }],
+        transactionData: new SorobanDataBuilder().build().toXDR('base64'),
+      }) as any);
+
+    jest
+      .spyOn(SorobanRpc.Server.prototype, 'sendTransaction')
+      .mockImplementation(async (tx: any) => {
+        const parsed =
+          typeof tx?.sequence === 'string'
+            ? tx
+            : TransactionBuilder.fromXDR(tx.toXDR(), MOCK_NETWORK);
+        const seq = BigInt(parsed.sequence);
+        if (seq !== ledgerSequence + 1n) {
+          return { status: 'ERROR', errorResult: 'txBAD_SEQ', hash: `bad-${seq}` } as any;
+        }
+        ledgerSequence = seq;
+        submittedSequences.push(parsed.sequence);
+        return { status: 'PENDING', hash: `hash-${seq}` } as any;
+      });
+
+    jest
+      .spyOn(SorobanRpc.Server.prototype, 'getTransaction')
+      .mockImplementation(async (hash: string) => ({
+        status: SorobanRpc.Api.GetTransactionStatus.SUCCESS,
+        hash,
+        returnValue: undefined,
+      }) as any);
+
+    const client = new bcForgeClient({
+      rpcUrl: MOCK_RPC_URL,
+      networkPassphrase: MOCK_NETWORK,
+      contractId: MOCK_CONTRACT_ID,
+      maxRetryAttempts: 1,
+    });
+
+    const results = await Promise.all([
+      client.mint(recipient, 10n, sourceKeypair),
+      client.mint(recipient, 20n, sourceKeypair),
+      client.mint(recipient, 30n, sourceKeypair),
+    ]);
+
+    expect(results.map((r) => r.success)).toEqual([true, true, true]);
+    expect(submittedSequences).toEqual(['1001', '1002', '1003']);
+    expect(getAccountSpy).toHaveBeenCalledTimes(1);
+    expect(client.getTransactionQueue().getCachedSequence(sourceKeypair.publicKey())).toBe(1003n);
   });
 });

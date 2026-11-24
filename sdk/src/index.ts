@@ -36,7 +36,13 @@ export type {
  * is submitted.
  */
 export type { DryRunResult, DryRunFootprint } from './client';
-export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
+export {
+  buildInvokeTransaction,
+  submitTransaction,
+  scValToNative,
+  TransactionQueue,
+} from './utils';
+export type { TransactionQueueOptions, SequenceFetcher } from './utils';
 export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents, onMint, onTransfer, onVaultDeposit } from './events';
 export type { bcForgeEvent, SubscriptionOptions, EventListenerOptions } from './events';
 export * from './errors';

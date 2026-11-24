@@ -35,6 +35,141 @@ export interface SubmitTransactionOptions {
   args?: xdr.ScVal[];
 }
 
+export type SequenceFetcher = (publicKey: string) => Promise<string | bigint>;
+
+export interface TransactionQueueOptions {
+  /** Optional custom sequence fetcher (defaults to SorobanRpc.Server.getAccount). */
+  fetchSequence?: SequenceFetcher;
+  /** Whether to automatically invalidate, refetch, and retry once on txBAD_SEQ (default: true). */
+  resyncOnBadSeq?: boolean;
+}
+
+interface AccountQueueState {
+  cachedSequence: bigint | null;
+  tail: Promise<unknown>;
+}
+
+function isSequenceError(error: unknown): boolean {
+  const errStr = String((error as { message?: unknown })?.message ?? error ?? '');
+  return (
+    errStr.includes('txBAD_SEQ') ||
+    errStr.includes('txbad_seq') ||
+    errStr.includes('BAD_SEQ') ||
+    errStr.includes('bad_seq') ||
+    errStr.toLowerCase().includes('bad sequence')
+  );
+}
+
+/**
+ * Per-account in-flight transaction sequence queue.
+ *
+ * Serializes transaction submissions per source account, caches the latest
+ * confirmed sequence number, increments it locally for consecutive in-flight
+ * transactions, and invalidates/resynchronizes from on-chain state whenever
+ * a transaction is rejected.
+ */
+export class TransactionQueue {
+  private readonly rpcUrl: string;
+  private readonly fetchSequenceFn: SequenceFetcher;
+  private readonly resyncOnBadSeq: boolean;
+  private readonly accounts = new Map<string, AccountQueueState>();
+
+  constructor(rpcUrl: string, options: TransactionQueueOptions = {}) {
+    this.rpcUrl = rpcUrl;
+    this.resyncOnBadSeq = options.resyncOnBadSeq ?? true;
+    this.fetchSequenceFn =
+      options.fetchSequence ??
+      (async (publicKey: string) => {
+        const server = new SorobanRpc.Server(this.rpcUrl);
+        const account = await server.getAccount(publicKey);
+        return account.sequenceNumber();
+      });
+  }
+
+  /**
+   * Returns the currently cached sequence number for `sourcePublicKey`, if any.
+   */
+  getCachedSequence(sourcePublicKey: string): bigint | null {
+    return this.accounts.get(sourcePublicKey)?.cachedSequence ?? null;
+  }
+
+  /**
+   * Invalidates the cached sequence number for a specific source account, or
+   * for all accounts if no public key is provided.
+   */
+  invalidate(sourcePublicKey?: string): void {
+    if (sourcePublicKey === undefined) {
+      for (const state of this.accounts.values()) {
+        state.cachedSequence = null;
+      }
+      return;
+    }
+    const state = this.accounts.get(sourcePublicKey);
+    if (state) {
+      state.cachedSequence = null;
+    }
+  }
+
+  /**
+   * Enqueues a transaction submission task for `sourcePublicKey`.
+   *
+   * Tasks targeting the same source account are executed strictly sequentially
+   * with monotonically increasing sequence numbers. Tasks targeting different
+   * source accounts run independently.
+   */
+  enqueue<T>(sourcePublicKey: string, task: (account: Account) => Promise<T>): Promise<T> {
+    let state = this.accounts.get(sourcePublicKey);
+    if (!state) {
+      state = { cachedSequence: null, tail: Promise.resolve() };
+      this.accounts.set(sourcePublicKey, state);
+    }
+
+    const run = async (): Promise<T> => {
+      const executeWithCurrentSequence = async (): Promise<T> => {
+        if (state!.cachedSequence === null) {
+          const onChainSeq = await this.fetchSequenceFn(sourcePublicKey);
+          state!.cachedSequence = BigInt(onChainSeq);
+        }
+
+        const baseSeq = state!.cachedSequence;
+        const account = new Account(sourcePublicKey, baseSeq.toString());
+        const result = await task(account);
+
+        const postTaskSeq = BigInt(account.sequenceNumber());
+        state!.cachedSequence = postTaskSeq > baseSeq ? postTaskSeq : baseSeq + 1n;
+        return result;
+      };
+
+      try {
+        return await executeWithCurrentSequence();
+      } catch (error) {
+        // Always invalidate cached sequence on rejection so the next attempt resyncs on-chain state
+        state!.cachedSequence = null;
+
+        if (this.resyncOnBadSeq && isSequenceError(error)) {
+          try {
+            return await executeWithCurrentSequence();
+          } catch (retryError) {
+            state!.cachedSequence = null;
+            throw retryError;
+          }
+        }
+
+        throw error;
+      }
+    };
+
+    const resultPromise = state.tail.then(run, run);
+    // Keep the tail chain alive even if this task rejects
+    state.tail = resultPromise.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return resultPromise;
+  }
+}
+
 /**
  * Builds an `invokeHostFunction` transaction for a Soroban contract call.
  *
@@ -44,7 +179,7 @@ export interface SubmitTransactionOptions {
  * @param method           - The contract function name to invoke.
  * @param args             - Array of xdr.ScVal arguments.
  * @param sourceKeypair    - The keypair signing the transaction.
- * @param options          - Optional options including fee override.
+ * @param options          - Optional options including fee and pre-fetched sourceAccount override.
  * @returns The assembled and signed transaction XDR string.
  */
 export async function buildInvokeTransaction(
@@ -54,10 +189,11 @@ export async function buildInvokeTransaction(
   method: string,
   args: xdr.ScVal[],
   sourceKeypair: Keypair,
-  options?: { fee?: string | number | bigint },
+  options?: { fee?: string | number | bigint; sourceAccount?: Account },
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
-  const sourceAccount = await server.getAccount(sourceKeypair.publicKey());
+  const sourceAccount =
+    options?.sourceAccount ?? (await server.getAccount(sourceKeypair.publicKey()));
 
   const contract = new Contract(contractId);
   const feeStr = options?.fee ? options.fee.toString() : '100';
@@ -437,9 +573,10 @@ export async function buildUnsignedTransaction(
   method: string,
   args: xdr.ScVal[],
   sourcePublicKey: string,
+  options?: { sourceAccount?: Account },
 ): Promise<string> {
   const server = new SorobanRpc.Server(rpcUrl);
-  const sourceAccount = await server.getAccount(sourcePublicKey);
+  const sourceAccount = options?.sourceAccount ?? (await server.getAccount(sourcePublicKey));
 
   const contract = new Contract(contractId);
 
