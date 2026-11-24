@@ -1,25 +1,27 @@
 // SPDX-License-Identifier: MIT
-import '@testing-library/jest-dom';
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { BcForgeProvider, WalletProvider, truncatePublicKey } from '../context';
-import { useWallet } from '../hooks';
-import { ConnectWallet } from './ConnectWallet';
+import "@testing-library/jest-dom";
+import React from "react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { BcForgeProvider, WalletProvider, truncatePublicKey } from "../context";
+import { useWallet } from "../hooks";
+import { ConnectWallet } from "./ConnectWallet";
 
-const FREIGHTER_KEY = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT';
-const ALBEDO_KEY = 'GAVTHAJHFEHX4PZ7GR6O5V2DSJ6G6J4U5XQZ4XK7X5XQZ4XK7X5XQZ';
+const FREIGHTER_KEY =
+  "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT";
+const ALBEDO_KEY = "GAVTHAJHFEHX4PZ7GR6O5V2DSJ6G6J4U5XQZ4XK7X5XQZ4XK7X5XQZ";
 
 // Shared spy so assertions reach the adapter registered by the provider.
 // (Jest allows factory references when the name starts with "mock".)
 const mockSetWalletAdapter = jest.fn();
 
-jest.mock('@bc-forge/sdk', () => {
+jest.mock("@bc-forge/sdk", () => {
   class MockFreighterAdapter {
-    name = 'freighter';
+    name = "freighter";
     connected = false;
     publicKey?: string;
     async connect() {
-      this.publicKey = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT';
+      this.publicKey =
+        "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGWEBUSAVCBCY42YOXT";
       this.connected = true;
     }
     async disconnect() {
@@ -31,12 +33,11 @@ jest.mock('@bc-forge/sdk', () => {
     }
   }
   class MockAlbedoAdapter {
-    name = 'albedo';
+    name = "albedo";
     connected = false;
     publicKey?: string;
     async connect() {
-      this.publicKey =
-        'GAVTHAJHFEHX4PZ7GR6O5V2DSJ6G6J4U5XQZ4XK7X5XQZ4XK7X5XQZ';
+      this.publicKey = "GAVTHAJHFEHX4PZ7GR6O5V2DSJ6G6J4U5XQZ4XK7X5XQZ4XK7X5XQZ";
       this.connected = true;
     }
     async disconnect() {
@@ -49,10 +50,10 @@ jest.mock('@bc-forge/sdk', () => {
   }
   return {
     Role: {
-      Admin: 'Admin',
-      SuperAdmin: 'SuperAdmin',
-      Minter: 'Minter',
-      Pauser: 'Pauser',
+      Admin: "Admin",
+      SuperAdmin: "SuperAdmin",
+      Minter: "Minter",
+      Pauser: "Pauser",
     },
     bcForgeClient: jest.fn().mockImplementation(() => ({
       setWalletAdapter: mockSetWalletAdapter,
@@ -63,9 +64,9 @@ jest.mock('@bc-forge/sdk', () => {
 });
 
 const config = {
-  rpcUrl: 'https://soroban-testnet.stellar.org',
-  networkPassphrase: 'Test SDF Network ; September 2015',
-  contractId: 'CA123',
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  contractId: "CA123",
 };
 
 /** Probe that exposes useWallet() state for assertions. */
@@ -73,8 +74,8 @@ const WalletProbe: React.FC = () => {
   const { name, publicKey, connected } = useWallet();
   return (
     <div>
-      <span data-testid="probe-name">{name ?? 'none'}</span>
-      <span data-testid="probe-pubkey">{publicKey ?? 'none'}</span>
+      <span data-testid="probe-name">{name ?? "none"}</span>
+      <span data-testid="probe-pubkey">{publicKey ?? "none"}</span>
       <span data-testid="probe-connected">{String(connected)}</span>
     </div>
   );
@@ -90,7 +91,7 @@ const renderConnected = () =>
     </BcForgeProvider>,
   );
 
-describe('ConnectWallet', () => {
+describe("ConnectWallet", () => {
   beforeEach(() => {
     mockSetWalletAdapter.mockClear();
     // A successful connect persists the wallet so a reload can restore it
@@ -100,71 +101,71 @@ describe('ConnectWallet', () => {
     localStorage.clear();
   });
 
-  it('calls client.setWalletAdapter with the Freighter adapter and exposes the public key', async () => {
+  it("calls client.setWalletAdapter with the Freighter adapter and exposes the public key", async () => {
     renderConnected();
 
-    fireEvent.click(screen.getByTestId('connect-freighter'));
+    fireEvent.click(screen.getByTestId("connect-freighter"));
 
     await waitFor(() => {
-      expect(screen.getByTestId('probe-connected')).toHaveTextContent('true');
+      expect(screen.getByTestId("probe-connected")).toHaveTextContent("true");
     });
 
     expect(mockSetWalletAdapter).toHaveBeenCalledTimes(1);
     const [firstCall] = mockSetWalletAdapter.mock.calls;
     const adapter = firstCall?.[0];
-    expect(adapter?.name).toBe('freighter');
+    expect(adapter?.name).toBe("freighter");
     expect(adapter?.publicKey).toBe(FREIGHTER_KEY);
 
-    expect(screen.getByTestId('probe-name')).toHaveTextContent('freighter');
-    expect(screen.getByTestId('probe-pubkey')).toHaveTextContent(FREIGHTER_KEY);
-    expect(screen.getByTestId('connected-wallet')).toHaveTextContent(
+    expect(screen.getByTestId("probe-name")).toHaveTextContent("freighter");
+    expect(screen.getByTestId("probe-pubkey")).toHaveTextContent(FREIGHTER_KEY);
+    expect(screen.getByTestId("connected-wallet")).toHaveTextContent(
       truncatePublicKey(FREIGHTER_KEY),
     );
   });
 
-  it('calls client.setWalletAdapter with the Albedo adapter and exposes the public key', async () => {
+  it("calls client.setWalletAdapter with the Albedo adapter and exposes the public key", async () => {
     renderConnected();
 
-    fireEvent.click(screen.getByTestId('connect-albedo'));
+    fireEvent.click(screen.getByTestId("connect-albedo"));
 
     await waitFor(() => {
-      expect(screen.getByTestId('probe-connected')).toHaveTextContent('true');
+      expect(screen.getByTestId("probe-connected")).toHaveTextContent("true");
     });
 
     expect(mockSetWalletAdapter).toHaveBeenCalledTimes(1);
     const [firstCall] = mockSetWalletAdapter.mock.calls;
     const adapter = firstCall?.[0];
-    expect(adapter?.name).toBe('albedo');
+    expect(adapter?.name).toBe("albedo");
     expect(adapter?.publicKey).toBe(ALBEDO_KEY);
 
-    expect(screen.getByTestId('probe-name')).toHaveTextContent('albedo');
-    expect(screen.getByTestId('probe-pubkey')).toHaveTextContent(ALBEDO_KEY);
+    expect(screen.getByTestId("probe-name")).toHaveTextContent("albedo");
+    expect(screen.getByTestId("probe-pubkey")).toHaveTextContent(ALBEDO_KEY);
   });
 
-  it('disconnects and clears the client signer', async () => {
+  it("disconnects and clears the client signer", async () => {
     renderConnected();
 
-    fireEvent.click(screen.getByTestId('connect-freighter'));
+    fireEvent.click(screen.getByTestId("connect-freighter"));
     await waitFor(() => {
-      expect(screen.getByTestId('probe-connected')).toHaveTextContent('true');
+      expect(screen.getByTestId("probe-connected")).toHaveTextContent("true");
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /disconnect/i }));
+    fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('probe-connected')).toHaveTextContent('false');
+      expect(screen.getByTestId("probe-connected")).toHaveTextContent("false");
     });
 
     expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(undefined);
-    expect(screen.getByTestId('probe-pubkey')).toHaveTextContent('none');
+    expect(screen.getByTestId("probe-pubkey")).toHaveTextContent("none");
   });
 
-  it('displays prominent warning banner identifying expected vs actual network passphrases (#1175)', async () => {
+  it("displays prominent warning banner identifying expected vs actual network passphrases (#1175)", async () => {
     class MismatchedFreighterAdapter {
-      name = 'freighter';
+      name = "freighter";
       connected = false;
       publicKey?: string;
-      networkPassphrase = 'Public Global Stellar Network ; September 2015';
+      networkPassphrase = "Public Global Stellar Network ; September 2015";
       async connect() {
         this.publicKey = FREIGHTER_KEY;
         this.connected = true;
@@ -187,15 +188,17 @@ describe('ConnectWallet', () => {
       </BcForgeProvider>,
     );
 
-    fireEvent.click(screen.getByTestId('connect-freighter'));
+    fireEvent.click(screen.getByTestId("connect-freighter"));
 
     await waitFor(() => {
-      expect(screen.getByTestId('network-mismatch-warning')).toBeInTheDocument();
+      expect(
+        screen.getByTestId("network-mismatch-warning"),
+      ).toBeInTheDocument();
     });
-    expect(screen.getByTestId('network-mismatch-warning')).toHaveTextContent(
+    expect(screen.getByTestId("network-mismatch-warning")).toHaveTextContent(
       /Test SDF Network ; September 2015/,
     );
-    expect(screen.getByTestId('network-mismatch-warning')).toHaveTextContent(
+    expect(screen.getByTestId("network-mismatch-warning")).toHaveTextContent(
       /Public Global Stellar Network ; September 2015/,
     );
   });

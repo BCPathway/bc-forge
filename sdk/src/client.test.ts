@@ -206,13 +206,10 @@ describe('bcForgeClient Offline Transaction Builders', () => {
           returnValue: null,
         }),
       );
-      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
 
-      const result = await client.grantRole(
-        Role.SuperAdmin,
-        targetUser,
-        adminKeypair,
-      );
+      const result = await client.grantRole(Role.SuperAdmin, targetUser, adminKeypair);
 
       expect(result.success).toBe(true);
       expect(invokeContract).toHaveBeenCalledTimes(1);
@@ -230,13 +227,10 @@ describe('bcForgeClient Offline Transaction Builders', () => {
           returnValue: null,
         }),
       );
-      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
 
-      const result = await client.revokeRole(
-        Role.Minter,
-        targetUser,
-        adminKeypair,
-      );
+      const result = await client.revokeRole(Role.Minter, targetUser, adminKeypair);
 
       expect(result.success).toBe(true);
       expect(invokeContract).toHaveBeenCalledTimes(1);
@@ -254,7 +248,8 @@ describe('bcForgeClient Offline Transaction Builders', () => {
           returnValue: null,
         }),
       );
-      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
 
       const result = await client.setAdminContract(adminContractId, adminKeypair);
 
@@ -274,7 +269,8 @@ describe('bcForgeClient Offline Transaction Builders', () => {
           returnValue: null,
         }),
       );
-      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract = invokeContract;
+      (client as unknown as { invokeContract: typeof invokeContract }).invokeContract =
+        invokeContract;
 
       const result = await client.setDependentToken(tokenContractId, adminKeypair);
 
@@ -328,9 +324,7 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       const spender = Keypair.random().publicKey();
       const getAllowanceSpy = jest.spyOn(client, 'getAllowance').mockResolvedValue(100n);
 
-      await expect(client.hasSufficientAllowance(owner, spender, -1n)).rejects.toThrow(
-        RangeError,
-      );
+      await expect(client.hasSufficientAllowance(owner, spender, -1n)).rejects.toThrow(RangeError);
       expect(getAllowanceSpy).not.toHaveBeenCalled();
     });
   });
