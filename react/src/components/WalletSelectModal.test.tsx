@@ -254,7 +254,9 @@ describe("WalletSelectModal", () => {
     renderModal(createFakeAdapter(), false);
 
     const trigger = screen.getByRole("button", { name: "Connect" });
-    trigger.focus();
+    // Focusing the trigger updates dialog state indirectly on close; keep it
+    // inside act so React flushes the update (#1323).
+    act(() => trigger.focus());
     fireEvent.click(trigger);
 
     await waitFor(() => {

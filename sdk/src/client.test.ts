@@ -285,6 +285,55 @@ describe('bcForgeClient Offline Transaction Builders', () => {
       expect(source).toBe(adminKeypair);
     });
   });
+
+  describe('hasSufficientAllowance', () => {
+    it('should return true when allowance exceeds the required amount', async () => {
+      const owner = Keypair.random().publicKey();
+      const spender = Keypair.random().publicKey();
+      const getAllowanceSpy = jest.spyOn(client, 'getAllowance').mockResolvedValue(500n);
+
+      const sufficient = await client.hasSufficientAllowance(owner, spender, 250n);
+
+      expect(sufficient).toBe(true);
+      expect(getAllowanceSpy).toHaveBeenCalledTimes(1);
+      expect(getAllowanceSpy).toHaveBeenCalledWith(owner, spender);
+    });
+
+    it('should return true when allowance equals the required amount', async () => {
+      const owner = Keypair.random().publicKey();
+      const spender = Keypair.random().publicKey();
+      jest.spyOn(client, 'getAllowance').mockResolvedValue(250n);
+
+      await expect(client.hasSufficientAllowance(owner, spender, 250n)).resolves.toBe(true);
+    });
+
+    it('should return false when allowance is below the required amount', async () => {
+      const owner = Keypair.random().publicKey();
+      const spender = Keypair.random().publicKey();
+      jest.spyOn(client, 'getAllowance').mockResolvedValue(100n);
+
+      await expect(client.hasSufficientAllowance(owner, spender, 250n)).resolves.toBe(false);
+    });
+
+    it('should return true for zero required amount with zero allowance', async () => {
+      const owner = Keypair.random().publicKey();
+      const spender = Keypair.random().publicKey();
+      jest.spyOn(client, 'getAllowance').mockResolvedValue(0n);
+
+      await expect(client.hasSufficientAllowance(owner, spender, 0n)).resolves.toBe(true);
+    });
+
+    it('should throw RangeError for negative amounts without querying allowance', async () => {
+      const owner = Keypair.random().publicKey();
+      const spender = Keypair.random().publicKey();
+      const getAllowanceSpy = jest.spyOn(client, 'getAllowance').mockResolvedValue(100n);
+
+      await expect(client.hasSufficientAllowance(owner, spender, -1n)).rejects.toThrow(
+        RangeError,
+      );
+      expect(getAllowanceSpy).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('isZeroAddress', () => {

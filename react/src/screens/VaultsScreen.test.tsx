@@ -133,9 +133,15 @@ describe("VaultsScreen", () => {
     jest.useFakeTimers();
     const { unmount } = render(<VaultsScreen client={mockClient} />);
 
-    act(() => jest.advanceTimersByTime(0));
+    // Async state updates triggered by the interval must be flushed inside
+    // act to avoid "update not wrapped in act(...)" warnings (#1323).
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
     expect(mockClient.getTotalAssets).toHaveBeenCalledTimes(1);
-    act(() => jest.advanceTimersByTime(30_000));
+    await act(async () => {
+      jest.advanceTimersByTime(30_000);
+    });
     expect(mockClient.getTotalAssets).toHaveBeenCalledTimes(2);
 
     unmount();

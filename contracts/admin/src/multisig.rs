@@ -210,6 +210,44 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     extend_instance_ttl(env);
 }
 
+/// Removes a member from the multi-sig admin pool while preserving the
+/// deadlock-prevention invariant (`remaining_pool.len() >= threshold`).
+///
+/// # Errors
+///
+/// Returns [`AdminError::RoleNotHeld`] if `member` is not currently in the
+/// admin pool, or [`AdminError::ThresholdExceedsPoolSize`] if removing `member`
+/// would leave fewer pool members than the configured approval threshold.
+///
+/// @notice Removes `member` from the multi-sig admin pool if doing so does not deadlock governance.
+/// @dev Requires the contract admin's authorization and enforces `pool.len() - 1 >= threshold`.
+/// @param env The Soroban environment.
+/// @param member The address of the admin pool member to remove.
+/// @return `Ok(())` on success, or an [`AdminError`] if `member` is not in the pool or removal would violate the threshold invariant.
+pub fn remove_admin(env: &Env, member: Address) -> Result<(), AdminError> {
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let current_pool = get_admin_pool(env);
+    let member_index = current_pool
+        .iter()
+        .position(|addr| addr == member)
+        .ok_or(AdminError::RoleNotHeld)?;
+
+    let current_threshold = get_threshold(env);
+    if current_pool.len().saturating_sub(1) < current_threshold {
+        return Err(AdminError::ThresholdExceedsPoolSize);
+    }
+
+    let mut updated_pool = current_pool;
+    updated_pool.remove(member_index as u32);
+    env.storage()
+        .instance()
+        .set(&AdminKey::AdminPool, &updated_pool);
+    extend_instance_ttl(env);
+    Ok(())
+}
+
 /// Returns the multi-sig admin pool.
 ///
 /// @notice Returns the configured admin pool, or a single-member pool of the contract admin if none was set.

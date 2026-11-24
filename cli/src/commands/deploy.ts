@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { addNetworkOptions, explicitNetworkOverrides, formatContractIdWithExplorer } from '../network.js';
-import { getClientConfig } from '../utils/config.js';
+import { getClientConfig, resolveSourceSecret } from '../utils/config.js';
 import { buildDeploymentArtifacts, exportDeploymentsToFile } from '../utils/deployments.js';
 import { resolveContractIdOption } from '../utils/registry.js';
 import logger, { silenceInformationalLogs } from '../utils/logger.js';
@@ -361,7 +361,7 @@ export function createDeployCommand(): Command {
     .requiredOption('--vault-wasm <path>', 'Path to the vault (WrapperContract) WASM binary')
     .option('--fee-wasm <path>', 'Path to the fee contract WASM binary (optional)')
     .requiredOption('--admin <address>', 'Admin public key (G...) or an address-book name')
-    .requiredOption('--source <secret>', 'Source account secret key for signing transactions')
+    .option('--source <secret>', 'Source account secret key (use STELLAR_SECRET_KEY instead)')
     .requiredOption('--underlying-token <id>', 'Underlying SEP-41 token contract id, or a deployment alias')
     .requiredOption('--name <name>', 'Human-readable name for the wrapped token')
     .requiredOption('--symbol <symbol>', 'Ticker symbol for the wrapped token')
@@ -383,7 +383,7 @@ export function createDeployCommand(): Command {
         vaultWasm: opts.vaultWasm,
         feeWasm: opts.feeWasm,
         admin: resolveAccountReference(opts.admin),
-        source: opts.source,
+        source: await resolveSourceSecret(opts.source),
         underlyingToken,
         name: opts.name,
         symbol: opts.symbol,
