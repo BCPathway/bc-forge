@@ -224,6 +224,44 @@ pub fn set_admin_pool(env: &Env, pool: Vec<Address>, threshold: u32) {
     extend_instance_ttl(env);
 }
 
+/// Removes a member from the multi-sig admin pool while preserving the
+/// deadlock-prevention invariant (`remaining_pool.len() >= threshold`).
+///
+/// # Errors
+///
+/// Returns [`AdminError::RoleNotHeld`] if `member` is not currently in the
+/// admin pool, or [`AdminError::ThresholdExceedsPoolSize`] if removing `member`
+/// would leave fewer pool members than the configured approval threshold.
+///
+/// @notice Removes `member` from the multi-sig admin pool if doing so does not deadlock governance.
+/// @dev Requires the contract admin's authorization and enforces `pool.len() - 1 >= threshold`.
+/// @param env The Soroban environment.
+/// @param member The address of the admin pool member to remove.
+/// @return `Ok(())` on success, or an [`AdminError`] if `member` is not in the pool or removal would violate the threshold invariant.
+pub fn remove_admin(env: &Env, member: Address) -> Result<(), AdminError> {
+    let admin = get_admin(env);
+    admin.require_auth();
+
+    let current_pool = get_admin_pool(env);
+    let member_index = current_pool
+        .iter()
+        .position(|addr| addr == member)
+        .ok_or(AdminError::RoleNotHeld)?;
+
+    let current_threshold = get_threshold(env);
+    if current_pool.len().saturating_sub(1) < current_threshold {
+        return Err(AdminError::ThresholdExceedsPoolSize);
+    }
+
+    let mut updated_pool = current_pool;
+    updated_pool.remove(member_index as u32);
+    env.storage()
+        .instance()
+        .set(&AdminKey::AdminPool, &updated_pool);
+    extend_instance_ttl(env);
+    Ok(())
+}
+
 /// Returns the multi-sig admin pool.
 ///
 /// @notice Returns the configured admin pool, or a single-member pool of the contract admin if none was set.
@@ -502,11 +540,24 @@ pub fn create_action_proposal(
                 soroban_sdk::panic_with_error!(env, AdminError::InvalidAction);
             }
         }
+/// Creates a multisig proposal that binds `wasm_hash` to `proposal_id` for upgrade execution.
+///
+/// Stores `wasm_hash` under [`AdminKey::ProposalWasmHash`] so that arbitrary bytecode
+/// cannot be substituted once quorum is reached (#1310).
+pub fn create_upgrade_proposal(
+    env: &Env,
+    creator: Address,
+    wasm_hash: BytesN<32>,
+    description: String,
+) -> u64 {
+    if wasm_hash == BytesN::from_array(env, &[0u8; 32]) {
+        soroban_sdk::panic_with_error!(env, AdminError::InvalidWasmHash);
     }
     let id = create_proposal(env, creator, description);
     env.storage()
         .instance()
         .set(&AdminKey::ActionProposal(id), &action);
+        .set(&AdminKey::ProposalWasmHash(id), &wasm_hash);
     extend_instance_ttl(env);
     id
 }
@@ -573,6 +624,26 @@ pub fn consume_action_proposal(
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
     Ok(action)
+/// Returns the bound WASM hash for a legacy upgrade proposal, if set.
+pub fn get_proposal_wasm_hash(env: &Env, proposal_id: u64) -> Option<BytesN<32>> {
+    let hash = env
+        .storage()
+        .instance()
+        .get(&AdminKey::ProposalWasmHash(proposal_id));
+    if hash.is_some() {
+        extend_instance_ttl(env);
+    }
+    hash
+}
+
+/// Returns the bound WASM hash for an UpgradeProposal, if set.
+pub fn get_upgrade_proposal_wasm_hash(env: &Env, proposal_id: u64) -> Option<BytesN<32>> {
+    let key = AdminKey::UpgradeProposalWasmHash(proposal_id);
+    let hash = env.storage().persistent().get(&key);
+    if hash.is_some() {
+        extend_storage_ttl_for_key(env, &key);
+    }
+    hash
 }
 
 /// Returns proposal details for the voting panel.
@@ -793,6 +864,9 @@ pub fn cancel_legacy_proposal(
         .remove(&AdminKey::RoleGrantProposal(proposal_id));
     env.storage()
         .instance()
+        .remove(&AdminKey::ProposalWasmHash(proposal_id));
+    env.storage()
+        .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
 
@@ -958,42 +1032,97 @@ fn execute_upgrade_inner(
         return Err(AdminError::UnauthorizedRole);
     }
 
-    let mut proposal: Proposal = env
+    let key = AdminKey::Proposal(proposal_id);
+    if let Some(mut proposal) = env.storage().instance().get::<AdminKey, Proposal>(&key) {
+        if proposal.executed {
+            return Err(AdminError::ProposalAlreadyExecuted);
+        }
+        if proposal.cancelled {
+            return Err(AdminError::ProposalCancelled);
+        }
+        if _proposal_expired(env, &proposal) {
+            return Err(AdminError::ProposalExpired);
+        }
+
+        // If a WASM hash was bound to this proposal, assert it strictly matches caller-provided wasm_hash (#1310).
+        if let Some(bound_hash) = env
+            .storage()
+            .instance()
+            .get::<_, BytesN<32>>(&AdminKey::ProposalWasmHash(proposal_id))
+        {
+            if wasm_hash != bound_hash {
+                return Err(AdminError::WasmHashMismatch);
+            }
+        }
+
+        // Quorum check: enough unique approvals must have been collected.
+        if !is_proposal_ready(env, proposal_id) {
+            return Err(AdminError::QuorumNotMet);
+        }
+
+        // Timelock check: revert while current ledger time < unlock time (#665).
+        require_timelock_expired(env, proposal_id)?;
+
+        // Effect first (checks-effects-interactions): persist the executed flag so
+        // a reentrant invocation cannot execute the same proposal twice.
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&AdminKey::Proposal(proposal_id), &proposal);
+        extend_instance_ttl(env);
+
+        events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
+
+        env.deployer().update_current_contract_wasm(wasm_hash);
+        return Ok(());
+    }
+
+    // Unify UpgradeProposal execution (#1310)
+    let upg_key = AdminKey::UpgradeProposal(proposal_id);
+    if let Some(mut upg_proposal) = env
         .storage()
-        .instance()
-        .get(&AdminKey::Proposal(proposal_id))
-        .ok_or(AdminError::ProposalNotFound)?;
+        .persistent()
+        .get::<AdminKey, UpgradeProposal>(&upg_key)
+    {
+        extend_storage_ttl_for_key(env, &upg_key);
 
-    if proposal.executed {
-        return Err(AdminError::ProposalAlreadyExecuted);
+        match upg_proposal.status {
+            ProposalStatus::Executed => return Err(AdminError::ProposalAlreadyExecuted),
+            ProposalStatus::Cancelled => return Err(AdminError::ProposalCancelled),
+            ProposalStatus::Expired => return Err(AdminError::ProposalExpired),
+            ProposalStatus::Pending | ProposalStatus::Approved => {}
+        }
+
+        let hash_key = AdminKey::UpgradeProposalWasmHash(proposal_id);
+        if let Some(bound_hash) = env.storage().persistent().get::<_, BytesN<32>>(&hash_key) {
+            extend_storage_ttl_for_key(env, &hash_key);
+            if wasm_hash != bound_hash {
+                return Err(AdminError::WasmHashMismatch);
+            }
+        }
+
+        require_upgrade_quorum_met(&upg_proposal)?;
+
+        _start_upgrade_timelock_if_quorate(env, &mut upg_proposal);
+        let timelock_expires_at = upg_proposal
+            .timelock_expires_at
+            .ok_or(AdminError::QuorumNotMet)?;
+        if env.ledger().timestamp() < timelock_expires_at {
+            return Err(AdminError::TimelockActive);
+        }
+
+        upg_proposal.status = ProposalStatus::Executed;
+        env.storage().persistent().set(&upg_key, &upg_proposal);
+        extend_storage_ttl_for_key(env, &upg_key);
+        extend_instance_ttl(env);
+
+        events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
+
+        env.deployer().update_current_contract_wasm(wasm_hash);
+        return Ok(());
     }
-    if proposal.cancelled {
-        return Err(AdminError::ProposalCancelled);
-    }
-    if _proposal_expired(env, &proposal) {
-        return Err(AdminError::ProposalExpired);
-    }
 
-    // Quorum check: enough unique approvals must have been collected.
-    if !is_proposal_ready(env, proposal_id) {
-        return Err(AdminError::QuorumNotMet);
-    }
-
-    // Timelock check: revert while current ledger time < unlock time (#665).
-    require_timelock_expired(env, proposal_id)?;
-
-    // Effect first (checks-effects-interactions): persist the executed flag so
-    // a reentrant invocation cannot execute the same proposal twice.
-    proposal.executed = true;
-    env.storage()
-        .instance()
-        .set(&AdminKey::Proposal(proposal_id), &proposal);
-    extend_instance_ttl(env);
-
-    events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
-
-    env.deployer().update_current_contract_wasm(wasm_hash);
-    Ok(())
+    Err(AdminError::ProposalNotFound)
 }
 
 /// Executes multiple quorum-approved WASM upgrades in sequence on the current contract.
@@ -1095,6 +1224,7 @@ pub fn approve_upgrade(env: &Env, voter: Address, proposal_id: u64) -> Result<()
         .sum();
     if tally >= proposal.quorum {
         proposal.status = ProposalStatus::Approved;
+        _start_upgrade_timelock_if_quorate(env, &mut proposal);
     }
 
     env.storage().persistent().set(&key, &proposal);
@@ -1304,6 +1434,10 @@ pub fn submit_upgrade_proposal(
     let key = AdminKey::UpgradeProposal(id);
     env.storage().persistent().set(&key, &proposal);
     extend_storage_ttl_for_key(env, &key);
+
+    let hash_key = AdminKey::UpgradeProposalWasmHash(id);
+    env.storage().persistent().set(&hash_key, &new_wasm_hash);
+    extend_storage_ttl_for_key(env, &hash_key);
     extend_instance_ttl(env);
 
     events::emit_upgrade_proposal_submitted(env, &submitter, id, &new_wasm_hash);
@@ -1375,6 +1509,17 @@ pub fn emergency_execute_upgrade(
         return Err(AdminError::ProposalAlreadyExecuted);
     }
 
+    // Assert bound wasm_hash matches if bound (#1310)
+    if let Some(bound_hash) = env
+        .storage()
+        .instance()
+        .get::<_, BytesN<32>>(&AdminKey::ProposalWasmHash(proposal_id))
+    {
+        if wasm_hash != bound_hash {
+            return Err(AdminError::WasmHashMismatch);
+        }
+    }
+
     // Emergency quorum check: all signers must have approved (100% agreement).
     // proposal.approvals.len() must equal the total pool size.
     if proposal.approvals.len() != pool.len() {
@@ -1387,6 +1532,78 @@ pub fn emergency_execute_upgrade(
     env.storage()
         .instance()
         .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+
+    events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);
+
+    env.deployer().update_current_contract_wasm(wasm_hash);
+    Ok(())
+}
+
+/// Executes an approved [`UpgradeProposal`]. Resolves issue #1310.
+///
+/// Verifies caller pool authorization, proposal existence, quorum, and timelock expiration,
+/// then applies the upgrade using the on-chain bound WASM hash.
+///
+/// # Errors
+///
+/// Returns [`AdminError::UnauthorizedRole`] if executor is not a pool member,
+/// [`AdminError::UpgradeProposalNotFound`] if the proposal does not exist,
+/// [`AdminError::ProposalAlreadyExecuted`] if already executed,
+/// [`AdminError::ProposalCancelled`] if cancelled,
+/// [`AdminError::ProposalExpired`] if expired,
+/// [`AdminError::QuorumNotMet`] if quorum is not met,
+/// [`AdminError::TimelockActive`] if the timelock delay has not elapsed,
+/// or [`AdminError::InvalidWasmHash`] if no valid bound WASM hash was recorded.
+pub fn execute_upgrade_proposal(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+) -> Result<(), AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
+    executor.require_auth();
+
+    let pool = get_admin_pool(env);
+    if !pool.contains(&executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    let key = AdminKey::UpgradeProposal(proposal_id);
+    let mut proposal: UpgradeProposal = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(AdminError::UpgradeProposalNotFound)?;
+    extend_storage_ttl_for_key(env, &key);
+
+    match proposal.status {
+        ProposalStatus::Executed => return Err(AdminError::ProposalAlreadyExecuted),
+        ProposalStatus::Cancelled => return Err(AdminError::ProposalCancelled),
+        ProposalStatus::Expired => return Err(AdminError::ProposalExpired),
+        ProposalStatus::Pending | ProposalStatus::Approved => {}
+    }
+
+    require_upgrade_quorum_met(&proposal)?;
+
+    _start_upgrade_timelock_if_quorate(env, &mut proposal);
+    let timelock_expires_at = proposal
+        .timelock_expires_at
+        .ok_or(AdminError::QuorumNotMet)?;
+    if env.ledger().timestamp() < timelock_expires_at {
+        return Err(AdminError::TimelockActive);
+    }
+
+    let hash_key = AdminKey::UpgradeProposalWasmHash(proposal_id);
+    let wasm_hash: BytesN<32> = env
+        .storage()
+        .persistent()
+        .get(&hash_key)
+        .ok_or(AdminError::InvalidWasmHash)?;
+    extend_storage_ttl_for_key(env, &hash_key);
+
+    proposal.status = ProposalStatus::Executed;
+    env.storage().persistent().set(&key, &proposal);
+    extend_storage_ttl_for_key(env, &key);
     extend_instance_ttl(env);
 
     events::emit_upgraded(env, &executor, proposal_id, &wasm_hash);

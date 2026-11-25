@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: MIT
 import React, { useState } from "react";
 import { Role } from "@bc-forge/sdk";
-import { useHasRole, useMint, useSimulateTransaction, useWallet } from "../hooks";
+import {
+  useHasRole,
+  useMint,
+  useSimulateTransaction,
+  useWallet,
+} from "../hooks";
 import { truncatePublicKey } from "../context";
 import { isPositiveInteger } from "../utils";
 import { Alert } from "../components/Alert";
@@ -9,11 +14,7 @@ import { ExternalLink } from "../components/ExternalLink";
 import { theme } from "../theme";
 
 export type MintStep =
-  | "form"
-  | "simulating"
-  | "confirming"
-  | "submitting"
-  | "success";
+  "form" | "simulating" | "confirming" | "submitting" | "success";
 
 const STEP_LABEL: Record<Exclude<MintStep, "form" | "success">, string> = {
   simulating: "Simulating transaction…",

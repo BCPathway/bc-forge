@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
-use crate::{InvoiceStatus, Recipient, SplitContract, SplitContractClient};
+use crate::{
+    Invoice, InvoiceStatus, Recipient, RecipientBps, SplitContract, SplitContractClient, SplitError,
+};
 use bc_forge_admin as admin;
 use bc_forge_token::{BcForgeToken, BcForgeTokenClient};
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{vec, Address, Env, String};
+use soroban_sdk::{vec, Address, Env, String, Vec};
 
 fn setup(
     env: &Env,
@@ -33,6 +35,8 @@ fn setup(
         &String::from_str(env, "T"),
         &String::from_str(env, "T"),
     );
+    // mint now requires an explicit per-minter issuance allowance (#1327).
+    token_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
 
     (split_client, token_client, split_admin, token_admin)
 }
@@ -234,6 +238,238 @@ fn test_create_invoice_validates_amounts() {
 }
 
 #[test]
+fn test_batch_release_releases_all_invoices() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, token_admin) = setup(&env);
+
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+
+    token_client.mint(&token_admin, &split_client.address, &300_000);
+
+    let recipients1 = vec![
+        &env,
+        Recipient {
+            to: recipient1.clone(),
+            amount: 100_000,
+        },
+    ];
+    let recipients2 = vec![
+        &env,
+        Recipient {
+            to: recipient2.clone(),
+            amount: 200_000,
+        },
+    ];
+
+    split_client.create_invoice(
+        &split_admin,
+        &1u64,
+        &100_000i128,
+        &recipients1,
+        &token_client.address,
+    );
+    split_client.create_invoice(
+        &split_admin,
+        &2u64,
+        &200_000i128,
+        &recipients2,
+        &token_client.address,
+    );
+
+    let released = split_client.release_payment_batch(&vec![&env, 1u64, 2u64]);
+    assert_eq!(released, vec![&env, 1u64, 2u64]);
+
+    assert_eq!(
+        split_client.get_invoice(&1).status,
+        InvoiceStatus::FullyReleased
+    );
+    assert_eq!(
+        split_client.get_invoice(&2).status,
+        InvoiceStatus::FullyReleased
+    );
+    assert_eq!(token_client.balance(&recipient1), 100_000);
+    assert_eq!(token_client.balance(&recipient2), 200_000);
+}
+
+#[test]
+fn test_batch_release_skips_failed_invoices() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, token_admin) = setup(&env);
+
+    let recipient = Address::generate(&env);
+    token_client.mint(&token_admin, &split_client.address, &100_000);
+
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: recipient.clone(),
+            amount: 100_000,
+        },
+    ];
+    split_client.create_invoice(
+        &split_admin,
+        &1u64,
+        &100_000i128,
+        &recipients,
+        &token_client.address,
+    );
+
+    // Invoice 99 does not exist and invoice 1 has not been released yet; the
+    // batch must still process invoice 1 and report only that ID.
+    let released = split_client.release_payment_batch(&vec![&env, 99u64, 1u64]);
+    assert_eq!(released, vec![&env, 1u64]);
+    assert_eq!(token_client.balance(&recipient), 100_000);
+
+    // Re-running the batch skips the now-completed invoice without reverting.
+    let released_again = split_client.release_payment_batch(&vec![&env, 1u64]);
+    assert_eq!(released_again, vec![&env]);
+}
+
+#[test]
+fn test_create_invoice_rejects_too_many_recipients() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    let mut recipients = Vec::new(&env);
+    for _ in 0..101 {
+        recipients.push_back(Recipient {
+            to: Address::generate(&env),
+            amount: 1,
+        });
+    }
+
+    assert_eq!(
+        split_client.try_create_invoice(
+            &split_admin,
+            &1u64,
+            &101i128,
+            &recipients,
+            &token_client.address
+        ),
+        Err(Ok(SplitError::TooManyRecipients))
+    );
+
+    // Exactly 100 recipients is still accepted.
+    recipients.pop_back();
+    assert!(split_client
+        .try_create_invoice(
+            &split_admin,
+            &1u64,
+            &100i128,
+            &recipients,
+            &token_client.address
+        )
+        .is_ok());
+}
+
+#[test]
+fn test_create_invoice_rejects_duplicate_recipients() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    let recipient = Address::generate(&env);
+    let recipients = vec![
+        &env,
+        Recipient {
+            to: recipient.clone(),
+            amount: 50,
+        },
+        Recipient {
+            to: recipient,
+            amount: 50,
+        },
+    ];
+
+    assert_eq!(
+        split_client.try_create_invoice(
+            &split_admin,
+            &1u64,
+            &100i128,
+            &recipients,
+            &token_client.address
+        ),
+        Err(Ok(SplitError::DuplicateRecipient))
+    );
+}
+
+#[test]
+fn test_rescue_tokens_admin_recovers_foreign_token() {
+    let env = Env::default();
+    let (split_client, _token_client, split_admin, token_admin) = setup(&env);
+
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign_client = BcForgeTokenClient::new(&env, &foreign_id);
+    foreign_client.initialize(
+        &token_admin,
+        &7,
+        &String::from_str(&env, "F"),
+        &String::from_str(&env, "F"),
+    );
+    foreign_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
+
+    let recovery = Address::generate(&env);
+    foreign_client.mint(&token_admin, &split_client.address, &5_000);
+
+    split_client.rescue_tokens(&split_admin, &foreign_id, &recovery, &5_000);
+
+    assert_eq!(foreign_client.balance(&recovery), 5_000);
+    assert_eq!(foreign_client.balance(&split_client.address), 0);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_non_admin() {
+    let env = Env::default();
+    let (split_client, _token_client, _split_admin, token_admin) = setup(&env);
+
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign_client = BcForgeTokenClient::new(&env, &foreign_id);
+    foreign_client.initialize(
+        &token_admin,
+        &7,
+        &String::from_str(&env, "F"),
+        &String::from_str(&env, "F"),
+    );
+    foreign_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
+    foreign_client.mint(&token_admin, &split_client.address, &5_000);
+
+    let stranger = Address::generate(&env);
+    let recovery = Address::generate(&env);
+    assert!(split_client
+        .try_rescue_tokens(&stranger, &foreign_id, &recovery, &1_000)
+        .is_err());
+    assert_eq!(foreign_client.balance(&split_client.address), 5_000);
+}
+
+#[test]
+fn test_rescue_tokens_rejects_invalid_amount() {
+    let env = Env::default();
+    let (split_client, _token_client, split_admin, token_admin) = setup(&env);
+
+    let foreign_id = env.register(BcForgeToken, ());
+    let foreign_client = BcForgeTokenClient::new(&env, &foreign_id);
+    foreign_client.initialize(
+        &token_admin,
+        &7,
+        &String::from_str(&env, "F"),
+        &String::from_str(&env, "F"),
+    );
+    foreign_client.set_minter_allowance(&token_admin, &token_admin, &i128::MAX);
+    foreign_client.mint(&token_admin, &split_client.address, &5_000);
+
+    let recovery = Address::generate(&env);
+    assert_eq!(
+        split_client.try_rescue_tokens(&split_admin, &foreign_id, &recovery, &0),
+        Err(Ok(SplitError::InvalidAmount))
+    );
+    assert_eq!(
+        split_client.try_rescue_tokens(&split_admin, &foreign_id, &recovery, &-1),
+        Err(Ok(SplitError::InvalidAmount))
+    );
+    assert_eq!(foreign_client.balance(&split_client.address), 5_000);
+}
+
+#[test]
 fn test_get_failed_payout_no_invoice() {
     let env = Env::default();
     let (split_client, _token_client, _split_admin, _token_admin) = setup(&env);
@@ -311,4 +547,285 @@ fn test_reentrancy_on_split_release_reverts() {
 
     let result = split_client.try_release_payment(&1u64, &split_admin);
     assert!(result.is_err());
+}
+// ─── Invoice keyset pagination (#1467) ────────────────────────────────────────
+
+fn create_invoice_for_listing(
+    env: &Env,
+    split_client: &SplitContractClient<'_>,
+    split_admin: &Address,
+    token: &Address,
+    invoice_id: u64,
+) {
+    let recipients = vec![
+        env,
+        Recipient {
+            to: Address::generate(env),
+            amount: 1_000,
+        },
+    ];
+    split_client.create_invoice(split_admin, &invoice_id, &1_000, &recipients, token);
+}
+
+fn invoice_ids(env: &Env, invoices: &soroban_sdk::Vec<Invoice>) -> soroban_sdk::Vec<u64> {
+    let mut ids = soroban_sdk::Vec::new(env);
+    for invoice in invoices.iter() {
+        ids.push_back(invoice.invoice_id);
+    }
+    ids
+}
+
+#[test]
+fn test_list_invoices_empty_when_none_created() {
+    let env = Env::default();
+    let (split_client, _token_client, _split_admin, _token_admin) = setup(&env);
+
+    let page = split_client.list_invoices(&0, &10);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_list_invoices_returns_created_invoices_in_id_order() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in &[3u64, 1, 2] {
+        create_invoice_for_listing(
+            &env,
+            &split_client,
+            &split_admin,
+            &token_client.address,
+            *id,
+        );
+    }
+
+    let page = split_client.list_invoices(&0, &10);
+    assert_eq!(invoice_ids(&env, &page), vec![&env, 1u64, 2, 3]);
+    for invoice in page.iter() {
+        assert_eq!(invoice.status, InvoiceStatus::Pending);
+        assert_eq!(invoice.total_amount, 1_000);
+    }
+}
+
+#[test]
+fn test_list_invoices_keyset_pagination() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in 1..=5u64 {
+        create_invoice_for_listing(&env, &split_client, &split_admin, &token_client.address, id);
+    }
+
+    let first = split_client.list_invoices(&0, &2);
+    assert_eq!(invoice_ids(&env, &first), vec![&env, 1u64, 2]);
+
+    let second = split_client.list_invoices(&2, &2);
+    assert_eq!(invoice_ids(&env, &second), vec![&env, 3u64, 4]);
+
+    let third = split_client.list_invoices(&4, &2);
+    assert_eq!(invoice_ids(&env, &third), vec![&env, 5u64]);
+
+    let exhausted = split_client.list_invoices(&5, &2);
+    assert_eq!(exhausted.len(), 0);
+}
+
+#[test]
+fn test_list_invoices_caps_limit_at_fifty() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in 1..=60u64 {
+        create_invoice_for_listing(&env, &split_client, &split_admin, &token_client.address, id);
+    }
+
+    let first = split_client.list_invoices(&0, &100);
+    assert_eq!(first.len(), 50);
+    assert_eq!(first.get(0).unwrap().invoice_id, 1);
+    assert_eq!(first.get(49).unwrap().invoice_id, 50);
+
+    let second = split_client.list_invoices(&50, &u32::MAX);
+    assert_eq!(second.len(), 10);
+    assert_eq!(second.get(0).unwrap().invoice_id, 51);
+    assert_eq!(second.get(9).unwrap().invoice_id, 60);
+}
+
+#[test]
+fn test_list_invoices_skips_missing_ids_and_zero_limit() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    for id in &[1u64, 3, 5] {
+        create_invoice_for_listing(
+            &env,
+            &split_client,
+            &split_admin,
+            &token_client.address,
+            *id,
+        );
+    }
+
+    assert_eq!(
+        invoice_ids(&env, &split_client.list_invoices(&0, &10)),
+        vec![&env, 1u64, 3, 5]
+    );
+    assert_eq!(
+        invoice_ids(&env, &split_client.list_invoices(&3, &10)),
+        vec![&env, 5u64]
+    );
+    assert_eq!(split_client.list_invoices(&0, &0).len(), 0);
+}
+
+#[test]
+fn test_create_split_percentage_creates_balanced_invoice_and_releases() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, token_admin) = setup(&env);
+
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let total_amount = 1_000_000i128;
+
+    let recipients = vec![
+        &env,
+        RecipientBps {
+            to: recipient1.clone(),
+            bps: 2_500,
+        },
+        RecipientBps {
+            to: recipient2.clone(),
+            bps: 7_500,
+        },
+    ];
+
+    let invoice_id = split_client.create_split_bps_with_token(
+        &split_admin,
+        &total_amount,
+        &recipients,
+        &token_client.address,
+    );
+
+    let invoice = split_client.get_invoice(&invoice_id);
+    assert_eq!(invoice.invoice_id, invoice_id);
+    assert_eq!(invoice.total_amount, total_amount);
+    assert_eq!(invoice.status, InvoiceStatus::Pending);
+    assert_eq!(invoice.recipients.len(), 2);
+    assert_eq!(invoice.recipients.get(0).unwrap().amount, 250_000);
+    assert_eq!(invoice.recipients.get(1).unwrap().amount, 750_000);
+
+    token_client.mint(&token_admin, &split_client.address, &total_amount);
+    split_client.release_payment(&invoice_id, &split_admin);
+
+    assert_eq!(
+        split_client.get_invoice(&invoice_id).status,
+        InvoiceStatus::FullyReleased
+    );
+    assert_eq!(token_client.balance(&recipient1), 250_000);
+    assert_eq!(token_client.balance(&recipient2), 750_000);
+}
+
+#[test]
+fn test_create_split_percentage_requires_exactly_10000_bps() {
+    let env = Env::default();
+    let (split_client, _token_client, split_admin, _token_admin) = setup(&env);
+
+    let recipients = vec![
+        &env,
+        RecipientBps {
+            to: Address::generate(&env),
+            bps: 4_000,
+        },
+        RecipientBps {
+            to: Address::generate(&env),
+            bps: 5_999,
+        },
+    ];
+
+    assert_eq!(
+        split_client.try_create_split_percentage(&split_admin, &1_000i128, &recipients),
+        Err(Ok(SplitError::InvalidBasisPointsTotal))
+    );
+}
+
+#[test]
+fn test_create_split_percentage_assigns_rounding_remainder_to_last_recipient() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    let recipients = vec![
+        &env,
+        RecipientBps {
+            to: Address::generate(&env),
+            bps: 3_334,
+        },
+        RecipientBps {
+            to: Address::generate(&env),
+            bps: 3_333,
+        },
+        RecipientBps {
+            to: Address::generate(&env),
+            bps: 3_333,
+        },
+    ];
+
+    let invoice_id = split_client.create_split_bps_with_token(
+        &split_admin,
+        &100i128,
+        &recipients,
+        &token_client.address,
+    );
+    let invoice = split_client.get_invoice(&invoice_id);
+
+    assert_eq!(invoice.recipients.get(0).unwrap().amount, 33);
+    assert_eq!(invoice.recipients.get(1).unwrap().amount, 33);
+    assert_eq!(invoice.recipients.get(2).unwrap().amount, 34);
+    assert_eq!(
+        invoice.recipients.get(0).unwrap().amount
+            + invoice.recipients.get(1).unwrap().amount
+            + invoice.recipients.get(2).unwrap().amount,
+        100
+    );
+}
+
+#[test]
+fn test_create_split_percentage_requires_configured_token() {
+    let env = Env::default();
+    let (split_client, _token_client, split_admin, _token_admin) = setup(&env);
+
+    let recipients = vec![
+        &env,
+        RecipientBps {
+            to: Address::generate(&env),
+            bps: 10_000,
+        },
+    ];
+
+    assert_eq!(
+        split_client.try_create_split_percentage(&split_admin, &100i128, &recipients),
+        Err(Ok(SplitError::TokenNotConfigured))
+    );
+}
+
+#[test]
+fn test_create_split_percentage_uses_configured_token_and_generates_ids() {
+    let env = Env::default();
+    let (split_client, token_client, split_admin, _token_admin) = setup(&env);
+
+    let recipients = vec![
+        &env,
+        RecipientBps {
+            to: Address::generate(&env),
+            bps: 10_000,
+        },
+    ];
+
+    let first = split_client.create_split_bps_with_token(
+        &split_admin,
+        &1_000i128,
+        &recipients,
+        &token_client.address,
+    );
+    let second = split_client.create_split_percentage(&split_admin, &2_000i128, &recipients);
+
+    assert_eq!(second, first + 1);
+    assert_eq!(split_client.get_invoice(&first).total_amount, 1_000);
+    assert_eq!(split_client.get_invoice(&second).total_amount, 2_000);
 }

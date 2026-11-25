@@ -91,7 +91,7 @@ interface BcForgeContextType {
 // ─── Multi-network switching (#1148) ────────────────────────────────────────
 
 /** Networks {@link BcForgeProvider} can switch between (#1148). */
-export type NetworkId = "testnet" | "futurenet" | "local";
+export type NetworkId = "testnet" | "futurenet" | "mainnet" | "local";
 
 /** Static description of one selectable Stellar network (#1148). */
 export interface NetworkDescriptor {
@@ -118,6 +118,12 @@ export const STELLAR_NETWORKS: readonly NetworkDescriptor[] = [
     label: "Futurenet",
     networkPassphrase: "Test SDF Future Network ; October 2022",
     defaultRpcUrl: "https://soroban-futurenet.stellar.org",
+  },
+  {
+    id: "mainnet",
+    label: "Mainnet",
+    networkPassphrase: "Public Global Stellar Network ; September 2015",
+    defaultRpcUrl: "https://soroban-rpc.mainnet.stellar.org",
   },
   {
     id: "local",

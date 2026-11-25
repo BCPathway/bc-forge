@@ -26,6 +26,7 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
         &String::from_str(env, "bc-forge Token"),
         &String::from_str(env, "SFG"),
     );
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     (client, admin)
 }

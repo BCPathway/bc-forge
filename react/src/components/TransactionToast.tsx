@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import React, { useEffect } from "react";
 
-import { parseWalletError, truncateMiddle } from '../utils';
+import { parseWalletError, truncateMiddle } from "../utils";
 import { ExternalLink } from "./ExternalLink";
 
 /** Lifecycle of the transaction a {@link TransactionToast} reports on. */
