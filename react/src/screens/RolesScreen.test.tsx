@@ -387,6 +387,12 @@ describe("RolesScreen (#906, #1224, #1225, #1227, #1228, #1231, #1232, #1233)", 
     const originalRevoke = URL.revokeObjectURL;
     URL.createObjectURL = createObjectURL;
     URL.revokeObjectURL = revokeObjectURL;
+    // The export uses an anchor download click, which JSDOM reports as an
+    // unimplemented navigation. Stub it so the test exercises the export
+    // logic without producing console.error noise (#1323).
+    const clickSpy = jest
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
 
     fireEvent.change(screen.getByLabelText("Export format"), {
       target: { value: "json" },
@@ -395,6 +401,7 @@ describe("RolesScreen (#906, #1224, #1225, #1227, #1228, #1231, #1232, #1233)", 
 
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
 
+    clickSpy.mockRestore();
     URL.createObjectURL = originalCreate;
     URL.revokeObjectURL = originalRevoke;
   });

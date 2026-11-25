@@ -38,6 +38,8 @@ async fn test_complete_lifecycle() {
     let name = String::from_str(&env, "bc-forge-test");
     let symbol = String::from_str(&env, "SFGT");
     client.initialize(&admin, &7, &name, &symbol);
+    // mint requires an explicit per-minter issuance allowance (#1327).
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     // Mint tokens
     client.mint(&admin, &user_a, &1000000);
@@ -71,6 +73,7 @@ async fn test_token_vault_compound_lifecycle() {
     let token_name = String::from_str(&env, "Underlying Token");
     let token_symbol = String::from_str(&env, "UND");
     token_client.initialize(&admin, &7, &token_name, &token_symbol);
+    token_client.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     // 2. Deploy & Initialize Vault Contract
     let vault_id = env.register(WrapperContract, ());
@@ -136,6 +139,8 @@ async fn test_parallel_execution() {
     let name = String::from_str(&env, "bc-forge-parallel");
     let symbol = String::from_str(&env, "SFGP");
     client.initialize(&admin, &7, &name, &symbol);
+    // mint requires an explicit per-minter issuance allowance (#1327).
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     // Create multiple users
     let users: Vec<Address> = (0..10).map(|_| Address::generate(&env)).collect();
@@ -166,6 +171,8 @@ async fn test_deployment_verification() {
     let name = String::from_str(&env, "bc-forge-deploy");
     let symbol = String::from_str(&env, "SFGD");
     client.initialize(&admin, &7, &name, &symbol);
+    // mint requires an explicit per-minter issuance allowance (#1327).
+    client.set_minter_allowance(&admin, &admin, &i128::MAX);
 
     println!("✅ Deployment verification test passed!");
 }

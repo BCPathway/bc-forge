@@ -42,6 +42,7 @@ import {
   xdr,
   nativeToScVal,
   Address,
+  Account,
 } from '@stellar/stellar-sdk';
 import type { WalletAdapter } from './walletAdapter';
 
@@ -58,6 +59,7 @@ import {
   simulateTransaction,
   hashToScVal,
   simulationToDryRun,
+  TransactionQueue,
 } from './utils';
 import type { DryRunResult } from './utils';
 
@@ -82,8 +84,10 @@ export interface bcForgeClientConfig {
   contractId: string;
   /** Optional wallet adapter for browser-based signing flows */
   walletAdapter?: WalletAdapter;
-  /** Max retry attempts for transient sequence or fee errors (default: 3) */
+  /** Maximum total attempts for retryable SDK operations (default: 3). */
   maxRetryAttempts?: number;
+  /** Base retry delay in milliseconds (default: 1000). Set to 0 in tests. */
+  retryDelayMs?: number;
   /** Maximum fee cap in stroops for fee bump retries (default: 10000000) */
   maxFeeCap?: string | number | bigint;
 }
@@ -221,10 +225,12 @@ export class bcForgeClient {
   private server: SorobanRpc.Server;
   private contract: Contract;
   private walletAdapter?: WalletAdapter;
-  private maxRetryAttempts?: number;
+  private maxRetryAttempts: number;
+  private retryDelayMs: number;
   private maxFeeCap?: string | number | bigint;
   private readCache = new Map<string, { value: unknown; ledger: number }>();
   private cachedLedgerSequence: number = 0;
+  public readonly transactionQueue: TransactionQueue;
 
   constructor(config: bcForgeClientConfig) {
     this.rpcUrl = config.rpcUrl;
@@ -233,8 +239,10 @@ export class bcForgeClient {
     this.server = new SorobanRpc.Server(this.rpcUrl);
     this.contract = new Contract(this.contractId);
     this.walletAdapter = config.walletAdapter;
-    this.maxRetryAttempts = config.maxRetryAttempts;
+    this.maxRetryAttempts = config.maxRetryAttempts ?? 3;
+    this.retryDelayMs = config.retryDelayMs ?? 1000;
     this.maxFeeCap = config.maxFeeCap;
+    this.transactionQueue = new TransactionQueue(this.rpcUrl);
   }
 
   /** Replace or set the wallet adapter at runtime */
@@ -376,6 +384,22 @@ export class bcForgeClient {
       ]);
       return BigInt(scValToNative(result) as string | number | bigint);
     });
+  }
+
+  /**
+   * Check whether `spender` has at least `amount` spending allowance from `owner`.
+   *
+   * @param owner - The token owner's Stellar public key
+   * @param spender - The spender's Stellar public key
+   * @param amount - The required minimum allowance amount
+   * @returns `true` if the current allowance is greater than or equal to `amount`, `false` otherwise
+   */
+  async hasSufficientAllowance(owner: string, spender: string, amount: bigint): Promise<boolean> {
+    if (amount < 0n) {
+      throw new RangeError('amount must be non-negative');
+    }
+    const allowance = await this.getAllowance(owner, spender);
+    return allowance >= amount;
   }
 
   /**
@@ -2097,14 +2121,25 @@ export class bcForgeClient {
   // ─── Internal Helpers ────────────────────────────────────────────────────
 
   /**
-   * Internal helper to execute a task with retries.
+   * Internal helper to execute an operation with bounded retries and exponential
+   * backoff. `attempts` counts the initial request, so a value of 3 means
+   * one initial attempt plus at most two retries.
+   *
+   * Contract/simulation/signer errors are non-retryable. RPC and transport
+   * failures may be retried; delay grows as baseDelay * 2^(retry index).
+   * The base delay can be set to 0 to make tests deterministic and fast.
    */
-  private async withRetry<T>(fn: () => Promise<T>, retries: number = 3): Promise<T> {
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    attempts: number = this.maxRetryAttempts,
+  ): Promise<T> {
+    const boundedAttempts = Math.max(1, Math.floor(attempts));
     let lastError: unknown;
-    for (let i = 0; i < retries; i++) {
+
+    for (let attempt = 0; attempt < boundedAttempts; attempt++) {
       try {
         return await fn();
-      } catch (error) {
+      } catch (error: unknown) {
         if (
           error instanceof ContractError ||
           error instanceof SimulationError ||
@@ -2112,13 +2147,17 @@ export class bcForgeClient {
         ) {
           throw error;
         }
+
         lastError = error;
-        // Only retry on certain errors (e.g., network/RPC errors)
-        if (i < retries - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+        if (attempt === boundedAttempts - 1) break;
+
+        const delayMs = this.retryDelayMs * 2 ** attempt;
+        if (delayMs > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
         }
       }
     }
+
     throw lastError;
   }
 
@@ -2169,96 +2208,114 @@ export class bcForgeClient {
     args: xdr.ScVal[],
     source?: Keypair,
   ): Promise<TransactionResult> {
-    return this.withRetry(async () => {
-      try {
-        const submitOpts = {
-          maxAttempts: this.maxRetryAttempts,
-          maxFeeCap: this.maxFeeCap,
-          sourceKeypair: source,
-          networkPassphrase: this.networkPassphrase,
-          contractId: this.contractId,
-          method,
-          args,
-        };
+    const sourceAddress = source ? source.publicKey() : this.walletAdapter?.publicKey;
+    const runInvocation = async (sourceAccount?: Account) => {
+      return this.withRetry(async () => {
+        try {
+          const submitOpts = {
+            maxAttempts: this.maxRetryAttempts,
+            maxFeeCap: this.maxFeeCap,
+            sourceKeypair: source,
+            networkPassphrase: this.networkPassphrase,
+            contractId: this.contractId,
+            method,
+            args,
+          };
 
-        // If an explicit Keypair is provided, use the existing signed builder
-        if (source) {
-          const txXdr = await buildInvokeTransaction(
+          // If an explicit Keypair is provided, use the existing signed builder
+          if (source) {
+            const txXdr = await buildInvokeTransaction(
+              this.rpcUrl,
+              this.networkPassphrase,
+              this.contractId,
+              method,
+              args,
+              source,
+              { sourceAccount },
+            );
+
+            const response = await submitTransaction(this.rpcUrl, txXdr, submitOpts);
+
+            if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+              this.clearCache();
+              return {
+                success: true,
+                hash:
+                  (response as unknown as { hash?: string; txHash?: string }).hash ??
+                  (response as any).txHash,
+                returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+              };
+            }
+
+            return {
+              success: false,
+              hash:
+                (response as unknown as { hash?: string; txHash?: string }).hash ??
+                (response as any).txHash,
+            };
+          }
+
+          // Otherwise, attempt to use the configured wallet adapter
+          if (!this.walletAdapter) {
+            throw new SignerRequiredError(
+              'A signer (Keypair or connected WalletAdapter) is required to execute write transactions',
+            );
+          }
+          if (!this.walletAdapter.connected || !this.walletAdapter.publicKey) {
+            throw new SignerRequiredError('Wallet adapter is not connected');
+          }
+
+          const unsignedXdr = await buildUnsignedTransaction(
             this.rpcUrl,
             this.networkPassphrase,
             this.contractId,
             method,
             args,
-            source,
+            this.walletAdapter.publicKey,
+            { sourceAccount },
           );
 
-          const response = await submitTransaction(this.rpcUrl, txXdr, submitOpts);
+          const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr, {
+            networkPassphrase: this.networkPassphrase,
+          });
+
+          const response = await submitTransaction(this.rpcUrl, signedXdr, submitOpts);
 
           if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
             this.clearCache();
             return {
               success: true,
-              hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+              hash:
+                (response as unknown as { hash?: string; txHash?: string }).hash ??
+                (response as any).txHash,
               returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
             };
           }
 
           return {
             success: false,
-            hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+            hash:
+              (response as unknown as { hash?: string; txHash?: string }).hash ??
+              (response as any).txHash,
           };
-        }
-
-        // Otherwise, attempt to use the configured wallet adapter
-        if (!this.walletAdapter) {
-          throw new SignerRequiredError(
-            'A signer (Keypair or connected WalletAdapter) is required to execute write transactions',
-          );
-        }
-        if (!this.walletAdapter.connected || !this.walletAdapter.publicKey) {
-          throw new SignerRequiredError('Wallet adapter is not connected');
-        }
-
-        const unsignedXdr = await buildUnsignedTransaction(
-          this.rpcUrl,
-          this.networkPassphrase,
-          this.contractId,
-          method,
-          args,
-          this.walletAdapter.publicKey,
-        );
-
-        const signedXdr = await this.walletAdapter.signTransaction(unsignedXdr, {
-          networkPassphrase: this.networkPassphrase,
-        });
-
-        const response = await submitTransaction(this.rpcUrl, signedXdr, submitOpts);
-
-        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-          this.clearCache();
-          return {
-            success: true,
-            hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
-            returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
-          };
-        }
-
-        return {
-          success: false,
-          hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
-        };
-      } catch (error: unknown) {
-        // Don't retry on simulation errors or missing signer errors
-        if (
-          error instanceof ContractError ||
-          error instanceof SimulationError ||
-          error instanceof SignerRequiredError
-        ) {
+        } catch (error: unknown) {
+          // Don't retry on simulation errors or missing signer errors
+          if (
+            error instanceof ContractError ||
+            error instanceof SimulationError ||
+            error instanceof SignerRequiredError
+          ) {
+            throw error;
+          }
           throw error;
         }
-        throw error;
-      }
-    });
+      });
+    };
+
+    if (sourceAddress) {
+      return this.transactionQueue.enqueue(sourceAddress, (account) => runInvocation(account));
+    }
+    return runInvocation();
   }
 
   /**
@@ -2273,14 +2330,18 @@ export class bcForgeClient {
       this.clearCache();
       return {
         success: true,
-        hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+        hash:
+          (response as unknown as { hash?: string; txHash?: string }).hash ??
+          (response as any).txHash,
         returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
       };
     }
 
     return {
       success: false,
-      hash: (response as unknown as { hash?: string; txHash?: string }).hash ?? (response as any).txHash,
+      hash:
+        (response as unknown as { hash?: string; txHash?: string }).hash ??
+        (response as any).txHash,
     };
   }
 }

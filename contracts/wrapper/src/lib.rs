@@ -22,6 +22,7 @@ pub mod math;
 mod test;
 
 use bc_forge_admin as admin;
+use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::TokenClient, Address, Env, String,
@@ -88,6 +89,14 @@ pub struct UserEmergencyState {
     pub window_start_ledger: u32,
 }
 
+/// Instance storage footprint and TTL diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct StorageInfo {
+    pub instance_ttl: u32,
+    pub instance_keys: u32,
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -134,6 +143,8 @@ pub enum DataKey {
     QueuedWithdrawal(Address),
     /// Emergency cap tracking state for a user.
     UserEmergencyState(Address),
+    /// Recorded live-until ledger for instance TTL diagnostics.
+    InstanceLiveUntil,
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -174,9 +185,15 @@ pub enum WrapperError {
     UnderlyingAssetProtected = 18,
     /// `rescue_tokens` was called with a non-positive amount.
     InvalidRescueAmount = 19,
+    /// The minimum output bound passed to `deposit_with_slippage` or
+    /// `withdraw_with_slippage` was not met at execution time.
+    SlippageExceeded = 20,
     /// `rescue_tokens` was called on this vault's own share token. Share
     /// balances the vault holds are not stranded foreign assets.
-    ShareTokenProtected = 20,
+    ///
+    /// NOTE: this variant previously used code `20`; it was moved to `21` so
+    /// that `SlippageExceeded` could occupy the code reserved by issue #1468.
+    ShareTokenProtected = 21,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -186,6 +203,65 @@ pub struct WrapperContract;
 
 impl WrapperContract {
     // ── Guards ───────────────────────────────────────────────────────────────
+
+    fn read_recorded_live_until(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::InstanceLiveUntil)
+            .unwrap_or(0)
+    }
+
+    fn remember_instance_extension(env: &Env, threshold: u32, extend_to: u32) {
+        let current = env.ledger().sequence();
+        let stored = Self::read_recorded_live_until(env);
+        let remaining = stored.saturating_sub(current);
+        if stored == 0 || remaining <= threshold {
+            let requested = current.saturating_add(extend_to);
+            if requested > stored {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::InstanceLiveUntil, &requested);
+            }
+        }
+    }
+
+    fn extend_instance_ttl(env: &Env) {
+        ttl::extend_instance_ttl(env);
+        Self::remember_instance_extension(
+            env,
+            ttl::INSTANCE_LIFETIME_THRESHOLD,
+            ttl::INSTANCE_BUMP_AMOUNT,
+        );
+    }
+
+    fn extend_instance_ttl_for_call(env: &Env) {
+        Self::extend_instance_ttl(env);
+    }
+
+    fn get_instance_ttl_value(env: &Env) -> u32 {
+        Self::read_recorded_live_until(env).saturating_sub(env.ledger().sequence())
+    }
+
+    fn get_storage_key_counts_value(env: &Env) -> u32 {
+        let keys = [
+            DataKey::UnderlyingToken,
+            DataKey::Decimals,
+            DataKey::Symbol,
+            DataKey::Name,
+            DataKey::Supply,
+            DataKey::PendingRewards,
+            DataKey::CooldownConfig,
+        ];
+        let mut count = 0u32;
+        let mut i = 0;
+        while i < keys.len() {
+            if env.storage().instance().has(&keys[i]) {
+                count += 1;
+            }
+            i += 1;
+        }
+        count
+    }
 
     fn ensure_initialized(env: &Env) -> Result<(), WrapperError> {
         if admin::has_admin(env) {
@@ -591,6 +667,27 @@ impl WrapperContract {
         Ok(())
     }
 
+    /// Returns storage diagnostics for the wrapper contract.
+    pub fn get_storage_info(env: Env) -> StorageInfo {
+        Self::extend_instance_ttl_for_call(&env);
+        StorageInfo {
+            instance_ttl: Self::get_instance_ttl_value(&env),
+            instance_keys: Self::get_storage_key_counts_value(&env),
+        }
+    }
+
+    /// Returns the recorded remaining instance TTL in ledgers.
+    pub fn get_instance_ttl(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_instance_ttl_value(&env)
+    }
+
+    /// Returns the number of populated singleton instance keys.
+    pub fn get_storage_key_counts(env: Env) -> u32 {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::get_storage_key_counts_value(&env)
+    }
+
     /// Wrap `amount` of the underlying token.
     ///
     /// Transfers `amount` of the underlying token from `caller` into this contract,
@@ -735,6 +832,45 @@ impl WrapperContract {
         Self::release_lock(&env);
         events::emit_deposit(&env, &caller, assets, shares_out);
         Ok(shares_out)
+    }
+
+    /// Deposit underlying assets while enforcing a minimum number of shares out.
+    ///
+    /// This is a thin, slippage-aware wrapper around [`WrapperContract::deposit`].
+    /// The underlying deposit is executed first; if the number of shares minted
+    /// is below `min_shares_out` the call returns
+    /// [`WrapperError::SlippageExceeded`]. Because the check happens inside the
+    /// same contract invocation, returning the error reverts the whole deposit
+    /// (including the token transfer and share mint) atomically.
+    ///
+    /// `deposit` itself is left unchanged, so existing callers remain backward
+    /// compatible.
+    ///
+    /// # Arguments
+    /// * `env`            - The Soroban environment.
+    /// * `caller`         - Address depositing underlying tokens; must have
+    ///                      pre-approved this contract to spend `assets`.
+    /// * `assets`         - Amount of underlying tokens to deposit. Must be positive.
+    /// * `min_shares_out` - Minimum acceptable share amount. A non-positive
+    ///                      bound disables the slippage check.
+    ///
+    /// # Returns
+    /// The number of vault shares minted to `caller`.
+    ///
+    /// # Errors
+    /// Any error from [`WrapperContract::deposit`], or
+    /// [`WrapperError::SlippageExceeded`] when `shares_minted < min_shares_out`.
+    pub fn deposit_with_slippage(
+        env: Env,
+        caller: Address,
+        assets: i128,
+        min_shares_out: i128,
+    ) -> Result<i128, WrapperError> {
+        let shares_minted = Self::deposit(env.clone(), caller, assets)?;
+        if shares_minted < min_shares_out {
+            return Err(WrapperError::SlippageExceeded);
+        }
+        Ok(shares_minted)
     }
 
     /// Unwrap `wrapped_amount` of wrapped tokens back to the underlying token.
@@ -1169,6 +1305,69 @@ impl WrapperContract {
         Ok(queued.amount)
     }
 
+    /// Claim a partial (or full) portion of a queued withdrawal after the
+    /// cooldown release ledger has passed.
+    ///
+    /// Proportionally calculates the underlying payout for `shares_to_claim`,
+    /// deducts the claimed shares and payout from the stored
+    /// [`QueuedWithdrawal`] (removing it when fully claimed), and transfers
+    /// the underlying tokens to `caller`.
+    pub fn claim_withdrawal_partial(
+        env: Env,
+        caller: Address,
+        shares_to_claim: i128,
+    ) -> Result<i128, WrapperError> {
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        caller.require_auth();
+
+        if shares_to_claim <= 0 {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let queued =
+            Self::read_queued_withdrawal(&env, &caller).ok_or(WrapperError::NoQueuedWithdrawal)?;
+
+        if env.ledger().sequence() < queued.release_ledger {
+            return Err(WrapperError::CooldownNotMet);
+        }
+
+        if shares_to_claim > queued.shares {
+            return Err(WrapperError::InvalidAmount);
+        }
+
+        let payout_amount = if shares_to_claim == queued.shares {
+            queued.amount
+        } else {
+            let proportional = math::mul_div_down(queued.amount, shares_to_claim, queued.shares)
+                .ok_or(WrapperError::InvalidAmount)?;
+            if proportional <= 0 {
+                return Err(WrapperError::InvalidAmount);
+            }
+            proportional
+        };
+
+        Self::acquire_lock(&env)?;
+        if shares_to_claim == queued.shares {
+            Self::remove_queued_withdrawal(&env, &caller);
+        } else {
+            let updated = QueuedWithdrawal {
+                shares: queued.shares - shares_to_claim,
+                amount: queued.amount - payout_amount,
+                release_ledger: queued.release_ledger,
+            };
+            Self::write_queued_withdrawal(&env, &caller, &updated);
+        }
+
+        let underlying_id = Self::read_underlying(&env);
+        let underlying_client = TokenClient::new(&env, &underlying_id);
+        underlying_client.transfer(&env.current_contract_address(), &caller, &payout_amount);
+
+        Self::release_lock(&env);
+        events::emit_withdraw(&env, &caller, shares_to_claim, payout_amount);
+        Ok(payout_amount)
+    }
+
     /// Withdraw `shares` of wrapped tokens and receive a proportional share of
     /// the vault's underlying assets, including any accrued yield.
     ///
@@ -1261,6 +1460,46 @@ impl WrapperContract {
             events::emit_withdraw(&env, &caller, shares, tokens_out);
             Ok(tokens_out)
         }
+    }
+
+    /// Withdraw shares while enforcing a minimum number of underlying assets out.
+    ///
+    /// This is a thin, slippage-aware wrapper around [`WrapperContract::withdraw`].
+    /// The underlying withdrawal is executed first; if the amount of assets
+    /// returned is below `min_assets_out` the call returns
+    /// [`WrapperError::SlippageExceeded`]. Returning the error from the same
+    /// contract invocation reverts the entire withdrawal atomically, so no
+    /// shares are burned and no tokens are moved when the bound is violated.
+    ///
+    /// `withdraw` itself is left unchanged, so existing callers remain backward
+    /// compatible. In cooldown mode `withdraw` queues the payout and returns
+    /// `0`; callers that need a payout guarantee should not combine that mode
+    /// with a positive `min_assets_out`.
+    ///
+    /// # Arguments
+    /// * `env`            - The Soroban environment.
+    /// * `caller`         - Address whose shares are burned; must authorize the call.
+    /// * `shares`         - Number of vault shares to withdraw.
+    /// * `min_assets_out` - Minimum acceptable underlying asset amount. A
+    ///                      non-positive bound disables the slippage check.
+    ///
+    /// # Returns
+    /// The amount of underlying assets returned by [`WrapperContract::withdraw`].
+    ///
+    /// # Errors
+    /// Any error from [`WrapperContract::withdraw`], or
+    /// [`WrapperError::SlippageExceeded`] when `assets_out < min_assets_out`.
+    pub fn withdraw_with_slippage(
+        env: Env,
+        caller: Address,
+        shares: i128,
+        min_assets_out: i128,
+    ) -> Result<i128, WrapperError> {
+        let assets_out = Self::withdraw(env.clone(), caller, shares)?;
+        if assets_out < min_assets_out {
+            return Err(WrapperError::SlippageExceeded);
+        }
+        Ok(assets_out)
     }
 
     /// Enforce the deposit time lockup: records the timestamp at which `user`'s
