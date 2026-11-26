@@ -5,7 +5,12 @@ import { publishIndexerEvent } from './events';
 import { applyLedgerEventAggregates, type AggregateStore } from './aggregates';
 import type { LedgerEvent } from './ledger';
 import { logger } from './lib/logger';
-import { setLatestNetworkLedger } from './metrics';
+import {
+  incrementEventsProcessed,
+  setIngestionLag,
+  setLatestNetworkLedger,
+  timeRpcCall,
+} from './metrics';
 import {
   hasContinuousParentChain,
   reconcileLedgerCursor,
@@ -43,10 +48,11 @@ export async function runIndexer() {
   // 2. Continuous loop
   while (true) {
     try {
-      const currentLedger = (await server.getLatestLedger()).sequence;
+      const currentLedger = (await timeRpcCall(() => server.getLatestLedger())).sequence;
 
       setLatestNetworkLedger(currentLedger);
       const lag = Math.max(0, currentLedger - (startLedger - 1));
+      setIngestionLag(lag);
       if (lag > LAG_THRESHOLD) {
         logger.warn('indexer lag threshold exceeded', {
           alert: 'indexer_lag_threshold_exceeded',
@@ -67,10 +73,12 @@ export async function runIndexer() {
       logger.info('indexing ledger range', { startLedger, endLedger });
 
       const ledgerStart = Math.max(1, startLedger - 1);
-      const ledgerResponse = await server.getLedgers({
-        startLedger: ledgerStart,
-        pagination: { limit: endLedger - ledgerStart + 1 },
-      });
+      const ledgerResponse = await timeRpcCall(() =>
+        server.getLedgers({
+          startLedger: ledgerStart,
+          pagination: { limit: endLedger - ledgerStart + 1 },
+        }),
+      );
       const coordinates = ledgerResponse.ledgers
         .filter((ledger) => ledger.sequence >= startLedger && ledger.sequence <= endLedger)
         .map(toLedgerCoordinate);
@@ -94,19 +102,22 @@ export async function runIndexer() {
         throw new Error(`Ledger sequence or parent hash mismatch at ${startLedger}`);
       }
 
-      const response = await server.getEvents({
-        startLedger: startLedger,
-        endLedger,
-        filters: [
-          {
-            type: 'contract',
-            contractIds: [CONTRACT_ID as string],
-          },
-        ],
-      });
+      const response = await timeRpcCall(() =>
+        server.getEvents({
+          startLedger: startLedger,
+          endLedger,
+          filters: [
+            {
+              type: 'contract',
+              contractIds: [CONTRACT_ID as string],
+            },
+          ],
+        }),
+      );
 
       for (const event of response.events) {
         await processEvent(event);
+        incrementEventsProcessed();
       }
 
       const latestCoordinate = coordinates[coordinates.length - 1];
