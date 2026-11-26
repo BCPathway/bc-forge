@@ -23,7 +23,7 @@ pub enum DataKey {
     DepositBlock(Address),
 }
 
-/// Typed failures for the flash loan guard (#1315).
+/// Typed failures for the flash loan guard (#1315, #1456).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[contracterror]
 #[repr(u32)]
@@ -31,6 +31,8 @@ pub enum FlashLoanError {
     /// A withdrawal was attempted in the same ledger block as the deposit.
     SameLedgerWithdrawal = 1,
 }
+
+pub type FlashLoanGuardError = FlashLoanError;
 
 #[contract]
 pub struct FlashLoanGuardContract;

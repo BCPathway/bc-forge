@@ -202,3 +202,17 @@ pub fn emit_withdraw_queued(
         (caller.clone(), shares, amount, release_ledger),
     );
 }
+
+/// Emitted when a claim is made for wrapped assets.
+///
+/// @notice Distinct from the yield vault claim event. This is for wrapper contract claims.
+/// @param env The Soroban environment.
+/// @param caller The address initiating the claim.
+/// @param shares The amount of wrapped shares claimed.
+/// @param amount The amount of underlying tokens received in the claim.
+pub fn emit_claim(env: &Env, caller: &Address, shares: i128, amount: i128) {
+    env.events().publish(
+        (symbol_short!("w_claim"),),
+        (caller.clone(), shares, amount, EVENT_SCHEMA_VERSION),
+    );
+}
