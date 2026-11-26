@@ -28,6 +28,7 @@ Built for open-source collaboration via [drips.network](https://www.drips.networ
 bc-forge/
 ├── contracts/                     # Soroban smart contracts (Rust)
 │   ├── admin/                     # Admin access control, proposals, multisig pool
+│   ├── fee_sweeper/               # Keeper-driven fee sweeper that splits fees to treasury and vault
 │   ├── flash_loan_guard/          # Flash-loan callback guard
 │   ├── lifecycle/                 # Pause/unpause lifecycle module
 │   ├── rate-limit/                # Rate limiting module

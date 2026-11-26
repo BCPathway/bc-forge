@@ -19,6 +19,9 @@ mod test;
 mod fuzz_mint;
 
 #[cfg(test)]
+mod compliance;
+
+#[cfg(test)]
 mod lockup;
 
 #[cfg(test)]
@@ -28,8 +31,8 @@ use bc_forge_admin as admin;
 use bc_forge_ttl as ttl;
 use soroban_sdk::token::TokenInterface;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, TryIntoVal,
-    Val, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    String, TryIntoVal, Val, Vec,
 };
 
 /// A mint recipient with an amount.
@@ -96,6 +99,22 @@ pub enum DataKey {
     /// Address of the governing admin/multisig contract (#1329). When set,
     /// only this address may invoke privileged supply-policy entry points.
     AdminContract,
+    /// Set once by `lock_metadata`; permanently freezes name and symbol.
+    MetadataLocked,
+    /// Set while minting alone is paused (`pause_mints`).
+    MintPaused,
+    /// Set while transfers alone are paused (`pause_transfers`).
+    TransferPaused,
+    /// Account frozen by a compliance officer (#1333).
+    Frozen(Address),
+    /// Active transfer filter mode (#1334).
+    FilterMode,
+    /// Allowlist/denylist membership per address (#1334).
+    AddressFilter(Address),
+    /// Whether peer-to-peer transfers are enabled (#1335).
+    IsTransferable,
+    /// Address nominated to become admin via two-step handoff (#1337).
+    PendingOwner,
     /// Per-minter issuance budget (remaining allowance) in token units.
     MinterAllowance(Address),
     /// Scheduled mint stream by id.
@@ -105,6 +124,13 @@ pub enum DataKey {
     /// Recorded live-until ledger for instance TTL diagnostics.
     InstanceLiveUntil,
 }
+
+/// Transfer filter disabled.
+pub const FILTER_NONE: u32 = 0;
+/// Only allowlisted addresses may send or receive.
+pub const FILTER_ALLOWLIST: u32 = 1;
+/// Denylisted addresses may neither send nor receive.
+pub const FILTER_DENYLIST: u32 = 2;
 
 /// Fee configuration for dynamic contract fee charging.
 ///
@@ -242,6 +268,24 @@ pub enum TokenError {
     CapTimelockActive = 24,
     /// Caller is not the configured admin/multisig contract (#1329).
     UnauthorizedCaller = 25,
+    /// The sender or recipient account is frozen.
+    AccountFrozen = 24,
+    /// The sender or recipient is rejected by the active allowlist/denylist.
+    AddressNotAllowed = 25,
+    /// Transfers are disabled (soulbound token).
+    TransfersDisabled = 26,
+    /// Invalid filter mode value.
+    InvalidFilterMode = 27,
+    /// No pending ownership transfer exists.
+    NoPendingOwner = 28,
+    /// Caller is not the pending owner.
+    NotPendingOwner = 29,
+    /// The account cannot be frozen (contract itself).
+    CannotFreezeReserve = 30,
+    /// The caller lacks the required role.
+    Unauthorized = 31,
+    /// Name and symbol were permanently locked by `lock_metadata`.
+    MetadataImmutable = 32,
     /// The minter has no configured issuance budget or has exceeded it.
     MinterQuotaExceeded = 23,
 }
@@ -271,6 +315,53 @@ impl BcForgeToken {
         } else {
             Ok(())
         }
+    }
+
+    fn flag_set(env: &Env, key: DataKey) -> bool {
+        env.storage().instance().get(&key).unwrap_or(false)
+    }
+
+    /// Rejects while minting is paused, either by the master pause or `pause_mints`.
+    fn ensure_mints_not_paused(env: &Env) -> Result<(), TokenError> {
+        Self::ensure_not_paused(env)?;
+        if Self::flag_set(env, DataKey::MintPaused) {
+            return Err(TokenError::ContractPaused);
+        }
+        Ok(())
+    }
+
+    /// Rejects while transfers are paused, either by the master pause or `pause_transfers`.
+    fn ensure_transfers_not_paused(env: &Env) -> Result<(), TokenError> {
+        Self::ensure_not_paused(env)?;
+        if Self::flag_set(env, DataKey::TransferPaused) {
+            return Err(TokenError::ContractPaused);
+        }
+        Ok(())
+    }
+
+    fn set_scope_paused(
+        env: &Env,
+        caller: &Address,
+        key: DataKey,
+        scope: soroban_sdk::Symbol,
+        paused: bool,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(env);
+        Self::ensure_initialized(env)?;
+        if !admin::is_admin_or_pauser(env, caller) {
+            return Err(TokenError::ContractPaused);
+        }
+        caller.require_auth();
+        if Self::flag_set(env, key.clone()) == paused {
+            return Err(if paused {
+                TokenError::AlreadyPaused
+            } else {
+                TokenError::NotPaused
+            });
+        }
+        env.storage().instance().set(&key, &paused);
+        events::emit_scope_paused(env, caller, scope, paused);
+        Ok(())
     }
 
     fn read_balance(env: &Env, address: &Address) -> i128 {
@@ -518,17 +609,144 @@ impl BcForgeToken {
         to: &Address,
         amount: i128,
     ) -> Result<(), TokenError> {
+        Self::ensure_transferable(env)?;
+        Self::check_frozen_and_filter(env, from, to)?;
+        let fee = Self::calculate_transfer_fee(env, from, amount);
+        let required = amount.checked_add(fee).ok_or(TokenError::InvalidAmount)?;
         let from_balance = Self::read_balance(env, from);
-        if Self::get_spendable_balance(env, from) < amount {
+        if Self::get_spendable_balance(env, from) < required {
             return Err(TokenError::InsufficientBalance);
         }
 
-        if from != to {
-            let to_balance = Self::read_balance(env, to);
+        let treasury = if fee > 0 {
+            Some(Self::read_treasury(env)?)
+        } else {
+            None
+        };
+
+        if from == to {
+            if fee > 0 && treasury.as_ref() != Some(from) {
+                let treasury = treasury.as_ref().expect("fee treasury configured");
+                let treasury_balance = Self::read_balance(env, treasury);
+                Self::write_balance(env, from, from_balance - fee);
+                Self::write_balance(env, treasury, treasury_balance + fee);
+                events::emit_fee_charged(env, from, treasury, fee);
+            }
+            return Ok(());
+        }
+
+        let treasury_is_recipient = treasury.as_ref() == Some(to);
+        let treasury_is_sender = treasury.as_ref() == Some(from);
+
+        if treasury_is_sender {
             Self::write_balance(env, from, from_balance - amount);
-            Self::write_balance(env, to, to_balance + amount);
+        } else {
+            Self::write_balance(env, from, from_balance - required);
+        }
+
+        let to_balance = Self::read_balance(env, to);
+        let recipient_amount = if treasury_is_recipient {
+            amount + fee
+        } else {
+            amount
+        };
+        Self::write_balance(env, to, to_balance + recipient_amount);
+
+        if let Some(treasury) = treasury {
+            if !treasury_is_sender && !treasury_is_recipient {
+                let treasury_balance = Self::read_balance(env, &treasury);
+                Self::write_balance(env, &treasury, treasury_balance + fee);
+            }
+        }
+
+        if fee > 0 {
+            let treasury = Self::read_treasury(env)?;
+            events::emit_fee_charged(env, from, &treasury, fee);
         }
         Ok(())
+    }
+
+    fn is_transferable_flag(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsTransferable)
+            .unwrap_or(true)
+    }
+
+    fn ensure_transferable(env: &Env) -> Result<(), TokenError> {
+        if Self::is_transferable_flag(env) {
+            Ok(())
+        } else {
+            Err(TokenError::TransfersDisabled)
+        }
+    }
+
+    fn is_frozen_internal(env: &Env, account: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Frozen(account.clone()))
+            .unwrap_or(false)
+    }
+
+    fn read_filter_mode(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FilterMode)
+            .unwrap_or(FILTER_NONE)
+    }
+
+    fn read_filter_status(env: &Env, account: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AddressFilter(account.clone()))
+            .unwrap_or(false)
+    }
+
+    fn check_frozen_and_filter(env: &Env, from: &Address, to: &Address) -> Result<(), TokenError> {
+        if Self::is_frozen_internal(env, from) || Self::is_frozen_internal(env, to) {
+            return Err(TokenError::AccountFrozen);
+        }
+        match Self::read_filter_mode(env) {
+            FILTER_ALLOWLIST
+                if !Self::read_filter_status(env, from) || !Self::read_filter_status(env, to) =>
+            {
+                return Err(TokenError::AddressNotAllowed);
+            }
+            FILTER_DENYLIST
+                if Self::read_filter_status(env, from) || Self::read_filter_status(env, to) =>
+            {
+                return Err(TokenError::AddressNotAllowed);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Mint-side filter check: recipient must pass the active filter and not be frozen.
+    fn check_recipient(env: &Env, to: &Address) -> Result<(), TokenError> {
+        if Self::is_frozen_internal(env, to) {
+            return Err(TokenError::AccountFrozen);
+        }
+        match Self::read_filter_mode(env) {
+            FILTER_ALLOWLIST if !Self::read_filter_status(env, to) => {
+                Err(TokenError::AddressNotAllowed)
+            }
+            FILTER_DENYLIST if Self::read_filter_status(env, to) => {
+                Err(TokenError::AddressNotAllowed)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn require_compliance_or_super_admin(env: &Env, caller: &Address) -> Result<(), TokenError> {
+        if admin::has_role(env, admin::Role::Compliance, caller)
+            || admin::has_role(env, admin::Role::SuperAdmin, caller)
+        {
+            caller.require_auth();
+            Ok(())
+        } else {
+            Err(TokenError::Unauthorized)
+        }
     }
 
     fn internal_mint(
@@ -541,6 +759,7 @@ impl BcForgeToken {
             return Err(TokenError::InvalidAmount);
         }
 
+        Self::check_recipient(env, to)?;
         let max_supply = Self::read_max_supply(env);
         let new_supply = Self::read_supply(env) + amount;
         if new_supply > max_supply {
@@ -860,6 +1079,217 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Initializes the token with an explicit transferability flag (#1335).
+    /// When `is_transferable` is false the token is soulbound: mint and burn
+    /// work but every transfer is rejected with `TransfersDisabled`.
+    pub fn initialize_custom(
+        env: Env,
+        admin_address: Address,
+        decimal: u32,
+        name: String,
+        symbol: String,
+        is_transferable: bool,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::initialize(env.clone(), admin_address, decimal, name, symbol)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::IsTransferable, &is_transferable);
+        Ok(())
+    }
+
+    /// Returns whether peer-to-peer transfers are enabled (default true).
+    pub fn is_transferable(env: Env) -> bool {
+        Self::is_transferable_flag(&env)
+    }
+
+    /// Freezes `account` so it can neither send nor receive (#1333).
+    pub fn freeze(env: Env, caller: Address, account: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_compliance(&env, &caller);
+        if account == env.current_contract_address() {
+            return Err(TokenError::CannotFreezeReserve);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::Frozen(account.clone()), &true);
+        events::emit_account_frozen(&env, &caller, &account);
+        Ok(())
+    }
+
+    /// Unfreezes `account` (#1333).
+    pub fn unfreeze(env: Env, caller: Address, account: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_compliance(&env, &caller);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Frozen(account.clone()));
+        events::emit_account_unfrozen(&env, &caller, &account);
+        Ok(())
+    }
+
+    /// Returns whether `account` is frozen.
+    pub fn is_frozen(env: Env, account: Address) -> bool {
+        Self::is_frozen_internal(&env, &account)
+    }
+
+    /// Seizes `amount` tokens from `from` into `to` (#1333). Works on frozen
+    /// accounts and bypasses lockups, pause state and transfer filters, as
+    /// legally required for court-ordered seizures.
+    pub fn clawback(
+        env: Env,
+        caller: Address,
+        from: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_compliance(&env, &caller);
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        let from_balance = Self::read_balance(&env, &from);
+        if from_balance < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+        if from != to {
+            let to_balance = Self::read_balance(&env, &to);
+            Self::write_balance(&env, &from, from_balance - amount);
+            Self::write_balance(&env, &to, to_balance + amount);
+        }
+        events::emit_tokens_clawback(&env, &caller, &from, &to, amount);
+        Ok(())
+    }
+
+    /// Sets the transfer filter mode: 0 none, 1 allowlist, 2 denylist (#1334). SuperAdmin only.
+    pub fn set_filter_mode(env: Env, caller: Address, mode: u32) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if mode > FILTER_DENYLIST {
+            return Err(TokenError::InvalidFilterMode);
+        }
+        env.storage().instance().set(&DataKey::FilterMode, &mode);
+        events::emit_filter_mode_set(&env, &caller, mode);
+        Ok(())
+    }
+
+    /// Returns the active filter mode.
+    pub fn get_filter_mode(env: Env) -> u32 {
+        Self::read_filter_mode(&env)
+    }
+
+    /// Returns the filter status of `account`.
+    pub fn get_filter_status(env: Env, account: Address) -> bool {
+        Self::read_filter_status(&env, &account)
+    }
+
+    /// Lists or delists one address (#1334). Compliance or SuperAdmin.
+    pub fn set_filter_status(
+        env: Env,
+        caller: Address,
+        account: Address,
+        status: bool,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        Self::require_compliance_or_super_admin(&env, &caller)?;
+        Self::write_filter_status(&env, &account, status);
+        events::emit_filter_status_set(&env, &caller, &account, status);
+        Ok(())
+    }
+
+    /// Lists or delists many addresses at once (#1334).
+    pub fn batch_set_filter_status(
+        env: Env,
+        caller: Address,
+        accounts: Vec<Address>,
+        status: bool,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        Self::require_compliance_or_super_admin(&env, &caller)?;
+        if accounts.is_empty() {
+            return Err(TokenError::BatchEmpty);
+        }
+        if accounts.len() > 50 {
+            return Err(TokenError::BatchTooLarge);
+        }
+        for account in accounts.iter() {
+            Self::write_filter_status(&env, &account, status);
+            events::emit_filter_status_set(&env, &caller, &account, status);
+        }
+        Ok(())
+    }
+
+    fn write_filter_status(env: &Env, account: &Address, status: bool) {
+        let key = DataKey::AddressFilter(account.clone());
+        if status {
+            env.storage().persistent().set(&key, &true);
+        } else {
+            env.storage().persistent().remove(&key);
+        }
+    }
+
+    /// Step one of the two-step ownership handoff (#1337).
+    pub fn propose_ownership(
+        env: Env,
+        caller: Address,
+        pending_admin: Address,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if admin::is_zero_address(&env, &pending_admin) {
+            return Err(TokenError::InvalidAmount);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingOwner, &pending_admin);
+        events::emit_ownership_proposed(&env, &caller, &pending_admin);
+        Ok(())
+    }
+
+    /// Step two: the nominated address accepts and becomes admin (#1337).
+    pub fn accept_ownership(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingOwner)
+            .ok_or(TokenError::NoPendingOwner)?;
+        if caller != pending {
+            return Err(TokenError::NotPendingOwner);
+        }
+        caller.require_auth();
+        let old_admin = admin::get_admin(&env);
+        admin::set_admin(&env, &caller);
+        env.storage().instance().remove(&DataKey::PendingOwner);
+        events::emit_ownership_transferred(&env, &old_admin, &caller);
+        Ok(())
+    }
+
+    /// Cancels a pending ownership handoff (#1337). Current admin only.
+    pub fn cancel_ownership_transfer(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_admin(&env, &caller);
+        if !env.storage().instance().has(&DataKey::PendingOwner) {
+            return Err(TokenError::NoPendingOwner);
+        }
+        env.storage().instance().remove(&DataKey::PendingOwner);
+        events::emit_ownership_cancelled(&env, &caller);
+        Ok(())
+    }
+
+    /// Returns the address nominated to become admin, if any.
+    pub fn pending_owner(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingOwner)
+    }
     /// Returns storage diagnostics for the token contract.
     pub fn get_storage_info(env: Env) -> StorageInfo {
         Self::extend_instance_ttl_for_call(&env);
@@ -1006,7 +1436,7 @@ impl BcForgeToken {
         }
         reentrancy_guard!(&env, "mint_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_mints_not_paused(&env)?;
             bc_forge_admin::has_role!(&env, bc_forge_admin::Role::Minter, &minter);
 
             if !crate::rate_limit::check_mint_rate_limit(&env, &minter, amount) {
@@ -1034,7 +1464,7 @@ impl BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "batch_mint_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_mints_not_paused(&env)?;
 
             // Check for any invalid amounts and aggregate total batch amount before
             // requiring minter role so callers cannot bypass volume-based rate limits
@@ -1082,16 +1512,17 @@ impl BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "batch_transfer_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_transfers_not_paused(&env)?;
             from.require_auth();
 
             let mut total: i128 = 0;
             for i in 0..recipients.len() {
-                let (_, amount) = recipients.get(i).expect("recipient should exist");
+                let (_to, amount) = recipients.get(i).expect("recipient should exist");
                 if amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
-                total = match total.checked_add(amount) {
+                let fee = Self::calculate_transfer_fee(&env, &from, amount);
+                total = match total.checked_add(amount).and_then(|t| t.checked_add(fee)) {
                     Some(total) => total,
                     None => return Err(TokenError::InvalidAmount),
                 };
@@ -1101,11 +1532,12 @@ impl BcForgeToken {
                 return Err(TokenError::InsufficientBalance);
             }
 
+            if !crate::rate_limit::check_transfer_rate_limit(&env, &from, total) {
+                return Err(TokenError::InvalidAmount);
+            }
+
             for i in 0..recipients.len() {
                 let (to, amount) = recipients.get(i).expect("recipient should exist");
-                if !crate::rate_limit::check_transfer_rate_limit(&env, &from, amount) {
-                    return Err(TokenError::InvalidAmount);
-                }
                 Self::move_balance(&env, &from, &to, amount)?;
                 events::emit_transfer(&env, &from, &to, amount);
             }
@@ -1330,6 +1762,8 @@ impl BcForgeToken {
 
     /// Transfers contract ownership to a new admin.
     ///
+    /// @dev Deprecated: prefer `propose_ownership` / `accept_ownership` (#1337).
+    ///
     /// @notice Transfers the admin role to `new_admin`. Only the current admin can call this function.
     /// @param env The Soroban environment.
     /// @param new_admin The address to become the new admin.
@@ -1537,6 +1971,72 @@ impl BcForgeToken {
         bc_forge_lifecycle::set_paused(&env, false);
         events::emit_unpaused(&env, &caller);
         Ok(())
+    }
+
+    /// Emergency master pause; alias of [`Self::pause`] (halts mints and transfers).
+    pub fn pause_all(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::pause(env, caller)
+    }
+
+    /// Lifts the master pause; alias of [`Self::unpause`].
+    pub fn unpause_all(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::unpause(env, caller)
+    }
+
+    /// Halts minting (`mint`, `batch_mint`) while transfers keep working.
+    /// Requires the Pauser or SuperAdmin role.
+    pub fn pause_mints(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::MintPaused,
+            symbol_short!("mints"),
+            true,
+        )
+    }
+
+    /// Resumes minting after `pause_mints`.
+    pub fn unpause_mints(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::MintPaused,
+            symbol_short!("mints"),
+            false,
+        )
+    }
+
+    /// Halts transfers (`transfer`, `transfer_from`, `batch_transfer`,
+    /// `execute_from_contract`) while minting keeps working.
+    pub fn pause_transfers(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::TransferPaused,
+            symbol_short!("transfers"),
+            true,
+        )
+    }
+
+    /// Resumes transfers after `pause_transfers`.
+    pub fn unpause_transfers(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::set_scope_paused(
+            &env,
+            &caller,
+            DataKey::TransferPaused,
+            symbol_short!("transfers"),
+            false,
+        )
+    }
+
+    /// Returns whether minting is currently halted (master pause or `pause_mints`).
+    pub fn is_mint_paused(env: Env) -> bool {
+        bc_forge_lifecycle::is_paused(&env) || Self::flag_set(&env, DataKey::MintPaused)
+    }
+
+    /// Returns whether transfers are currently halted (master pause or `pause_transfers`).
+    pub fn is_transfer_paused(env: Env) -> bool {
+        bc_forge_lifecycle::is_paused(&env) || Self::flag_set(&env, DataKey::TransferPaused)
     }
 
     /// Upgrades the contract's executable to a new WASM hash.
@@ -1871,7 +2371,7 @@ impl BcForgeToken {
         Self::extend_instance_ttl_for_call(&env);
         reentrancy_guard!(&env, "execute_from_contract_guard", {
             Self::ensure_initialized(&env)?;
-            Self::ensure_not_paused(&env)?;
+            Self::ensure_transfers_not_paused(&env)?;
 
             if operations.is_empty() {
                 return Err(TokenError::BatchEmpty);
@@ -1918,6 +2418,25 @@ impl BcForgeToken {
             events::emit_batch_execute(&env, &from, operations.len());
             Ok(())
         })
+    }
+
+    fn calculate_transfer_fee(env: &Env, from: &Address, _amount: i128) -> i128 {
+        let Ok(config) = Self::read_fee_config(env) else {
+            return 0;
+        };
+        if !config.enabled {
+            return 0;
+        }
+        if let Some(exemption) = env
+            .storage()
+            .instance()
+            .get::<_, FeeExemption>(&DataKey::FeeExemption(from.clone()))
+        {
+            if exemption.exemption_type == 0 || exemption.exemption_type == 1 {
+                return 0;
+            }
+        }
+        config.base_fee.min(config.max_fee)
     }
 }
 
@@ -1985,7 +2504,7 @@ impl TokenInterface for BcForgeToken {
             // plain `require_not_paused` panic: a non-contract panic unwinds through the
             // reentrancy guard's Drop, which performs storage writes mid-unwind and masks
             // the failure as Context(InvalidAction) for try_ callers.
-            Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+            Self::panic_on_err(&env, Self::ensure_transfers_not_paused(&env));
             from.require_auth();
             if amount <= 0 {
                 soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
@@ -2011,34 +2530,36 @@ impl TokenInterface for BcForgeToken {
     /// @param amount The amount to transfer.
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         Self::extend_instance_ttl_for_call(&env);
-        Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        // #762 – tie pause state into token transfers via the lifecycle modifier.
-        // See the comment in `transfer` for why this is not `require_not_paused`.
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
-        spender.require_auth();
-        if amount <= 0 {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
+        reentrancy_guard!(&env, "transfer_from_guard", {
+            Self::panic_on_err(&env, Self::ensure_initialized(&env));
+            // #762 – tie pause state into token transfers via the lifecycle modifier.
+            // See the comment in `transfer` for why this is not `require_not_paused`.
+            Self::panic_on_err(&env, Self::ensure_transfers_not_paused(&env));
+            spender.require_auth();
+            if amount <= 0 {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
 
-        if !crate::rate_limit::check_transfer_from_rate_limit(&env, &spender, amount) {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
+            if !crate::rate_limit::check_transfer_from_rate_limit(&env, &spender, amount) {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
 
-        let allowance = Self::allowance_amount(&env, &from, &spender);
-        if allowance < amount {
-            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
-        }
+            let allowance = Self::allowance_amount(&env, &from, &spender);
+            if allowance < amount {
+                soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
+            }
 
-        let allowance_data = Self::read_allowance_data(&env, &from, &spender);
-        Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
-        Self::write_allowance(
-            &env,
-            &from,
-            &spender,
-            allowance - amount,
-            allowance_data.expiration_ledger,
-        );
-        events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
+            let allowance_data = Self::read_allowance_data(&env, &from, &spender);
+            Self::panic_on_err(&env, Self::move_balance(&env, &from, &to, amount));
+            Self::write_allowance(
+                &env,
+                &from,
+                &spender,
+                allowance - amount,
+                allowance_data.expiration_ledger,
+            );
+            events::emit_transfer_from(&env, &spender, &from, &to, amount, allowance - amount);
+        });
     }
 
     /// Burns tokens from the caller's own balance.
@@ -2050,28 +2571,30 @@ impl TokenInterface for BcForgeToken {
     /// @param amount The amount to burn.
     fn burn(env: Env, from: Address, amount: i128) {
         Self::extend_instance_ttl_for_call(&env);
-        Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
-        from.require_auth();
-        if amount <= 0 {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
+        reentrancy_guard!(&env, "burn_guard", {
+            Self::panic_on_err(&env, Self::ensure_initialized(&env));
+            Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+            from.require_auth();
+            if amount <= 0 {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
 
-        // Check rate limits for burn operation
-        if !crate::rate_limit::check_burn_rate_limit(&env, &from, amount) {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
+            // Check rate limits for burn operation
+            if !crate::rate_limit::check_burn_rate_limit(&env, &from, amount) {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
 
-        let balance = Self::read_balance(&env, &from);
-        if Self::get_spendable_balance(&env, &from) < amount {
-            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
-        }
+            let balance = Self::read_balance(&env, &from);
+            if Self::get_spendable_balance(&env, &from) < amount {
+                soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
+            }
 
-        let new_balance = balance - amount;
-        let new_supply = Self::read_supply(&env) - amount;
-        Self::write_balance(&env, &from, new_balance);
-        Self::write_supply(&env, new_supply);
-        events::emit_burn(&env, &from, amount, new_balance, new_supply);
+            let new_balance = balance - amount;
+            let new_supply = Self::read_supply(&env) - amount;
+            Self::write_balance(&env, &from, new_balance);
+            Self::write_supply(&env, new_supply);
+            events::emit_burn(&env, &from, amount, new_balance, new_supply);
+        });
     }
 
     /// Burns tokens from another address's balance using the allowance mechanism.
@@ -2084,40 +2607,42 @@ impl TokenInterface for BcForgeToken {
     /// @param amount The amount to burn.
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
         Self::extend_instance_ttl_for_call(&env);
-        Self::panic_on_err(&env, Self::ensure_initialized(&env));
-        Self::panic_on_err(&env, Self::ensure_not_paused(&env));
-        spender.require_auth();
-        if amount <= 0 {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
+        reentrancy_guard!(&env, "burn_from_guard", {
+            Self::panic_on_err(&env, Self::ensure_initialized(&env));
+            Self::panic_on_err(&env, Self::ensure_not_paused(&env));
+            spender.require_auth();
+            if amount <= 0 {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
 
-        if !crate::rate_limit::check_burn_from_rate_limit(&env, &spender, amount) {
-            soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
-        }
+            if !crate::rate_limit::check_burn_from_rate_limit(&env, &spender, amount) {
+                soroban_sdk::panic_with_error!(&env, TokenError::InvalidAmount);
+            }
 
-        let allowance = Self::allowance_amount(&env, &from, &spender);
-        if allowance < amount {
-            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
-        }
+            let allowance = Self::allowance_amount(&env, &from, &spender);
+            if allowance < amount {
+                soroban_sdk::panic_with_error!(&env, TokenError::InsufficientAllowance);
+            }
 
-        let allowance_data = Self::read_allowance_data(&env, &from, &spender);
-        let balance = Self::read_balance(&env, &from);
-        if Self::get_spendable_balance(&env, &from) < amount {
-            soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
-        }
+            let allowance_data = Self::read_allowance_data(&env, &from, &spender);
+            let balance = Self::read_balance(&env, &from);
+            if Self::get_spendable_balance(&env, &from) < amount {
+                soroban_sdk::panic_with_error!(&env, TokenError::InsufficientBalance);
+            }
 
-        let new_balance = balance - amount;
-        let new_supply = Self::read_supply(&env) - amount;
-        Self::write_allowance(
-            &env,
-            &from,
-            &spender,
-            allowance - amount,
-            allowance_data.expiration_ledger,
-        );
-        Self::write_balance(&env, &from, new_balance);
-        Self::write_supply(&env, new_supply);
-        events::emit_burn(&env, &from, amount, new_balance, new_supply);
+            let new_balance = balance - amount;
+            let new_supply = Self::read_supply(&env) - amount;
+            Self::write_allowance(
+                &env,
+                &from,
+                &spender,
+                allowance - amount,
+                allowance_data.expiration_ledger,
+            );
+            Self::write_balance(&env, &from, new_balance);
+            Self::write_supply(&env, new_supply);
+            events::emit_burn(&env, &from, amount, new_balance, new_supply);
+        });
     }
 
     /// Returns the number of decimal places for the token.
@@ -2254,6 +2779,9 @@ impl BcForgeToken {
     ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         admin::require_admin(&env, &caller);
+        if Self::flag_set(&env, DataKey::MetadataLocked) {
+            return Err(TokenError::MetadataImmutable);
+        }
         let stored_decimals: u32 = env
             .storage()
             .instance()
@@ -2289,10 +2817,37 @@ impl BcForgeToken {
     ) -> Result<(), TokenError> {
         Self::ensure_initialized(&env)?;
         admin::require_admin(&env, &caller);
+        if Self::flag_set(&env, DataKey::MetadataLocked) {
+            return Err(TokenError::MetadataImmutable);
+        }
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         ttl::extend_instance_ttl(&env);
         events::emit_metadata_updated(&env, &caller, &name, &symbol);
         Ok(())
+    }
+
+    /// Permanently freezes name and symbol (irreversible).
+    ///
+    /// @notice Requires `SuperAdmin`. After this call `set_metadata` and
+    ///         `update_metadata` fail with `TokenError::MetadataImmutable`.
+    ///         Calling it again is a no-op. Emits `meta_lck`.
+    pub fn lock_metadata(env: Env, caller: Address) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if Self::flag_set(&env, DataKey::MetadataLocked) {
+            return Ok(());
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MetadataLocked, &true);
+        events::emit_metadata_locked(&env, &caller);
+        Ok(())
+    }
+
+    /// Returns whether name and symbol have been permanently locked.
+    pub fn is_metadata_locked(env: Env) -> bool {
+        Self::flag_set(&env, DataKey::MetadataLocked)
     }
 }

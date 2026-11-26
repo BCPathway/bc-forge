@@ -36,6 +36,7 @@ export default {
           { text: 'Access Control', link: '/ACCESS_CONTROL' },
           { text: 'Admin Keys', link: '/ADMIN_KEYS' },
           { text: 'Upgrade Guide', link: '/UPGRADE_GUIDE' },
+          { text: 'Upgrade Playbook', link: '/UPGRADE_PLAYBOOK' },
           { text: 'Vaults', link: '/VAULTS' },
           { text: 'Walkthrough', link: '/WALKTHROUGH' },
           { text: 'Compatibility', link: '/COMPATIBILITY' },
