@@ -27,7 +27,8 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 19] = [
+const DATA_KEY_SLOT_NAMES: [&str; 24] = [
+    "AddressFilter",
     "Admin",
     "Allowance",
     "AllowanceExp",
@@ -35,7 +36,10 @@ const DATA_KEY_SLOT_NAMES: [&str; 19] = [
     "Decimals",
     "FeeConfig",
     "FeeExemption",
+    "FilterMode",
+    "Frozen",
     "InstanceLiveUntil",
+    "IsTransferable",
     "Lockup",
     "MaxSupply",
     "MintStream",
@@ -44,6 +48,7 @@ const DATA_KEY_SLOT_NAMES: [&str; 19] = [
     "NextMintStreamId",
     "Nonce",
     "PendingAdmin",
+    "PendingOwner",
     "Supply",
     "Symbol",
     "Treasury",
@@ -99,6 +104,11 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::Frozen(_) => "Frozen",
+        DataKey::FilterMode => "FilterMode",
+        DataKey::AddressFilter(_) => "AddressFilter",
+        DataKey::IsTransferable => "IsTransferable",
+        DataKey::PendingOwner => "PendingOwner",
         DataKey::MinterAllowance(_) => "MinterAllowance",
         DataKey::MintStream(_) => "MintStream",
         DataKey::NextMintStreamId => "NextMintStreamId",
@@ -106,7 +116,7 @@ fn data_key_name(key: &DataKey) -> &'static str {
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 19] {
+fn all_data_keys(env: &Env) -> [DataKey; 24] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -125,6 +135,11 @@ fn all_data_keys(env: &Env) -> [DataKey; 19] {
         DataKey::FeeConfig,
         DataKey::FeeExemption(owner.clone()),
         DataKey::Nonce(owner.clone()),
+        DataKey::Frozen(owner.clone()),
+        DataKey::FilterMode,
+        DataKey::AddressFilter(owner.clone()),
+        DataKey::IsTransferable,
+        DataKey::PendingOwner,
         DataKey::MinterAllowance(owner),
         DataKey::MintStream(1),
         DataKey::NextMintStreamId,
