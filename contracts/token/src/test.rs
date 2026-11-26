@@ -1671,6 +1671,16 @@ fn test_transfer_charges_fee_and_routes_to_treasury() {
     assert_eq!(client.balance(&sender), 890);
     assert_eq!(client.balance(&recipient), 100);
     assert_eq!(client.balance(&treasury), 10);
+
+    // Self-transfer with fee
+    client.transfer(&sender, &sender, &100);
+    assert_eq!(client.balance(&sender), 880);
+    assert_eq!(client.balance(&treasury), 20);
+
+    // Transfer to treasury with fee
+    client.transfer(&sender, &treasury, &100);
+    assert_eq!(client.balance(&sender), 770);
+    assert_eq!(client.balance(&treasury), 130);
 }
 
 #[test]
