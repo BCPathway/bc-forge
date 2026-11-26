@@ -157,6 +157,21 @@ function parseFromLedger(query: Request["query"]): number | null | undefined {
 }
 
 /**
+ * Extract the optional `resolved` query param.
+ *
+ * Returns `true` or `false` when present, or `null` when the value is
+ * not one of those strings.
+ */
+function parseResolved(query: Request["query"]): boolean | null | undefined {
+  const raw = query.resolved;
+  if (raw === undefined) return undefined;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
+/**
  * Build the Prisma `where` filter object for a Mint row.
  *
  * Mints have a `to` address field. An address filter matches that field.
@@ -708,6 +723,106 @@ export function createApiRouter(
         transferCount,
         burnCount,
       });
+    }),
+  );
+
+  /**
+   * GET /vault-withdrawals
+   * Retrieve vault withdrawal logs.
+   */
+  router.get(
+    "/vault-withdrawals",
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
+        return;
+      }
+      const where = buildAddressFieldWhere("caller", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().vaultWithdrawal as any,
+        where,
+      );
+    }),
+  );
+
+  /**
+   * GET /vault-claims
+   * Retrieve vault claim logs.
+   */
+  router.get(
+    "/vault-claims",
+    asyncHandler(async (req, res) => {
+      const address = parseAddress(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (fromLedger === null) {
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
+        return;
+      }
+      const where = buildAddressFieldWhere("caller", address, fromLedger);
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().vaultClaim as any,
+        where,
+      );
+    }),
+  );
+
+  /**
+   * GET /split-failures
+   * Retrieve failed split payout logs.
+   */
+  router.get(
+    "/split-failures",
+    asyncHandler(async (req, res) => {
+      const invoiceId =
+        typeof req.query.invoice_id === "string"
+          ? req.query.invoice_id
+          : undefined;
+      const recipient =
+        typeof req.query.recipient === "string"
+          ? req.query.recipient
+          : undefined;
+      const resolved = parseResolved(req.query);
+      const fromLedger = parseFromLedger(req.query);
+      if (resolved === null) {
+        res
+          .status(400)
+          .json({ error: "Invalid resolved: must be true or false" });
+        return;
+      }
+      if (fromLedger === null) {
+        res.status(400).json({
+          error: "Invalid from_ledger: must be a non-negative integer",
+        });
+        return;
+      }
+      const conditions: Record<string, unknown>[] = [];
+      if (invoiceId) conditions.push({ invoiceId });
+      if (recipient) conditions.push({ recipient });
+      if (resolved !== undefined) conditions.push({ resolved });
+      if (fromLedger !== undefined)
+        conditions.push({ ledger: { gte: fromLedger } });
+      const where =
+        conditions.length === 0
+          ? undefined
+          : conditions.length === 1
+            ? conditions[0]
+            : { AND: conditions };
+      await handlePaginatedList(
+        req,
+        res,
+        getPrismaClient().splitFailure as any,
+        where,
+      );
     }),
   );
 

@@ -86,6 +86,22 @@ model SplitDistribution {
   createdAt  DateTime @default(now())
 }
 
+model SplitFailure {
+  id         String   @id @default(uuid())
+  invoiceId  String
+  recipient  String
+  amount     String
+  retryCount Int      @default(0)
+  resolved   Boolean  @default(false)
+  ledger     Int
+  txHash     String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([invoiceId])
+  @@index([recipient])
+}
+
 /// Aggregate holder balances, maintained transactionally by the indexer as
 /// mint, transfer, and burn events are persisted. A row exists only while the
 /// holder's balance is non-zero.
@@ -126,5 +142,24 @@ model IndexedLedger {
 model Webhook {
   id        String   @id @default(uuid())
   url       String   @unique
+  createdAt DateTime @default(now())
+}
+
+model VaultWithdrawal {
+  id        String   @id @default(uuid())
+  caller    String
+  shares    String
+  assets    String
+  ledger    Int
+  txHash    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model VaultClaim {
+  id        String   @id @default(uuid())
+  caller    String
+  amount    String
+  ledger    Int
+  txHash    String   @unique
   createdAt DateTime @default(now())
 }
