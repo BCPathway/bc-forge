@@ -540,6 +540,15 @@ pub fn create_action_proposal(
                 soroban_sdk::panic_with_error!(env, AdminError::InvalidAction);
             }
         }
+    }
+    let id = create_proposal(env, creator, description);
+    env.storage()
+        .instance()
+        .set(&AdminKey::ActionProposal(id), &action);
+    extend_instance_ttl(env);
+    id
+}
+
 /// Creates a multisig proposal that binds `wasm_hash` to `proposal_id` for upgrade execution.
 ///
 /// Stores `wasm_hash` under [`AdminKey::ProposalWasmHash`] so that arbitrary bytecode
@@ -556,7 +565,6 @@ pub fn create_upgrade_proposal(
     let id = create_proposal(env, creator, description);
     env.storage()
         .instance()
-        .set(&AdminKey::ActionProposal(id), &action);
         .set(&AdminKey::ProposalWasmHash(id), &wasm_hash);
     extend_instance_ttl(env);
     id
@@ -624,6 +632,8 @@ pub fn consume_action_proposal(
         .set(&AdminKey::Proposal(proposal_id), &proposal);
     extend_instance_ttl(env);
     Ok(action)
+}
+
 /// Returns the bound WASM hash for a legacy upgrade proposal, if set.
 pub fn get_proposal_wasm_hash(env: &Env, proposal_id: u64) -> Option<BytesN<32>> {
     let hash = env
