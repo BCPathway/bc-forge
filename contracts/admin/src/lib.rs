@@ -4522,7 +4522,8 @@ mod tests {
         let expected = RoleFlags::Admin.bits()
             | RoleFlags::Minter.bits()
             | RoleFlags::SuperAdmin.bits()
-            | RoleFlags::Pauser.bits();
+            | RoleFlags::Pauser.bits()
+            | RoleFlags::Compliance.bits();
         assert_eq!(mask, expected);
     }
 
