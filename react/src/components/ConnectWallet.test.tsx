@@ -202,4 +202,81 @@ describe("ConnectWallet", () => {
       /Public Global Stellar Network ; September 2015/,
     );
   });
+
+  it("renders mobile wallet deep links when isMobile is true (#1491)", () => {
+    const wcUri = "wc:example-topic@2?relay-protocol=irn&symKey=dummy";
+    render(
+      <BcForgeProvider config={config}>
+        <WalletProvider>
+          <ConnectWallet isMobile={true} wcUri={wcUri} />
+        </WalletProvider>
+      </BcForgeProvider>,
+    );
+
+    expect(screen.getByTestId("mobile-wallet-deep-links")).toBeInTheDocument();
+    const stellarLink = screen.getByTestId("deep-link-stellar");
+    const lobstrLink = screen.getByTestId("deep-link-lobstr");
+    const xbullLink = screen.getByTestId("deep-link-xbull");
+
+    expect(stellarLink).toBeInTheDocument();
+    expect(stellarLink).toHaveAttribute(
+      "href",
+      expect.stringContaining("stellar://wc?uri="),
+    );
+    expect(lobstrLink).toBeInTheDocument();
+    expect(lobstrLink).toHaveAttribute(
+      "href",
+      expect.stringContaining("lobstr://stellar.org/connect?uri="),
+    );
+    expect(xbullLink).toBeInTheDocument();
+    expect(xbullLink).toHaveAttribute(
+      "href",
+      expect.stringContaining("xbull://wc?uri="),
+    );
+  });
+
+  it("auto-reconnects on mount when session is persisted (#1491)", async () => {
+    localStorage.setItem(
+      "bc-forge:walletconnect-session",
+      JSON.stringify({
+        walletName: "freighter",
+        publicKey: FREIGHTER_KEY,
+        connectedAt: Date.now(),
+      }),
+    );
+
+    renderConnected();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("probe-connected")).toHaveTextContent("true");
+    });
+
+    expect(mockSetWalletAdapter).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("probe-name")).toHaveTextContent("freighter");
+  });
+
+  it("clears persisted session when disconnected (#1491)", async () => {
+    localStorage.setItem(
+      "bc-forge:walletconnect-session",
+      JSON.stringify({
+        walletName: "freighter",
+        publicKey: FREIGHTER_KEY,
+        connectedAt: Date.now(),
+      }),
+    );
+
+    renderConnected();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("probe-connected")).toHaveTextContent("true");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("probe-connected")).toHaveTextContent("false");
+    });
+
+    expect(localStorage.getItem("bc-forge:walletconnect-session")).toBeNull();
+  });
 });
