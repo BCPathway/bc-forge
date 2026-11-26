@@ -1915,7 +1915,7 @@ fn test_execute_privileged_mint_rejects_mismatched_action() {
 
     assert_eq!(
         client.try_execute_privileged_mint(&admin, &id),
-        Err(Ok(TokenError::ActionProposalWrongType))
+        Err(Ok(TokenError::InvalidAmount))
     );
 }
 
