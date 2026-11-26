@@ -817,3 +817,26 @@ fn test_emergency_cap_blocks_excessive_withdrawals_in_window() {
     assert_eq!(third, 200_000);
 }
 
+
+
+#[test]
+fn test_deposit_mitigates_first_depositor_inflation_attack() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, underlying, admin, attacker, _vault_id) = setup_and_fund(&env);
+    let victim = Address::generate(&env);
+    underlying.mint(&admin, &victim, &1_000_000);
+
+    // Attacker bootstraps with a minimal deposit.
+    vault.deposit(&attacker, &1, &0);
+    // Donate directly to the vault to inflate the share price.
+    underlying.mint(&admin, &vault.address, &1_000_000);
+
+    // Victim deposits a meaningful amount and must still receive shares.
+    let victim_shares = vault.deposit(&victim, &1_000_000, &0);
+    assert!(victim_shares > 0);
+
+    let victim_assets = vault.withdraw(&victim, &victim_shares, &0);
+    assert!(victim_assets > 0);
+    assert!(victim_assets >= 500_000);
+}

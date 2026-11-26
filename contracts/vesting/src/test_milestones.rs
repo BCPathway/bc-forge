@@ -37,18 +37,18 @@ fn setup(
     let vesting_id = env.register(VestingContract, ());
     let vesting = VestingContractClient::new(env, &vesting_id);
     vesting.initialize(&admin, &token_id);
+    token.mint(&admin, &admin, &1_000_000);
+    token.approve(
     // The vesting contract mints from the token on create_vesting; #1327
     // requires an explicit allowance for that minter.
     token.set_minter_allowance(&admin, &vesting_id, &i128::MAX);
     // Ownership transfer runs through the #914 privilege timelock.
     token.propose_privilege_action(
         &admin,
-        &bc_forge_admin::PrivilegeAction::TransferOwnership(vesting_id.clone()),
+        &vesting_id,
+        &i128::MAX,
+        &(env.ledger().sequence() + 10_000),
     );
-    let mut info = env.ledger().get();
-    info.timestamp += 24 * 60 * 60;
-    env.ledger().set(info);
-    token.transfer_ownership(&vesting_id);
 
     (token, vesting, admin, beneficiary, vesting_id)
 }

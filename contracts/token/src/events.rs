@@ -526,6 +526,10 @@ pub fn emit_ownership_cancelled(env: &Env, caller: &Address) {
     );
 }
 
+/// Emits the `snap_new` event when a balance snapshot is created.
+pub fn emit_snapshot_created(env: &Env, snapshot_id: u32, ledger: u32) {
+    env.events()
+        .publish((symbol_short!("snap_new"),), (snapshot_id, ledger));
 /// Emits the `m_allow` event when a minter issuance allowance is set.
 ///
 /// @notice Publishes the admin caller, the minter address, and the configured
