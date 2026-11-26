@@ -56,7 +56,7 @@ export async function runIndexer() {
           threshold: LAG_THRESHOLD,
         });
       }
-      
+
       if (startLedger > currentLedger) {
         // Wait for new ledgers
         await new Promise(resolve => setTimeout(resolve, 5000));
@@ -76,13 +76,13 @@ export async function runIndexer() {
         .map(toLedgerCoordinate);
       const previousCoordinate = lastLedger?.ledger === startLedger - 1 && lastLedger.hash
         ? {
-            ledger: lastLedger.ledger,
-            hash: lastLedger.hash,
-            parentHash: lastLedger.parentHash ?? '',
-          }
+          ledger: lastLedger.ledger,
+          hash: lastLedger.hash,
+          parentHash: lastLedger.parentHash ?? '',
+        }
         : ledgerResponse.ledgers
-            .filter((ledger) => ledger.sequence === startLedger - 1)
-            .map(toLedgerCoordinate)[0];
+          .filter((ledger) => ledger.sequence === startLedger - 1)
+          .map(toLedgerCoordinate)[0];
 
       if (
         coordinates.length !== endLedger - startLedger + 1 ||
@@ -185,7 +185,14 @@ async function persistEventRow(
   return run(client as never);
 }
 
-type IndexedEventModel = 'vaultDeposit' | 'wrapperUpdate' | 'vestingClaim' | 'splitDistribution';
+type IndexedEventModel =
+  | 'vaultDeposit'
+  | 'vaultWithdrawal'
+  | 'vaultClaim'
+  | 'wrapperUpdate'
+  | 'vestingClaim'
+  | 'splitDistribution'
+  | 'splitFailure';
 
 /**
  * Stringify a decoded Soroban value. Amounts and ids arrive as bigint.
@@ -408,6 +415,71 @@ export async function processEvent(
         });
         publishIndexerEvent({
           type: 'splitDistribution',
+          data: row as unknown as Record<string, unknown>,
+        });
+        await (database as any).splitFailure?.updateMany?.({
+          where: {
+            invoiceId: scValString(decoded[0]),
+            recipient: scValString(decoded[1]),
+            resolved: false,
+          },
+          data: { resolved: true },
+        });
+        break;
+      }
+      case 'withdraw':
+      case 'withdrw': {
+        const decoded = scValToNative(data as any);
+        const row = await persistIndexedRow(database, 'vaultWithdrawal', {
+          caller: scValString(decoded[0]),
+          shares: scValString(decoded[1]),
+          assets: scValString(decoded[2]),
+          ledger: event.ledger,
+          txHash: event.txHash,
+        });
+        publishIndexerEvent({
+          type: 'vaultWithdraw',
+          data: row as unknown as Record<string, unknown>,
+        });
+        break;
+      }
+      case 'v_claim':
+      case 'w_claim': {
+        const decoded = scValToNative(data as any);
+        const row = await persistIndexedRow(database, 'vaultClaim', {
+          caller: scValString(decoded[0]),
+          amount: scValString(decoded[2]),
+          ledger: event.ledger,
+          txHash: event.txHash,
+        });
+        publishIndexerEvent({
+          type: 'vaultClaim',
+          data: row as unknown as Record<string, unknown>,
+        });
+        break;
+      }
+      case 'pyo_fail': {
+        const decoded = scValToNative(data as any);
+        const invoiceId = scValString(decoded[0]);
+        const recipient = scValString(decoded[1]);
+        const amount = scValString(decoded[2]);
+        const retryCount = Number(decoded[3] ?? 0);
+        const delegate = (database as any).splitFailure;
+        const row = await delegate.upsert({
+          where: { txHash: event.txHash },
+          update: { retryCount, resolved: false },
+          create: {
+            invoiceId,
+            recipient,
+            amount,
+            retryCount,
+            resolved: false,
+            ledger: event.ledger,
+            txHash: event.txHash,
+          },
+        });
+        publishIndexerEvent({
+          type: 'splitFailure',
           data: row as unknown as Record<string, unknown>,
         });
         break;

@@ -422,6 +422,20 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
         (user.clone(), amount, EVENT_SCHEMA_VERSION),
     );
 }
+/// Emits the `fee_chg` event when a fee is charged during a transfer.
+///
+/// @notice Publishes fee charge event data including the sender, treasury address, and fee amount.
+/// @dev The event topics include the `fee_chg` symbol.
+/// @param env The Soroban environment.
+/// @param from The sender address.
+/// @param treasury The treasury address that receives the fee.
+/// @param fee The amount of the fee charged.
+pub fn emit_fee_charged(env: &Env, from: &Address, treasury: &Address, fee: i128) {
+    env.events().publish(
+        (symbol_short!("fee_chg"),),
+        (from.clone(), treasury.clone(), fee, EVENT_SCHEMA_VERSION),
+    );
+}
 
 /// Emits `acc_frz` when an account is frozen (#1333).
 pub fn emit_account_frozen(env: &Env, caller: &Address, account: &Address) {

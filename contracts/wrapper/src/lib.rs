@@ -1302,6 +1302,7 @@ impl WrapperContract {
 
         Self::release_lock(&env);
         events::emit_withdraw(&env, &caller, queued.shares, queued.amount);
+        events::emit_claim(&env, &caller, queued.shares, queued.amount);
         Ok(queued.amount)
     }
 

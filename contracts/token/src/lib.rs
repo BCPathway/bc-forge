@@ -463,15 +463,57 @@ impl BcForgeToken {
     ) -> Result<(), TokenError> {
         Self::ensure_transferable(env)?;
         Self::check_frozen_and_filter(env, from, to)?;
+        let fee = Self::calculate_transfer_fee(env, from, amount);
+        let required = amount.checked_add(fee).ok_or(TokenError::InvalidAmount)?;
         let from_balance = Self::read_balance(env, from);
-        if Self::get_spendable_balance(env, from) < amount {
+        if Self::get_spendable_balance(env, from) < required {
             return Err(TokenError::InsufficientBalance);
         }
 
-        if from != to {
-            let to_balance = Self::read_balance(env, to);
+        let treasury = if fee > 0 {
+            Some(Self::read_treasury(env)?)
+        } else {
+            None
+        };
+
+        if from == to {
+            if fee > 0 && treasury.as_ref() != Some(from) {
+                let treasury = treasury.as_ref().expect("fee treasury configured");
+                let treasury_balance = Self::read_balance(env, treasury);
+                Self::write_balance(env, from, from_balance - fee);
+                Self::write_balance(env, treasury, treasury_balance + fee);
+                events::emit_fee_charged(env, from, treasury, fee);
+            }
+            return Ok(());
+        }
+
+        let treasury_is_recipient = treasury.as_ref() == Some(to);
+        let treasury_is_sender = treasury.as_ref() == Some(from);
+
+        if treasury_is_sender {
             Self::write_balance(env, from, from_balance - amount);
-            Self::write_balance(env, to, to_balance + amount);
+        } else {
+            Self::write_balance(env, from, from_balance - required);
+        }
+
+        let to_balance = Self::read_balance(env, to);
+        let recipient_amount = if treasury_is_recipient {
+            amount + fee
+        } else {
+            amount
+        };
+        Self::write_balance(env, to, to_balance + recipient_amount);
+
+        if let Some(treasury) = treasury {
+            if !treasury_is_sender && !treasury_is_recipient {
+                let treasury_balance = Self::read_balance(env, &treasury);
+                Self::write_balance(env, &treasury, treasury_balance + fee);
+            }
+        }
+
+        if fee > 0 {
+            let treasury = Self::read_treasury(env)?;
+            events::emit_fee_charged(env, from, &treasury, fee);
         }
         Ok(())
     }
@@ -1317,11 +1359,12 @@ impl BcForgeToken {
 
             let mut total: i128 = 0;
             for i in 0..recipients.len() {
-                let (_, amount) = recipients.get(i).expect("recipient should exist");
+                let (_to, amount) = recipients.get(i).expect("recipient should exist");
                 if amount <= 0 {
                     return Err(TokenError::InvalidAmount);
                 }
-                total = match total.checked_add(amount) {
+                let fee = Self::calculate_transfer_fee(&env, &from, amount);
+                total = match total.checked_add(amount).and_then(|t| t.checked_add(fee)) {
                     Some(total) => total,
                     None => return Err(TokenError::InvalidAmount),
                 };
@@ -1978,6 +2021,25 @@ impl BcForgeToken {
             events::emit_batch_execute(&env, &from, operations.len());
             Ok(())
         })
+    }
+
+    fn calculate_transfer_fee(env: &Env, from: &Address, _amount: i128) -> i128 {
+        let Ok(config) = Self::read_fee_config(env) else {
+            return 0;
+        };
+        if !config.enabled {
+            return 0;
+        }
+        if let Some(exemption) = env
+            .storage()
+            .instance()
+            .get::<_, FeeExemption>(&DataKey::FeeExemption(from.clone()))
+        {
+            if exemption.exemption_type == 0 || exemption.exemption_type == 1 {
+                return 0;
+            }
+        }
+        config.base_fee.min(config.max_fee)
     }
 }
 

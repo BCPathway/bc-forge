@@ -9,7 +9,6 @@
   "admin:upg_prop": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "admin:upgraded": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "split:inv_crtd": "Not yet indexed; tracked as backlog (no indexer table for this event)",
-  "split:pyo_fail": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "split:token_rsc": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "split:upgraded": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:acc_frz": "Not yet indexed; tracked as backlog (no indexer table for this event)",
@@ -18,6 +17,7 @@
   "token:clawback": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:exec_btch": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:fee_cfg": "Not yet indexed; tracked as backlog (no indexer table for this event)",
+  "token:fee_chg": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:fee_exm": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:fee_rmv": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:fee_tres": "Not yet indexed; tracked as backlog (no indexer table for this event)",
@@ -57,10 +57,8 @@
   "wrapper:unpause": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "wrapper:v_state": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "wrapper:w_queued": "Not yet indexed; tracked as backlog (no indexer table for this event)",
-  "wrapper:withdrw": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "yield_vault:c_cfg": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "yield_vault:init": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "yield_vault:rescue": "Not yet indexed; tracked as backlog (no indexer table for this event)",
-  "yield_vault:w_queued": "Not yet indexed; tracked as backlog (no indexer table for this event)",
-  "yield_vault:withdraw": "Not yet indexed; tracked as backlog (no indexer table for this event)"
+  "yield_vault:w_queued": "Not yet indexed; tracked as backlog (no indexer table for this event)"
 }

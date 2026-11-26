@@ -451,6 +451,7 @@ impl YieldVaultContract {
         underlying_client.transfer(&env.current_contract_address(), &caller, &queued.amount);
 
         events::emit_withdraw(&env, &caller, queued.shares, queued.amount);
+        events::emit_claim(&env, &caller, queued.shares, queued.amount);
         Ok(queued.amount)
     }
 
