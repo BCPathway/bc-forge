@@ -16,11 +16,14 @@
  * every path resolved at config-evaluation time against this file's own
  * location, so it works regardless of the process' working directory.
  */
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Absolute path of the `react/` package root (one level above `demo/`). */
-export const reactPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+export const reactPackageRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 /**
  * A Vite/rollup-style alias pair. `find` is a bare specifier or a `RegExp`;
@@ -40,7 +43,8 @@ export interface SharedAlias {
  * Exported so `react/demo/tsconfig.json` can derive its `paths` entries from
  * exactly the same strings the bundler uses.
  */
-export const fromReactRoot = (relativePath: string): string => resolve(reactPackageRoot, relativePath);
+export const fromReactRoot = (relativePath: string): string =>
+  resolve(reactPackageRoot, relativePath);
 
 /**
  * The aliases shared by the demo app and by Storybook (#1139, #1144).
@@ -54,15 +58,15 @@ export const sharedAliases: readonly SharedAlias[] = [
   {
     // The published barrel, resolved straight from TypeScript source so the demo
     // never needs a `tsup` build step to pick up local changes.
-    find: '@bc-forge/react',
-    replacement: fromReactRoot('src/index.ts'),
+    find: "@bc-forge/react",
+    replacement: fromReactRoot("src/index.ts"),
   },
   {
     // The "shared UI components" alias from #1139: lets demo code and stories
     // import a single component in isolation (`@bc-forge/ui/Badge`) without
     // pulling the whole barrel (and therefore the SDK) into the graph.
-    find: '@bc-forge/ui',
-    replacement: fromReactRoot('src/components'),
+    find: "@bc-forge/ui",
+    replacement: fromReactRoot("src/components"),
   },
 ];
 
@@ -72,7 +76,10 @@ export const sharedAliases: readonly SharedAlias[] = [
  * placeholder instead of breaking the bundle.
  */
 export const demoAliases: readonly SharedAlias[] = [
-  { find: '@demo', replacement: resolve(dirname(fileURLToPath(import.meta.url)), 'src') },
+  {
+    find: "@demo",
+    replacement: resolve(dirname(fileURLToPath(import.meta.url)), "src"),
+  },
 ];
 
 /**
@@ -83,7 +90,7 @@ export const demoAliases: readonly SharedAlias[] = [
  */
 export const storybookSdkAlias: SharedAlias = {
   find: /^@bc-forge\/sdk$/,
-  replacement: fromReactRoot('stories/sdk.ts'),
+  replacement: fromReactRoot("stories/sdk.ts"),
 };
 
 /**
@@ -115,20 +122,21 @@ export function demoManualChunks(id: string | undefined): string | undefined {
   if (!id) return undefined;
 
   // Normalise Windows separators so the `/node_modules/` test works on win32.
-  const normalized = id.replace(/\\/g, '/');
-  if (!normalized.includes('/node_modules/')) return undefined;
+  const normalized = id.replace(/\\/g, "/");
+  if (!normalized.includes("/node_modules/")) return undefined;
 
   // Rule 1 — Soroban transport, XDR encoding and the crypto polyfills.
-  if (normalized.includes('/node_modules/@stellar/stellar-sdk/')) return 'soroban';
+  if (normalized.includes("/node_modules/@stellar/stellar-sdk/"))
+    return "soroban";
 
   // Rule 2 — React must not be duplicated across the split chunks.
   if (
     /\/node_modules\/(react|react-dom|scheduler)\//.test(normalized) ||
     /\/node_modules\/react(-dom)?\/[^/]+$/.test(normalized)
   ) {
-    return 'react';
+    return "react";
   }
 
   // Rule 3 — everything else third-party.
-  return 'vendor';
+  return "vendor";
 }

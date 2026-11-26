@@ -13,7 +13,11 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    include: ["src/__tests__/**/*.test.ts", "src/orchestrator/__tests__/**/*.test.ts"],
+    include: [
+      "src/__tests__/**/*.test.ts",
+      "src/commands/__tests__/**/*.test.ts",
+      "src/orchestrator/__tests__/**/*.test.ts",
+    ],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

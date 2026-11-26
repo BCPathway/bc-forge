@@ -15,6 +15,20 @@ use crate::address::{is_zero_address, require_non_zero_address};
 use crate::events;
 use crate::{extend_instance_ttl, extend_storage_ttl_for_key, AdminError, AdminKey};
 
+/// Grant metadata for a time-limited role assignment.
+///
+/// @title RoleRecord
+/// @notice `expires_at` is the last ledger sequence at which the role is still
+///         active; at `expires_at + 1` and later it is treated as expired.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RoleRecord {
+    /// Ledger sequence at which the role was granted.
+    pub granted_at: u32,
+    /// Last ledger sequence at which the role is active, or `None` for no expiry.
+    pub expires_at: Option<u32>,
+}
+
 /// Roles recognized by the access-control layer.
 ///
 /// New variants must be appended, never inserted, so that previously
@@ -42,6 +56,8 @@ pub enum Role {
     SuperAdmin,
     /// Role allowing emergency pause and unpause operations.
     Pauser,
+    /// Role allowing compliance operations (freeze, unfreeze, clawback, address filters).
+    Compliance,
 }
 
 /// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
@@ -75,6 +91,8 @@ pub enum RoleFlags {
     SuperAdmin = 4,
     /// Role allowing emergency pause and unpause operations.
     Pauser = 8,
+    /// Role allowing compliance operations (freeze, unfreeze, clawback, address filters).
+    Compliance = 16,
 }
 
 impl RoleFlags {
@@ -85,6 +103,7 @@ impl RoleFlags {
             Role::Minter => RoleFlags::Minter,
             Role::SuperAdmin => RoleFlags::SuperAdmin,
             Role::Pauser => RoleFlags::Pauser,
+            Role::Compliance => RoleFlags::Compliance,
         }
     }
 
@@ -139,6 +158,8 @@ pub const ROLE_BIT_SUPER_ADMIN: u32 = 1 << 2;
 /// @custom:bitmask-value 8 — the role bit used by [`Role::Pauser`] in
 /// `AdminKey::RoleMask(Address)` storage.
 pub const ROLE_BIT_PAUSER: u32 = 1 << 3;
+/// Bitmask bit for the [`Role::Compliance`] role (`1 << 4`, decimal `16`).
+pub const ROLE_BIT_COMPLIANCE: u32 = 1 << 4;
 
 /// Returns the bitmask bit for `role`, or `None` for an unrecognized variant.
 pub(crate) fn role_bit(role: Role) -> Option<u32> {
@@ -147,6 +168,7 @@ pub(crate) fn role_bit(role: Role) -> Option<u32> {
         Role::Minter => Some(ROLE_BIT_MINTER),
         Role::SuperAdmin => Some(ROLE_BIT_SUPER_ADMIN),
         Role::Pauser => Some(ROLE_BIT_PAUSER),
+        Role::Compliance => Some(ROLE_BIT_COMPLIANCE),
     }
 }
 
@@ -191,11 +213,12 @@ pub fn mask_without_role(mask: u32, role: Role) -> u32 {
 }
 
 /// Every `(role, bit)` pair in bit order, used for legacy-entry migration.
-const ALL_ROLE_BITS: [(Role, u32); 4] = [
+const ALL_ROLE_BITS: [(Role, u32); 5] = [
     (Role::Admin, ROLE_BIT_ADMIN),
     (Role::Minter, ROLE_BIT_MINTER),
     (Role::SuperAdmin, ROLE_BIT_SUPER_ADMIN),
     (Role::Pauser, ROLE_BIT_PAUSER),
+    (Role::Compliance, ROLE_BIT_COMPLIANCE),
 ];
 
 /// Loads the role bitmask for `address`.
@@ -271,6 +294,67 @@ fn persist_role_mask(env: &Env, address: &Address, mask: u32) {
     }
 }
 
+/// Returns the expiry record of a time-limited grant, if one exists.
+pub fn get_role_record(env: &Env, role: Role, address: &Address) -> Option<RoleRecord> {
+    env.storage()
+        .persistent()
+        .get(&AdminKey::RoleExpiry(role, address.clone()))
+}
+
+/// Returns `true` when `role` was granted with an expiry ledger that has passed.
+fn is_role_expired(env: &Env, role: Role, address: &Address) -> bool {
+    match get_role_record(env, role, address).and_then(|r| r.expires_at) {
+        Some(expires_at) => env.ledger().sequence() > expires_at,
+        None => false,
+    }
+}
+
+/// Grants `role` to `account` until ledger `expires_at` (inclusive).
+///
+/// @notice Requires `SuperAdmin`. The role is active while
+///         `ledger.sequence() <= expires_at` and automatically inactive after,
+///         with no revoke call needed. Re-granting a role whose previous
+///         time-limited grant has expired is allowed.
+/// @errors
+/// - [`AdminError::InvalidExpiry`] - `expires_at` is not after the current ledger.
+/// - [`AdminError::RoleAlreadyGranted`] - `account` currently holds an active `role`.
+/// # Events
+/// Emits `role_gexp` with data `(caller, role, account, expires_at)`.
+pub fn grant_role_with_expiry(
+    env: &Env,
+    caller: &Address,
+    role: Role,
+    account: &Address,
+    expires_at: u32,
+) -> Result<(), AdminError> {
+    require_super_admin(env, caller);
+    require_non_zero_address(env, account);
+    require_valid_role(env, role);
+    if expires_at <= env.ledger().sequence() {
+        return Err(AdminError::InvalidExpiry);
+    }
+    let bit = match role_bit(role) {
+        Some(bit) => bit,
+        None => return Err(AdminError::InvalidRole),
+    };
+    let mask = load_role_mask(env, account);
+    if mask & bit != 0 && !is_role_expired(env, role, account) {
+        return Err(AdminError::RoleAlreadyGranted);
+    }
+    persist_role_mask(env, account, mask | bit);
+    let key = AdminKey::RoleExpiry(role, account.clone());
+    env.storage().persistent().set(
+        &key,
+        &RoleRecord {
+            granted_at: env.ledger().sequence(),
+            expires_at: Some(expires_at),
+        },
+    );
+    extend_storage_ttl_for_key(env, &key);
+    events::emit_role_granted_with_expiry(env, caller, role, account, expires_at);
+    Ok(())
+}
+
 /// Returns `true` if `role` is one of the recognized variants.
 ///
 /// Because `Role` is a `#[contracttype]` enum, an attacker could in theory
@@ -279,7 +363,7 @@ fn persist_role_mask(env: &Env, address: &Address, mask: u32) {
 fn is_valid_role(role: Role) -> bool {
     matches!(
         role,
-        Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
+        Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser | Role::Compliance
     )
 }
 
@@ -497,9 +581,13 @@ pub(crate) fn _grant_role(env: &Env, admin: &Address, role: Role, address: &Addr
     // A role that is already held must fail loudly rather than silently
     // no-op: callers that rely on the grant having *changed* something would
     // otherwise get a false sense of a fresh assignment (#768).
-    if mask & bit != 0 {
+    if mask & bit != 0 && !is_role_expired(env, role, address) {
         soroban_sdk::panic_with_error!(env, AdminError::RoleAlreadyGranted);
     }
+    // A permanent grant replaces any (expired) time-limited record.
+    env.storage()
+        .persistent()
+        .remove(&AdminKey::RoleExpiry(role, address.clone()));
     persist_role_mask(env, address, mask | bit);
     events::emit_role_granted(env, admin, role, address);
 }
@@ -593,22 +681,26 @@ pub fn get_roles_bitmask(env: &Env, address: &Address) -> u32 {
     let role_mask = load_role_mask(env, address);
 
     // Check if Admin role is set - if so, it implies all other roles
-    if (role_mask & ROLE_BIT_ADMIN) != 0 {
+    if (role_mask & ROLE_BIT_ADMIN) != 0 && !is_role_expired(env, Role::Admin, address) {
         return RoleFlags::Admin.bits()
             | RoleFlags::Minter.bits()
             | RoleFlags::SuperAdmin.bits()
-            | RoleFlags::Pauser.bits();
+            | RoleFlags::Pauser.bits()
+            | RoleFlags::Compliance.bits();
     }
 
     let mut mask = 0u32;
-    if (role_mask & ROLE_BIT_MINTER) != 0 {
+    if (role_mask & ROLE_BIT_MINTER) != 0 && !is_role_expired(env, Role::Minter, address) {
         mask |= RoleFlags::Minter.bits();
     }
-    if (role_mask & ROLE_BIT_SUPER_ADMIN) != 0 {
+    if (role_mask & ROLE_BIT_SUPER_ADMIN) != 0 && !is_role_expired(env, Role::SuperAdmin, address) {
         mask |= RoleFlags::SuperAdmin.bits();
     }
-    if (role_mask & ROLE_BIT_PAUSER) != 0 {
+    if (role_mask & ROLE_BIT_PAUSER) != 0 && !is_role_expired(env, Role::Pauser, address) {
         mask |= RoleFlags::Pauser.bits();
+    }
+    if (role_mask & ROLE_BIT_COMPLIANCE) != 0 {
+        mask |= RoleFlags::Compliance.bits();
     }
 
     mask
@@ -706,6 +798,9 @@ pub(crate) fn _revoke_role(env: &Env, role: Role, address: &Address) -> Result<(
         return Err(AdminError::RoleNotHeld);
     }
     persist_role_mask(env, address, mask & !bit);
+    env.storage()
+        .persistent()
+        .remove(&AdminKey::RoleExpiry(role, address.clone()));
 
     let admin = get_admin(env);
     events::emit_role_revoked(env, &admin, role, address);
@@ -731,12 +826,16 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
     let mask = load_role_mask(env, address);
 
     // Admin role implicitly grants all other roles.
-    if role != Role::Admin && mask & ROLE_BIT_ADMIN != 0 {
+    if role != Role::Admin
+        && mask & ROLE_BIT_ADMIN != 0
+        && !is_role_expired(env, Role::Admin, address)
+    {
         events::emit_role_checked(env, address, role, true);
         return true;
     }
 
-    let has = role_bit(role).is_some_and(|bit| mask & bit != 0);
+    let has =
+        role_bit(role).is_some_and(|bit| mask & bit != 0) && !is_role_expired(env, role, address);
     events::emit_role_checked(env, address, role, has);
     has
 }
@@ -753,6 +852,9 @@ pub fn has_role(env: &Env, role: Role, address: &Address) -> bool {
 pub fn require_role(env: &Env, role: Role, address: &Address) {
     require_valid_role(env, role);
     if !has_role(env, role, address) {
+        if is_role_expired(env, role, address) {
+            soroban_sdk::panic_with_error!(env, AdminError::RoleExpired);
+        }
         soroban_sdk::panic_with_error!(env, AdminError::RoleNotHeld);
     }
     address.require_auth();
@@ -852,6 +954,13 @@ pub fn require_fee_admin(env: &Env, address: &Address) {
 /// @dev Thin wrapper around `require_role_guard` for the `Pauser` role.
 /// @param env The Soroban environment.
 /// @param address The address to check and require authorization from.
+#[inline(always)]
+// panic-allow: auth failure uses require_auth or panic_with_error
+pub fn require_compliance(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Compliance, address);
+}
+
+/// Requires that the caller has the Pauser role and has authorized the invocation.
 #[inline(always)]
 // panic-allow: auth failure uses require_auth or panic_with_error
 pub fn require_pauser(env: &Env, address: &Address) {
