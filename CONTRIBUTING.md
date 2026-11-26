@@ -91,6 +91,46 @@ git rebase upstream/main
 
 > **Note on Test Snapshots**: Soroban test snapshots (`contracts/admin/test_snapshots/`) are generated test artifacts. They are ignored in `.gitignore` and must never be committed to git history.
 
+### Troubleshooting: Windows MinGW `export ordinal too large`
+
+On Windows, `cargo test` with the GNU/MinGW toolchain (`x86_64-pc-windows-gnu`) can fail while linking contract test libraries:
+
+```text
+ld.exe: error: export ordinal too large: 68206
+collect2.exe: error: ld returned 1 exit status
+error: could not compile `bc-forge-wrapper` (lib) due to 1 previous error
+```
+
+This is not a bug in the contracts. `soroban-sdk`'s `testutils` exports tens of thousands of host functions into the test `cdylib`, which exceeds the PE/COFF format's 16-bit export ordinal limit (65,535). Linux builds ELF shared objects and is unaffected.
+
+Use one of these workarounds:
+
+1. **Use the MSVC toolchain (recommended on Windows):**
+
+   ```bash
+   rustup toolchain install stable-x86_64-pc-windows-msvc
+   rustup default stable-x86_64-pc-windows-msvc
+   cargo test --tests
+   ```
+
+2. **Run the tests in WSL or a Linux container** (the environment used by CI):
+
+   ```bash
+   wsl --install -d Ubuntu
+   # inside WSL: install Rust, then
+   cargo test --tests
+   ```
+
+3. **Build for WASM only** when you do not need host test utilities:
+
+   ```bash
+   cargo build --target wasm32-unknown-unknown --release
+   ```
+
+Switching **toolchains** changes which linker is used; switching **targets** changes the output format. Setting `--target x86_64-pc-windows-gnu` or tweaking `rustflags` does not bypass the PE export limit. A commented, opt-in configuration example is kept in `.cargo/config.toml`.
+
+CI runs on Linux, so these workarounds do not change CI behavior.
+
 
 ## 📋 Workflow
 

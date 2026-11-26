@@ -330,15 +330,21 @@ pub enum AdminError {
     RoleProposalNotFound = 30,
     /// A role proposal must be executed through `execute_role_proposal`.
     RoleProposalRequiresExecution = 31,
+    /// Removing an admin pool member would leave fewer members than the approval threshold.
+    ThresholdExceedsPoolSize = 32,
+    /// The supplied WASM hash does not match the hash bound to the proposal (#1310).
+    WasmHashMismatch = 33,
     /// The role grant carried an expiry ledger that has now passed; the role is inactive.
     RoleExpired = 34,
     /// `grant_role_with_expiry` was given an `expires_at` that is not strictly
     /// after the current ledger sequence.
     InvalidExpiry = 35,
-    /// Removing an admin pool member would leave fewer members than the approval threshold.
-    ThresholdExceedsPoolSize = 32,
-    /// The supplied WASM hash does not match the hash bound to the proposal (#1310).
-    WasmHashMismatch = 33,
+    /// No governance action is attached to the requested proposal (#1329).
+    ActionProposalNotFound = 36,
+    /// The governance action attached to the proposal has an unexpected type (#1329).
+    ActionProposalWrongType = 37,
+    /// A governance action carried invalid parameters (#1329).
+    InvalidAction = 38,
 }
 
 /// Storage keys for the access-control layer.
@@ -417,6 +423,9 @@ pub enum AdminKey {
     /// Role grant action attached to a legacy proposal, keyed by proposal ID.
     /// Appended to preserve every existing storage-key discriminant.
     RoleGrantProposal(u64),
+    /// Supply-policy action attached to a multisig proposal, keyed by
+    /// proposal ID (#1329). Appended last to preserve existing discriminants.
+    ActionProposal(u64),
     /// Target WASM hash bound to a proposal (#1310).
     ProposalWasmHash(u64),
     /// Target WASM hash bound to an upgrade proposal (#1310).

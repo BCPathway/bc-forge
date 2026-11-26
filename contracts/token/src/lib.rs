@@ -109,6 +109,12 @@ pub enum DataKey {
     IsTransferable,
     /// Address nominated to become admin via two-step handoff (#1337).
     PendingOwner,
+    /// Scheduled maximum-supply change awaiting its timelock (#1330).
+    /// Appended last to preserve every previously deployed slot discriminant.
+    PendingMaxSupply,
+    /// Address of the governing admin/multisig contract (#1329). When set,
+    /// only this address may invoke privileged supply-policy entry points.
+    AdminContract,
     /// Per-minter issuance budget (remaining allowance) in token units.
     MinterAllowance(Address),
     /// Scheduled mint stream by id.
@@ -171,6 +177,19 @@ pub struct LockupState {
     /// Unix timestamp (seconds since epoch) at which the locked tokens
     /// become withdrawable.
     pub unlock_timestamp: u64,
+}
+
+/// A scheduled maximum-supply change (#1330).
+///
+/// Stored as instance state under [`DataKey::PendingMaxSupply`] until the
+/// timelock elapses and the change is applied.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PendingCapChange {
+    /// The new supply cap to apply.
+    pub new_cap: i128,
+    /// Unix timestamp at or after which the change may be applied.
+    pub execute_after: u64,
 }
 
 /// A scheduled mint stream that mints tokens to a recipient over time.
@@ -245,6 +264,8 @@ pub enum TokenError {
     LockupNotFound = 21,
     /// The holder's lock has not reached its unlock timestamp.
     TokensStillLocked = 22,
+    /// The minter has no configured issuance budget or has exceeded it.
+    MinterQuotaExceeded = 23,
     /// The sender or recipient account is frozen.
     AccountFrozen = 24,
     /// The sender or recipient is rejected by the active allowlist/denylist.
@@ -263,8 +284,12 @@ pub enum TokenError {
     Unauthorized = 31,
     /// Name and symbol were permanently locked by `lock_metadata`.
     MetadataImmutable = 32,
-    /// The minter has no configured issuance budget or has exceeded it.
-    MinterQuotaExceeded = 23,
+    /// No scheduled maximum-supply change exists (#1330).
+    NoPendingCapChange = 33,
+    /// A scheduled maximum-supply change is still inside its timelock (#1330).
+    CapTimelockActive = 34,
+    /// Caller is not the configured admin/multisig contract (#1329).
+    UnauthorizedCaller = 35,
 }
 
 #[contract]
@@ -380,6 +405,76 @@ impl BcForgeToken {
             .instance()
             .set(&DataKey::MaxSupply, &max_supply);
         Self::extend_instance_ttl(env);
+    }
+
+    // Maximum-supply timelock (#1330).
+
+    /// Number of seconds a scheduled cap change must wait before application.
+    pub const MAX_SUPPLY_DELAY_SECS: u64 = 24 * 60 * 60;
+
+    fn read_pending_cap_change(env: &Env) -> Option<PendingCapChange> {
+        let key = DataKey::PendingMaxSupply;
+        if env.storage().instance().has(&key) {
+            ttl::extend_instance_ttl(env);
+        }
+        env.storage().instance().get(&key)
+    }
+
+    fn write_pending_cap_change(env: &Env, change: &PendingCapChange) {
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingMaxSupply, change);
+        ttl::extend_instance_ttl(env);
+    }
+
+    fn remove_pending_cap_change(env: &Env) {
+        env.storage().instance().remove(&DataKey::PendingMaxSupply);
+    }
+
+    // Governing admin/multisig contract (#1329).
+
+    fn read_admin_contract(env: &Env) -> Option<Address> {
+        let key = DataKey::AdminContract;
+        if env.storage().instance().has(&key) {
+            ttl::extend_instance_ttl(env);
+        }
+        env.storage().instance().get(&key)
+    }
+
+    fn write_admin_contract(env: &Env, address: &Address) {
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminContract, address);
+        ttl::extend_instance_ttl(env);
+    }
+
+    /// Requires that `caller` be the configured admin contract when one is
+    /// set, otherwise falls back to the legacy Minter-role check.
+    fn require_supply_governor(env: &Env, caller: &Address) -> Result<(), TokenError> {
+        match Self::read_admin_contract(env) {
+            Some(admin_contract) => {
+                if caller != &admin_contract {
+                    return Err(TokenError::UnauthorizedCaller);
+                }
+                Ok(())
+            }
+            None => {
+                admin::require_minter(env, caller);
+                Ok(())
+            }
+        }
+    }
+
+    fn map_admin_error(error: admin::AdminError) -> TokenError {
+        match error {
+            admin::AdminError::PrivilegeTimelockActive | admin::AdminError::TimelockActive => {
+                TokenError::TimelockNotElapsed
+            }
+            admin::AdminError::ProposalNotFound | admin::AdminError::ActionProposalNotFound => {
+                TokenError::PrivilegeProposalNotFound
+            }
+            _ => TokenError::UnauthorizedCaller,
+        }
     }
 
     fn remove_legacy_allowance_exp(env: &Env, from: &Address, spender: &Address) {
@@ -935,6 +1030,16 @@ impl BcForgeToken {
         Ok(())
     }
 
+    /// Read-only view of a holder's lockup state (#1326).
+    ///
+    /// Returns ``None`` when the holder has no persisted lock, otherwise the
+    /// locked amount and the timestamp at which it becomes withdrawable.
+    /// Locked amounts remain reserved from the spendable balance until the
+    /// holder explicitly calls ``withdraw_locked`` after that timestamp.
+    pub fn get_lockup(env: Env, user: Address) -> Option<LockupState> {
+        Self::read_lockup(&env, &user)
+    }
+
     /// Initializes the token contract.
     ///
     /// Sets the admin address, decimals, name, and symbol.
@@ -1478,10 +1583,183 @@ impl BcForgeToken {
         if max_supply < 0 {
             return Err(TokenError::InvalidAmount);
         }
-        admin::require_minter(&env, &caller);
+        // A cap below circulating supply would leave the contract in an
+        // invalid state where supply exceeds its own ceiling (#1330).
+        if max_supply < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
+        // Once an admin/multisig contract is configured, direct unapproved
+        // changes are rejected (#1329); otherwise keep the legacy Minter path.
+        Self::require_supply_governor(&env, &caller)?;
         Self::write_max_supply(&env, max_supply);
         events::emit_max_supply_changed(&env, &caller, max_supply);
         Ok(())
+    }
+
+    /// Schedules a maximum-supply increase behind a 24-hour timelock (#1330).
+    ///
+    /// Requires `Role::SuperAdmin`. The new cap must cover current supply.
+    /// A single pending change is kept; applying it clears the pending state.
+    pub fn schedule_max_supply(
+        env: Env,
+        caller: Address,
+        new_max_supply: i128,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        if new_max_supply < 0 || new_max_supply < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        let execute_after = env
+            .ledger()
+            .timestamp()
+            .saturating_add(Self::MAX_SUPPLY_DELAY_SECS);
+        Self::write_pending_cap_change(
+            &env,
+            &PendingCapChange {
+                new_cap: new_max_supply,
+                execute_after,
+            },
+        );
+        events::emit_max_supply_scheduled(&env, &caller, new_max_supply, execute_after);
+        Ok(())
+    }
+
+    /// Applies a previously scheduled maximum-supply change (#1330).
+    ///
+    /// The change can only be applied once its 24-hour timelock has elapsed.
+    /// The supply floor is re-checked at application time in case supply grew
+    /// while the change was pending.
+    pub fn apply_max_supply(env: Env, caller: Address) -> Result<i128, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+
+        let change = Self::read_pending_cap_change(&env).ok_or(TokenError::NoPendingCapChange)?;
+        if env.ledger().timestamp() < change.execute_after {
+            return Err(TokenError::CapTimelockActive);
+        }
+        if change.new_cap < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        Self::write_max_supply(&env, change.new_cap);
+        Self::remove_pending_cap_change(&env);
+        events::emit_max_supply_applied(&env, &caller, change.new_cap);
+        Ok(change.new_cap)
+    }
+
+    /// Read-only view of the pending scheduled cap change (#1330).
+    pub fn get_pending_max_supply(env: Env) -> Option<PendingCapChange> {
+        Self::read_pending_cap_change(&env)
+    }
+
+    /// Binds the governing admin/multisig contract address (#1329).
+    ///
+    /// Only a SuperAdmin may set or replace it. Once set, direct calls to
+    /// supply-policy entry points are rejected unless they come from this
+    /// address.
+    pub fn set_admin_contract(
+        env: Env,
+        caller: Address,
+        admin_contract: Address,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        admin::require_super_admin(&env, &caller);
+        admin::require_non_zero_address(&env, &admin_contract);
+        Self::write_admin_contract(&env, &admin_contract);
+        Ok(())
+    }
+
+    /// Returns the bound admin/multisig contract address, if any (#1329).
+    pub fn get_admin_contract(env: Env) -> Option<Address> {
+        Self::read_admin_contract(&env)
+    }
+
+    /// Proposes a governed maximum-supply change through the admin multisig (#1329).
+    ///
+    /// The proposal reaches execution only after quorum and a 24-hour delay.
+    pub fn propose_cap_change(
+        env: Env,
+        caller: Address,
+        new_cap: i128,
+        description: String,
+    ) -> Result<u64, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        if new_cap < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
+        Ok(admin::create_action_proposal(
+            &env,
+            caller,
+            admin::ProposalAction::SetMaxSupply(new_cap),
+            description,
+        ))
+    }
+
+    /// Executes a quorum-approved, timelock-expired cap-change proposal (#1329).
+    pub fn execute_cap_change(
+        env: Env,
+        caller: Address,
+        proposal_id: u64,
+    ) -> Result<i128, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        let action = admin::consume_action_proposal(&env, caller.clone(), proposal_id)
+            .map_err(Self::map_admin_error)?;
+        let new_cap = match action {
+            admin::ProposalAction::SetMaxSupply(new_cap) => new_cap,
+            _ => return Err(TokenError::InvalidAmount),
+        };
+        if new_cap < Self::read_supply(&env) {
+            return Err(TokenError::InvalidAmount);
+        }
+        Self::write_max_supply(&env, new_cap);
+        events::emit_max_supply_applied(&env, &caller, new_cap);
+        Ok(new_cap)
+    }
+
+    /// Proposes a governed privileged mint through the admin multisig (#1329).
+    pub fn propose_privileged_mint(
+        env: Env,
+        caller: Address,
+        to: Address,
+        amount: i128,
+        description: String,
+    ) -> Result<u64, TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        Ok(admin::create_action_proposal(
+            &env,
+            caller,
+            admin::ProposalAction::PrivilegedMint(to, amount),
+            description,
+        ))
+    }
+
+    /// Executes a quorum-approved, timelock-expired privileged mint (#1329).
+    pub fn execute_privileged_mint(
+        env: Env,
+        caller: Address,
+        proposal_id: u64,
+    ) -> Result<(), TokenError> {
+        Self::extend_instance_ttl_for_call(&env);
+        Self::ensure_initialized(&env)?;
+        Self::ensure_not_paused(&env)?;
+        let action = admin::consume_action_proposal(&env, caller.clone(), proposal_id)
+            .map_err(Self::map_admin_error)?;
+        let (to, amount) = match action {
+            admin::ProposalAction::PrivilegedMint(to, amount) => (to, amount),
+            _ => return Err(TokenError::InvalidAmount),
+        };
+        Self::internal_mint(&env, &caller, &to, amount)
     }
 
     /// Transfers contract ownership to a new admin.

@@ -29,6 +29,8 @@
   "token:locked": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:m_allow": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:max_sup": "Not yet indexed; tracked as backlog (no indexer table for this event)",
+  "token:max_sup_appl": "Not yet indexed; tracked as backlog (no indexer table for this event)",
+  "token:max_sup_sched": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:meta_lck": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:own_canc": "Not yet indexed; tracked as backlog (no indexer table for this event)",
   "token:own_prop": "Not yet indexed; tracked as backlog (no indexer table for this event)",

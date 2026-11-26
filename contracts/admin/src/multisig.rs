@@ -15,7 +15,7 @@ use soroban_sdk::{contracttype, vec, Address, BytesN, Env, Map, String, Vec};
 
 use crate::address::require_non_zero_address;
 use crate::events;
-use crate::rbac::{get_admin, has_admin, require_admin, Role};
+use crate::rbac::{get_admin, has_admin, has_role, require_admin, Role};
 use crate::reentrancy_guard;
 use crate::{extend_instance_ttl, extend_storage_ttl_for_key, AdminError, AdminKey};
 
@@ -30,6 +30,20 @@ use crate::{extend_instance_ttl, extend_storage_ttl_for_key, AdminError, AdminKe
 /// @notice The duration in seconds (86,400s / 24 hours) for the proposal execution timelock.
 /// @dev Mandatory delay applied once quorum is reached before an upgrade can be executed.
 pub const TIMELOCK_DELAY_SECS: u64 = 24 * 60 * 60;
+
+/// Supply-policy actions that require multisig approval (#1329).
+///
+/// Each action is bound to a legacy governance [`Proposal`] through
+/// `AdminKey::ActionProposal(id)` and executed only after quorum and the
+/// mandatory 24-hour timelock.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum ProposalAction {
+    /// Changes a token's maximum supply cap to `new_cap`.
+    SetMaxSupply(i128),
+    /// Mints `amount` to `to` through a privileged, governed path.
+    PrivilegedMint(Address, i128),
+}
 
 /// Default lifetime of a legacy [`Proposal`], in ledgers.
 ///
@@ -502,6 +516,39 @@ pub fn create_role_proposal(
     id
 }
 
+/// Creates a multisig proposal carrying a supply-policy action (#1329).
+///
+/// The caller must be a member of the admin pool. The attached action is
+/// stored separately from the legacy proposal so consumers can inspect what
+/// will be executed before voting. The mandatory timelock starts as soon as
+/// quorum is reached, giving token holders a 24-hour review window.
+pub fn create_action_proposal(
+    env: &Env,
+    creator: Address,
+    action: ProposalAction,
+    description: String,
+) -> u64 {
+    match &action {
+        ProposalAction::SetMaxSupply(new_cap) => {
+            if *new_cap < 0 {
+                soroban_sdk::panic_with_error!(env, AdminError::InvalidAction);
+            }
+        }
+        ProposalAction::PrivilegedMint(to, amount) => {
+            require_non_zero_address(env, to);
+            if *amount <= 0 {
+                soroban_sdk::panic_with_error!(env, AdminError::InvalidAction);
+            }
+        }
+    }
+    let id = create_proposal(env, creator, description);
+    env.storage()
+        .instance()
+        .set(&AdminKey::ActionProposal(id), &action);
+    extend_instance_ttl(env);
+    id
+}
+
 /// Creates a multisig proposal that binds `wasm_hash` to `proposal_id` for upgrade execution.
 ///
 /// Stores `wasm_hash` under [`AdminKey::ProposalWasmHash`] so that arbitrary bytecode
@@ -521,6 +568,70 @@ pub fn create_upgrade_proposal(
         .set(&AdminKey::ProposalWasmHash(id), &wasm_hash);
     extend_instance_ttl(env);
     id
+}
+
+/// Returns the supply-policy action attached to a proposal, if any (#1329).
+pub fn get_action_proposal(env: &Env, proposal_id: u64) -> Option<ProposalAction> {
+    let action: Option<ProposalAction> = env
+        .storage()
+        .instance()
+        .get(&AdminKey::ActionProposal(proposal_id));
+    action
+}
+
+/// Consumes a quorum-approved, timelock-expired action proposal (#1329).
+///
+/// Marks the proposal executed (checks-effects-interactions) and returns the
+/// action for the caller to apply. The caller must be a member of the admin
+/// pool with the `SuperAdmin` role, matching `execute_role_proposal`.
+pub fn consume_action_proposal(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+) -> Result<ProposalAction, AdminError> {
+    let _reentrancy_guard = reentrancy_guard::enter(env);
+
+    let mut proposal: Proposal = env
+        .storage()
+        .instance()
+        .get(&AdminKey::Proposal(proposal_id))
+        .ok_or(AdminError::ProposalNotFound)?;
+    if proposal.executed {
+        return Err(AdminError::ProposalAlreadyExecuted);
+    }
+    if proposal.cancelled {
+        return Err(AdminError::ProposalCancelled);
+    }
+    if _proposal_expired(env, &proposal) {
+        return Err(AdminError::ProposalExpired);
+    }
+
+    executor.require_auth();
+    if !get_admin_pool(env).contains(&executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+    if !has_role(env, Role::SuperAdmin, &executor) {
+        return Err(AdminError::UnauthorizedRole);
+    }
+
+    if !is_proposal_ready(env, proposal_id) {
+        return Err(AdminError::ThresholdNotMet);
+    }
+    // 24-hour delay: TIMELOCK_DELAY_SECS == PRIVILEGE_ACTION_DELAY_SECS.
+    require_timelock_expired(env, proposal_id)?;
+
+    let action: ProposalAction = env
+        .storage()
+        .instance()
+        .get(&AdminKey::ActionProposal(proposal_id))
+        .ok_or(AdminError::ActionProposalNotFound)?;
+
+    proposal.executed = true;
+    env.storage()
+        .instance()
+        .set(&AdminKey::Proposal(proposal_id), &proposal);
+    extend_instance_ttl(env);
+    Ok(action)
 }
 
 /// Returns the bound WASM hash for a legacy upgrade proposal, if set.

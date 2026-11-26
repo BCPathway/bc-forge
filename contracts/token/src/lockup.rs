@@ -718,3 +718,55 @@ fn test_lockup_state_is_keyed_per_user() {
         assert!(!BcForgeToken::is_locked(&env, &user_b));
     });
 }
+
+#[test]
+fn get_lockup_returns_none_when_no_lock_exists() {
+    let env = Env::default();
+    let (client, _admin) = setup(&env);
+    let user = Address::generate(&env);
+
+    assert_eq!(client.get_lockup(&user), None);
+}
+
+#[test]
+fn get_lockup_exposes_persisted_state_and_spendable_balance_is_reduced() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+    mint(&env, &client, &admin, &user, 1_000);
+
+    // lock_tokens uses a unix timestamp; the test ledger starts at 0.
+    let unlock_timestamp = 1_000;
+    client.lock_tokens(&admin, &user, &400, &unlock_timestamp);
+
+    let state = client.get_lockup(&user).expect("lock should be visible");
+    assert_eq!(state.amount, 400);
+    assert_eq!(state.unlock_timestamp, unlock_timestamp);
+
+    // The locked portion must not be spendable: a transfer of the entire
+    // balance is rejected while the amount within the free balance succeeds.
+    let recipient = Address::generate(&env);
+    assert!(client.try_transfer(&user, &recipient, &601).is_err());
+    client.transfer(&user, &recipient, &600);
+    assert_eq!(client.balance(&recipient), 600);
+    assert_eq!(client.balance(&user), 400);
+}
+
+#[test]
+fn get_lockup_view_survives_withdrawal_after_unlock() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    let user = Address::generate(&env);
+    mint(&env, &client, &admin, &user, 500);
+    client.lock_tokens(&admin, &user, &200, &100);
+
+    assert!(client.get_lockup(&user).is_some());
+    assert_eq!(
+        client.try_withdraw_locked(&user),
+        Err(Ok(TokenError::TokensStillLocked))
+    );
+
+    env.ledger().set_timestamp(101);
+    client.withdraw_locked(&user);
+    assert_eq!(client.get_lockup(&user), None);
+}

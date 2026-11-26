@@ -111,7 +111,7 @@ fn test_initialize_emits_expected_events() {
     let decimal: u32 = data_vec.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(decimal, 7);
 
-    // #924 — every event data tuple ends with the schema version.
+    // #924 â€” every event data tuple ends with the schema version.
     let version: u32 = data_vec.get(3).unwrap().try_into_val(&env).unwrap();
     assert_eq!(version, 1, "init event must carry schema version 1");
 }
@@ -856,7 +856,7 @@ fn test_unpause_when_not_paused_returns_error() {
     assert_eq!(result, Err(Ok(TokenError::NotPaused)));
 }
 
-// ─── #913: AllowanceData migration from legacy storage ───────────────────────
+// â”€â”€â”€ #913: AllowanceData migration from legacy storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn write_legacy_allowance(
     env: &Env,
@@ -998,7 +998,7 @@ fn test_fresh_approve_persists_only_allowance_data() {
     assert_eq!(data.expiration_ledger, 123_456);
 }
 
-// ─── #762: transfer / transfer_from pause hooks ───────────────────────────────
+// â”€â”€â”€ #762: transfer / transfer_from pause hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_transfer_succeeds_when_not_paused() {
@@ -1097,7 +1097,7 @@ fn test_transfer_and_transfer_from_resume_after_unpause() {
     assert_eq!(client.balance(&recipient), 125);
 }
 
-// ─── #912: execute_from_contract batch execution tests ───────────────────────
+// â”€â”€â”€ #912: execute_from_contract batch execution tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_execute_from_contract_happy_path() {
@@ -1237,7 +1237,7 @@ fn test_execute_from_contract_admin_function_rejected_at_enum_level() {
     assert_eq!(ops.len(), 2);
 }
 
-// ─── rescue_tokens (#921) ────────────────────────────────────────────────────
+// â”€â”€â”€ rescue_tokens (#921) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_rescue_tokens_admin_recovers_foreign_token() {
@@ -1357,7 +1357,7 @@ fn test_rescue_tokens_rejects_invalid_amount() {
     assert_eq!(foreign.balance(&recovery), 0);
 }
 
-// ─── Metadata updates (#911) ─────────────────────────────────────────────────
+// â”€â”€â”€ Metadata updates (#911) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Reads the last emitted event as `(emitter, topics, data)`.
 fn last_event(env: &Env) -> (Address, soroban_sdk::Vec<Val>, Val) {
@@ -1642,6 +1642,281 @@ fn test_update_metadata_rejects_unauthorized_caller() {
     assert!(result.is_err());
     assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
     assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
+}
+
+#[test]
+fn test_set_max_supply_below_circulating_supply_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    // use admin as minter for the test
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &holder, &1_000);
+    assert_eq!(client.supply(), 1_000);
+
+    // Cap below current supply must be rejected.
+    assert_eq!(
+        client.try_set_max_supply(&admin, &999),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    // Cap at current supply is allowed.
+    client.set_max_supply(&admin, &1_000);
+    assert_eq!(client.get_max_supply(), 1_000);
+}
+
+#[test]
+fn test_scheduled_cap_change_enforces_24h_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    client.schedule_max_supply(&admin, &5_000);
+
+    let pending = client.get_pending_max_supply().expect("pending cap change");
+    assert_eq!(pending.new_cap, 5_000);
+    // ledger timestamp starts at 0; execute_after is 24 hours later
+    assert_eq!(pending.execute_after, 24 * 60 * 60);
+
+    // Early application fails.
+    assert_eq!(
+        client.try_apply_max_supply(&admin),
+        Err(Ok(TokenError::CapTimelockActive))
+    );
+    assert_eq!(client.get_max_supply(), i128::MAX);
+
+    // After the delay the change applies and clears pending state.
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    assert_eq!(client.apply_max_supply(&admin), 5_000);
+    assert_eq!(client.get_max_supply(), 5_000);
+    assert_eq!(client.get_pending_max_supply(), None);
+    assert_eq!(
+        client.try_apply_max_supply(&admin),
+        Err(Ok(TokenError::NoPendingCapChange))
+    );
+}
+
+#[test]
+fn test_schedule_cap_change_rejects_value_below_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &holder, &500);
+
+    assert_eq!(
+        client.try_schedule_max_supply(&admin, &499),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(client.get_pending_max_supply(), None);
+}
+#[test]
+fn test_admin_contract_restricts_direct_cap_changes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let multisig = Address::generate(&env);
+
+    // Before binding, the legacy Minter path still works.
+    client.set_max_supply(&admin, &1_000);
+
+    client.set_admin_contract(&admin, &multisig);
+    assert_eq!(client.get_admin_contract(), Some(multisig.clone()));
+
+    // A direct change from the former minter is now rejected.
+    assert_eq!(
+        client.try_set_max_supply(&admin, &2_000),
+        Err(Ok(TokenError::UnauthorizedCaller))
+    );
+    // The bound admin contract may change the cap directly.
+    client.set_max_supply(&multisig, &2_000);
+    assert_eq!(client.get_max_supply(), 2_000);
+}
+
+#[test]
+fn test_governed_cap_change_round_trip() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let description = String::from_str(&env, "raise cap to 5k");
+
+    let id = client.propose_cap_change(&admin, &5_000, &description);
+    // The cap is not changed until the proposal is executed.
+    assert_eq!(client.get_max_supply(), i128::MAX);
+
+    // The mandatory 24-hour timelock must elapse first.
+    assert_eq!(
+        client.try_execute_cap_change(&admin, &id),
+        Err(Ok(TokenError::TimelockNotElapsed))
+    );
+
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    assert_eq!(client.execute_cap_change(&admin, &id), 5_000);
+    assert_eq!(client.get_max_supply(), 5_000);
+}
+
+#[test]
+fn test_propose_cap_change_rejects_cap_below_supply() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &holder, &1_000);
+
+    assert_eq!(
+        client.try_propose_cap_change(&admin, &999, &String::from_str(&env, "too low")),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_execute_cap_change_rechecks_supply_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    let id = client.propose_cap_change(&admin, &5_000, &String::from_str(&env, "raise cap"));
+
+    // Supply grows past the proposed cap before execution.
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &holder, &6_000);
+
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    assert_eq!(
+        client.try_execute_cap_change(&admin, &id),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(client.get_max_supply(), i128::MAX);
+}
+
+#[test]
+fn test_execute_cap_change_rejects_unknown_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    assert_eq!(
+        client.try_execute_cap_change(&admin, &42),
+        Err(Ok(TokenError::PrivilegeProposalNotFound))
+    );
+}
+
+#[test]
+fn test_execute_cap_change_rejects_unauthorized_executor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let stranger = Address::generate(&env);
+
+    let id = client.propose_cap_change(&admin, &5_000, &String::from_str(&env, "raise cap"));
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    assert_eq!(
+        client.try_execute_cap_change(&stranger, &id),
+        Err(Ok(TokenError::UnauthorizedCaller))
+    );
+}
+
+#[test]
+fn test_execute_cap_change_rejects_mismatched_action() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    let id = client.propose_privileged_mint(
+        &admin,
+        &recipient,
+        &250,
+        &String::from_str(&env, "mint 250"),
+    );
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    assert_eq!(
+        client.try_execute_cap_change(&admin, &id),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_privileged_mint_action_round_trip() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    let id = client.propose_privileged_mint(
+        &admin,
+        &recipient,
+        &250,
+        &String::from_str(&env, "mint 250"),
+    );
+    assert_eq!(client.balance(&recipient), 0);
+
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    client.execute_privileged_mint(&admin, &id);
+    assert_eq!(client.balance(&recipient), 250);
+    assert_eq!(client.supply(), 250);
+}
+
+#[test]
+fn test_propose_privileged_mint_rejects_non_positive_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    assert_eq!(
+        client.try_propose_privileged_mint(&admin, &recipient, &0, &String::from_str(&env, "zero")),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_execute_privileged_mint_rejects_mismatched_action() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+
+    let id = client.propose_cap_change(&admin, &5_000, &String::from_str(&env, "raise cap"));
+    let mut info = env.ledger().get();
+    info.timestamp += 24 * 60 * 60;
+    env.ledger().set(info);
+
+    assert_eq!(
+        client.try_execute_privileged_mint(&admin, &id),
+        Err(Ok(TokenError::InvalidAmount))
+    );
 }
 
 // ---- Metadata lock ----
@@ -1963,6 +2238,37 @@ fn test_create_mint_stream_validates_input_and_supply() {
         client.try_claim_stream_mint(&999),
         Err(Ok(TokenError::InvalidAmount))
     );
+}
+
+#[test]
+fn test_apply_max_supply_rechecks_supply_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let holder = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &holder, &1_000);
+
+    // A pending change that no longer covers circulating supply must fail at
+    // application time.
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(
+            &DataKey::PendingMaxSupply,
+            &crate::PendingCapChange {
+                new_cap: 500,
+                execute_after: 0,
+            },
+        );
+    });
+
+    assert_eq!(
+        client.try_apply_max_supply(&admin),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(client.get_max_supply(), i128::MAX);
 }
 
 #[test]

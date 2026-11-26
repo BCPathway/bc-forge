@@ -1333,6 +1333,31 @@ export class bcForgeClient {
   }
 
   /**
+   * Propose a governed maximum-supply change through the admin multisig (#1329).
+   *
+   * @param creator     - Pool member proposing the change
+   * @param newCap      - New supply cap (i128)
+   * @param description - Human-readable description
+   * @param source      - Proposing pool member keypair
+   */
+  async proposeCapChange(
+    creator: string,
+    newCap: bigint,
+    description: string,
+    source?: Keypair,
+  ): Promise<TransactionResult> {
+    return this.invokeContract(
+      'propose_cap_change',
+      [
+        addressToScVal(creator),
+        i128ToScVal(newCap),
+        stringToScVal(description),
+      ],
+      source,
+    );
+  }
+
+  /**
    * Approve a pending proposal.
    */
   async approveProposal(
