@@ -36,8 +36,21 @@ export type {
  * is submitted.
  */
 export type { DryRunResult, DryRunFootprint } from './client';
-export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
-export { bcForgeEventType, decodeEvent, decodeDiagnosticEvent, subscribeEvents, onMint, onTransfer, onVaultDeposit } from './events';
+export {
+  buildInvokeTransaction,
+  submitTransaction,
+  scValToNative,
+  TransactionQueue,
+} from './utils';
+export {
+  bcForgeEventType,
+  decodeEvent,
+  decodeDiagnosticEvent,
+  subscribeEvents,
+  onMint,
+  onTransfer,
+  onVaultDeposit,
+} from './events';
 export type { bcForgeEvent, SubscriptionOptions, EventListenerOptions } from './events';
 export * from './errors';
 export * from './mockClient';
@@ -57,6 +70,18 @@ export type { VaultClientConfig } from './vaultClient';
 export { WrapperClient } from './wrapperClient';
 export type { WrapperClientConfig } from './wrapperClient';
 
+// ─── Vesting and Split Clients (#1356, #1357) ────────────────────────────────
+export { VestingClient } from './vestingClient';
+export type {
+  Signer,
+  VestingClientConfig,
+  VestingSchedule,
+  Milestone,
+  CreateVestingParams,
+} from './vestingClient';
+export { SplitClient, InvoiceStatus } from './splitClient';
+export type { SplitClientConfig, Recipient, Invoice, FailedPayout } from './splitClient';
+
 // ─── APY helpers (#745) ──────────────────────────────────────────────────────
 export {
   calculateApy,
@@ -65,13 +90,7 @@ export {
   compoundingPeriodsPerYear,
   timeWeightedYield,
 } from './apy';
-export type {
-  ApyOptions,
-  ApyResult,
-  ApySnapshot,
-  CompoundingFrequency,
-  YieldWindow,
-} from './apy';
+export type { ApyOptions, ApyResult, ApySnapshot, CompoundingFrequency, YieldWindow } from './apy';
 
 // ─── Generated Contract Bindings (#926) ──────────────────────────────────────
 // Auto-generated TypeScript bindings from `stellar contract bindings typescript`.

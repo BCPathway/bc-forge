@@ -9,7 +9,10 @@ import {
   rpc as SorobanRpcNs,
 } from "@stellar/stellar-sdk";
 import { addNetworkOptions } from "../network.js";
-import { prepareSignAndSubmit, type PrepareSignSubmitResult } from "../utils/soroban-tx.js";
+import {
+  prepareSignAndSubmit,
+  type PrepareSignSubmitResult,
+} from "../utils/soroban-tx.js";
 import logger from "../utils/logger.js";
 import { writeJson } from "../utils/output.js";
 import { resolveContractIdOption } from "../utils/registry.js";
@@ -58,29 +61,38 @@ export interface SmokeTestResult {
 
 export function createSmokeTestCommand(): Command {
   const cmd = new Command("smoke-test")
-    .description("Run a quick ping test against a live contract (mint/transfer)")
+    .description(
+      "Run a quick ping test against a live contract (mint/transfer)",
+    )
     .requiredOption(
       "--contract-id <id>",
-      "Contract ID, or a deployment alias for the selected network"
+      "Contract ID, or a deployment alias for the selected network",
     )
-    .option("--source <secret>", "Admin/source account secret key (use STELLAR_SECRET_KEY instead)")
+    .option(
+      "--source <secret>",
+      "Admin/source account secret key (use STELLAR_SECRET_KEY instead)",
+    )
     .option(
       "--recipient <address>",
-      "Recipient public key or address-book name (auto-generated if omitted)"
+      "Recipient public key or address-book name (auto-generated if omitted)",
     )
-    .option("--amount <amount>", "Amount to mint and transfer (default: 1)", "1")
-  .option(
-    "--timeout <ms>",
-    "Timeout in milliseconds for the full sequence",
-    "30000"
-  )
-  .option("--watch", "Repeat the smoke test until interrupted", false)
-  .option(
-    "--interval <ms>",
-    "Delay between smoke test passes in --watch mode",
-    "15000"
-  )
-  .option("--json", "Print balances and transaction hashes as JSON");
+    .option(
+      "--amount <amount>",
+      "Amount to mint and transfer (default: 1)",
+      "1",
+    )
+    .option(
+      "--timeout <ms>",
+      "Timeout in milliseconds for the full sequence",
+      "30000",
+    )
+    .option("--watch", "Repeat the smoke test until interrupted", false)
+    .option(
+      "--interval <ms>",
+      "Delay between smoke test passes in --watch mode",
+      "15000",
+    )
+    .option("--json", "Print balances and transaction hashes as JSON");
 
   addNetworkOptions(cmd);
 
@@ -132,7 +144,7 @@ export function createSmokeTestCommand(): Command {
 }
 
 export async function runSmokeTest(
-  opts: SmokeTestOptions
+  opts: SmokeTestOptions,
 ): Promise<SmokeTestResult> {
   const timeout = Number(opts.timeout) || 30000;
   const amount = BigInt(opts.amount || "1");
@@ -142,7 +154,7 @@ export async function runSmokeTest(
   const checkDeadline = () => {
     if (Date.now() - startTime > timeout) {
       throw new Error(
-        `Smoke test timed out after ${timeout}ms (completed: ${sequence.join(" → ")})`
+        `Smoke test timed out after ${timeout}ms (completed: ${sequence.join(" → ")})`,
       );
     }
   };
@@ -195,9 +207,14 @@ export async function runSmokeTest(
       .setTimeout(30)
       .build();
 
-    const mintOutcome = await prepareSignAndSubmit(server, mintTx, sourceKeypair, {
-      deadline: startTime + timeout,
-    });
+    const mintOutcome = await prepareSignAndSubmit(
+      server,
+      mintTx,
+      sourceKeypair,
+      {
+        deadline: startTime + timeout,
+      },
+    );
     if (mintOutcome.outcome !== "confirmed") {
       return {
         success: false,
@@ -222,8 +239,7 @@ export async function runSmokeTest(
     sequence.push("balance_after_mint_ok");
 
     // 5. Determine recipient
-    const recipientAddress =
-      opts.recipient || Keypair.random().publicKey();
+    const recipientAddress = opts.recipient || Keypair.random().publicKey();
 
     // 6. Transfer tokens to recipient
     checkDeadline();
@@ -243,9 +259,14 @@ export async function runSmokeTest(
       .setTimeout(30)
       .build();
 
-    const transferOutcome = await prepareSignAndSubmit(server, transferTx, sourceKeypair, {
-      deadline: startTime + timeout,
-    });
+    const transferOutcome = await prepareSignAndSubmit(
+      server,
+      transferTx,
+      sourceKeypair,
+      {
+        deadline: startTime + timeout,
+      },
+    );
     if (transferOutcome.outcome !== "confirmed") {
       return {
         success: false,
@@ -312,7 +333,9 @@ export interface WatchLoopOptions {
  * Every pass — success or failure — is reported before continuing.
  */
 export async function watchSmokeTest(options: WatchLoopOptions): Promise<void> {
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep =
+    options.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const shouldContinue = options.shouldContinue ?? (() => true);
 
   let iteration = 1;
@@ -328,7 +351,10 @@ export async function watchSmokeTest(options: WatchLoopOptions): Promise<void> {
 }
 
 /** Prints one pass result in --watch mode. */
-function reportSmokeTestResult(result: SmokeTestResult, iteration: number): void {
+function reportSmokeTestResult(
+  result: SmokeTestResult,
+  iteration: number,
+): void {
   if (result.success) {
     logger.success(`watch pass ${iteration}: ${result.message}`);
   } else {

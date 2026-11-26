@@ -8,10 +8,16 @@ pub fn emit_invoice_created(env: &Env, invoice_id: u64, total_amount: i128) {
     );
 }
 
-pub fn emit_payout_failed(env: &Env, invoice_id: u64, recipient: &Address) {
+pub fn emit_payout_failed(
+    env: &Env,
+    invoice_id: u64,
+    recipient: &Address,
+    amount: i128,
+    retry_count: u32,
+) {
     env.events().publish(
         (symbol_short!("pyo_fail"), invoice_id, recipient.clone()),
-        (invoice_id, recipient.clone()),
+        (invoice_id, recipient.clone(), amount, retry_count),
     );
 }
 
@@ -19,6 +25,14 @@ pub fn emit_payout_succeeded(env: &Env, invoice_id: u64, recipient: &Address, am
     env.events().publish(
         (symbol_short!("pyo_succ"), invoice_id, recipient.clone()),
         (invoice_id, recipient.clone(), amount),
+    );
+}
+
+/// Emitted when an admin rescues stranded SEP-41 tokens from the contract.
+pub fn emit_token_rescued(env: &Env, token: &Address, to: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("token_rsc"), token.clone(), to.clone()),
+        (token.clone(), to.clone(), amount),
     );
 }
 

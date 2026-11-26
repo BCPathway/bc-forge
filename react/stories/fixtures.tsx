@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: MIT
-import { useEffect, useRef, type ReactNode } from 'react';
-import type { VaultClient as SdkVaultClient, WalletAdapter } from '@bc-forge/sdk';
-import { BcForgeProvider, WalletProvider, useWallet } from '../src/context';
-import { VaultClient, account, networkPassphrase } from './sdk';
+import { useEffect, useRef, type ReactNode } from "react";
+import type {
+  VaultClient as SdkVaultClient,
+  WalletAdapter,
+} from "@bc-forge/sdk";
+import { BcForgeProvider, WalletProvider, useWallet } from "../src/context";
+import { VaultClient, account, networkPassphrase } from "./sdk";
 
 export { account };
 const config = {
-  rpcUrl: 'https://rpc.invalid',
+  rpcUrl: "https://rpc.invalid",
   networkPassphrase,
-  contractId: 'STORYBOOK_CONTRACT',
+  contractId: "STORYBOOK_CONTRACT",
 };
 const vault = new VaultClient() satisfies Pick<
   SdkVaultClient,
-  'getDecimals' | 'getShareBalance' | 'calculateRewards' | 'deposit'
+  "getDecimals" | "getShareBalance" | "calculateRewards" | "deposit"
 >;
 export const vaultClient = vault as unknown as SdkVaultClient;
 
@@ -24,19 +27,16 @@ export const vaultClient = vault as unknown as SdkVaultClient;
  * only through a misbehaving adapter, so each variant supplies its own.
  */
 export type WalletFixtureVariant =
-  | 'disconnected'
-  | 'connected'
-  | 'wrong-network'
-  | 'error';
+  "disconnected" | "connected" | "wrong-network" | "error";
 
 /** Network passphrase an adapter reports when it is on the wrong network. */
 const OTHER_NETWORK_PASSPHRASE =
-  'Public Global Stellar Network ; September 2015';
+  "Public Global Stellar Network ; September 2015";
 
 /** An in-memory adapter that always reports a different network. */
 function createWrongNetworkAdapter(): WalletAdapter {
   return {
-    name: 'freighter',
+    name: "freighter",
     connected: false,
     publicKey: undefined,
     networkPassphrase: OTHER_NETWORK_PASSPHRASE,
@@ -49,7 +49,7 @@ function createWrongNetworkAdapter(): WalletAdapter {
       this.publicKey = undefined;
     },
     async signTransaction(): Promise<string> {
-      throw new Error('Storybook never signs transactions');
+      throw new Error("Storybook never signs transactions");
     },
   };
 }
@@ -57,7 +57,7 @@ function createWrongNetworkAdapter(): WalletAdapter {
 /** An in-memory adapter whose connection attempt always fails. */
 function createFailingAdapter(message: string): WalletAdapter {
   return {
-    name: 'freighter',
+    name: "freighter",
     connected: false,
     publicKey: undefined,
     networkPassphrase,
@@ -69,19 +69,22 @@ function createFailingAdapter(message: string): WalletAdapter {
       this.publicKey = undefined;
     },
     async signTransaction(): Promise<string> {
-      throw new Error('Storybook never signs transactions');
+      throw new Error("Storybook never signs transactions");
     },
   };
 }
 
 /** Adapter factory per variant; `undefined` means "never connect". */
-const ADAPTERS: Record<WalletFixtureVariant, (() => WalletAdapter) | undefined> =
-  {
-    disconnected: undefined,
-    connected: undefined,
-    'wrong-network': createWrongNetworkAdapter,
-    error: () => createFailingAdapter('The user rejected the connection request.'),
-  };
+const ADAPTERS: Record<
+  WalletFixtureVariant,
+  (() => WalletAdapter) | undefined
+> = {
+  disconnected: undefined,
+  connected: undefined,
+  "wrong-network": createWrongNetworkAdapter,
+  error: () =>
+    createFailingAdapter("The user rejected the connection request."),
+};
 
 function Connection({
   variant,
@@ -93,9 +96,9 @@ function Connection({
   const { connect } = useWallet();
   const started = useRef(false);
   useEffect(() => {
-    if (variant === 'disconnected' || started.current) return;
+    if (variant === "disconnected" || started.current) return;
     started.current = true;
-    void connect('freighter');
+    void connect("freighter");
   }, [variant, connect]);
   return <>{children}</>;
 }
@@ -130,7 +133,7 @@ export function WalletFixture({
   variant,
 }: WalletFixtureProps) {
   const state: WalletFixtureVariant =
-    variant ?? (connected ? 'connected' : 'disconnected');
+    variant ?? (connected ? "connected" : "disconnected");
   const adapterFactory = ADAPTERS[state];
   return (
     <BcForgeProvider config={config}>

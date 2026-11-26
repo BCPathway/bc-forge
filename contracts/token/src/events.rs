@@ -422,6 +422,93 @@ pub fn emit_withdraw_locked(env: &Env, user: &Address, amount: i128) {
         (user.clone(), amount, EVENT_SCHEMA_VERSION),
     );
 }
+/// Emits the `fee_chg` event when a fee is charged during a transfer.
+///
+/// @notice Publishes fee charge event data including the sender, treasury address, and fee amount.
+/// @dev The event topics include the `fee_chg` symbol.
+/// @param env The Soroban environment.
+/// @param from The sender address.
+/// @param treasury The treasury address that receives the fee.
+/// @param fee The amount of the fee charged.
+pub fn emit_fee_charged(env: &Env, from: &Address, treasury: &Address, fee: i128) {
+    env.events().publish(
+        (symbol_short!("fee_chg"),),
+        (from.clone(), treasury.clone(), fee, EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `acc_frz` when an account is frozen (#1333).
+pub fn emit_account_frozen(env: &Env, caller: &Address, account: &Address) {
+    env.events().publish(
+        (symbol_short!("acc_frz"),),
+        (caller.clone(), account.clone(), EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `acc_unfrz` when an account is unfrozen (#1333).
+pub fn emit_account_unfrozen(env: &Env, caller: &Address, account: &Address) {
+    env.events().publish(
+        (symbol_short!("acc_unfrz"),),
+        (caller.clone(), account.clone(), EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `clawback` when tokens are seized (#1333).
+pub fn emit_tokens_clawback(
+    env: &Env,
+    caller: &Address,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+) {
+    env.events().publish(
+        (symbol_short!("clawback"),),
+        (
+            caller.clone(),
+            from.clone(),
+            to.clone(),
+            amount,
+            EVENT_SCHEMA_VERSION,
+        ),
+    );
+}
+
+/// Emits `flt_mode` when the transfer filter mode changes (#1334).
+pub fn emit_filter_mode_set(env: &Env, caller: &Address, mode: u32) {
+    env.events().publish(
+        (symbol_short!("flt_mode"),),
+        (caller.clone(), mode, EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `flt_stat` when an address filter status changes (#1334).
+pub fn emit_filter_status_set(env: &Env, caller: &Address, account: &Address, status: bool) {
+    env.events().publish(
+        (symbol_short!("flt_stat"),),
+        (
+            caller.clone(),
+            account.clone(),
+            status,
+            EVENT_SCHEMA_VERSION,
+        ),
+    );
+}
+
+/// Emits `own_prop` when ownership is proposed (#1337).
+pub fn emit_ownership_proposed(env: &Env, caller: &Address, pending_admin: &Address) {
+    env.events().publish(
+        (symbol_short!("own_prop"),),
+        (caller.clone(), pending_admin.clone(), EVENT_SCHEMA_VERSION),
+    );
+}
+
+/// Emits `own_canc` when a pending ownership transfer is cancelled (#1337).
+pub fn emit_ownership_cancelled(env: &Env, caller: &Address) {
+    env.events().publish(
+        (symbol_short!("own_canc"),),
+        (caller.clone(), EVENT_SCHEMA_VERSION),
+    );
+}
 
 /// Emits the `m_allow` event when a minter issuance allowance is set.
 ///

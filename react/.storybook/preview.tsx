@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
-import React from 'react';
-import type { Preview } from '@storybook/react-vite';
-import { cssVariablesFor } from '../src/theme';
-import { WalletFixture, type WalletFixtureVariant } from '../stories/fixtures';
+import React from "react";
+import type { Preview } from "@storybook/react-vite";
+import { cssVariablesFor } from "../src/theme";
+import { WalletFixture, type WalletFixtureVariant } from "../stories/fixtures";
 
 /**
  * The decorator signature, derived from {@link Preview} itself rather than
  * imported from a separate entry point, so this file stays in step with
  * whatever version of `@storybook/react-vite` is pinned.
  */
-type Decorator = NonNullable<Preview['decorators']>[number];
+type Decorator = NonNullable<Preview["decorators"]>[number];
 
 /**
  * The frame's inline style in light mode.
@@ -23,10 +23,10 @@ const LIGHT_FRAME: React.CSSProperties = {
   padding: 24,
   width: 640,
   minHeight: 320,
-  boxSizing: 'border-box',
-  fontFamily: 'Arial, sans-serif',
-  color: '#111827',
-  background: '#ffffff',
+  boxSizing: "border-box",
+  fontFamily: "Arial, sans-serif",
+  color: "#111827",
+  background: "#ffffff",
 };
 
 /**
@@ -37,10 +37,10 @@ const DARK_FRAME: React.CSSProperties = {
   padding: 24,
   width: 640,
   minHeight: 320,
-  boxSizing: 'border-box',
-  fontFamily: 'Arial, sans-serif',
-  color: '#e5e7eb',
-  background: '#0b1220',
+  boxSizing: "border-box",
+  fontFamily: "Arial, sans-serif",
+  color: "#e5e7eb",
+  background: "#0b1220",
 };
 
 /**
@@ -62,17 +62,17 @@ const DARK_FRAME: React.CSSProperties = {
  * without the decorator special-casing light.
  */
 const withTheme: Decorator = (Story, context) => {
-  const theme: 'light' | 'dark' =
-    context.globals.theme === 'dark' ? 'dark' : 'light';
+  const theme: "light" | "dark" =
+    context.globals.theme === "dark" ? "dark" : "light";
   return (
     <div
       data-theme={theme}
-      className={theme === 'dark' ? 'dark' : ''}
+      className={theme === "dark" ? "dark" : ""}
       style={{ ...cssVariablesFor(theme) }}
     >
       <main
         data-testid="story-frame"
-        style={theme === 'dark' ? DARK_FRAME : LIGHT_FRAME}
+        style={theme === "dark" ? DARK_FRAME : LIGHT_FRAME}
       >
         <Story />
       </main>
@@ -102,10 +102,10 @@ const withTheme: Decorator = (Story, context) => {
 const withMockedWeb3: Decorator = (Story, context) => {
   const variant = context.parameters.web3 as WalletFixtureVariant | undefined;
   if (
-    variant !== 'disconnected' &&
-    variant !== 'connected' &&
-    variant !== 'wrong-network' &&
-    variant !== 'error'
+    variant !== "disconnected" &&
+    variant !== "connected" &&
+    variant !== "wrong-network" &&
+    variant !== "error"
   ) {
     return <Story />;
   }
@@ -118,7 +118,7 @@ const withMockedWeb3: Decorator = (Story, context) => {
 
 const preview: Preview = {
   parameters: {
-    layout: 'fullscreen',
+    layout: "fullscreen",
 
     /**
      * `@storybook/addon-a11y` (#1144) — an a11y-friendly default.
@@ -135,14 +135,14 @@ const preview: Preview = {
      * ```
      */
     a11y: {
-      test: 'todo',
+      test: "todo",
       config: {
         // The library already fails on incomplete form controls and missing
         // labels; keep those at the strictest level so the report is short.
         rules: [
-          { id: 'label', enabled: true },
-          { id: 'button-name', enabled: true },
-          { id: 'aria-roles', enabled: true },
+          { id: "label", enabled: true },
+          { id: "button-name", enabled: true },
+          { id: "aria-roles", enabled: true },
         ],
       },
     },
@@ -176,24 +176,24 @@ const preview: Preview = {
     viewport: {
       viewports: {
         mobile: {
-          name: 'Mobile (375px)',
-          styles: { width: '375px', height: '780px' },
-          type: 'mobile',
+          name: "Mobile (375px)",
+          styles: { width: "375px", height: "780px" },
+          type: "mobile",
         },
         tablet: {
-          name: 'Tablet (768px)',
-          styles: { width: '768px', height: '1024px' },
-          type: 'tablet',
+          name: "Tablet (768px)",
+          styles: { width: "768px", height: "1024px" },
+          type: "tablet",
         },
         desktop: {
-          name: 'Desktop (1280px)',
-          styles: { width: '1280px', height: '900px' },
-          type: 'desktop',
+          name: "Desktop (1280px)",
+          styles: { width: "1280px", height: "900px" },
+          type: "desktop",
         },
         wide: {
-          name: 'Wide (1920px)',
-          styles: { width: '1920px', height: '1080px' },
-          type: 'desktop',
+          name: "Wide (1920px)",
+          styles: { width: "1920px", height: "1080px" },
+          type: "desktop",
         },
       },
     },
@@ -203,8 +203,8 @@ const preview: Preview = {
      * below and are consumed by {@link withTheme}.
      */
     themes: {
-      light: { name: 'Light' },
-      dark: { name: 'Dark' },
+      light: { name: "Light" },
+      dark: { name: "Dark" },
     },
 
     /**
@@ -220,14 +220,14 @@ const preview: Preview = {
    */
   globalTypes: {
     theme: {
-      description: 'Global colour scheme for every story',
-      defaultValue: 'light',
+      description: "Global colour scheme for every story",
+      defaultValue: "light",
       toolbar: {
-        title: 'Theme',
-        icon: 'circlehollow',
+        title: "Theme",
+        icon: "circlehollow",
         items: [
-          { value: 'light', title: 'Light' },
-          { value: 'dark', title: 'Dark' },
+          { value: "light", title: "Light" },
+          { value: "dark", title: "Dark" },
         ],
         dynamicTitle: true,
       },

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
+use crate::reentrancy_guard::ReentrancyGuardState;
 use crate::{
     AllowanceData, BatchOp, BcForgeToken, BcForgeTokenClient, DataKey, Recipient, TokenError,
 };
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger as _;
-use soroban_sdk::{symbol_short, vec, Address, BytesN, Env, String, TryIntoVal, Val};
+use soroban_sdk::{symbol_short, vec, Address, BytesN, Env, String, Symbol, TryIntoVal, Val};
 
 fn setup_contract(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let contract_id = env.register(BcForgeToken, ());
@@ -30,6 +31,19 @@ fn setup(env: &Env) -> (BcForgeTokenClient<'_>, Address) {
     let (client, _) = setup_contract(env);
     let admin = init_default(env, &client);
     (client, admin)
+}
+
+/// Forces a `reentrancy_guard!` slot into the `Entered` state, simulating a
+/// recursive callback reaching the guarded function while it is already
+/// executing. Used to verify that `transfer_from`, `burn`, and `burn_from`
+/// are now guarded, mirroring how `transfer`/`approve`/`batch_transfer` are
+/// already protected.
+fn force_guard_entered(env: &Env, contract_id: &Address, guard_key: &str) {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&Symbol::new(env, guard_key), &ReentrancyGuardState::Entered);
+    });
 }
 
 /// Proposes a privileged action and advances the ledger past the #914
@@ -182,6 +196,109 @@ fn test_batch_transfer_while_paused_returns_error() {
 
     let recipients = vec![&env, (recipient, 10_i128)];
     let result = client.try_batch_transfer(&from, &recipients);
+    assert!(result.is_err());
+}
+
+/// #1365 — `batch_transfer` must validate the sender's *aggregate* outflow
+/// against the transfer rate limit once, rather than re-checking (and
+/// re-consuming) the rate limit allowance once per recipient. With a
+/// per-address call allowance of 1, the old per-recipient check would
+/// already fail partway through a single multi-recipient batch; the fixed
+/// aggregate check consumes exactly one allowance for the whole batch.
+#[test]
+fn test_batch_transfer_rate_limit_checks_aggregate_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let from = Address::generate(&env);
+    let recipient_a = Address::generate(&env);
+    let recipient_b = Address::generate(&env);
+    let recipient_c = Address::generate(&env);
+
+    client.mint(&admin, &from, &1000);
+
+    env.as_contract(&contract_id, || {
+        bc_forge_rate_limit::BcForgeRateLimit::internal_set_address_rate_limit(
+            &env,
+            &from,
+            &String::from_str(&env, crate::rate_limit::OPERATION_TRANSFER),
+            1,
+            3600,
+        );
+    });
+
+    let recipients = vec![
+        &env,
+        (recipient_a.clone(), 100_i128),
+        (recipient_b.clone(), 250_i128),
+        (recipient_c.clone(), 50_i128),
+    ];
+    // A single batch spanning 3 recipients must consume only one rate-limit
+    // allowance; if it still checked per-recipient, this would already fail
+    // on the second recipient.
+    client.batch_transfer(&from, &recipients);
+    assert_eq!(client.balance(&from), 600);
+
+    // The single allowance for the window is now exhausted.
+    let more = vec![&env, (recipient_a, 1_i128)];
+    let result = client.try_batch_transfer(&from, &more);
+    assert!(result.is_err());
+}
+
+/// #1366 — `transfer_from` must be reentrancy-guarded like `transfer`.
+#[test]
+fn test_transfer_from_rejects_reentrant_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let from = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    client.mint(&admin, &from, &1000);
+    client.approve(&from, &spender, &500, &0);
+
+    force_guard_entered(&env, &contract_id, "transfer_from_guard");
+
+    let result = client.try_transfer_from(&spender, &from, &to, &100);
+    assert!(result.is_err());
+}
+
+/// #1366 — `burn` must be reentrancy-guarded like `transfer`.
+#[test]
+fn test_burn_rejects_reentrant_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let from = Address::generate(&env);
+
+    client.mint(&admin, &from, &1000);
+
+    force_guard_entered(&env, &contract_id, "burn_guard");
+
+    let result = client.try_burn(&from, &100);
+    assert!(result.is_err());
+}
+
+/// #1366 — `burn_from` must be reentrancy-guarded like `transfer`.
+#[test]
+fn test_burn_from_rejects_reentrant_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let contract_id = client.address.clone();
+    let from = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&admin, &from, &1000);
+    client.approve(&from, &spender, &500, &0);
+
+    force_guard_entered(&env, &contract_id, "burn_from_guard");
+
+    let result = client.try_burn_from(&spender, &from, &100);
     assert!(result.is_err());
 }
 
@@ -1525,6 +1642,74 @@ fn test_update_metadata_rejects_unauthorized_caller() {
     assert!(result.is_err());
     assert_eq!(client.name(), String::from_str(&env, "bc-forge Token"));
     assert_eq!(client.symbol(), String::from_str(&env, "SFG"));
+}
+
+#[test]
+fn test_transfer_charges_fee_and_routes_to_treasury() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &sender, &1_000);
+
+    client.set_treasury(&admin, &treasury);
+    propose_and_wait(
+        &env,
+        &client,
+        &admin,
+        &bc_forge_admin::PrivilegeAction::SetFeeConfig,
+    );
+    client.set_fee_config(&admin, &sample_fee_config());
+
+    client.transfer(&sender, &recipient, &100);
+    assert_eq!(client.balance(&sender), 890);
+    assert_eq!(client.balance(&recipient), 100);
+    assert_eq!(client.balance(&treasury), 10);
+
+    // Self-transfer with fee
+    client.transfer(&sender, &sender, &100);
+    assert_eq!(client.balance(&sender), 880);
+    assert_eq!(client.balance(&treasury), 20);
+
+    // Transfer to treasury with fee
+    client.transfer(&sender, &treasury, &100);
+    assert_eq!(client.balance(&sender), 770);
+    assert_eq!(client.balance(&treasury), 130);
+}
+
+#[test]
+fn test_transfer_fee_exemption() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    env.as_contract(&client.address, || {
+        bc_forge_admin::grant_role(&env, &admin, bc_forge_admin::Role::Minter, &admin);
+    });
+    client.mint(&admin, &sender, &1_000);
+    client.set_treasury(&admin, &treasury);
+    propose_and_wait(
+        &env,
+        &client,
+        &admin,
+        &bc_forge_admin::PrivilegeAction::SetFeeConfig,
+    );
+    client.set_fee_config(&admin, &sample_fee_config());
+    client.set_fee_exemption(&admin, &sender, &crate::FeeExemption { exemption_type: 1 });
+
+    client.transfer(&sender, &recipient, &100);
+    assert_eq!(client.balance(&sender), 900);
+    assert_eq!(client.balance(&recipient), 100);
+    assert_eq!(client.balance(&treasury), 0);
 }
 
 // ─── per-minter allowances (#1327), mint streams (#1328), diagnostics (#1325) ──

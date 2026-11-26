@@ -210,7 +210,9 @@ impl YieldVaultContract {
     }
 
     fn write_cooldown_config(env: &Env, config: &CooldownConfig) {
-        env.storage().instance().set(&DataKey::CooldownConfig, config);
+        env.storage()
+            .instance()
+            .set(&DataKey::CooldownConfig, config);
     }
 
     fn read_queued_withdrawal(env: &Env, user: &Address) -> Option<QueuedWithdrawal> {
@@ -254,7 +256,9 @@ impl YieldVaultContract {
             let mut state = match Self::read_user_emergency_state(env, user) {
                 Some(mut s) => {
                     if config.emergency_window_ledgers > 0
-                        && current_ledger >= s.window_start_ledger.saturating_add(config.emergency_window_ledgers)
+                        && current_ledger
+                            >= s.window_start_ledger
+                                .saturating_add(config.emergency_window_ledgers)
                     {
                         s.amount_withdrawn = 0;
                         s.window_start_ledger = current_ledger;
@@ -437,8 +441,8 @@ impl YieldVaultContract {
         Self::ensure_initialized(&env)?;
         caller.require_auth();
 
-        let queued = Self::read_queued_withdrawal(&env, &caller)
-            .ok_or(VaultError::NoQueuedWithdrawal)?;
+        let queued =
+            Self::read_queued_withdrawal(&env, &caller).ok_or(VaultError::NoQueuedWithdrawal)?;
 
         if env.ledger().sequence() < queued.release_ledger {
             return Err(VaultError::CooldownNotMet);
@@ -451,6 +455,7 @@ impl YieldVaultContract {
         underlying_client.transfer(&env.current_contract_address(), &caller, &queued.amount);
 
         events::emit_withdraw(&env, &caller, queued.shares, queued.amount);
+        events::emit_claim(&env, &caller, queued.shares, queued.amount);
         Ok(queued.amount)
     }
 
@@ -511,7 +516,10 @@ impl YieldVaultContract {
         Self::write_supply(&env, total_shares - shares);
 
         if config.enabled {
-            let release_ledger = env.ledger().sequence().saturating_add(config.cooldown_ledgers);
+            let release_ledger = env
+                .ledger()
+                .sequence()
+                .saturating_add(config.cooldown_ledgers);
             let queued = QueuedWithdrawal {
                 shares,
                 amount: tokens_out,

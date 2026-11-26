@@ -25,6 +25,8 @@
 //! | `SuperAdmin(Address)` | `persistent()` | `bool` (`true`) | Super-admin mapping populated by `migrate_admin` | On migration |
 //! | `UpgradeProposal(u64)` | `persistent()` | `UpgradeProposal` | Multi-sig WASM upgrade proposal state | On read/write by `cancel_proposal` (#662); submission and voting are owned by other issues in #653-#663 |
 //! | `UpgradeProposalIdCounter` | `instance()` | `u64` | Auto-incrementing upgrade proposal ID generator | No |
+//! | `ProposalWasmHash(u64)` | `instance()` | `BytesN<32>` | Target WASM hash bound to a proposal (#1310) | On write/read |
+//! | `UpgradeProposalWasmHash(u64)` | `persistent()` | `BytesN<32>` | Target WASM hash bound to an upgrade proposal (#1310) | On write/read |
 //!
 //! ## `Role` Enum
 //!
@@ -62,6 +64,7 @@
 //! | `23` | `ProposalExpired` | `execute_upgrade` / `execute_upgrade_batch` past the proposal expiry ledger |
 //! | `24` | `ProposalCancelled` | approve/execute on a legacy proposal cancelled by its creator |
 //! | `32` | `ThresholdExceedsPoolSize` | `remove_admin` when removing a member would drop pool size below threshold |
+//! | `33` | `WasmHashMismatch` | `execute_upgrade` / `emergency_execute_upgrade` when supplied hash differs from proposal hash (#1310) |
 //!
 //! ## Event Emissions
 //!
@@ -329,6 +332,8 @@ pub enum AdminError {
     RoleProposalRequiresExecution = 31,
     /// Removing an admin pool member would leave fewer members than the approval threshold.
     ThresholdExceedsPoolSize = 32,
+    /// The supplied WASM hash does not match the hash bound to the proposal (#1310).
+    WasmHashMismatch = 33,
 }
 
 /// Storage keys for the access-control layer.
@@ -404,6 +409,10 @@ pub enum AdminKey {
     /// Role grant action attached to a legacy proposal, keyed by proposal ID.
     /// Appended to preserve every existing storage-key discriminant.
     RoleGrantProposal(u64),
+    /// Target WASM hash bound to a proposal (#1310).
+    ProposalWasmHash(u64),
+    /// Target WASM hash bound to an upgrade proposal (#1310).
+    UpgradeProposalWasmHash(u64),
 }
 
 /// Instance TTL and the count of known singleton admin keys.
@@ -820,6 +829,31 @@ mod tests {
             description: String,
         ) -> Result<u64, AdminError> {
             super::submit_upgrade_proposal(&env, submitter, new_wasm_hash, description)
+        }
+
+        pub fn create_upgrade_proposal(
+            env: Env,
+            creator: Address,
+            wasm_hash: BytesN<32>,
+            description: String,
+        ) -> u64 {
+            super::create_upgrade_proposal(&env, creator, wasm_hash, description)
+        }
+
+        pub fn execute_upgrade_proposal(
+            env: Env,
+            executor: Address,
+            proposal_id: u64,
+        ) -> Result<(), AdminError> {
+            super::execute_upgrade_proposal(&env, executor, proposal_id)
+        }
+
+        pub fn get_proposal_wasm_hash(env: Env, proposal_id: u64) -> Option<BytesN<32>> {
+            super::get_proposal_wasm_hash(&env, proposal_id)
+        }
+
+        pub fn get_upgrade_proposal_wasm_hash(env: Env, proposal_id: u64) -> Option<BytesN<32>> {
+            super::get_upgrade_proposal_wasm_hash(&env, proposal_id)
         }
 
         /// Lists legacy [`Proposal`] IDs by state (#917).
@@ -4488,7 +4522,8 @@ mod tests {
         let expected = RoleFlags::Admin.bits()
             | RoleFlags::Minter.bits()
             | RoleFlags::SuperAdmin.bits()
-            | RoleFlags::Pauser.bits();
+            | RoleFlags::Pauser.bits()
+            | RoleFlags::Compliance.bits();
         assert_eq!(mask, expected);
     }
 
@@ -4668,6 +4703,224 @@ mod tests {
 
         let info = client.get_storage_info();
         assert_eq!(info.instance_ttl, extended_ttl);
+    }
+
+    // ── Bind Executed WASM Hash to Approved Proposal (#1310) ────────────────────
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #14)")]
+    fn test_create_upgrade_proposal_rejects_zero_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+        let desc = String::from_str(&env, "Upgrade with zero hash");
+        client.create_upgrade_proposal(&admin, &zero_hash, &desc);
+    }
+
+    #[test]
+    fn test_create_upgrade_proposal_stores_bound_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let valid_hash = BytesN::from_array(&env, &[42u8; 32]);
+        let desc = String::from_str(&env, "Valid upgrade proposal");
+        let id = client.create_upgrade_proposal(&admin, &valid_hash, &desc);
+        assert_eq!(client.get_proposal_wasm_hash(&id), Some(valid_hash));
+    }
+
+    #[test]
+    fn test_execute_upgrade_rejects_wasm_hash_mismatch() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let bound_hash = uploaded_wasm_hash(&env);
+        let other_hash = BytesN::from_array(&env, &[99u8; 32]);
+
+        let id = client.create_upgrade_proposal(
+            &admin,
+            &bound_hash,
+            &String::from_str(&env, "Bound upgrade"),
+        );
+        client.approve_proposal(&member, &id);
+        assert!(client.is_proposal_ready(&id));
+        advance_past_timelock(&env);
+
+        // Attempting to execute with a mismatched hash returns WasmHashMismatch
+        let res = client.try_execute_upgrade(&admin, &id, &other_hash);
+        assert_eq!(res, Err(Ok(AdminError::WasmHashMismatch)));
+
+        // Proposal has NOT been marked executed on mismatch, so correct execution succeeds
+        let res_correct = client.try_execute_upgrade(&admin, &id, &bound_hash);
+        assert_eq!(res_correct, Ok(Ok(())));
+
+        // Replay attempt fails with ProposalAlreadyExecuted
+        let res_replay = client.try_execute_upgrade(&admin, &id, &bound_hash);
+        assert_eq!(res_replay, Err(Ok(AdminError::ProposalAlreadyExecuted)));
+    }
+
+    #[test]
+    fn test_emergency_execute_upgrade_rejects_wasm_hash_mismatch_and_cannot_replay() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let bound_hash = uploaded_wasm_hash(&env);
+        let other_hash = BytesN::from_array(&env, &[77u8; 32]);
+
+        let id = client.create_upgrade_proposal(
+            &admin,
+            &bound_hash,
+            &String::from_str(&env, "Emergency upgrade"),
+        );
+        client.approve_proposal(&member, &id);
+
+        // Emergency execute with mismatched hash fails
+        let res = client.try_emergency_execute_upgrade(&admin, &id, &other_hash);
+        assert_eq!(res, Err(Ok(AdminError::WasmHashMismatch)));
+
+        // Emergency execute with matching hash succeeds
+        let res_ok = client.try_emergency_execute_upgrade(&admin, &id, &bound_hash);
+        assert_eq!(res_ok, Ok(Ok(())));
+
+        // Replay fails
+        let res_replay = client.try_emergency_execute_upgrade(&admin, &id, &bound_hash);
+        assert_eq!(res_replay, Err(Ok(AdminError::ProposalAlreadyExecuted)));
+    }
+
+    #[test]
+    fn test_cancel_legacy_proposal_removes_bound_wasm_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        client.set_admin(&admin);
+
+        let bound_hash = BytesN::from_array(&env, &[123u8; 32]);
+        let id = client.create_upgrade_proposal(
+            &admin,
+            &bound_hash,
+            &String::from_str(&env, "To be cancelled"),
+        );
+        assert_eq!(client.get_proposal_wasm_hash(&id), Some(bound_hash));
+
+        let cancel_res = client.try_cancel_legacy_proposal(&admin, &id);
+        assert_eq!(cancel_res, Ok(Ok(())));
+
+        assert_eq!(client.get_proposal_wasm_hash(&id), None);
+    }
+
+    #[test]
+    fn test_execute_upgrade_proposal_flow_and_no_replay() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let bound_hash = uploaded_wasm_hash(&env);
+        client.register_wasm_hash(&admin, &bound_hash);
+
+        let proposal_id = client.submit_upgrade_proposal(
+            &admin,
+            &bound_hash,
+            &String::from_str(&env, "UpgradeProposal flow"),
+        );
+
+        assert_eq!(
+            client.get_upgrade_proposal_wasm_hash(&proposal_id),
+            Some(bound_hash.clone())
+        );
+
+        // Before quorum is met
+        let res_no_quorum = client.try_execute_upgrade_proposal(&admin, &proposal_id);
+        assert_eq!(res_no_quorum, Err(Ok(AdminError::QuorumNotMet)));
+
+        // Approve
+        let approve_res = client.try_approve_upgrade(&member, &proposal_id);
+        assert_eq!(approve_res, Ok(Ok(())));
+
+        // Timelock active
+        let res_locked = client.try_execute_upgrade_proposal(&admin, &proposal_id);
+        assert_eq!(res_locked, Err(Ok(AdminError::TimelockActive)));
+
+        advance_past_timelock(&env);
+
+        // Now execute_upgrade_proposal succeeds using the recorded hash
+        let res_exec = client.try_execute_upgrade_proposal(&admin, &proposal_id);
+        assert_eq!(res_exec, Ok(Ok(())));
+
+        // Replay attempt fails with ProposalAlreadyExecuted
+        let res_replay = client.try_execute_upgrade_proposal(&admin, &proposal_id);
+        assert_eq!(res_replay, Err(Ok(AdminError::ProposalAlreadyExecuted)));
+    }
+
+    #[test]
+    fn test_execute_upgrade_unifies_upgrade_proposal_with_mismatch_check() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(AdminContract, ());
+        let client = AdminContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+
+        client.set_admin(&admin);
+        client.set_admin_pool(&vec![&env, admin.clone(), member.clone()], &2);
+
+        let bound_hash = uploaded_wasm_hash(&env);
+        client.register_wasm_hash(&admin, &bound_hash);
+
+        let proposal_id = client.submit_upgrade_proposal(
+            &admin,
+            &bound_hash,
+            &String::from_str(&env, "Unified UpgradeProposal"),
+        );
+
+        client.approve_upgrade(&member, &proposal_id);
+        advance_past_timelock(&env);
+
+        let wrong_hash = BytesN::from_array(&env, &[88u8; 32]);
+
+        // Mismatched hash reverts with WasmHashMismatch
+        let res_mismatch = client.try_execute_upgrade(&admin, &proposal_id, &wrong_hash);
+        assert_eq!(res_mismatch, Err(Ok(AdminError::WasmHashMismatch)));
+
+        // Matching hash succeeds
+        let res_ok = client.try_execute_upgrade(&admin, &proposal_id, &bound_hash);
+        assert_eq!(res_ok, Ok(Ok(())));
+
+        // Second execution attempt rejects
+        let res_replay = client.try_execute_upgrade(&admin, &proposal_id, &bound_hash);
+        assert_eq!(res_replay, Err(Ok(AdminError::ProposalAlreadyExecuted)));
     }
 
     #[test]
