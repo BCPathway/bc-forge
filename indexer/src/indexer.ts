@@ -1,28 +1,31 @@
-import { rpc as SorobanRpc, xdr, scValToNative } from '@stellar/stellar-sdk';
-import { PrismaClient } from '@prisma/client';
-import dotenv from 'dotenv';
-import { publishIndexerEvent } from './events';
-import { applyLedgerEventAggregates, type AggregateStore } from './aggregates';
-import type { LedgerEvent } from './ledger';
-import { logger } from './lib/logger';
-import { setLatestNetworkLedger } from './metrics';
+import { rpc as SorobanRpc, xdr, scValToNative } from "@stellar/stellar-sdk";
+import { PrismaClient } from "@prisma/client";
+import dotenv from "dotenv";
+import { publishIndexerEvent } from "./events";
+import { applyLedgerEventAggregates, type AggregateStore } from "./aggregates";
+import type { LedgerEvent } from "./ledger";
+import { logger } from "./lib/logger";
+import { setLatestNetworkLedger } from "./metrics";
 import {
   hasContinuousParentChain,
   reconcileLedgerCursor,
   seedLedgerCheckpoints,
   toLedgerCoordinate,
-} from './cursor';
+} from "./cursor";
 
 dotenv.config();
 
 const prisma = new PrismaClient();
 
-const RPC_URL = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
+const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.CONTRACT_ID;
-const LAG_THRESHOLD = Number.parseInt(process.env.INDEXER_LAG_THRESHOLD || '100', 10);
+const LAG_THRESHOLD = Number.parseInt(
+  process.env.INDEXER_LAG_THRESHOLD || "100",
+  10,
+);
 
 if (!CONTRACT_ID) {
-  throw new Error('CONTRACT_ID environment variable is required');
+  throw new Error("CONTRACT_ID environment variable is required");
 }
 
 const server = new SorobanRpc.Server(RPC_URL);
@@ -31,10 +34,12 @@ const server = new SorobanRpc.Server(RPC_URL);
  * Main indexer loop to fetch and process Soroban events.
  */
 export async function runIndexer() {
-  logger.info('starting contract indexer', { contractId: CONTRACT_ID });
+  logger.info("starting contract indexer", { contractId: CONTRACT_ID });
 
   // 1. Get the last indexed ledger
-  let lastLedger = await prisma.lastIndexedLedger.findUnique({ where: { id: 1 } });
+  let lastLedger = await prisma.lastIndexedLedger.findUnique({
+    where: { id: 1 },
+  });
   if (lastLedger) {
     await seedLedgerCheckpoints(prisma, server, lastLedger);
   }
@@ -48,8 +53,8 @@ export async function runIndexer() {
       setLatestNetworkLedger(currentLedger);
       const lag = Math.max(0, currentLedger - (startLedger - 1));
       if (lag > LAG_THRESHOLD) {
-        logger.warn('indexer lag threshold exceeded', {
-          alert: 'indexer_lag_threshold_exceeded',
+        logger.warn("indexer lag threshold exceeded", {
+          alert: "indexer_lag_threshold_exceeded",
           lastIndexedLedger: startLedger - 1,
           latestNetworkLedger: currentLedger,
           lag,
@@ -59,12 +64,12 @@ export async function runIndexer() {
 
       if (startLedger > currentLedger) {
         // Wait for new ledgers
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise((resolve) => setTimeout(resolve, 5000));
         continue;
       }
 
       const endLedger = Math.min(startLedger + 1000, currentLedger);
-      logger.info('indexing ledger range', { startLedger, endLedger });
+      logger.info("indexing ledger range", { startLedger, endLedger });
 
       const ledgerStart = Math.max(1, startLedger - 1);
       const ledgerResponse = await server.getLedgers({
@@ -72,17 +77,21 @@ export async function runIndexer() {
         pagination: { limit: endLedger - ledgerStart + 1 },
       });
       const coordinates = ledgerResponse.ledgers
-        .filter((ledger) => ledger.sequence >= startLedger && ledger.sequence <= endLedger)
+        .filter(
+          (ledger) =>
+            ledger.sequence >= startLedger && ledger.sequence <= endLedger,
+        )
         .map(toLedgerCoordinate);
-      const previousCoordinate = lastLedger?.ledger === startLedger - 1 && lastLedger.hash
-        ? {
-          ledger: lastLedger.ledger,
-          hash: lastLedger.hash,
-          parentHash: lastLedger.parentHash ?? '',
-        }
-        : ledgerResponse.ledgers
-          .filter((ledger) => ledger.sequence === startLedger - 1)
-          .map(toLedgerCoordinate)[0];
+      const previousCoordinate =
+        lastLedger?.ledger === startLedger - 1 && lastLedger.hash
+          ? {
+              ledger: lastLedger.ledger,
+              hash: lastLedger.hash,
+              parentHash: lastLedger.parentHash ?? "",
+            }
+          : ledgerResponse.ledgers
+              .filter((ledger) => ledger.sequence === startLedger - 1)
+              .map(toLedgerCoordinate)[0];
 
       if (
         coordinates.length !== endLedger - startLedger + 1 ||
@@ -91,7 +100,9 @@ export async function runIndexer() {
         if (lastLedger) {
           await reconcileLedgerCursor(prisma, server, lastLedger);
         }
-        throw new Error(`Ledger sequence or parent hash mismatch at ${startLedger}`);
+        throw new Error(
+          `Ledger sequence or parent hash mismatch at ${startLedger}`,
+        );
       }
 
       const response = await server.getEvents({
@@ -99,7 +110,7 @@ export async function runIndexer() {
         endLedger,
         filters: [
           {
-            type: 'contract',
+            type: "contract",
             contractIds: [CONTRACT_ID as string],
           },
         ],
@@ -110,9 +121,13 @@ export async function runIndexer() {
       }
 
       const latestCoordinate = coordinates[coordinates.length - 1];
-      if (!latestCoordinate) throw new Error(`No ledger coordinates returned through ${endLedger}`);
+      if (!latestCoordinate)
+        throw new Error(`No ledger coordinates returned through ${endLedger}`);
       await prisma.$transaction([
-        prisma.indexedLedger.createMany({ data: coordinates, skipDuplicates: true }),
+        prisma.indexedLedger.createMany({
+          data: coordinates,
+          skipDuplicates: true,
+        }),
         prisma.lastIndexedLedger.upsert({
           where: { id: 1 },
           update: {
@@ -127,12 +142,12 @@ export async function runIndexer() {
       startLedger = endLedger + 1;
 
       // Small delay to avoid hammering the RPC
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (error) {
-      logger.error('indexer ingestion error', {
+      logger.error("indexer ingestion error", {
         error: error instanceof Error ? error.message : String(error),
       });
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }
 }
@@ -143,7 +158,7 @@ export async function runIndexer() {
  */
 function ledgerCloseTime(event: SorobanRpc.Api.EventResponse): Date {
   const closedAt = (event as { ledgerClosedAt?: unknown }).ledgerClosedAt;
-  if (typeof closedAt === 'string') {
+  if (typeof closedAt === "string") {
     const parsed = new Date(closedAt);
     if (!Number.isNaN(parsed.getTime())) {
       return parsed;
@@ -158,50 +173,62 @@ function ledgerCloseTime(event: SorobanRpc.Api.EventResponse): Date {
  */
 async function persistEventRow(
   client: PrismaClient,
-  model: 'mint' | 'transfer' | 'burn',
+  model: "mint" | "transfer" | "burn",
   data: Record<string, unknown>,
   ledgerEvent: LedgerEvent,
   event: SorobanRpc.Api.EventResponse,
   newSupply?: string,
 ): Promise<unknown> {
-  const run = async (tx: AggregateStore & Record<string, { create: (args: { data: Record<string, unknown> }) => Promise<unknown> }>) => {
+  const run = async (
+    tx: AggregateStore &
+      Record<
+        string,
+        {
+          create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+        }
+      >,
+  ) => {
     const created = await (tx as any)[model].create({ data });
-    if (typeof (tx as AggregateStore).holder?.upsert === 'function') {
-      await applyLedgerEventAggregates(tx as unknown as AggregateStore, ledgerEvent, {
-        ledger: event.ledger,
-        txHash: event.txHash,
-        timestamp: ledgerCloseTime(event),
-        newSupply,
-      });
+    if (typeof (tx as AggregateStore).holder?.upsert === "function") {
+      await applyLedgerEventAggregates(
+        tx as unknown as AggregateStore,
+        ledgerEvent,
+        {
+          ledger: event.ledger,
+          txHash: event.txHash,
+          timestamp: ledgerCloseTime(event),
+          newSupply,
+        },
+      );
     }
     return created;
   };
   const transactional = client as PrismaClient & {
     $transaction?: <T>(fn: (tx: PrismaClient) => Promise<T>) => Promise<T>;
   };
-  if (typeof transactional.$transaction === 'function') {
+  if (typeof transactional.$transaction === "function") {
     return transactional.$transaction((tx) => run(tx as never));
   }
   return run(client as never);
 }
 
 type IndexedEventModel =
-  | 'vaultDeposit'
-  | 'vaultWithdrawal'
-  | 'vaultClaim'
-  | 'wrapperUpdate'
-  | 'vestingClaim'
-  | 'splitDistribution'
-  | 'splitFailure';
+  | "vaultDeposit"
+  | "vaultWithdrawal"
+  | "vaultClaim"
+  | "wrapperUpdate"
+  | "vestingClaim"
+  | "splitDistribution"
+  | "splitFailure";
 
 /**
  * Stringify a decoded Soroban value. Amounts and ids arrive as bigint.
  */
 function scValString(value: unknown): string {
   if (value === null || value === undefined) {
-    throw new Error('missing event field');
+    throw new Error("missing event field");
   }
-  return typeof value === 'bigint' ? value.toString() : String(value);
+  return typeof value === "bigint" ? value.toString() : String(value);
 }
 
 /**
@@ -239,17 +266,17 @@ export async function processEvent(
     // fields, switch on the trailing `version` in these cases before
     // interpreting the other elements.
     switch (topic) {
-      case 'mint': {
+      case "mint": {
         const decoded = scValToNative(data as any);
         // (admin, to, amount, new_balance, new_supply, version)
         const ledgerEvent: LedgerEvent = {
-          type: 'mint',
+          type: "mint",
           to: decoded[1],
           amount: decoded[2].toString(),
         };
         const row = await persistEventRow(
           database,
-          'mint',
+          "mint",
           {
             to: decoded[1],
             amount: decoded[2].toString(),
@@ -260,20 +287,23 @@ export async function processEvent(
           event,
           decoded[4]?.toString(),
         );
-        publishIndexerEvent({ type: 'mint', data: row as unknown as Record<string, unknown> });
+        publishIndexerEvent({
+          type: "mint",
+          data: row as unknown as Record<string, unknown>,
+        });
         break;
       }
-      case 'burn': {
+      case "burn": {
         const decoded = scValToNative(data as any);
         // (from, amount, new_balance, new_supply, version)
         const ledgerEvent: LedgerEvent = {
-          type: 'burn',
+          type: "burn",
           from: decoded[0],
           amount: decoded[1].toString(),
         };
         const row = await persistEventRow(
           database,
-          'burn',
+          "burn",
           {
             from: decoded[0],
             amount: decoded[1].toString(),
@@ -284,21 +314,24 @@ export async function processEvent(
           event,
           decoded[3]?.toString(),
         );
-        publishIndexerEvent({ type: 'burn', data: row as unknown as Record<string, unknown> });
+        publishIndexerEvent({
+          type: "burn",
+          data: row as unknown as Record<string, unknown>,
+        });
         break;
       }
-      case 'xfer': {
+      case "xfer": {
         const decoded = scValToNative(data as any);
         // (from, to, amount, version)
         const ledgerEvent: LedgerEvent = {
-          type: 'transfer',
+          type: "transfer",
           from: decoded[0],
           to: decoded[1],
           amount: decoded[2].toString(),
         };
         const row = await persistEventRow(
           database,
-          'transfer',
+          "transfer",
           {
             from: decoded[0],
             to: decoded[1],
@@ -309,21 +342,24 @@ export async function processEvent(
           ledgerEvent,
           event,
         );
-        publishIndexerEvent({ type: 'transfer', data: row as unknown as Record<string, unknown> });
+        publishIndexerEvent({
+          type: "transfer",
+          data: row as unknown as Record<string, unknown>,
+        });
         break;
       }
-      case 'xfer_frm': {
+      case "xfer_frm": {
         const decoded = scValToNative(data as any);
         // (spender, from, to, amount, remaining_allowance, version)
         const ledgerEvent: LedgerEvent = {
-          type: 'transfer',
+          type: "transfer",
           from: decoded[1],
           to: decoded[2],
           amount: decoded[3].toString(),
         };
         const row = await persistEventRow(
           database,
-          'transfer',
+          "transfer",
           {
             from: decoded[1],
             to: decoded[2],
@@ -334,14 +370,17 @@ export async function processEvent(
           ledgerEvent,
           event,
         );
-        publishIndexerEvent({ type: 'transfer', data: row as unknown as Record<string, unknown> });
+        publishIndexerEvent({
+          type: "transfer",
+          data: row as unknown as Record<string, unknown>,
+        });
         break;
       }
-      case 'deposit': {
+      case "deposit": {
         const decoded = scValToNative(data as any);
         // yield_vault `deposit`: (caller, assets, shares)
         // wrapper `deposit`: (caller, assets, shares, version)
-        const row = await persistIndexedRow(database, 'vaultDeposit', {
+        const row = await persistIndexedRow(database, "vaultDeposit", {
           caller: scValString(decoded[0]),
           assets: scValString(decoded[1]),
           shares: scValString(decoded[2]),
@@ -349,16 +388,16 @@ export async function processEvent(
           txHash: event.txHash,
         });
         publishIndexerEvent({
-          type: 'vaultDeposit',
+          type: "vaultDeposit",
           data: row as unknown as Record<string, unknown>,
         });
         break;
       }
-      case 'wrap': {
+      case "wrap": {
         const decoded = scValToNative(data as any);
         // wrapper `wrap`: (caller, amount, wrapped_amount)
-        const row = await persistIndexedRow(database, 'wrapperUpdate', {
-          kind: 'wrap',
+        const row = await persistIndexedRow(database, "wrapperUpdate", {
+          kind: "wrap",
           caller: scValString(decoded[0]),
           amount: scValString(decoded[1]),
           resultAmount: scValString(decoded[2]),
@@ -366,16 +405,16 @@ export async function processEvent(
           txHash: event.txHash,
         });
         publishIndexerEvent({
-          type: 'wrapperUpdate',
+          type: "wrapperUpdate",
           data: row as unknown as Record<string, unknown>,
         });
         break;
       }
-      case 'unwrap': {
+      case "unwrap": {
         const decoded = scValToNative(data as any);
         // wrapper `unwrap`: (caller, wrapped_amount, underlying_amount)
-        const row = await persistIndexedRow(database, 'wrapperUpdate', {
-          kind: 'unwrap',
+        const row = await persistIndexedRow(database, "wrapperUpdate", {
+          kind: "unwrap",
           caller: scValString(decoded[0]),
           amount: scValString(decoded[1]),
           resultAmount: scValString(decoded[2]),
@@ -383,30 +422,30 @@ export async function processEvent(
           txHash: event.txHash,
         });
         publishIndexerEvent({
-          type: 'wrapperUpdate',
+          type: "wrapperUpdate",
           data: row as unknown as Record<string, unknown>,
         });
         break;
       }
-      case 'v_rel': {
+      case "v_rel": {
         const decoded = scValToNative(data as any);
         // vesting `v_rel`: (beneficiary, amount)
-        const row = await persistIndexedRow(database, 'vestingClaim', {
+        const row = await persistIndexedRow(database, "vestingClaim", {
           beneficiary: scValString(decoded[0]),
           amount: scValString(decoded[1]),
           ledger: event.ledger,
           txHash: event.txHash,
         });
         publishIndexerEvent({
-          type: 'vestingClaim',
+          type: "vestingClaim",
           data: row as unknown as Record<string, unknown>,
         });
         break;
       }
-      case 'pyo_succ': {
+      case "pyo_succ": {
         const decoded = scValToNative(data as any);
         // split `pyo_succ` data: (invoice_id, recipient, amount)
-        const row = await persistIndexedRow(database, 'splitDistribution', {
+        const row = await persistIndexedRow(database, "splitDistribution", {
           invoiceId: scValString(decoded[0]),
           recipient: scValString(decoded[1]),
           amount: scValString(decoded[2]),
@@ -414,7 +453,7 @@ export async function processEvent(
           txHash: event.txHash,
         });
         publishIndexerEvent({
-          type: 'splitDistribution',
+          type: "splitDistribution",
           data: row as unknown as Record<string, unknown>,
         });
         await (database as any).splitFailure?.updateMany?.({
@@ -427,10 +466,10 @@ export async function processEvent(
         });
         break;
       }
-      case 'withdraw':
-      case 'withdrw': {
+      case "withdraw":
+      case "withdrw": {
         const decoded = scValToNative(data as any);
-        const row = await persistIndexedRow(database, 'vaultWithdrawal', {
+        const row = await persistIndexedRow(database, "vaultWithdrawal", {
           caller: scValString(decoded[0]),
           shares: scValString(decoded[1]),
           assets: scValString(decoded[2]),
@@ -438,27 +477,27 @@ export async function processEvent(
           txHash: event.txHash,
         });
         publishIndexerEvent({
-          type: 'vaultWithdraw',
+          type: "vaultWithdraw",
           data: row as unknown as Record<string, unknown>,
         });
         break;
       }
-      case 'v_claim':
-      case 'w_claim': {
+      case "v_claim":
+      case "w_claim": {
         const decoded = scValToNative(data as any);
-        const row = await persistIndexedRow(database, 'vaultClaim', {
+        const row = await persistIndexedRow(database, "vaultClaim", {
           caller: scValString(decoded[0]),
           amount: scValString(decoded[2]),
           ledger: event.ledger,
           txHash: event.txHash,
         });
         publishIndexerEvent({
-          type: 'vaultClaim',
+          type: "vaultClaim",
           data: row as unknown as Record<string, unknown>,
         });
         break;
       }
-      case 'pyo_fail': {
+      case "pyo_fail": {
         const decoded = scValToNative(data as any);
         const invoiceId = scValString(decoded[0]);
         const recipient = scValString(decoded[1]);
@@ -479,7 +518,7 @@ export async function processEvent(
           },
         });
         publishIndexerEvent({
-          type: 'splitFailure',
+          type: "splitFailure",
           data: row as unknown as Record<string, unknown>,
         });
         break;
@@ -487,8 +526,8 @@ export async function processEvent(
     }
   } catch (err: any) {
     // Unique constraint violation might happen if we re-index a ledger
-    if (err.code !== 'P2002') {
-      logger.error('event processing error', {
+    if (err.code !== "P2002") {
+      logger.error("event processing error", {
         topic,
         error: err instanceof Error ? err.message : String(err),
       });

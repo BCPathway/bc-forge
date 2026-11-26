@@ -392,11 +392,7 @@ export class WrapperClient {
       }),
     ]);
 
-    return this.invokeContract(
-      'set_vault_state',
-      [addressToScVal(caller), stateScVal],
-      source,
-    );
+    return this.invokeContract('set_vault_state', [addressToScVal(caller), stateScVal], source);
   }
 
   /**
@@ -833,11 +829,7 @@ export class WrapperClient {
    * Claim a queued withdrawal.
    */
   async claimWithdrawal(signer: Keypair): Promise<TransactionResult> {
-    return this.invokeContract(
-      'claim_withdrawal',
-      [addressToScVal(signer.publicKey())],
-      signer,
-    );
+    return this.invokeContract('claim_withdrawal', [addressToScVal(signer.publicKey())], signer);
   }
 
   /**
