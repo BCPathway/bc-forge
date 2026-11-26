@@ -125,6 +125,9 @@ export type { VaultDepositWidgetProps } from "./VaultDepositWidget";
 export { APYChart } from "./APYChart";
 export type { APYChartProps, ApyChartPoint } from "./APYChart";
 
+export { VestingChart, computeVestingMetrics } from "./VestingChart";
+export type { VestingChartProps, VestingMetrics } from "./VestingChart";
+
 export { ProposalVotingPanel } from "./ProposalVotingPanel";
 export type {
   ProposalVotingPanelProps,
