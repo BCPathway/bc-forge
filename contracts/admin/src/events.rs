@@ -23,6 +23,23 @@ pub fn emit_role_granted(env: &Env, admin: &Address, role: Role, address: &Addre
     );
 }
 
+/// Emitted when a time-limited role is granted.
+///
+/// Topics: `role_gexp`
+/// Data:   `(admin, role, address, expires_at)`
+pub fn emit_role_granted_with_expiry(
+    env: &Env,
+    admin: &Address,
+    role: Role,
+    address: &Address,
+    expires_at: u32,
+) {
+    env.events().publish(
+        (symbol_short!("role_gexp"),),
+        (admin.clone(), role, address.clone(), expires_at),
+    );
+}
+
 /// Emitted when a role is revoked from an address.
 ///
 /// @notice Publishes role-revoke event data including the revoking admin, role, and address.

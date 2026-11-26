@@ -19,7 +19,7 @@
  * Anything that has to change with the theme belongs in the second group, not
  * here.
  */
-const path = require('node:path');
+const path = require("node:path");
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
@@ -31,7 +31,7 @@ module.exports = {
    * attribute form is what keeps the very first paint correct before React
    * hydrates.
    */
-  darkMode: ['class', '[data-theme="dark"]'],
+  darkMode: ["class", '[data-theme="dark"]'],
 
   /**
    * `content` must list every file that can contain a class name.
@@ -43,13 +43,13 @@ module.exports = {
    */
   content: [
     // The demo's own sources.
-    path.join(__dirname, 'src/**/*.{ts,tsx,html}'),
-    path.join(__dirname, 'index.html'),
+    path.join(__dirname, "src/**/*.{ts,tsx,html}"),
+    path.join(__dirname, "index.html"),
     // The published library (`@bc-forge/react`, `@bc-forge/ui`).
-    path.join(__dirname, '../src/**/*.{ts,tsx}'),
+    path.join(__dirname, "../src/**/*.{ts,tsx}"),
     // Storybook stories and the Storybook config itself.
-    path.join(__dirname, '../stories/**/*.{ts,tsx}'),
-    path.join(__dirname, '../.storybook/**/*.{ts,tsx}'),
+    path.join(__dirname, "../stories/**/*.{ts,tsx}"),
+    path.join(__dirname, "../.storybook/**/*.{ts,tsx}"),
   ],
 
   /**
@@ -66,23 +66,23 @@ module.exports = {
          * inline-styled component and a Tailwind utility agree.
          */
         brand: {
-          50: '#eef4ff',
-          100: '#d9e6ff',
-          200: '#bcd3ff',
-          300: '#8eb6ff',
-          400: '#598fff',
-          500: '#3366ff',
-          600: '#2563eb',
-          700: '#1d4fd7',
-          800: '#1e42ad',
-          900: '#1e3a87',
+          50: "#eef4ff",
+          100: "#d9e6ff",
+          200: "#bcd3ff",
+          300: "#8eb6ff",
+          400: "#598fff",
+          500: "#3366ff",
+          600: "#2563eb",
+          700: "#1d4fd7",
+          800: "#1e42ad",
+          900: "#1e3a87",
         },
         /** Stellar blue — network/explorer accents. */
         stellar: {
-          300: '#93c5fd',
-          500: '#3b82f6',
-          700: '#1d4ed8',
-          DEFAULT: '#3b82f6',
+          300: "#93c5fd",
+          500: "#3b82f6",
+          700: "#1d4ed8",
+          DEFAULT: "#3b82f6",
         },
         /**
          * Dark surfaces. `ink` is the page background, `elevated` the raised
@@ -90,14 +90,14 @@ module.exports = {
          * `surfaceDark` family in `designTokens`.
          */
         ink: {
-          900: '#070b14',
-          800: '#0b1220',
-          700: '#111a2e',
-          600: '#182338',
-          500: '#22304c',
+          900: "#070b14",
+          800: "#0b1220",
+          700: "#111a2e",
+          600: "#182338",
+          500: "#22304c",
         },
         /** Focus ring colour; identical to `theme.focus`. */
-        ring: '#6366f1',
+        ring: "#6366f1",
       },
 
       /**
@@ -105,12 +105,25 @@ module.exports = {
        * adds, matching `typography.display` in `designTokens`.
        */
       fontSize: {
-        display: ['3.5rem', { lineHeight: '1.05', letterSpacing: '-0.02em' }],
+        display: ["3.5rem", { lineHeight: "1.05", letterSpacing: "-0.02em" }],
       },
 
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        sans: [
+          "Inter",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "Roboto",
+          "sans-serif",
+        ],
+        mono: [
+          "JetBrains Mono",
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "monospace",
+        ],
       },
 
       /**
@@ -119,12 +132,12 @@ module.exports = {
        * what the per-surface blur widths layer on top of.
        */
       borderRadius: {
-        glass: '16px',
+        glass: "16px",
       },
       boxShadow: {
-        glass: '0 8px 32px rgba(2, 6, 23, 0.24)',
-        'glass-lg': '0 24px 64px rgba(2, 6, 23, 0.32)',
-        focus: '0 0 0 3px rgba(99, 102, 241, 0.35)',
+        glass: "0 8px 32px rgba(2, 6, 23, 0.24)",
+        "glass-lg": "0 24px 64px rgba(2, 6, 23, 0.32)",
+        focus: "0 0 0 3px rgba(99, 102, 241, 0.35)",
       },
 
       /**
@@ -137,11 +150,10 @@ module.exports = {
        * a runtime theme switch animate rather than need a rebuild.
        */
       backgroundImage: {
-        'surface-gradient':
-          'linear-gradient(180deg, #0b1220 0%, #070b14 100%)',
-        'surface-gradient-elevated':
-          'linear-gradient(180deg, #182338 0%, #0b1220 100%)',
-        'brand-gradient': 'linear-gradient(135deg, #2563eb 0%, #6366f1 100%)',
+        "surface-gradient": "linear-gradient(180deg, #0b1220 0%, #070b14 100%)",
+        "surface-gradient-elevated":
+          "linear-gradient(180deg, #182338 0%, #0b1220 100%)",
+        "brand-gradient": "linear-gradient(135deg, #2563eb 0%, #6366f1 100%)",
       },
 
       /**

@@ -251,13 +251,17 @@ describe("wallet state machine", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "connect" }));
     await waitFor(() => {
-      expect(screen.getByTestId("wallet-status")).toHaveTextContent("connected");
+      expect(screen.getByTestId("wallet-status")).toHaveTextContent(
+        "connected",
+      );
     });
     expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(adapter);
 
     fireEvent.click(screen.getByRole("button", { name: "disconnect" }));
     await waitFor(() => {
-      expect(screen.getByTestId("wallet-status")).toHaveTextContent("disconnected");
+      expect(screen.getByTestId("wallet-status")).toHaveTextContent(
+        "disconnected",
+      );
     });
     expect(screen.getByTestId("wallet-key")).toHaveTextContent("none");
     expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(undefined);
@@ -277,21 +281,26 @@ describe("wallet state machine", () => {
     const removeAllListeners = jest.fn();
     const adapter = createFakeAdapter();
     (adapter as any).removeAllListeners = removeAllListeners;
-    adapter.disconnect = jest.fn().mockRejectedValue(new Error("Wallet window closed"));
+    adapter.disconnect = jest
+      .fn()
+      .mockRejectedValue(new Error("Wallet window closed"));
 
     renderWallet(adapter);
 
     fireEvent.click(screen.getByRole("button", { name: "connect" }));
     await waitFor(() => {
-      expect(screen.getByTestId("wallet-status")).toHaveTextContent("connected");
+      expect(screen.getByTestId("wallet-status")).toHaveTextContent(
+        "connected",
+      );
     });
 
     fireEvent.click(screen.getByRole("button", { name: "disconnect" }));
     await waitFor(() => {
-      expect(screen.getByTestId("wallet-status")).toHaveTextContent("disconnected");
+      expect(screen.getByTestId("wallet-status")).toHaveTextContent(
+        "disconnected",
+      );
     });
     expect(removeAllListeners).toHaveBeenCalled();
     expect(mockSetWalletAdapter).toHaveBeenLastCalledWith(undefined);
   });
 });
-

@@ -11,6 +11,7 @@ mod test_milestones;
 
 use bc_forge_admin as admin;
 use bc_forge_token::BcForgeTokenClient;
+use bc_forge_ttl as ttl;
 use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal,
@@ -107,6 +108,20 @@ pub enum VestingError {
     /// The vesting is still inside its cliff: nothing is claimable yet
     /// (#918 makes the cliff an explicit, testable error path).
     CliffNotReached = 13,
+    /// No milestone tranches are stored for the schedule (#1461).
+    MilestonesNotFound = 14,
+    /// The requested milestone index does not exist (#1461).
+    InvalidMilestoneIndex = 15,
+    /// `rescue_tokens` was called with the registered vesting token. Every
+    /// balance of that token held by this contract is escrowed grant money and
+    /// can never be drained through the rescue hatch (#1459).
+    CannotRescueVestingToken = 16,
+    /// The new beneficiary equals the current one.
+    BeneficiaryAlreadySet = 17,
+    /// Caller is neither the schedule beneficiary nor a SuperAdmin.
+    UnauthorizedBeneficiaryTransfer = 18,
+    /// The new beneficiary is the zero address.
+    InvalidBeneficiary = 19,
 }
 
 #[contract]
@@ -294,6 +309,33 @@ impl VestingContract {
         );
         Self::token_client(env).transfer(&current_contract, to, &amount);
     }
+
+    /// State transition shared by `revoke` and `revoke_vesting_batch`.
+    ///
+    /// Callers are responsible for initialization, admin authorization and
+    /// reentrancy protection. Returning an error (rather than panicking) is
+    /// what lets a batch skip an invalid entry and keep processing the rest.
+    fn revoke_internal(env: &Env, schedule_id: u64) -> Result<i128, VestingError> {
+        let current_ledger = env.ledger().sequence();
+        let admin_address = Self::read_admin(env);
+        let mut stored = Self::read_schedule(env, schedule_id)?;
+
+        if !stored.schedule.revocable {
+            return Err(VestingError::NotRevocable);
+        }
+        if stored.revoked_at_ledger.is_some() {
+            return Err(VestingError::AlreadyRevoked);
+        }
+
+        let vested = Self::vested_amount(env, &stored, current_ledger);
+        let unvested = stored.schedule.total_amount - vested;
+        stored.revoked_at_ledger = Some(current_ledger);
+        Self::write_schedule(env, schedule_id, &stored);
+
+        Self::transfer_from_vault(env, &admin_address, unvested);
+        events::emit_vesting_revoked(env, schedule_id, &stored.schedule.beneficiary, unvested);
+        Ok(unvested)
+    }
 }
 
 #[contractimpl]
@@ -380,6 +422,56 @@ impl VestingContract {
         })
     }
 
+    /// Adds tokens to an existing schedule without creating a new id (#1460).
+    ///
+    /// The admin funds the additional amount, the schedule total grows, and
+    /// previously released amounts are left untouched so the linear curve
+    /// simply recalculates from the new total. An optional `new_end_ledger`
+    /// may extend (never shorten) the vesting timeline.
+    pub fn top_up_schedule(
+        env: Env,
+        schedule_id: u64,
+        additional_amount: i128,
+        new_end_ledger: Option<u32>,
+    ) -> Result<(), VestingError> {
+        reentrancy_guard!(&env, "top_up_schedule", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
+
+            if additional_amount <= 0 {
+                return Err(VestingError::InvalidAmount);
+            }
+
+            let mut stored = Self::read_schedule(&env, schedule_id)?;
+
+            let new_total = stored
+                .schedule
+                .total_amount
+                .checked_add(additional_amount)
+                .ok_or(VestingError::InvalidAmount)?;
+
+            // Pull the extra tokens from the admin into the vesting vault.
+            Self::token_client(&env).transfer(
+                &admin_address,
+                &env.current_contract_address(),
+                &additional_amount,
+            );
+
+            stored.schedule.total_amount = new_total;
+
+            if let Some(end) = new_end_ledger {
+                if end > stored.schedule.end_ledger {
+                    stored.schedule.end_ledger = end;
+                }
+            }
+
+            Self::write_schedule(&env, schedule_id, &stored);
+            events::emit_schedule_topped_up(&env, schedule_id, additional_amount);
+            Ok(())
+        })
+    }
+
     pub fn release(env: Env, beneficiary: Address) -> Result<i128, VestingError> {
         reentrancy_guard!(&env, "release", {
             Self::ensure_initialized(&env)?;
@@ -413,25 +505,93 @@ impl VestingContract {
             Self::ensure_initialized(&env)?;
             let admin_address = Self::read_admin(&env);
             admin::require_admin(&env, &admin_address);
+            Self::revoke_internal(&env, schedule_id)
+        })
+    }
 
-            let current_ledger = env.ledger().sequence();
+    /// Revokes several schedules in a single transaction (#1458).
+    ///
+    /// Admin-gated and backward-compatible with `revoke`. Each id is applied
+    /// through the same internal state transition; ids that are missing,
+    /// already revoked, or non-revocable are skipped rather than aborting the
+    /// whole batch. The returned vector contains only the ids that were
+    /// actually revoked, in input order. Unvested tokens from every successful
+    /// revocation are refunded to the treasury (the admin address).
+    pub fn revoke_vesting_batch(
+        env: Env,
+        schedule_ids: Vec<u64>,
+    ) -> Result<Vec<u64>, VestingError> {
+        // Reuse the single-revoke guard key so a token callback cannot re-enter
+        // either entry point while the batch is transferring refunds.
+        reentrancy_guard!(&env, "revoke", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
+
+            let mut revoked = Vec::new(&env);
+            for schedule_id in schedule_ids.iter() {
+                if Self::revoke_internal(&env, schedule_id).is_ok() {
+                    revoked.push_back(schedule_id);
+                }
+            }
+            Ok(revoked)
+        })
+    }
+
+    /// Moves an active schedule to a new beneficiary address.
+    ///
+    /// Callable by the current beneficiary or a SuperAdmin. Vesting progress
+    /// and released amounts are preserved; the `BeneficiarySchedules` index is
+    /// updated for both addresses.
+    pub fn transfer_beneficiary(
+        env: Env,
+        caller: Address,
+        schedule_id: u64,
+        new_beneficiary: Address,
+    ) -> Result<(), VestingError> {
+        reentrancy_guard!(&env, "transfer_beneficiary", {
+            Self::ensure_initialized(&env)?;
+            ttl::extend_instance_ttl(&env);
+            caller.require_auth();
+
             let mut stored = Self::read_schedule(&env, schedule_id)?;
+            let old_beneficiary = stored.schedule.beneficiary.clone();
 
-            if !stored.schedule.revocable {
-                return Err(VestingError::NotRevocable);
+            let is_super = admin::has_role(&env, admin::Role::SuperAdmin, &caller)
+                || caller == Self::read_admin(&env);
+            if caller != old_beneficiary && !is_super {
+                return Err(VestingError::UnauthorizedBeneficiaryTransfer);
             }
-            if stored.revoked_at_ledger.is_some() {
-                return Err(VestingError::AlreadyRevoked);
+            if new_beneficiary == old_beneficiary {
+                return Err(VestingError::BeneficiaryAlreadySet);
+            }
+            if admin::is_zero_address(&env, &new_beneficiary) {
+                return Err(VestingError::InvalidBeneficiary);
             }
 
-            let vested = Self::vested_amount(&env, &stored, current_ledger);
-            let unvested = stored.schedule.total_amount - vested;
-            stored.revoked_at_ledger = Some(current_ledger);
+            stored.schedule.beneficiary = new_beneficiary.clone();
             Self::write_schedule(&env, schedule_id, &stored);
 
-            Self::transfer_from_vault(&env, &admin_address, unvested);
-            events::emit_vesting_revoked(&env, schedule_id, &stored.schedule.beneficiary, unvested);
-            Ok(unvested)
+            let old_ids = Self::beneficiary_schedule_ids(&env, &old_beneficiary);
+            let mut remaining = Vec::new(&env);
+            for id in old_ids.iter() {
+                if id != schedule_id {
+                    remaining.push_back(id);
+                }
+            }
+            Self::write_beneficiary_schedule_ids(&env, &old_beneficiary, &remaining);
+
+            let mut new_ids = Self::beneficiary_schedule_ids(&env, &new_beneficiary);
+            new_ids.push_back(schedule_id);
+            Self::write_beneficiary_schedule_ids(&env, &new_beneficiary, &new_ids);
+
+            events::emit_beneficiary_transferred(
+                &env,
+                schedule_id,
+                &old_beneficiary,
+                &new_beneficiary,
+            );
+            Ok(())
         })
     }
 
@@ -455,6 +615,16 @@ impl VestingContract {
         }
 
         result
+    }
+
+    /// Read-only lookup of a single schedule by its id (#1462).
+    ///
+    /// Callers that only know the schedule id (dApps, indexers) no longer
+    /// need to know the beneficiary address. No storage is mutated.
+    pub fn get_schedule(env: Env, schedule_id: u64) -> Result<VestingSchedule, VestingError> {
+        Self::panic_on_err(&env, Self::ensure_initialized(&env));
+        let stored = Self::read_schedule(&env, schedule_id)?;
+        Ok(stored.schedule)
     }
 
     /// Attaches milestone tranches to an existing schedule (#918).
@@ -497,6 +667,45 @@ impl VestingContract {
             Self::write_milestones(&env, schedule_id, &milestones);
             events::emit_milestones_set(&env, schedule_id, total);
             Ok(())
+        })
+    }
+
+    /// Cancels one unachieved milestone tranche (#1461).
+    ///
+    /// The schedule itself (and therefore its linear vesting floor) and all
+    /// other tranches remain intact. The cancelled tranche's tokens are
+    /// returned to the admin treasury.
+    pub fn cancel_milestone(
+        env: Env,
+        schedule_id: u64,
+        milestone_index: u32,
+    ) -> Result<i128, VestingError> {
+        reentrancy_guard!(&env, "cancel_milestone", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
+
+            let mut milestones: soroban_sdk::Vec<Milestone> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Milestones(schedule_id))
+                .ok_or(VestingError::MilestonesNotFound)?;
+
+            if milestone_index as usize >= milestones.len() as usize {
+                return Err(VestingError::InvalidMilestoneIndex);
+            }
+
+            let removed = milestones
+                .get(milestone_index)
+                .ok_or(VestingError::InvalidMilestoneIndex)?;
+            milestones.remove(milestone_index);
+            Self::write_milestones(&env, schedule_id, &milestones);
+
+            // Refund the unused tranche to the treasury. `transfer_from_vault`
+            // supplies the contract's sub-invocation authorization.
+            Self::transfer_from_vault(&env, &admin_address, removed.amount);
+            events::emit_milestone_cancelled(&env, schedule_id, milestone_index, removed.amount);
+            Ok(removed.amount)
         })
     }
 
@@ -591,6 +800,49 @@ impl VestingContract {
                 events::emit_tokens_released(&env, &beneficiary, total_to_release);
             }
             Ok(total_to_release)
+        })
+    }
+
+    /// Rescues a foreign SEP-41 token that was accidentally sent here (#1459).
+    ///
+    /// Admin-gated: authorization follows the contract's stored admin exactly
+    /// like `revoke` and `create_vesting`. The registered vesting token is
+    /// explicitly protected — every balance of it held by this contract is
+    /// escrowed grant money, so draining it would be indistinguishable from
+    /// theft. Any other token id can be recovered to `to`.
+    pub fn rescue_tokens(
+        env: Env,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), VestingError> {
+        reentrancy_guard!(&env, "rescue_tokens", {
+            Self::ensure_initialized(&env)?;
+            let admin_address = Self::read_admin(&env);
+            admin::require_admin(&env, &admin_address);
+
+            if amount <= 0 {
+                return Err(VestingError::InvalidAmount);
+            }
+            if token == Self::read_token(&env) {
+                return Err(VestingError::CannotRescueVestingToken);
+            }
+
+            let current_contract = env.current_contract_address();
+            Self::authorize_current_contract_call(
+                &env,
+                &token,
+                symbol_short!("transfer"),
+                (&current_contract, &to, amount).into_val(&env),
+            );
+            soroban_sdk::token::TokenClient::new(&env, &token).transfer(
+                &current_contract,
+                &to,
+                &amount,
+            );
+
+            events::emit_rescued(&env, &admin_address, &token, &to, amount);
+            Ok(())
         })
     }
 }

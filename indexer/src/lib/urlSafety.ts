@@ -13,8 +13,8 @@
  * tests; production uses `dns.promises.lookup`.
  */
 
-import { isIP } from 'node:net';
-import { promises as dns } from 'node:dns';
+import { isIP } from "node:net";
+import { promises as dns } from "node:dns";
 
 export type DnsResolver = (
   hostname: string,
@@ -22,7 +22,10 @@ export type DnsResolver = (
 
 const defaultResolver: DnsResolver = async (hostname) => {
   const addresses = await dns.lookup(hostname, { all: true });
-  return addresses.map((entry) => ({ address: entry.address, family: entry.family }));
+  return addresses.map((entry) => ({
+    address: entry.address,
+    family: entry.family,
+  }));
 };
 
 let resolver: DnsResolver = defaultResolver;
@@ -33,7 +36,7 @@ export function setWebhookDnsResolverForTests(next?: DnsResolver): void {
 }
 
 function parseIpv4(value: string): number[] | undefined {
-  const parts = value.split('.');
+  const parts = value.split(".");
   if (parts.length !== 4) return undefined;
   const octets: number[] = [];
   for (const part of parts) {
@@ -48,7 +51,7 @@ function parseIpv4(value: string): number[] | undefined {
 /** Returns true when a literal IP is loopback, private, link-local, or reserved. */
 export function isInternalIp(address: string): boolean {
   const version = isIP(address);
-  const withoutZone = address.split('%')[0];
+  const withoutZone = address.split("%")[0];
 
   if (version === 4) {
     const octets = parseIpv4(withoutZone);
@@ -67,7 +70,7 @@ export function isInternalIp(address: string): boolean {
 
   if (version === 6) {
     const lower = withoutZone.toLowerCase();
-    if (lower === '::' || lower === '::1') return true;
+    if (lower === "::" || lower === "::1") return true;
     // IPv4-mapped forms: ::ffff:127.0.0.1 etc.
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
     if (mapped) return isInternalIp(mapped[1]);
@@ -85,16 +88,20 @@ export function isInternalIp(address: string): boolean {
 }
 
 const INTERNAL_HOSTNAMES = new Set([
-  'localhost',
-  'metadata',
-  'metadata.google.internal',
-  'metadata.goog',
+  "localhost",
+  "metadata",
+  "metadata.google.internal",
+  "metadata.goog",
 ]);
 
 function hostnameIsInternal(hostname: string): boolean {
-  const lower = hostname.toLowerCase().replace(/\.$/, '');
+  const lower = hostname.toLowerCase().replace(/\.$/, "");
   if (INTERNAL_HOSTNAMES.has(lower)) return true;
-  if (lower.endsWith('.localhost') || lower.endsWith('.internal') || lower.endsWith('.local')) {
+  if (
+    lower.endsWith(".localhost") ||
+    lower.endsWith(".internal") ||
+    lower.endsWith(".local")
+  ) {
     return true;
   }
   return false;
@@ -109,34 +116,39 @@ export interface UrlSafetyResult {
  * Validates a webhook target without performing any network I/O for literal
  * IPs. Hostnames are resolved with the injected resolver (production: DNS).
  */
-export async function validateWebhookUrl(rawUrl: unknown): Promise<UrlSafetyResult> {
-  if (typeof rawUrl !== 'string') {
-    return { ok: false, reason: 'url must be an HTTPS URL' };
+export async function validateWebhookUrl(
+  rawUrl: unknown,
+): Promise<UrlSafetyResult> {
+  if (typeof rawUrl !== "string") {
+    return { ok: false, reason: "url must be an HTTPS URL" };
   }
 
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
   } catch {
-    return { ok: false, reason: 'url must be an HTTPS URL' };
+    return { ok: false, reason: "url must be an HTTPS URL" };
   }
 
   if (
-    parsed.protocol !== 'https:' ||
+    parsed.protocol !== "https:" ||
     parsed.username.length > 0 ||
     parsed.password.length > 0
   ) {
-    return { ok: false, reason: 'url must be an HTTPS URL without embedded credentials' };
+    return {
+      ok: false,
+      reason: "url must be an HTTPS URL without embedded credentials",
+    };
   }
 
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
   if (hostnameIsInternal(hostname)) {
-    return { ok: false, reason: 'url must target a public host' };
+    return { ok: false, reason: "url must target a public host" };
   }
 
   if (isIP(hostname)) {
     return isInternalIp(hostname)
-      ? { ok: false, reason: 'url must target a public host' }
+      ? { ok: false, reason: "url must target a public host" }
       : { ok: true };
   }
 
@@ -145,13 +157,13 @@ export async function validateWebhookUrl(rawUrl: unknown): Promise<UrlSafetyResu
     addresses = await resolver(hostname);
   } catch {
     // A hostname we cannot resolve cannot be verified as public.
-    return { ok: false, reason: 'url must target a resolvable public host' };
+    return { ok: false, reason: "url must target a resolvable public host" };
   }
   if (addresses.length === 0) {
-    return { ok: false, reason: 'url must target a resolvable public host' };
+    return { ok: false, reason: "url must target a resolvable public host" };
   }
   if (addresses.some((entry) => isInternalIp(entry.address))) {
-    return { ok: false, reason: 'url must target a public host' };
+    return { ok: false, reason: "url must target a public host" };
   }
   return { ok: true };
 }

@@ -1,17 +1,30 @@
-# Format staged TypeScript/JavaScript with Prettier (lint-staged) and staged Rust with cargo fmt.
-# cargo clippy stays in CI; it is too slow for a pre-commit hook.
+# Pre-commit hook (issue #1525)
+#
+# Runs lint-staged (Prettier + ESLint on staged TS/JS files) and cargo fmt /
+# cargo clippy on staged Rust files.  Fast for TypeScript-only changes; the
+# Rust checks add ~15–30 s when .rs files are staged (clippy runs the whole
+# workspace to catch cross-crate regressions).
 
 npx lint-staged
 
+# ── Rust checks ──────────────────────────────────────────────────────────────
 files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
 if [ -n "$files" ]; then
-  old_ifs=$IFS
-  IFS='
-'
-  for file in $files; do
-    [ -n "$file" ] || continue
-    cargo fmt -- "$file"
-    git add -- "$file"
-  done
-  IFS=$old_ifs
+  echo "[pre-commit] Rust files staged — running cargo fmt --check and cargo clippy"
+
+  # Format check: fail if any staged file is not formatted.
+  cargo fmt --all -- --check
+  fmt_exit=$?
+  if [ $fmt_exit -ne 0 ]; then
+    echo "[pre-commit] cargo fmt --check failed. Run 'cargo fmt --all' to fix."
+    exit $fmt_exit
+  fi
+
+  # Clippy lint: treat all warnings as errors.
+  cargo clippy --workspace --all-targets -- -D warnings
+  clippy_exit=$?
+  if [ $clippy_exit -ne 0 ]; then
+    echo "[pre-commit] cargo clippy found errors. Fix the warnings above before committing."
+    exit $clippy_exit
+  fi
 fi
