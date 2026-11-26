@@ -28,7 +28,7 @@ describe("secure CLI secret resolution (#1318)", () => {
     process.env.STELLAR_SECRET_KEY = TEST_SECRET;
 
     await expect(resolveSourceSecret("S" + "C".repeat(55))).resolves.toBe(
-      "S" + "C".repeat(55)
+      "S" + "C".repeat(55),
     );
   });
 
@@ -50,7 +50,7 @@ describe("secure CLI secret resolution (#1318)", () => {
 
     try {
       await expect(
-        resolveSourceSecret(undefined, async () => TEST_SECRET)
+        resolveSourceSecret(undefined, async () => TEST_SECRET),
       ).resolves.toBe(TEST_SECRET);
     } finally {
       Object.defineProperty(process.stdin, "isTTY", {

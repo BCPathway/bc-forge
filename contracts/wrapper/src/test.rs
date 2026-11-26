@@ -2604,6 +2604,359 @@ fn test_emergency_cap_blocks_excessive_withdrawals_in_window() {
     let third = wrapper.withdraw(&user, &200_000);
     assert_eq!(third, 200_000);
 }
+// ─── Slippage-protected deposit / withdrawal (#1468, #1469) ──────────────────
+
+#[test]
+fn test_deposit_with_slippage_mints_shares_when_bound_is_met() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
+
+    // Empty vault: the virtual offset cancels, so 1_000_000 assets mint
+    // exactly 1_000_000 shares.
+    let shares_out = wrapper.deposit_with_slippage(&user, &1_000_000, &1_000_000);
+
+    assert_eq!(shares_out, 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.total_assets(), 1_000_000);
+    assert_eq!(underlying.balance(&user), 9_000_000);
+}
+
+#[test]
+fn test_deposit_with_slippage_accepts_lower_bound() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    let shares_out = wrapper.deposit_with_slippage(&user, &1_000_000, &999_999);
+
+    assert_eq!(shares_out, 1_000_000);
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+}
+
+#[test]
+fn test_deposit_with_slippage_reverts_and_rolls_back_when_bound_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
+    let underlying_before = underlying.balance(&user);
+
+    assert_eq!(
+        wrapper.try_deposit_with_slippage(&user, &1_000_000, &1_000_001),
+        Err(Ok(WrapperError::SlippageExceeded))
+    );
+
+    // The rejected call must leave no shares minted, no assets moved and no
+    // reentrancy lock held.
+    assert_eq!(wrapper.balance(&user), 0);
+    assert_eq!(wrapper.supply(), 0);
+    assert_eq!(wrapper.total_assets(), 0);
+    assert_eq!(underlying.balance(&user), underlying_before);
+
+    assert_eq!(
+        wrapper.deposit_with_slippage(&user, &1_000_000, &0),
+        1_000_000
+    );
+}
+
+#[test]
+fn test_deposit_with_slippage_propagates_underlying_deposit_errors() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    assert_eq!(
+        wrapper.try_deposit_with_slippage(&user, &0, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_deposit_with_slippage(&user, &-1, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    wrapper.pause();
+    assert_eq!(
+        wrapper.try_deposit_with_slippage(&user, &1_000_000, &0),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+}
+
+#[test]
+fn test_withdraw_with_slippage_returns_assets_when_bound_is_met() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.deposit(&user, &1_000_000);
+    let underlying_before = underlying.balance(&user);
+
+    let assets_out = wrapper.withdraw_with_slippage(&user, &400_000, &400_000);
+
+    assert_eq!(assets_out, 400_000);
+    assert_eq!(underlying.balance(&user), underlying_before + 400_000);
+    assert_eq!(wrapper.balance(&user), 600_000);
+    assert_eq!(wrapper.supply(), 600_000);
+    assert_eq!(wrapper.total_assets(), 600_000);
+}
+
+#[test]
+fn test_withdraw_with_slippage_accepts_lower_bound() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.deposit(&user, &1_000_000);
+
+    let assets_out = wrapper.withdraw_with_slippage(&user, &400_000, &399_999);
+
+    assert_eq!(assets_out, 400_000);
+    assert_eq!(wrapper.balance(&user), 600_000);
+}
+
+#[test]
+fn test_withdraw_with_slippage_reverts_and_rolls_back_when_bound_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.deposit(&user, &1_000_000);
+    let underlying_before = underlying.balance(&user);
+
+    assert_eq!(
+        wrapper.try_withdraw_with_slippage(&user, &400_000, &400_001),
+        Err(Ok(WrapperError::SlippageExceeded))
+    );
+
+    // No shares burned and no assets transferred on a rejected withdrawal.
+    assert_eq!(wrapper.balance(&user), 1_000_000);
+    assert_eq!(wrapper.supply(), 1_000_000);
+    assert_eq!(wrapper.total_assets(), 1_000_000);
+    assert_eq!(underlying.balance(&user), underlying_before);
+
+    // The lock was released, so a subsequent withdrawal still works.
+    assert_eq!(wrapper.withdraw_with_slippage(&user, &400_000, &0), 400_000);
+}
+
+#[test]
+fn test_withdraw_with_slippage_enforces_bound_at_dynamic_exchange_rate() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+    let wrapper_id = wrapper.address.clone();
+    let rewarder = Address::generate(&env);
+
+    underlying.mint(&admin, &rewarder, &1_000_000);
+    underlying.approve(&rewarder, &wrapper_id, &1_000_000, &u32::MAX);
+
+    wrapper.deposit(&user, &2_000_000);
+    wrapper.distribute_rewards(&rewarder, &1_000_000);
+
+    // 1_000_000 shares are entitled to
+    // 1_000_000 * (3_000_000 + 10_000_000) / (2_000_000 + 10_000_000)
+    // = 1_083_333 underlying tokens.
+    let preview = wrapper.calculate_rewards(&1_000_000);
+    assert_eq!(preview, 1_083_333);
+
+    assert_eq!(
+        wrapper.try_withdraw_with_slippage(&user, &1_000_000, &(preview + 1)),
+        Err(Ok(WrapperError::SlippageExceeded))
+    );
+    assert_eq!(
+        wrapper.withdraw_with_slippage(&user, &1_000_000, &preview),
+        preview
+    );
+}
+
+#[test]
+fn test_withdraw_with_slippage_propagates_underlying_withdraw_errors() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    wrapper.deposit(&user, &1_000_000);
+
+    assert_eq!(
+        wrapper.try_withdraw_with_slippage(&user, &0, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_withdraw_with_slippage(&user, &-1, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_withdraw_with_slippage(&user, &1_000_001, &0),
+        Err(Ok(WrapperError::InsufficientBalance))
+    );
+}
+
+#[test]
+fn test_plain_deposit_and_withdraw_remain_unbounded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, _admin, user) = setup_and_fund(&env);
+
+    // Existing entry points ignore slippage bounds entirely and keep their
+    // original behaviour.
+    assert_eq!(wrapper.deposit(&user, &1_000_000), 1_000_000);
+    assert_eq!(wrapper.withdraw(&user, &500_000), 500_000);
+    assert_eq!(wrapper.balance(&user), 500_000);
+}
+
+#[test]
+fn test_claim_withdrawal_partial_reduces_queued_balance_accurately() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    wrapper.deposit(&user, &1_000_000);
+    assert_eq!(wrapper.withdraw(&user, &1_000_000), 0);
+
+    let queued = wrapper.get_queued_withdrawal(&user).unwrap();
+    let release_ledger = queued.release_ledger;
+    assert_eq!(queued.shares, 1_000_000);
+    assert_eq!(queued.amount, 1_000_000);
+
+    env.ledger().set_sequence_number(release_ledger);
+
+    // First partial claim: 25% of queued shares
+    let first = wrapper.claim_withdrawal_partial(&user, &250_000);
+    assert_eq!(first, 250_000);
+    assert_eq!(underlying.balance(&user), 9_250_000);
+
+    let after_first = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(after_first.shares, 750_000);
+    assert_eq!(after_first.amount, 750_000);
+    assert_eq!(after_first.release_ledger, release_ledger);
+
+    // Second partial claim: 500_000 shares
+    let second = wrapper.claim_withdrawal_partial(&user, &500_000);
+    assert_eq!(second, 500_000);
+    assert_eq!(underlying.balance(&user), 9_750_000);
+
+    let after_second = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(after_second.shares, 250_000);
+    assert_eq!(after_second.amount, 250_000);
+
+    // Final partial claim for remaining shares removes the queued entry
+    let third = wrapper.claim_withdrawal_partial(&user, &250_000);
+    assert_eq!(third, 250_000);
+    assert_eq!(underlying.balance(&user), 10_000_000);
+    assert!(wrapper.get_queued_withdrawal(&user).is_none());
+
+    // Claiming again after full depletion fails
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &1),
+        Err(Ok(WrapperError::NoQueuedWithdrawal))
+    );
+}
+
+#[test]
+fn test_claim_withdrawal_partial_proportional_with_yield_and_final_full_claim() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    wrapper.deposit(&user, &1_000_000);
+    wrapper.distribute_rewards(&user, &500_000);
+
+    assert_eq!(wrapper.withdraw(&user, &1_000_000), 0);
+    let queued = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(queued.shares, 1_000_000);
+    assert!(queued.amount > 1_000_000);
+
+    env.ledger().set_sequence_number(queued.release_ledger + 1);
+
+    let expected_first = (queued.amount * 400_000) / 1_000_000;
+    let first = wrapper.claim_withdrawal_partial(&user, &400_000);
+    assert_eq!(first, expected_first);
+
+    let remaining = wrapper.get_queued_withdrawal(&user).unwrap();
+    assert_eq!(remaining.shares, 600_000);
+    assert_eq!(remaining.amount, queued.amount - expected_first);
+
+    // Finish the remaining queued balance via full claim_withdrawal
+    let balance_before_final = underlying.balance(&user);
+    let second = wrapper.claim_withdrawal(&user);
+    assert_eq!(second, remaining.amount);
+    assert_eq!(first + second, queued.amount);
+    assert_eq!(underlying.balance(&user), balance_before_final + second);
+    assert!(wrapper.get_queued_withdrawal(&user).is_none());
+}
+
+#[test]
+fn test_claim_withdrawal_partial_validation_and_cooldown_errors() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (wrapper, _underlying, admin, user) = setup_and_fund(&env);
+
+    let config = CooldownConfig {
+        enabled: true,
+        cooldown_ledgers: 10,
+        emergency_cap: 0,
+        emergency_window_ledgers: 0,
+    };
+    wrapper.set_cooldown_config(&admin, &config);
+
+    // Non-positive share amounts are rejected
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &0),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &-100),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+
+    // No queued withdrawal
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &100),
+        Err(Ok(WrapperError::NoQueuedWithdrawal))
+    );
+
+    wrapper.deposit(&user, &1_000_000);
+    assert_eq!(wrapper.withdraw(&user, &1_000_000), 0);
+    let queued = wrapper.get_queued_withdrawal(&user).unwrap();
+
+    // Before cooldown release ledger
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &500_000),
+        Err(Ok(WrapperError::CooldownNotMet))
+    );
+
+    // Advance past cooldown release ledger
+    env.ledger().set_sequence_number(queued.release_ledger);
+
+    // Exceeding queued shares is rejected without mutating state
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &1_000_001),
+        Err(Ok(WrapperError::InvalidAmount))
+    );
+    assert_eq!(wrapper.get_queued_withdrawal(&user), Some(queued));
+
+    // Paused contract rejects partial claims
+    wrapper.pause();
+    assert_eq!(
+        wrapper.try_claim_withdrawal_partial(&user, &500_000),
+        Err(Ok(WrapperError::ContractPaused))
+    );
+}
 
 /// Storage footprint / instance TTL diagnostics views (#1325).
 #[test]

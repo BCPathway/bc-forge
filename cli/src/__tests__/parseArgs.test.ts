@@ -56,12 +56,22 @@ describe("CLI Parser (#705)", () => {
         });
 
       await program.parseAsync(
-        argv("upgrade", "--wasm", "./token.wasm", "--contract-id", "CABC123", "--source", "S...")
+        argv(
+          "upgrade",
+          "--wasm",
+          "./token.wasm",
+          "--contract-id",
+          "CABC123",
+          "--source",
+          "S...",
+        ),
       );
 
       expect(parsedOpts.network).toBe("testnet");
       expect(parsedOpts.rpcUrl).toBe("https://soroban-testnet.stellar.org");
-      expect(parsedOpts.networkPassphrase).toBe("Test SDF Network ; September 2015");
+      expect(parsedOpts.networkPassphrase).toBe(
+        "Test SDF Network ; September 2015",
+      );
     });
 
     it("maps --network mainnet to mainnet RPC and passphrase", async () => {
@@ -83,14 +93,14 @@ describe("CLI Parser (#705)", () => {
           "--contract-id",
           "CABC123",
           "--source",
-          "S..."
-        )
+          "S...",
+        ),
       );
 
       expect(parsedOpts.network).toBe("mainnet");
       expect(parsedOpts.rpcUrl).toBe("https://mainnet.sorobanrpc.com");
       expect(parsedOpts.networkPassphrase).toBe(
-        "Public Global Stellar Network ; September 2015"
+        "Public Global Stellar Network ; September 2015",
       );
     });
 
@@ -113,13 +123,15 @@ describe("CLI Parser (#705)", () => {
           "--contract-id",
           "CABC123",
           "--source",
-          "S..."
-        )
+          "S...",
+        ),
       );
 
       expect(parsedOpts.network).toBe("local");
       expect(parsedOpts.rpcUrl).toBe("http://localhost:8000/soroban/rpc");
-      expect(parsedOpts.networkPassphrase).toBe("Standalone Network ; February 2017");
+      expect(parsedOpts.networkPassphrase).toBe(
+        "Standalone Network ; February 2017",
+      );
     });
 
     it("lets --rpc-url override the selected network preset", async () => {
@@ -141,14 +153,14 @@ describe("CLI Parser (#705)", () => {
           "--contract-id",
           "CABC123",
           "--source",
-          "S..."
-        )
+          "S...",
+        ),
       );
 
       expect(parsedOpts.network).toBe("mainnet");
       expect(parsedOpts.rpcUrl).toBe("https://rpc.example.test");
       expect(parsedOpts.networkPassphrase).toBe(
-        "Public Global Stellar Network ; September 2015"
+        "Public Global Stellar Network ; September 2015",
       );
     });
 
@@ -167,9 +179,9 @@ describe("CLI Parser (#705)", () => {
             "--contract-id",
             "CABC123",
             "--source",
-            "S..."
-          )
-        )
+            "S...",
+          ),
+        ),
       ).rejects.toThrow();
     });
 
@@ -188,9 +200,9 @@ describe("CLI Parser (#705)", () => {
             "--contract-id",
             "CABC123",
             "--source",
-            "S..."
-          )
-        )
+            "S...",
+          ),
+        ),
       ).rejects.toThrow(/Invalid RPC URL/);
     });
   });
@@ -205,8 +217,16 @@ describe("CLI Parser (#705)", () => {
 
       await expect(
         program.parseAsync(
-          argv("upgrade", "--contract-id", "CX", "--rpc-url", "http://localhost", "--source", "S...")
-        )
+          argv(
+            "upgrade",
+            "--contract-id",
+            "CX",
+            "--rpc-url",
+            "http://localhost",
+            "--source",
+            "S...",
+          ),
+        ),
       ).rejects.toThrow();
     });
 
@@ -219,8 +239,16 @@ describe("CLI Parser (#705)", () => {
 
       await expect(
         program.parseAsync(
-          argv("upgrade", "--wasm", "./artifacts/token.wasm", "--rpc-url", "http://localhost", "--source", "S...")
-        )
+          argv(
+            "upgrade",
+            "--wasm",
+            "./artifacts/token.wasm",
+            "--rpc-url",
+            "http://localhost",
+            "--source",
+            "S...",
+          ),
+        ),
       ).rejects.toThrow();
     });
 
@@ -234,7 +262,15 @@ describe("CLI Parser (#705)", () => {
         });
 
       await program.parseAsync(
-        argv("upgrade", "--wasm", "./artifacts/token.wasm", "--contract-id", "CX", "--source", "S...")
+        argv(
+          "upgrade",
+          "--wasm",
+          "./artifacts/token.wasm",
+          "--contract-id",
+          "CX",
+          "--source",
+          "S...",
+        ),
       );
 
       expect(parsedOpts).not.toBeNull();
@@ -251,8 +287,16 @@ describe("CLI Parser (#705)", () => {
 
       await expect(
         program.parseAsync(
-          argv("upgrade", "--wasm", "./artifacts/token.wasm", "--contract-id", "CX", "--rpc-url", "http://localhost")
-        )
+          argv(
+            "upgrade",
+            "--wasm",
+            "./artifacts/token.wasm",
+            "--contract-id",
+            "CX",
+            "--rpc-url",
+            "http://localhost",
+          ),
+        ),
       ).resolves.not.toThrow();
       delete process.env.STELLAR_SECRET_KEY;
     });
@@ -290,8 +334,8 @@ describe("CLI Parser (#705)", () => {
           "--rpc-url",
           "https://soroban-testnet.stellar.org",
           "--source",
-          "S..."
-        )
+          "S...",
+        ),
       );
 
       expect(parsedOpts).not.toBeNull();
@@ -321,12 +365,12 @@ describe("CLI Parser (#705)", () => {
           "--rpc-url",
           "http://localhost",
           "--source",
-          "S..."
-        )
+          "S...",
+        ),
       );
 
       expect(parsedOpts.networkPassphrase).toBe(
-        "Test SDF Network ; September 2015"
+        "Test SDF Network ; September 2015",
       );
     });
 
@@ -352,12 +396,12 @@ describe("CLI Parser (#705)", () => {
           "--source",
           "S...",
           "--network-passphrase",
-          "Public Global Stellar Network ; September 2015"
-        )
+          "Public Global Stellar Network ; September 2015",
+        ),
       );
 
       expect(parsedOpts.networkPassphrase).toBe(
-        "Public Global Stellar Network ; September 2015"
+        "Public Global Stellar Network ; September 2015",
       );
     });
 
@@ -382,8 +426,8 @@ describe("CLI Parser (#705)", () => {
           "http://localhost",
           "--source",
           "S...",
-          "--dry-run"
-        )
+          "--dry-run",
+        ),
       );
 
       expect(parsedOpts.dryRun).toBe(true);
@@ -410,8 +454,8 @@ describe("CLI Parser (#705)", () => {
           "http://localhost",
           "--source",
           "S...",
-          "--estimate"
-        )
+          "--estimate",
+        ),
       );
 
       expect(parsedOpts.estimate).toBe(true);
@@ -437,8 +481,8 @@ describe("CLI Parser (#705)", () => {
           "--rpc-url",
           "http://localhost",
           "--source",
-          "S..."
-        )
+          "S...",
+        ),
       );
 
       expect(parsedOpts.estimate).toBe(false);
@@ -455,8 +499,14 @@ describe("CLI Parser (#705)", () => {
 
       await expect(
         program.parseAsync(
-          argv("smoke-test", "--rpc-url", "http://localhost", "--source", "S...")
-        )
+          argv(
+            "smoke-test",
+            "--rpc-url",
+            "http://localhost",
+            "--source",
+            "S...",
+          ),
+        ),
       ).rejects.toThrow();
     });
 
@@ -470,7 +520,7 @@ describe("CLI Parser (#705)", () => {
         });
 
       await program.parseAsync(
-        argv("smoke-test", "--contract-id", "CX", "--source", "S...")
+        argv("smoke-test", "--contract-id", "CX", "--source", "S..."),
       );
 
       expect(parsedOpts).not.toBeNull();
@@ -487,8 +537,14 @@ describe("CLI Parser (#705)", () => {
 
       await expect(
         program.parseAsync(
-          argv("smoke-test", "--contract-id", "CX", "--rpc-url", "http://localhost")
-        )
+          argv(
+            "smoke-test",
+            "--contract-id",
+            "CX",
+            "--rpc-url",
+            "http://localhost",
+          ),
+        ),
       ).resolves.not.toThrow();
       delete process.env.STELLAR_SECRET_KEY;
     });
@@ -524,8 +580,8 @@ describe("CLI Parser (#705)", () => {
           "--rpc-url",
           "https://soroban-testnet.stellar.org",
           "--source",
-          "S..."
-        )
+          "S...",
+        ),
       );
 
       expect(parsedOpts).not.toBeNull();
@@ -557,8 +613,8 @@ describe("CLI Parser (#705)", () => {
           "--recipient",
           "GABC...",
           "--amount",
-          "100"
-        )
+          "100",
+        ),
       );
 
       expect(parsedOpts.recipient).toBe("GABC...");
@@ -575,19 +631,19 @@ describe("CLI Parser (#705)", () => {
       });
 
       await expect(
-        program.parseAsync(argv("nonexistent-cmd"))
+        program.parseAsync(argv("nonexistent-cmd")),
       ).rejects.toThrow();
     });
   });
 
   describe("malformed config handling", () => {
     it("getFileConfig handles missing config file gracefully", async () => {
-      const { getFileConfig } = await import('../utils/config.js');
-      
+      const { getFileConfig } = await import("../utils/config.js");
+
       // Temporarily change cwd to ensure no config exists
       const originalCwd = process.cwd();
-      const tmpDir = (await import('node:os')).tmpdir();
-      
+      const tmpDir = (await import("node:os")).tmpdir();
+
       try {
         process.chdir(tmpDir);
         const config = getFileConfig();
@@ -599,126 +655,149 @@ describe("CLI Parser (#705)", () => {
     });
 
     it("validates config structure on load - detailed error messages", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'malformed-config-'));
-      
+      const tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "malformed-config-"),
+      );
+
       try {
         // Test missing required fields
-        const invalidConfigPath = path.join(tmpDir, '.bc-forge.json');
-        fs.writeFileSync(invalidConfigPath, JSON.stringify({
-          symbol: 'TEST'
-          // missing required "name" field
-        }));
+        const invalidConfigPath = path.join(tmpDir, ".bc-forge.json");
+        fs.writeFileSync(
+          invalidConfigPath,
+          JSON.stringify({
+            symbol: "TEST",
+            // missing required "name" field
+          }),
+        );
 
         const result = loadConfigFile(invalidConfigPath);
         expect(result.success).toBe(false);
         expect(result.errors).toBeDefined();
         expect(result.errors!.length).toBeGreaterThan(0);
-        expect(result.errors!.some(e => e.toLowerCase().includes('name'))).toBe(true);
+        expect(
+          result.errors!.some((e) => e.toLowerCase().includes("name")),
+        ).toBe(true);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
     it("reports invalid JSON in config file with details", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'invalid-json-'));
-      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "invalid-json-"));
+
       try {
-        const invalidJsonPath = path.join(tmpDir, '.bc-forge.json');
+        const invalidJsonPath = path.join(tmpDir, ".bc-forge.json");
         fs.writeFileSync(invalidJsonPath, '{ "name": "test", invalid json }');
 
         const result = loadConfigFile(invalidJsonPath);
         expect(result.success).toBe(false);
-        expect(result.errors?.[0]).toContain('Invalid JSON syntax');
+        expect(result.errors?.[0]).toContain("Invalid JSON syntax");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
     it("validates Stellar address formats in config", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stellar-addr-'));
-      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "stellar-addr-"));
+
       try {
-        const badAdminPath = path.join(tmpDir, '.bc-forge.json');
-        fs.writeFileSync(badAdminPath, JSON.stringify({
-          name: 'Test Token',
-          symbol: 'TST',
-          admin: 'NOTAVALIDADDRESS'  // Invalid Stellar address
-        }));
+        const badAdminPath = path.join(tmpDir, ".bc-forge.json");
+        fs.writeFileSync(
+          badAdminPath,
+          JSON.stringify({
+            name: "Test Token",
+            symbol: "TST",
+            admin: "NOTAVALIDADDRESS", // Invalid Stellar address
+          }),
+        );
 
         const result = loadConfigFile(badAdminPath);
         expect(result.success).toBe(false);
-        expect(result.errors?.some(e => e.toLowerCase().includes('admin'))).toBe(true);
+        expect(
+          result.errors?.some((e) => e.toLowerCase().includes("admin")),
+        ).toBe(true);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
     it("validates network enum values in config", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'network-enum-'));
-      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "network-enum-"));
+
       try {
-        const badNetworkPath = path.join(tmpDir, '.bc-forge.json');
-        fs.writeFileSync(badNetworkPath, JSON.stringify({
-          name: 'Test Token',
-          symbol: 'TST',
-          network: 'invalid-network'
-        }));
+        const badNetworkPath = path.join(tmpDir, ".bc-forge.json");
+        fs.writeFileSync(
+          badNetworkPath,
+          JSON.stringify({
+            name: "Test Token",
+            symbol: "TST",
+            network: "invalid-network",
+          }),
+        );
 
         const result = loadConfigFile(badNetworkPath);
         expect(result.success).toBe(false);
-        expect(result.errors?.some(e => e.toLowerCase().includes('network'))).toBe(true);
+        expect(
+          result.errors?.some((e) => e.toLowerCase().includes("network")),
+        ).toBe(true);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
     it("validates decimals range (0-18) in config", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decimals-'));
-      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "decimals-"));
+
       try {
         // Test decimals > 18
-        const tooHighPath = path.join(tmpDir, 'too-high.json');
-        fs.writeFileSync(tooHighPath, JSON.stringify({
-          name: 'Test Token',
-          symbol: 'TST',
-          decimals: 19
-        }));
+        const tooHighPath = path.join(tmpDir, "too-high.json");
+        fs.writeFileSync(
+          tooHighPath,
+          JSON.stringify({
+            name: "Test Token",
+            symbol: "TST",
+            decimals: 19,
+          }),
+        );
 
         const result1 = loadConfigFile(tooHighPath);
         expect(result1.success).toBe(false);
-        
+
         // Test negative decimals
-        const negativePath = path.join(tmpDir, 'negative.json');
-        fs.writeFileSync(negativePath, JSON.stringify({
-          name: 'Test Token',
-          symbol: 'TST',
-          decimals: -1
-        }));
+        const negativePath = path.join(tmpDir, "negative.json");
+        fs.writeFileSync(
+          negativePath,
+          JSON.stringify({
+            name: "Test Token",
+            symbol: "TST",
+            decimals: -1,
+          }),
+        );
 
         const result2 = loadConfigFile(negativePath);
         expect(result2.success).toBe(false);
@@ -728,61 +807,68 @@ describe("CLI Parser (#705)", () => {
     });
 
     it("rejects config with wrong data types", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'type-mismatch-'));
-      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "type-mismatch-"));
+
       try {
-        const typeMismatchPath = path.join(tmpDir, '.bc-forge.json');
-        fs.writeFileSync(typeMismatchPath, JSON.stringify({
-          name: 'Test Token',
-          symbol: 'TST',
-          decimals: 'not-a-number'  // Should be integer
-        }));
+        const typeMismatchPath = path.join(tmpDir, ".bc-forge.json");
+        fs.writeFileSync(
+          typeMismatchPath,
+          JSON.stringify({
+            name: "Test Token",
+            symbol: "TST",
+            decimals: "not-a-number", // Should be integer
+          }),
+        );
 
         const result = loadConfigFile(typeMismatchPath);
         expect(result.success).toBe(false);
-        expect(result.errors?.some(e => 
-          e.toLowerCase().includes('decimals') || e.toLowerCase().includes('type')
-        )).toBe(true);
+        expect(
+          result.errors?.some(
+            (e) =>
+              e.toLowerCase().includes("decimals") ||
+              e.toLowerCase().includes("type"),
+          ),
+        ).toBe(true);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
     it("handles empty config file", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-config-'));
-      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "empty-config-"));
+
       try {
-        const emptyPath = path.join(tmpDir, '.bc-forge.json');
-        fs.writeFileSync(emptyPath, '');
+        const emptyPath = path.join(tmpDir, ".bc-forge.json");
+        fs.writeFileSync(emptyPath, "");
 
         const result = loadConfigFile(emptyPath);
         expect(result.success).toBe(false);
-        expect(result.errors?.[0]).toContain('Invalid JSON syntax');
+        expect(result.errors?.[0]).toContain("Invalid JSON syntax");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
     it("handles config as JSON array instead of object", async () => {
-      const { loadConfigFile } = await import('../utils/config-parser.js');
-      const fs = await import('node:fs');
-      const os = await import('node:os');
-      const path = await import('node:path');
+      const { loadConfigFile } = await import("../utils/config-parser.js");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
 
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'array-config-'));
-      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "array-config-"));
+
       try {
-        const arrayPath = path.join(tmpDir, '.bc-forge.json');
+        const arrayPath = path.join(tmpDir, ".bc-forge.json");
         fs.writeFileSync(arrayPath, '["name", "symbol"]');
 
         const result = loadConfigFile(arrayPath);

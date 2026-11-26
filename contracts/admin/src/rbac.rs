@@ -56,6 +56,8 @@ pub enum Role {
     SuperAdmin,
     /// Role allowing emergency pause and unpause operations.
     Pauser,
+    /// Role allowing compliance operations (freeze, unfreeze, clawback, address filters).
+    Compliance,
 }
 
 /// The SuperAdmin role constant — can be imported as `SUPER_ADMIN_ROLE` for
@@ -89,6 +91,8 @@ pub enum RoleFlags {
     SuperAdmin = 4,
     /// Role allowing emergency pause and unpause operations.
     Pauser = 8,
+    /// Role allowing compliance operations (freeze, unfreeze, clawback, address filters).
+    Compliance = 16,
 }
 
 impl RoleFlags {
@@ -99,6 +103,7 @@ impl RoleFlags {
             Role::Minter => RoleFlags::Minter,
             Role::SuperAdmin => RoleFlags::SuperAdmin,
             Role::Pauser => RoleFlags::Pauser,
+            Role::Compliance => RoleFlags::Compliance,
         }
     }
 
@@ -153,6 +158,8 @@ pub const ROLE_BIT_SUPER_ADMIN: u32 = 1 << 2;
 /// @custom:bitmask-value 8 — the role bit used by [`Role::Pauser`] in
 /// `AdminKey::RoleMask(Address)` storage.
 pub const ROLE_BIT_PAUSER: u32 = 1 << 3;
+/// Bitmask bit for the [`Role::Compliance`] role (`1 << 4`, decimal `16`).
+pub const ROLE_BIT_COMPLIANCE: u32 = 1 << 4;
 
 /// Returns the bitmask bit for `role`, or `None` for an unrecognized variant.
 pub(crate) fn role_bit(role: Role) -> Option<u32> {
@@ -161,6 +168,7 @@ pub(crate) fn role_bit(role: Role) -> Option<u32> {
         Role::Minter => Some(ROLE_BIT_MINTER),
         Role::SuperAdmin => Some(ROLE_BIT_SUPER_ADMIN),
         Role::Pauser => Some(ROLE_BIT_PAUSER),
+        Role::Compliance => Some(ROLE_BIT_COMPLIANCE),
     }
 }
 
@@ -205,11 +213,12 @@ pub fn mask_without_role(mask: u32, role: Role) -> u32 {
 }
 
 /// Every `(role, bit)` pair in bit order, used for legacy-entry migration.
-const ALL_ROLE_BITS: [(Role, u32); 4] = [
+const ALL_ROLE_BITS: [(Role, u32); 5] = [
     (Role::Admin, ROLE_BIT_ADMIN),
     (Role::Minter, ROLE_BIT_MINTER),
     (Role::SuperAdmin, ROLE_BIT_SUPER_ADMIN),
     (Role::Pauser, ROLE_BIT_PAUSER),
+    (Role::Compliance, ROLE_BIT_COMPLIANCE),
 ];
 
 /// Loads the role bitmask for `address`.
@@ -354,7 +363,7 @@ pub fn grant_role_with_expiry(
 fn is_valid_role(role: Role) -> bool {
     matches!(
         role,
-        Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser
+        Role::Admin | Role::Minter | Role::SuperAdmin | Role::Pauser | Role::Compliance
     )
 }
 
@@ -676,7 +685,8 @@ pub fn get_roles_bitmask(env: &Env, address: &Address) -> u32 {
         return RoleFlags::Admin.bits()
             | RoleFlags::Minter.bits()
             | RoleFlags::SuperAdmin.bits()
-            | RoleFlags::Pauser.bits();
+            | RoleFlags::Pauser.bits()
+            | RoleFlags::Compliance.bits();
     }
 
     let mut mask = 0u32;
@@ -688,6 +698,9 @@ pub fn get_roles_bitmask(env: &Env, address: &Address) -> u32 {
     }
     if (role_mask & ROLE_BIT_PAUSER) != 0 && !is_role_expired(env, Role::Pauser, address) {
         mask |= RoleFlags::Pauser.bits();
+    }
+    if (role_mask & ROLE_BIT_COMPLIANCE) != 0 {
+        mask |= RoleFlags::Compliance.bits();
     }
 
     mask
@@ -941,6 +954,13 @@ pub fn require_fee_admin(env: &Env, address: &Address) {
 /// @dev Thin wrapper around `require_role_guard` for the `Pauser` role.
 /// @param env The Soroban environment.
 /// @param address The address to check and require authorization from.
+#[inline(always)]
+// panic-allow: auth failure uses require_auth or panic_with_error
+pub fn require_compliance(env: &Env, address: &Address) {
+    require_role_guard(env, Role::Compliance, address);
+}
+
+/// Requires that the caller has the Pauser role and has authorized the invocation.
 #[inline(always)]
 // panic-allow: auth failure uses require_auth or panic_with_error
 pub fn require_pauser(env: &Env, address: &Address) {
