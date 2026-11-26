@@ -1,12 +1,13 @@
 {
-  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects lock_tokens, withdraw_locked (#1076, #1077), and role proposals (#914, #918, #1308); vesting links the token crate, so that same code is included in its WASM. The rate-limit and split budgets are raised by #914/#918 as well: both contracts link the bc-forge-admin crate, whose privileged-action timelock, role renounce, and proposal listing additions compile into their WASMs.",
-  "_measured_on": "cargo 1.96.0, wasm32-unknown-unknown, --release, zero warnings. #914/#918 re-measured on 1.94.0; rate-limit/split re-measured on 1.96.0; token/vesting re-measured on 1.96.0 (#1308); rate-limit/token/vesting re-measured on 1.96.0 (#1329/#1330).",
+  "_comment": "Per-contract WASM size budgets for the release build (#956). Budget = measured size + 5% headroom. The token budget reflects lock_tokens, withdraw_locked (#1076, #1077), role proposals (#914, #918, #1308), and the per-minter allowances, scheduled mint streams and storage/TTL diagnostics added in #1374; vesting links the token crate, so that same code is included in its WASM. The rate-limit and split budgets are raised by #914/#918 as well: both contracts link the bc-forge-admin crate, whose privileged-action timelock, role renounce, and proposal listing additions compile into their WASMs. Split is raised again for the basis-point allocation entry points (#1463); vesting is raised again for get_schedule, top_up_schedule and cancel_milestone (#1460-#1462); wrapper is raised for partial cooldown withdrawal claims (#1471). Rate-limit and split are raised again (#1338): grant_role_with_expiry, RoleRecord and the expiry checks in has_role/require_role also compile into both. Token and vesting budgets raised for metadata lock, scoped pausing, and role expiry (#1336, #1338, #1340). A budget is added for the new fee_sweeper contract (#1342), and split budget is raised for distribute_mint (#1341). Rate-limit, split, wrapper, token, and vesting budgets raised for ProposalAction multisig governance (#1329), supply floor/timelock (#1330), and get_lockup (#1326).",
+  "_measured_on": "cargo 1.96.0/1.99.1, wasm32-unknown-unknown, --release, zero warnings. #914/#918 re-measured on 1.94.0; rate-limit/split re-measured on 1.96.0; token/vesting re-measured on 1.96.0 (#1308); token re-measured on 1.96.0 after #1374 (206864 bytes, budget 218000). Split/vesting re-measured with #1460-#1463 applied; wrapper re-measured with #1471 applied (140902 bytes, budget 148000); token and vesting re-measured with #1381; fee_sweeper and split re-measured with #1378; rate-limit (61281B), split (135096B), wrapper (153226B), token (280182B), vesting (326544B) re-measured with #1376.",
   "budgets": {
-    "bc_forge_rate_limit.wasm": 58277,
-    "bc_forge_split.wasm": 94692,
-    "bc_forge_token.wasm": 219772,
-    "bc_forge_vesting.wasm": 255146,
-    "bc_forge_wrapper.wasm": 140000,
+    "bc_forge_fee_sweeper.wasm": 36000,
+    "bc_forge_rate_limit.wasm": 64400,
+    "bc_forge_split.wasm": 142000,
+    "bc_forge_token.wasm": 294200,
+    "bc_forge_vesting.wasm": 343000,
+    "bc_forge_wrapper.wasm": 161000,
     "bc_forge_yield_vault.wasm": 76765
   }
 }

@@ -512,6 +512,41 @@ export class bcForgeClient {
   }
 
   /**
+   * Query token balances for a list of addresses in controlled concurrent chunks,
+   * preventing RPC rate-limit flooding for large address sets.
+   *
+   * Addresses are processed in sequential chunks of `chunkSize`. Within each chunk
+   * all queries run concurrently via `Promise.all`. Results are returned as a `Map`
+   * keyed by address so callers never have to correlate parallel index arrays.
+   *
+   * @param addresses - Array of Stellar public keys (G… addresses) to query.
+   * @param chunkSize - Maximum number of concurrent RPC calls per batch (default: 20).
+   * @returns Map from address → raw token balance as bigint.
+   *
+   * @example
+   * ```typescript
+   * const balances = await client.getBalancesChunked(addresses, 20);
+   * for (const [addr, bal] of balances) {
+   *   console.log(addr, bal);
+   * }
+   * ```
+   */
+  async getBalancesChunked(
+    addresses: string[],
+    chunkSize: number = 20,
+  ): Promise<Map<string, bigint>> {
+    const result = new Map<string, bigint>();
+    for (let i = 0; i < addresses.length; i += chunkSize) {
+      const chunk = addresses.slice(i, i + chunkSize);
+      const balances = await Promise.all(chunk.map((addr) => this.getBalance(addr)));
+      for (let j = 0; j < chunk.length; j++) {
+        result.set(chunk[j], balances[j]);
+      }
+    }
+    return result;
+  }
+
+  /**
    * Internal helper to execute a list of async tasks in chunks using Promise.all.
    */
   private async executeBatch<T, R>(
@@ -809,6 +844,72 @@ export class bcForgeClient {
    * @param txXdr - Signed transaction XDR string
    */
   async submitSignedTransaction(txXdr: string): Promise<TransactionResult> {
+    const response = await submitTransaction(this.rpcUrl, txXdr, {
+      networkPassphrase: this.networkPassphrase,
+    });
+    if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return {
+        success: true,
+        hash: response.txHash,
+        returnValue: response.returnValue ? scValToNative(response.returnValue) : undefined,
+      };
+    }
+    return { success: false, hash: response.txHash };
+  }
+
+  /**
+   * Submit a transaction exactly once, even when retried after a network dropout.
+   *
+   * Before broadcasting, the method computes the transaction hash and queries the
+   * Soroban RPC to check whether the transaction was already mined. If it was, the
+   * existing receipt is returned immediately — no duplicate broadcast is made.
+   *
+   * This prevents double-payments or duplicate contract invocations when clients
+   * retry after a timeout or connection reset.
+   *
+   * @param txXdr - Signed transaction XDR string.
+   * @returns `TransactionResult` — either the already-mined receipt or the result
+   *          of a fresh submission.
+   *
+   * @example
+   * ```typescript
+   * // Safe to call multiple times; only submits once.
+   * const result = await client.submitIdempotent(signedXdr);
+   * console.log(result.hash, result.success);
+   * ```
+   */
+  async submitIdempotent(txXdr: string): Promise<TransactionResult> {
+    const server = new SorobanRpc.Server(this.rpcUrl);
+
+    // Parse the XDR to derive the canonical transaction hash.
+    let txHash: string;
+    try {
+      const parsed = TransactionBuilder.fromXDR(txXdr, this.networkPassphrase);
+      txHash = parsed.hash().toString('hex');
+    } catch {
+      // If we cannot parse the XDR fall back to a plain submission.
+      return this.submitSignedTransaction(txXdr);
+    }
+
+    // Check on-chain status before attempting to submit.
+    try {
+      const existing = await server.getTransaction(txHash);
+      if (existing.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        return {
+          success: true,
+          hash: txHash,
+          returnValue: existing.returnValue ? scValToNative(existing.returnValue) : undefined,
+        };
+      }
+      if (existing.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
+        return { success: false, hash: txHash };
+      }
+      // Status is NOT_FOUND — transaction has not been seen yet, fall through.
+    } catch {
+      // RPC lookup failed; proceed with normal submission.
+    }
+
+    // Transaction not yet on-chain — submit normally.
     const response = await submitTransaction(this.rpcUrl, txXdr, {
       networkPassphrase: this.networkPassphrase,
     });

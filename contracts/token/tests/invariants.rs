@@ -90,6 +90,7 @@ fn fixture(env: &Env, fees: bool) -> Fixture<'_> {
         &String::from_str(env, "Invariant Token"),
         &String::from_str(env, "INV"),
     );
+    // Admin mints draw on a per-minter budget (fixture_allowance).
     client.set_minter_allowance(&admin, &admin, &i128::MAX);
     let treasury = Address::generate(env);
     if fees {

@@ -177,10 +177,12 @@ jobs:
       - name: Check published ESM entry size (#932)
         # Measured dist/esm/index.mjs at 2541 bytes after the wallet adapters,
         # dry-run API, and APR helpers. Budget is ceil(2541 * 1.10) = 2796 bytes.
+        # Raised for VestingClient and SplitClient exports (#1365, #1366):
+        # measured at 2810 bytes, budget ceil(2810 * 1.10) = 3091 bytes.
         run: |
           set -euo pipefail
           entry="dist/esm/index.mjs"
-          budget=2796
+          budget=3091
           if [[ ! -f "$entry" ]]; then
             echo "::error::Published ESM entry not found: ${entry}"
             exit 1

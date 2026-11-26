@@ -32,6 +32,101 @@ export interface UpgradeResult {
   wasmHash?: string;
   message: string;
   estimate?: FeeEstimate;
+  /** Per-getter results when `--simulate` / `--check-storage` was used. */
+  storageCheck?: StorageCheckReport;
+}
+
+export interface StorageGetterResult {
+  getter: string;
+  ok: boolean;
+  /** Failure diagnostic, or a warning when the getter decoded but looks suspicious. */
+  detail?: string;
+}
+
+export interface StorageCheckReport {
+  ok: boolean;
+  results: StorageGetterResult[];
+  warnings: string[];
+}
+
+/** Core views that must stay callable and decodable across an upgrade. */
+export const STORAGE_CHECK_GETTERS = [
+  "name",
+  "symbol",
+  "decimals",
+  "total_supply",
+  "get_storage_info",
+] as const;
+
+/**
+ * Simulates each essential getter against the contract and asserts the
+ * response is a decodable XDR ScVal. Failures carry the getter name and the
+ * RPC diagnostic so operators can see exactly which view broke.
+ */
+export async function checkStorageCompatibility(
+  server: any,
+  sourceAccount: any,
+  contractId: string,
+  networkPassphrase: string,
+): Promise<StorageCheckReport> {
+  const contract = new Contract(contractId);
+  const results: StorageGetterResult[] = [];
+  const warnings: string[] = [];
+
+  for (const getter of STORAGE_CHECK_GETTERS) {
+    try {
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: "100",
+        networkPassphrase,
+      })
+        .addOperation(contract.call(getter))
+        .setTimeout(30)
+        .build();
+      const sim: any = await server.simulateTransaction(tx);
+      if (sim && "error" in sim && sim.error) {
+        results.push({
+          getter,
+          ok: false,
+          detail: `reverted during simulation: ${
+            typeof sim.error === "string"
+              ? sim.error
+              : JSON.stringify(sim.error)
+          }`,
+        });
+        continue;
+      }
+      const retval = sim?.result?.retval;
+      if (!retval) {
+        results.push({ getter, ok: false, detail: "returned no value" });
+        continue;
+      }
+      try {
+        // Round-trip through XDR to prove the value is well-formed.
+        xdr.ScVal.fromXDR(retval.toXDR("base64"), "base64");
+      } catch (e) {
+        results.push({
+          getter,
+          ok: false,
+          detail: `response is not valid XDR ScVal: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        continue;
+      }
+      if (retval.toXDR("base64") === xdr.ScVal.scvVoid().toXDR("base64")) {
+        warnings.push(
+          `${getter}() returned void; instance storage keys may have been modified unexpectedly`,
+        );
+      }
+      results.push({ getter, ok: true });
+    } catch (e) {
+      results.push({
+        getter,
+        ok: false,
+        detail: `simulation error: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  }
+
+  return { ok: results.every((r) => r.ok), results, warnings };
 }
 
 export interface UpgradeOptions {
@@ -43,6 +138,8 @@ export interface UpgradeOptions {
   proposalId?: string;
   dryRun?: boolean;
   estimate?: boolean;
+  /** Simulate the upgrade and run storage-compatibility getter checks without submitting. */
+  simulate?: boolean;
   timeout?: number;
   /** When true, use the previous WASM hash from local history instead of a WASM file. */
   toLastGood?: boolean;
@@ -64,6 +161,12 @@ export function createUpgradeCommand(): Command {
     )
     .option("--proposal-id <id>", "Existing proposal ID to execute")
     .option("--dry-run", "Simulate without submitting on-chain", false)
+    .option(
+      "--simulate",
+      "Simulate the upgrade and verify core getters (name, symbol, decimals, total_supply, get_storage_info) return decodable values; never submits",
+      false,
+    )
+    .option("--check-storage", "Alias of --simulate", false)
     .option(
       "--estimate",
       "Dry-run to estimate total fee cost without submitting",
@@ -95,6 +198,7 @@ export function createUpgradeCommand(): Command {
         contractId: contractId ?? opts.contractId,
         wasmPath: opts.wasmPath ?? opts.wasm ?? "",
         toLastGood: opts.toLastGood ?? false,
+        simulate: Boolean(opts.simulate || opts.checkStorage),
       });
       if (opts.json) {
         writeJson(result);
@@ -133,6 +237,7 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
       source: opts.source,
       dryRun: opts.dryRun,
       estimate: opts.estimate,
+      simulate: opts.simulate,
       timeout: opts.timeout,
       isRollback: true,
     });
@@ -179,12 +284,19 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
     source: opts.source,
     dryRun: opts.dryRun,
     estimate: opts.estimate,
+    simulate: opts.simulate,
     timeout: opts.timeout,
     isRollback: false,
   });
 
   // Record history when the on-chain upgrade was confirmed.
-  if (result.success && !opts.dryRun && !opts.estimate && result.txHash) {
+  if (
+    result.success &&
+    !opts.dryRun &&
+    !opts.estimate &&
+    !opts.simulate &&
+    result.txHash
+  ) {
     // Retrieve the current "last good" hash (which will become the previous
     // hash for the next upgrade) before we overwrite it.
     const previousHash =
@@ -216,6 +328,7 @@ interface UpgradeWithHashOptions {
   source: string;
   dryRun?: boolean;
   estimate?: boolean;
+  simulate?: boolean;
   timeout?: number;
   isRollback: boolean;
 }
@@ -276,6 +389,43 @@ async function runUpgradeWithHash(
         wasmHash,
         estimate: { baseFee, resourceFee, totalFee },
         message: `Fee estimate for upgrade${rollbackNote}: base=${baseFee} resource=${resourceFee} total=${totalFee} stroops (hash ${wasmHash})`,
+      };
+    }
+
+    // 4b. --simulate / --check-storage: simulate the upgrade, then verify getters
+    if (opts.simulate) {
+      const upgradeSim: any = await server.simulateTransaction(tx);
+      if ("error" in upgradeSim && upgradeSim.error) {
+        return {
+          success: false,
+          wasmHash,
+          message: `Upgrade simulation failed: ${JSON.stringify(upgradeSim.error)}`,
+        };
+      }
+      const report = await checkStorageCompatibility(
+        server,
+        sourceAccount,
+        opts.contractId,
+        opts.networkPassphrase,
+      );
+      const failed = report.results.filter((r) => !r.ok);
+      for (const w of report.warnings) logger.warn(`Warning: ${w}`);
+      if (!report.ok) {
+        const lines = failed
+          .map((r) => `  - ${r.getter}(): ${r.detail}`)
+          .join("\n");
+        return {
+          success: false,
+          wasmHash,
+          storageCheck: report,
+          message: `Storage compatibility check failed; ${failed.length} getter(s) not callable:\n${lines}`,
+        };
+      }
+      return {
+        success: true,
+        wasmHash,
+        storageCheck: report,
+        message: `Upgrade simulation succeeded${rollbackNote}; all ${report.results.length} core getters returned decodable values. Nothing was submitted. WASM hash: ${wasmHash}.`,
       };
     }
 

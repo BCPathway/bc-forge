@@ -330,16 +330,21 @@ pub enum AdminError {
     RoleProposalNotFound = 30,
     /// A role proposal must be executed through `execute_role_proposal`.
     RoleProposalRequiresExecution = 31,
-    /// No governance action is attached to the requested proposal (#1329).
-    ActionProposalNotFound = 32,
-    /// The governance action attached to the proposal has an unexpected type (#1329).
-    ActionProposalWrongType = 33,
-    /// A governance action carried invalid parameters (#1329).
-    InvalidAction = 34,
     /// Removing an admin pool member would leave fewer members than the approval threshold.
     ThresholdExceedsPoolSize = 32,
     /// The supplied WASM hash does not match the hash bound to the proposal (#1310).
     WasmHashMismatch = 33,
+    /// The role grant carried an expiry ledger that has now passed; the role is inactive.
+    RoleExpired = 34,
+    /// `grant_role_with_expiry` was given an `expires_at` that is not strictly
+    /// after the current ledger sequence.
+    InvalidExpiry = 35,
+    /// No governance action is attached to the requested proposal (#1329).
+    ActionProposalNotFound = 36,
+    /// The governance action attached to the proposal has an unexpected type (#1329).
+    ActionProposalWrongType = 37,
+    /// A governance action carried invalid parameters (#1329).
+    InvalidAction = 38,
 }
 
 /// Storage keys for the access-control layer.
@@ -412,6 +417,9 @@ pub enum AdminKey {
     /// [`get_instance_ttl`] derives a non-negative remaining lifetime from this
     /// value. It is not one of the five monitored singleton keys.
     InstanceLiveUntil,
+    /// Expiry record for a time-limited role grant. Present only for roles
+    /// granted through `grant_role_with_expiry`; holds a [`RoleRecord`].
+    RoleExpiry(Role, Address),
     /// Role grant action attached to a legacy proposal, keyed by proposal ID.
     /// Appended to preserve every existing storage-key discriminant.
     RoleGrantProposal(u64),
@@ -561,6 +569,7 @@ mod tests {
     mod proptest;
     mod quorum_proptest;
     mod rbac_errors;
+    mod role_expiry;
 
     #[contract]
     struct AdminContract;
@@ -588,6 +597,20 @@ mod tests {
             address: Address,
         ) -> Result<(), AdminError> {
             super::revoke_role(&env, &caller, role, &address)
+        }
+
+        pub fn grant_role_with_expiry(
+            env: Env,
+            caller: Address,
+            role: Role,
+            account: Address,
+            expires_at: u32,
+        ) -> Result<(), AdminError> {
+            super::grant_role_with_expiry(&env, &caller, role, &account, expires_at)
+        }
+
+        pub fn get_role_record(env: Env, role: Role, address: Address) -> Option<RoleRecord> {
+            super::get_role_record(&env, role, &address)
         }
 
         pub fn has_role(env: Env, role: Role, address: Address) -> bool {
@@ -4531,7 +4554,8 @@ mod tests {
         let expected = RoleFlags::Admin.bits()
             | RoleFlags::Minter.bits()
             | RoleFlags::SuperAdmin.bits()
-            | RoleFlags::Pauser.bits();
+            | RoleFlags::Pauser.bits()
+            | RoleFlags::Compliance.bits();
         assert_eq!(mask, expected);
     }
 

@@ -27,18 +27,24 @@ use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryFromVal, Val, Vec};
 /// Frozen on purpose: these literals do not derive from the enum, so renaming a
 /// variant fails here instead of silently orphaning the slot every deployed
 /// contract already wrote under.
-const DATA_KEY_SLOT_NAMES: [&str; 17] = [
+const DATA_KEY_SLOT_NAMES: [&str; 29] = [
+    "AddressFilter",
     "Admin",
-    "Allowance",
     "AdminContract",
+    "Allowance",
     "AllowanceExp",
     "Balance",
     "Decimals",
     "FeeConfig",
     "FeeExemption",
+    "FilterMode",
+    "Frozen",
     "InstanceLiveUntil",
+    "IsTransferable",
     "Lockup",
     "MaxSupply",
+    "MetadataLocked",
+    "MintPaused",
     "MintStream",
     "MinterAllowance",
     "Name",
@@ -46,8 +52,10 @@ const DATA_KEY_SLOT_NAMES: [&str; 17] = [
     "Nonce",
     "PendingAdmin",
     "PendingMaxSupply",
+    "PendingOwner",
     "Supply",
     "Symbol",
+    "TransferPaused",
     "Treasury",
 ];
 
@@ -102,11 +110,15 @@ fn data_key_name(key: &DataKey) -> &'static str {
         DataKey::FeeConfig => "FeeConfig",
         DataKey::FeeExemption(_) => "FeeExemption",
         DataKey::Nonce(_) => "Nonce",
+        DataKey::MetadataLocked => "MetadataLocked",
+        DataKey::MintPaused => "MintPaused",
+        DataKey::TransferPaused => "TransferPaused",
+        DataKey::Frozen(_) => "Frozen",
+        DataKey::FilterMode => "FilterMode",
+        DataKey::AddressFilter(_) => "AddressFilter",
+        DataKey::IsTransferable => "IsTransferable",
+        DataKey::PendingOwner => "PendingOwner",
         DataKey::PendingMaxSupply => "PendingMaxSupply",
-    }
-}
-
-fn all_data_keys(env: &Env) -> [DataKey; 17] {
         DataKey::MinterAllowance(_) => "MinterAllowance",
         DataKey::MintStream(_) => "MintStream",
         DataKey::NextMintStreamId => "NextMintStreamId",
@@ -114,7 +126,7 @@ fn all_data_keys(env: &Env) -> [DataKey; 17] {
     }
 }
 
-fn all_data_keys(env: &Env) -> [DataKey; 19] {
+fn all_data_keys(env: &Env) -> [DataKey; 29] {
     let owner = Address::generate(env);
     let spender = Address::generate(env);
     [
@@ -135,10 +147,18 @@ fn all_data_keys(env: &Env) -> [DataKey; 19] {
         DataKey::FeeExemption(owner.clone()),
         DataKey::Nonce(owner.clone()),
         DataKey::PendingMaxSupply,
+        DataKey::Frozen(owner.clone()),
+        DataKey::FilterMode,
+        DataKey::AddressFilter(owner.clone()),
+        DataKey::IsTransferable,
+        DataKey::PendingOwner,
         DataKey::MinterAllowance(owner),
         DataKey::MintStream(1),
         DataKey::NextMintStreamId,
         DataKey::InstanceLiveUntil,
+        DataKey::MetadataLocked,
+        DataKey::MintPaused,
+        DataKey::TransferPaused,
     ]
 }
 
