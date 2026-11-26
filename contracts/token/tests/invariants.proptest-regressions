@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 9eed7147467cfac171f10a0e58521903bfc5910b2d985cde35f6ac47901b1fd2 # shrinks to amount = 1, stranded = 1
 cc a428628f9505c25e7d37bf36d19c2a0cc1335578565f5a5818afce1986bdcfd6 # shrinks to amount = 1, stranded = 1
+cc fa75f1f9a8188171a0ae725d83a96df8fc338dbe973c32cfe47f56e6317cfa96 # shrinks to amount = 1, stranded = 1
