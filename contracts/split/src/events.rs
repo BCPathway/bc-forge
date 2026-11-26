@@ -43,3 +43,18 @@ pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) 
         (upgrader.clone(), new_wasm_hash.clone()),
     );
 }
+
+/// Emitted after a `distribute_mint` batch completes.
+pub fn emit_mint_distribution_executed(
+    env: &Env,
+    caller: &Address,
+    token: &Address,
+    success_count: u32,
+    fail_count: u32,
+    total_minted: i128,
+) {
+    env.events().publish(
+        (symbol_short!("mint_dst"), caller.clone(), token.clone()),
+        (success_count, fail_count, total_minted),
+    );
+}

@@ -16,6 +16,10 @@ import { resolveContractIdOption } from "../utils/registry.js";
 import logger, { silenceInformationalLogs } from "../utils/logger.js";
 import { writeJson } from "../utils/output.js";
 import { resolveAccountReference } from "../utils/address-book.js";
+import {
+  checkMainnetAdmin,
+  type MainnetGuardOptions,
+} from "../utils/mainnet-guard.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,6 +50,13 @@ export interface DeployVaultOptions {
   dryRun?: boolean;
   /** Target path to export deployed contract IDs and transaction hashes (e.g. "deployments.json"). */
   out?: string;
+  /** Bypass the mainnet single-signer admin block (--force-single-signer-unsecure). */
+  forceSingleSigner?: boolean;
+  /** Test hooks for the mainnet guard. */
+  mainnetGuard?: Pick<
+    MainnetGuardOptions,
+    "fetchAccount" | "confirm" | "interactive" | "warn"
+  >;
 }
 
 export interface DeployVaultResult {
@@ -224,6 +235,22 @@ export async function deployVault(
     }
 
     const { rpcUrl, networkPassphrase, source, dryRun = false } = opts;
+
+    if (!dryRun) {
+      const guard = await checkMainnetAdmin({
+        networkPassphrase,
+        admin: opts.admin,
+        forceSingleSigner: opts.forceSingleSigner,
+        ...opts.mainnetGuard,
+      });
+      if (!guard.allowed) {
+        return {
+          success: false,
+          message: guard.reason ?? "Mainnet admin check failed",
+          steps,
+        };
+      }
+    }
 
     // ── Step 1: Upload vault WASM ─────────────────────────────────────────
     steps.push("Uploading vault WASM…");
@@ -422,6 +449,11 @@ export function createDeployCommand(): Command {
       "Output file path to export deployment artifact JSON (e.g. deployments.json)",
     )
     .option("--dry-run", "Print commands but do not execute them", false)
+    .option(
+      "--force-single-signer-unsecure",
+      "Allow mainnet deploy with a single-signer admin account (unsafe)",
+      false,
+    )
     .option("--json", "Print contract ids and transaction hashes as JSON");
 
   addNetworkOptions(cmd);
@@ -448,6 +480,7 @@ export function createDeployCommand(): Command {
         network: netCfg.network,
         dryRun: opts.dryRun,
         out: opts.out,
+        forceSingleSigner: opts.forceSingleSignerUnsecure,
       });
 
       if (opts.json) {

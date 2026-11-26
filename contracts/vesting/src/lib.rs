@@ -11,6 +11,7 @@ mod test_milestones;
 
 use bc_forge_admin as admin;
 use bc_forge_token::BcForgeTokenClient;
+use bc_forge_ttl as ttl;
 use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal,
@@ -115,6 +116,12 @@ pub enum VestingError {
     /// balance of that token held by this contract is escrowed grant money and
     /// can never be drained through the rescue hatch (#1459).
     CannotRescueVestingToken = 16,
+    /// The new beneficiary equals the current one.
+    BeneficiaryAlreadySet = 17,
+    /// Caller is neither the schedule beneficiary nor a SuperAdmin.
+    UnauthorizedBeneficiaryTransfer = 18,
+    /// The new beneficiary is the zero address.
+    InvalidBeneficiary = 19,
 }
 
 #[contract]
@@ -528,6 +535,63 @@ impl VestingContract {
                 }
             }
             Ok(revoked)
+        })
+    }
+
+    /// Moves an active schedule to a new beneficiary address.
+    ///
+    /// Callable by the current beneficiary or a SuperAdmin. Vesting progress
+    /// and released amounts are preserved; the `BeneficiarySchedules` index is
+    /// updated for both addresses.
+    pub fn transfer_beneficiary(
+        env: Env,
+        caller: Address,
+        schedule_id: u64,
+        new_beneficiary: Address,
+    ) -> Result<(), VestingError> {
+        reentrancy_guard!(&env, "transfer_beneficiary", {
+            Self::ensure_initialized(&env)?;
+            ttl::extend_instance_ttl(&env);
+            caller.require_auth();
+
+            let mut stored = Self::read_schedule(&env, schedule_id)?;
+            let old_beneficiary = stored.schedule.beneficiary.clone();
+
+            let is_super = admin::has_role(&env, admin::Role::SuperAdmin, &caller)
+                || caller == Self::read_admin(&env);
+            if caller != old_beneficiary && !is_super {
+                return Err(VestingError::UnauthorizedBeneficiaryTransfer);
+            }
+            if new_beneficiary == old_beneficiary {
+                return Err(VestingError::BeneficiaryAlreadySet);
+            }
+            if admin::is_zero_address(&env, &new_beneficiary) {
+                return Err(VestingError::InvalidBeneficiary);
+            }
+
+            stored.schedule.beneficiary = new_beneficiary.clone();
+            Self::write_schedule(&env, schedule_id, &stored);
+
+            let old_ids = Self::beneficiary_schedule_ids(&env, &old_beneficiary);
+            let mut remaining = Vec::new(&env);
+            for id in old_ids.iter() {
+                if id != schedule_id {
+                    remaining.push_back(id);
+                }
+            }
+            Self::write_beneficiary_schedule_ids(&env, &old_beneficiary, &remaining);
+
+            let mut new_ids = Self::beneficiary_schedule_ids(&env, &new_beneficiary);
+            new_ids.push_back(schedule_id);
+            Self::write_beneficiary_schedule_ids(&env, &new_beneficiary, &new_ids);
+
+            events::emit_beneficiary_transferred(
+                &env,
+                schedule_id,
+                &old_beneficiary,
+                &new_beneficiary,
+            );
+            Ok(())
         })
     }
 
