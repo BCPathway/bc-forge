@@ -36,7 +36,12 @@ export type {
  * is submitted.
  */
 export type { DryRunResult, DryRunFootprint } from './client';
-export { buildInvokeTransaction, submitTransaction, scValToNative } from './utils';
+export {
+  buildInvokeTransaction,
+  submitTransaction,
+  scValToNative,
+  TransactionQueue,
+} from './utils';
 export {
   bcForgeEventType,
   decodeEvent,
@@ -64,6 +69,18 @@ export { VaultClient } from './vaultClient';
 export type { VaultClientConfig } from './vaultClient';
 export { WrapperClient } from './wrapperClient';
 export type { WrapperClientConfig } from './wrapperClient';
+
+// ─── Vesting and Split Clients (#1356, #1357) ────────────────────────────────
+export { VestingClient } from './vestingClient';
+export type {
+  Signer,
+  VestingClientConfig,
+  VestingSchedule,
+  Milestone,
+  CreateVestingParams,
+} from './vestingClient';
+export { SplitClient, InvoiceStatus } from './splitClient';
+export type { SplitClientConfig, Recipient, Invoice, FailedPayout } from './splitClient';
 
 // ─── APY helpers (#745) ──────────────────────────────────────────────────────
 export {
