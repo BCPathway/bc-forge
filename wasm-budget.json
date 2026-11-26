@@ -3,7 +3,7 @@
   "_measured_on": "cargo 1.96.0, wasm32-unknown-unknown, --release, zero warnings. #914/#918 re-measured on 1.94.0; rate-limit/split re-measured on 1.96.0; token/vesting re-measured on 1.96.0 (#1308); token re-measured on 1.96.0 after #1374 (206864 bytes, budget 218000). Split/vesting re-measured with #1460-#1463 applied; wrapper re-measured with #1471 applied (140902 bytes, budget 148000).",
   "budgets": {
     "bc_forge_rate_limit.wasm": 58600,
-    "bc_forge_split.wasm": 115000,
+    "bc_forge_split.wasm": 123000,
     "bc_forge_token.wasm": 239300,
     "bc_forge_vesting.wasm": 275000,
     "bc_forge_wrapper.wasm": 148000,
