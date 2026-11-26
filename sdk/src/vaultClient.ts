@@ -44,6 +44,24 @@ export interface VaultClientConfig {
   walletAdapter?: WalletAdapter;
 }
 
+export interface CooldownConfig {
+  enabled: boolean;
+  cooldownLedgers: number;
+  emergencyCap: bigint;
+  emergencyWindowLedgers: number;
+}
+
+export interface QueuedWithdrawal {
+  shares: bigint;
+  amount: bigint;
+  releaseLedger: number;
+}
+
+export interface UserEmergencyState {
+  amountWithdrawn: bigint;
+  windowStartLedger: number;
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class VaultClient {
@@ -187,6 +205,51 @@ export class VaultClient {
   async getUnlockTime(user: string): Promise<bigint | null> {
     const result = await this.queryContract('get_unlock_time', [addressToScVal(user)]);
     return scValToNative(result) as bigint | null;
+  }
+
+  /**
+   * Get the vault cooldown configuration.
+   */
+  async getCooldownConfig(): Promise<CooldownConfig> {
+    const result = await this.queryContract('get_cooldown_config', []);
+    const native = scValToNative(result) as {
+      enabled: boolean;
+      cooldown_ledgers: number;
+      emergency_cap: bigint | number | string;
+      emergency_window_ledgers: number;
+    };
+    return {
+      enabled: native.enabled,
+      cooldownLedgers: Number(native.cooldown_ledgers),
+      emergencyCap: BigInt(native.emergency_cap),
+      emergencyWindowLedgers: Number(native.emergency_window_ledgers),
+    };
+  }
+
+  /**
+   * Get the queued withdrawal for a user.
+   */
+  async getQueuedWithdrawal(user: string): Promise<QueuedWithdrawal | null> {
+    const result = await this.queryContract('get_queued_withdrawal', [addressToScVal(user)]);
+    const native = scValToNative(result) as {
+      shares: bigint | number | string;
+      amount: bigint | number | string;
+      release_ledger: number;
+    } | null;
+    if (!native) return null;
+    return {
+      shares: BigInt(native.shares),
+      amount: BigInt(native.amount),
+      releaseLedger: Number(native.release_ledger),
+    };
+  }
+
+  /**
+   * Check if a withdrawal is claimable for a user.
+   */
+  async isWithdrawalClaimable(user: string, currentLedger: number): Promise<boolean> {
+    const queued = await this.getQueuedWithdrawal(user);
+    return queued !== null && currentLedger >= queued.releaseLedger;
   }
 
   // ─── Write Transactions ──────────────────────────────────────────────────
@@ -364,6 +427,18 @@ export class VaultClient {
     return this.invokeContract(
       'transfer_from',
       [addressToScVal(spender), addressToScVal(from), addressToScVal(to), i128ToScVal(amount)],
+      source,
+    );
+  }
+
+  /**
+   * Claim a queued withdrawal.
+   */
+  async claimWithdrawal(signer?: Keypair | WalletAdapter): Promise<TransactionResult> {
+    const source = signer ?? this.walletAdapter;
+    return this.invokeContract(
+      'claim_withdrawal',
+      [addressToScVal((source as any)?.publicKey ?? '')],
       source,
     );
   }
@@ -577,7 +652,7 @@ export class VaultClient {
   private async invokeContract(
     method: string,
     args: xdr.ScVal[],
-    source?: Keypair,
+    source?: Keypair | WalletAdapter,
   ): Promise<TransactionResult> {
     const isAdapter = Boolean(
       source &&
@@ -606,7 +681,7 @@ export class VaultClient {
             this.contractId,
             method,
             args,
-            actualSource,
+            actualSource as Keypair,
           );
         } else {
           const unsignedXdr = await buildUnsignedTransaction(

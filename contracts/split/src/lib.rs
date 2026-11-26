@@ -8,6 +8,9 @@ mod reentrancy_guard;
 mod test;
 
 #[cfg(test)]
+mod tests;
+
+#[cfg(test)]
 mod upgrade_batch_test;
 
 use bc_forge_admin as admin;
@@ -28,6 +31,7 @@ const MAX_RECIPIENTS: u32 = 100;
 pub trait TokenInterface {
     fn balance(id: Address) -> i128;
     fn transfer(from: Address, to: Address, amount: i128);
+    fn mint(minter: Address, to: Address, amount: i128);
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,6 +39,17 @@ pub trait TokenInterface {
 pub struct Recipient {
     pub to: Address,
     pub amount: i128,
+}
+
+/// Outcome of a `distribute_mint` batch. Failed recipients are listed
+/// without reverting the successful mints.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct DistributionResult {
+    pub success_count: u32,
+    pub fail_count: u32,
+    pub total_minted: i128,
+    pub failed: Vec<Address>,
 }
 
 /// A recipient expressed as a share of the invoice total in basis points
@@ -45,7 +60,6 @@ pub struct RecipientBps {
     pub to: Address,
     pub bps: u32,
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum InvoiceStatus {
@@ -237,7 +251,13 @@ impl SplitContract {
                     retry_count,
                 };
                 Self::write_failed_payout(env, &failed_payout);
-                events::emit_payout_failed(env, invoice_id, &recipient.to);
+                events::emit_payout_failed(
+                    env,
+                    invoice_id,
+                    &recipient.to,
+                    failed_payout.amount,
+                    failed_payout.retry_count,
+                );
             }
         }
 
@@ -292,7 +312,13 @@ impl SplitContract {
         } else {
             failed_payout.retry_count += 1;
             Self::write_failed_payout(env, &failed_payout);
-            events::emit_payout_failed(env, invoice_id, recipient);
+            events::emit_payout_failed(
+                env,
+                invoice_id,
+                recipient,
+                failed_payout.amount,
+                failed_payout.retry_count,
+            );
             Err(SplitError::InsufficientBalance)
         }
     }
@@ -548,6 +574,55 @@ impl SplitContract {
         reentrancy_guard!(&env, "retry_failed_payout", {
             admin::require_super_admin(&env, &admin_address);
             Self::retry_failed_payout_inner(&env, invoice_id, &recipient)
+        })
+    }
+
+    /// Mints `amount` of `token` straight to each recipient using this
+    /// contract as the (pre-approved) minter, so no pre-funding is needed.
+    ///
+    /// A recipient whose mint fails (invalid amount, exhausted minter budget,
+    /// token error) is recorded in `DistributionResult::failed` and does not
+    /// revert the rest of the batch.
+    pub fn distribute_mint(
+        env: Env,
+        caller: Address,
+        token: Address,
+        recipients: Vec<(Address, i128)>,
+    ) -> Result<DistributionResult, SplitError> {
+        reentrancy_guard!(&env, "distribute_mint", {
+            admin::require_super_admin(&env, &caller);
+
+            let client = TokenClient::new(&env, &token);
+            let minter = env.current_contract_address();
+            let mut success_count = 0u32;
+            let mut total_minted = 0i128;
+            let mut failed = Vec::new(&env);
+
+            for (to, amount) in recipients.iter() {
+                let ok = amount > 0 && matches!(client.try_mint(&minter, &to, &amount), Ok(Ok(())));
+                if ok {
+                    success_count += 1;
+                    total_minted += amount;
+                } else {
+                    failed.push_back(to);
+                }
+            }
+
+            let fail_count = failed.len();
+            events::emit_mint_distribution_executed(
+                &env,
+                &caller,
+                &token,
+                success_count,
+                fail_count,
+                total_minted,
+            );
+            Ok(DistributionResult {
+                success_count,
+                fail_count,
+                total_minted,
+                failed,
+            })
         })
     }
 

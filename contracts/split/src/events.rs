@@ -8,10 +8,16 @@ pub fn emit_invoice_created(env: &Env, invoice_id: u64, total_amount: i128) {
     );
 }
 
-pub fn emit_payout_failed(env: &Env, invoice_id: u64, recipient: &Address) {
+pub fn emit_payout_failed(
+    env: &Env,
+    invoice_id: u64,
+    recipient: &Address,
+    amount: i128,
+    retry_count: u32,
+) {
     env.events().publish(
         (symbol_short!("pyo_fail"), invoice_id, recipient.clone()),
-        (invoice_id, recipient.clone()),
+        (invoice_id, recipient.clone(), amount, retry_count),
     );
 }
 
@@ -35,5 +41,20 @@ pub fn emit_upgraded(env: &Env, upgrader: &Address, new_wasm_hash: &BytesN<32>) 
     env.events().publish(
         (symbol_short!("upgraded"),),
         (upgrader.clone(), new_wasm_hash.clone()),
+    );
+}
+
+/// Emitted after a `distribute_mint` batch completes.
+pub fn emit_mint_distribution_executed(
+    env: &Env,
+    caller: &Address,
+    token: &Address,
+    success_count: u32,
+    fail_count: u32,
+    total_minted: i128,
+) {
+    env.events().publish(
+        (symbol_short!("mint_dst"), caller.clone(), token.clone()),
+        (success_count, fail_count, total_minted),
     );
 }

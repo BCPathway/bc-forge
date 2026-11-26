@@ -43,6 +43,21 @@ pub fn emit_milestones_set(env: &Env, schedule_id: u64, total_amount: i128) {
     env.events()
         .publish((symbol_short!("miles_set"),), (schedule_id, total_amount));
 }
+/// Emitted when a schedule is moved to a new beneficiary.
+///
+/// Topic: `v_trans`, schedule id. Data: `(old_beneficiary, new_beneficiary)`.
+pub fn emit_beneficiary_transferred(
+    env: &Env,
+    schedule_id: u64,
+    old_beneficiary: &Address,
+    new_beneficiary: &Address,
+) {
+    env.events().publish(
+        (symbol_short!("v_trans"), schedule_id),
+        (old_beneficiary.clone(), new_beneficiary.clone()),
+    );
+}
+
 /// Emitted when the admin rescues a foreign SEP-41 token balance that was
 /// accidentally sent to the vesting contract (#1459).
 ///
