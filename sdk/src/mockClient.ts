@@ -18,6 +18,19 @@ interface AccountState {
   allowances: Record<string, bigint>;
 }
 
+export interface MockBcForgeClientConfig extends Partial<bcForgeClientConfig> {
+  simulateRateLimit?: boolean;
+  simulateReentrancy?: boolean;
+}
+
+export interface MockVaultClientConfig {
+  rpcUrl?: string;
+  networkPassphrase?: string;
+  contractId?: string;
+  simulateRateLimit?: boolean;
+  simulateReentrancy?: boolean;
+}
+
 export class MockBcForgeClient {
   private accounts: Record<string, AccountState> = {};
   private roles: Record<string, Set<string>> = {};
@@ -28,10 +41,40 @@ export class MockBcForgeClient {
   private adminAddress: string = 'GADMIN0000000000000000000000000000000000000000000000000000';
   private linkedContracts: Record<string, string> = {};
   private contractId: string;
+  private simulateRateLimit: boolean;
+  private simulateReentrancy: boolean;
 
-  constructor(config?: bcForgeClientConfig) {
+  constructor(config?: MockBcForgeClientConfig) {
     this.contractId =
       config?.contractId ?? 'CMOCK000000000000000000000000000000000000000000000000000';
+    this.simulateRateLimit = config?.simulateRateLimit ?? false;
+    this.simulateReentrancy = config?.simulateReentrancy ?? false;
+  }
+
+  setSimulateRateLimit(enabled: boolean): void {
+    this.simulateRateLimit = enabled;
+  }
+
+  setSimulateReentrancy(enabled: boolean): void {
+    this.simulateReentrancy = enabled;
+  }
+
+  private checkSimulatedFailures(): TransactionResult | null {
+    if (this.simulateReentrancy) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'ReentrancyDetected: Reentrant call rejected',
+      };
+    }
+    if (this.simulateRateLimit) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'RateLimitExceeded: Operation rate limit exceeded',
+      };
+    }
+    return null;
   }
 
   getContractId(): string {
@@ -71,6 +114,8 @@ export class MockBcForgeClient {
   }
 
   async setAdmin(admin: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     this.adminAddress = admin;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
@@ -85,22 +130,30 @@ export class MockBcForgeClient {
   }
 
   async grantRole(role: Role | string, address: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (!this.roles[address]) this.roles[address] = new Set();
     this.roles[address].add(role);
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
   async revokeRole(role: Role | string, address: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     this.roles[address]?.delete(role);
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
   async setAdminContract(adminContractId: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     this.linkedContracts['admin'] = adminContractId;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
   async setDependentToken(tokenContractId: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     this.linkedContracts['token'] = tokenContractId;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
@@ -110,6 +163,8 @@ export class MockBcForgeClient {
   }
 
   async mint(from: string, to: string, amount: bigint): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (!this.accounts[to]) this.accounts[to] = { balance: 0n, allowances: {} };
     this.accounts[to].balance += amount;
     this.totalSupply += amount;
@@ -117,6 +172,8 @@ export class MockBcForgeClient {
   }
 
   async batchMint(from: string, recipients: BatchMintRecipient[]): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (recipients.length === 0) {
       return { success: false, hash: 'mock-hash', returnValue: 'Recipients list cannot be empty' };
     }
@@ -133,6 +190,8 @@ export class MockBcForgeClient {
   }
 
   async transfer(from: string, to: string, amount: bigint): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if ((this.accounts[from]?.balance ?? 0n) < amount) {
       return { success: false, hash: 'mock-hash', returnValue: 'Insufficient balance' };
     }
@@ -143,12 +202,16 @@ export class MockBcForgeClient {
   }
 
   async approve(owner: string, spender: string, amount: bigint): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (!this.accounts[owner]) this.accounts[owner] = { balance: 0n, allowances: {} };
     this.accounts[owner].allowances[spender] = amount;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
   async batchTransfer(from: string, recipients: BatchMintRecipient[]): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if ((this.accounts[from]?.balance ?? 0n) < recipients.reduce((sum, r) => sum + r.amount, 0n)) {
       return { success: false, hash: 'mock-hash', returnValue: 'Insufficient balance' };
     }
@@ -161,11 +224,15 @@ export class MockBcForgeClient {
   }
 
   async updateName(newName: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     this.name = newName;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
 
   async updateSymbol(newSymbol: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     this.symbol = newSymbol;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
@@ -183,6 +250,8 @@ export class MockBcForgeClient {
   }
 
   async revokeSuperAdmin(address: string): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (!this.roles[address]?.has(Role.SuperAdmin) && !this.roles[address]?.has('SuperAdmin')) {
       return { success: false, hash: 'mock-hash', returnValue: 'SuperAdmin role not held' };
     }
@@ -190,6 +259,13 @@ export class MockBcForgeClient {
   }
 
   async initRbac(superAdmin: string): Promise<RbacInitResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) {
+      return {
+        migrate: failure,
+        grant: failure,
+      };
+    }
     const grant = await this.grantSuperAdmin(superAdmin);
     return {
       migrate: { success: true, hash: 'mock-hash', returnValue: null },
@@ -203,6 +279,8 @@ export class MockBcForgeClient {
     to: string,
     amount: bigint,
   ): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     const allowance = this.accounts[owner]?.allowances[spender] ?? 0n;
     if (allowance < amount) {
       return { success: false, hash: 'mock-hash', returnValue: 'Insufficient allowance' };
@@ -240,8 +318,39 @@ export class MockVaultClient {
   private name: string = 'Mock Vault Share';
   private symbol: string = 'mvSHARE';
   private decimals: number = 7;
+  private simulateRateLimit: boolean;
+  private simulateReentrancy: boolean;
 
-  constructor(_config?: { rpcUrl?: string; networkPassphrase?: string; contractId?: string }) {}
+  constructor(config?: MockVaultClientConfig) {
+    this.simulateRateLimit = config?.simulateRateLimit ?? false;
+    this.simulateReentrancy = config?.simulateReentrancy ?? false;
+  }
+
+  setSimulateRateLimit(enabled: boolean): void {
+    this.simulateRateLimit = enabled;
+  }
+
+  setSimulateReentrancy(enabled: boolean): void {
+    this.simulateReentrancy = enabled;
+  }
+
+  private checkSimulatedFailures(): TransactionResult | null {
+    if (this.simulateReentrancy) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'ReentrancyDetected: Reentrant call rejected',
+      };
+    }
+    if (this.simulateRateLimit) {
+      return {
+        success: false,
+        hash: 'mock-hash',
+        returnValue: 'RateLimitExceeded: Operation rate limit exceeded',
+      };
+    }
+    return null;
+  }
 
   async getBalance(address: string): Promise<bigint> {
     return this.shareBalances[address] ?? 0n;
@@ -306,6 +415,8 @@ export class MockVaultClient {
     _source?: unknown,
     minSharesOut: bigint = 0n,
   ): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (amount <= 0n) {
       return {
         success: false,
@@ -346,6 +457,8 @@ export class MockVaultClient {
     _source?: unknown,
     minTokensOut: bigint = 0n,
   ): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (shares <= 0n) {
       return {
         success: false,
@@ -397,6 +510,8 @@ export class MockVaultClient {
     amount: bigint,
     _source?: unknown,
   ): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (amount <= 0n) {
       return {
         success: false,
@@ -410,6 +525,8 @@ export class MockVaultClient {
   }
 
   async compound(_caller: string, _source?: unknown): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     this.pendingRewardsAmount = 0n;
     return { success: true, hash: 'mock-hash', returnValue: null };
   }
@@ -424,6 +541,8 @@ export class MockVaultClient {
     amount: bigint,
     _source?: unknown,
   ): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     const fromBalance = this.shareBalances[from] ?? 0n;
     if (fromBalance < amount) {
       return { success: false, hash: 'mock-hash', returnValue: 'InsufficientBalance' };
@@ -440,6 +559,8 @@ export class MockVaultClient {
     _exp?: number,
     _source?: unknown,
   ): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     if (!this.allowances[from]) this.allowances[from] = {};
     this.allowances[from][spender] = amount;
     return { success: true, hash: 'mock-hash', returnValue: null };
@@ -450,6 +571,8 @@ export class MockVaultClient {
     _extendToLedgers?: number,
     _source?: unknown,
   ): Promise<TransactionResult> {
+    const failure = this.checkSimulatedFailures();
+    if (failure) return failure;
     return { success: true, hash: 'mock-ttl-bump-hash', returnValue: null };
   }
 
