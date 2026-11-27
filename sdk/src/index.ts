@@ -63,6 +63,19 @@ export { LobstrAdapter } from './adapters/lobstrAdapter';
 export { XBullAdapter } from './adapters/xbullAdapter';
 export { PrivateKeyAdapter } from './adapters/privateKeyAdapter';
 export type { PrivateKeyAdapterOptions } from './adapters/privateKeyAdapter';
+export {
+  PasskeyWalletAdapter,
+  normalizeWebAuthnSignature,
+  buildSep0043SignatureScVal,
+} from './adapters/passkeyAdapter';
+export type {
+  PasskeyWalletAdapterOptions,
+  Sep0043WebAuthnSignature,
+  WebAuthnCredential,
+  WebAuthnCredentialsContainer,
+  WebAuthnAuthenticatorAssertionResponse,
+  WebAuthnPublicKeyCredentialRequestOptions,
+} from './adapters/passkeyAdapter';
 
 // ─── Vault and Wrapper Clients (#744) ────────────────────────────────────────
 export { VaultClient } from './vaultClient';
