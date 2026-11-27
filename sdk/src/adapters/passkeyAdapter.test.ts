@@ -62,7 +62,7 @@ function makeMockAssertion(
 ): WebAuthnCredential {
   return {
     id: Buffer.from(rawId).toString('base64url'),
-    rawId: rawId.buffer.slice(rawId.byteOffset, rawId.byteOffset + rawId.byteLength),
+    rawId: Uint8Array.from(rawId).buffer,
     type: 'public-key',
     response: {
       authenticatorData: new Uint8Array(37).fill(0xaa),
